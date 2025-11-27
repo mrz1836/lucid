@@ -1,2 +1,3 @@
-# mindshift
-Transforms raw daily journaling into clear patterns, life pillars, and insights to guide intentional personal growth
+# Lucid
+
+A private, local-first operating system for your inner life. Lucid is the journal that remembers everything and finds the patterns you can't see, the therapist that builds a living map of your fears, triggers, and growth edges without judgment or cost, and the coach that tracks your goals and gently reminds you of what you said mattered. It interprets your experiences through the philosophical frameworks you actually believe in—whether Stoicism, NVC, IFS, or your own combination—and builds a living narrative of your life: daily reflections compounding into weekly insights, monthly patterns, yearly transformations. Everything runs locally on your device. No cloud. No company reading your vulnerabilities. Just you and a system that gets smarter about *you* over time, becoming the companion you wish you'd always had—one that truly knows you, holds your story across time, and helps you become who you want to be.
