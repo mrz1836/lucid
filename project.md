@@ -20,7 +20,13 @@ Everything runs **locally on your device**. Your deepest reflections, your psych
 
 Lucid builds a **living narrative of your life**: daily reflections that compound into weekly insights, monthly patterns, yearly transformations. It connects today's emotional spike to the wound you identified six months ago. It notices that you've mentioned feeling "not enough" in four different contexts this month. It asks: *"Does this resonate?"*
 
-Over time, it becomes the companion you wish you'd always had—one that truly knows you, holds your story across time, and helps you become who you want to be. And the deep profile you build here? It becomes the foundation for AI that can genuinely represent you.
+Over time, it becomes the companion you wish you'd always had—one that truly knows you, holds your story across time, and helps you become who you want to be.
+
+But Lucid doesn't just understand you—it helps you **act**. When your friend's birthday is coming up, Lucid drafts a message in your voice, suggests when to send it, and waits for your approval. When you've been meaning to reach out to someone, it proposes what you might say. When you made a commitment and forgot, it reminds you—with a draft ready to go.
+
+This isn't outsourcing your humanity. It's a **superpower**. The intention is entirely yours. The care is real. Lucid just removes the friction between wanting to show up and actually showing up. You approve everything—the agent proposes, you decide. And in a world where attention is scarce and life moves fast, having an agent-self that helps you follow through means you can be *more* present, not less.
+
+The deep profile you build here becomes the foundation for AI that genuinely represents you—not as a replacement, but as an extension of your capacity to connect.
 
 **This is the missing tool.** People have systems for tasks, money, and fitness. No one has a system for their inner life—until now.
 
@@ -37,10 +43,11 @@ To create a **deeply personalized, private, always-available system** that helps
 * Notice blind spots and unconscious loops
 * Improve relationships, communication, and self-awareness
 * Transform long-term through continuous reflection and guidance
+* Act on your behalf—drafting, reminding, following through—in ways aligned with your voice and values
 
 Lucid is built to answer one powerful question:
 
-> **"What is actually happening in my life, and how can I grow from it?"**
+> **"What is actually happening in my life, how can I grow from it, and how can I show up better for the people and commitments that matter?"**
 
 ---
 
@@ -160,22 +167,24 @@ The profile isn't just a snapshot of who you are today—it's a living record of
 
 This creates something unprecedented: **a longitudinal record of your inner life.**
 
-#### **A Foundation for Personal AI**
+#### **A Foundation for Your Agent-Self**
 
-Over time, this profile becomes something more: a deep model of who you are.
+From day one, Lucid learns how you communicate—your voice, your tone, the way you express care, concern, gratitude, and boundaries. This isn't future functionality; it's how the system works.
 
 * Your communication style, values, and decision-making patterns
 * How you think, what you prioritize, how you respond under pressure
 * The frameworks you use to interpret the world
 
-This opens future possibilities:
+As the system knows you better, its ability to help you *act* grows:
 
-* AI agents that can act with your traits and values
-* Drafting communications in your voice
-* Making decisions aligned with your principles
-* A digital representation that truly understands you—because you taught it
+* Drafting messages in your voice—birthday wishes, difficult conversations, follow-ups
+* Proposing what you might say when you've been meaning to reach out
+* Helping you follow through on commitments in a way that sounds like *you*
+* Suggesting timing and context so your actions land well
 
-The profile you build isn't just for self-understanding. It's the foundation for **AI that can genuinely represent you**.
+The agent proposes; you approve. Nothing happens without your explicit consent. But the friction disappears—and you show up for the people who matter.
+
+The profile you build isn't just for self-understanding. It's the foundation for an **agent-self** that helps you operate in the world as your best self.
 
 ### **E. Coaching Layer**
 
@@ -458,9 +467,9 @@ The system doesn't just wait for you to write—it reaches out when something ma
 
 #### **Types of Proactive Moments**
 
-**Relationship reminders** (learned, not calendared):
-* "You mentioned wanting to call your sister more. It's been 3 weeks."
-* "Sarah's birthday is in 2 days—you wanted to make it meaningful this year."
+**Relationship reminders with drafts** (learned, not calendared):
+* "You mentioned wanting to call your sister more. It's been 3 weeks. Here are a few things you might say, based on what's been on your mind."
+* "Sarah's birthday is Friday. Based on what you've shared about her and your friendship, here's a message draft that feels like you. Want to send it Thursday evening, or adjust it?"
 
 **Pattern interrupts:**
 * "You have that presentation tomorrow. Last time you had one, you spiraled the night before. Want to do a grounding exercise?"
@@ -484,6 +493,48 @@ The system doesn't just wait for you to write—it reaches out when something ma
 * **User controls frequency** and types of reach-outs
 * **Timing matters** — not during a crisis, not at 2am
 * **The system learns** when you're receptive vs when to back off
+
+### **L. Agent Actions (Your Agent-Self)**
+
+Lucid doesn't just understand you—it helps you **do** things. This is the agent-assisted layer: your agent-self that operates alongside you, helping you show up in the world.
+
+#### **Types of Agent Actions**
+
+**Message drafting:**
+* Birthday wishes, thank-you notes, difficult conversations—drafted in your voice
+* "Here's a draft for Sarah's birthday. It mentions the trip you took together last year and your inside joke about coffee. Sound right?"
+
+**Relationship follow-through:**
+* Not just reminding you to reach out, but proposing what you might say
+* "You mentioned wanting to reconnect with David. Here's a low-pressure message based on your last conversation."
+
+**Commitment support:**
+* When you've made a promise or set an intention, the agent helps you follow through
+* "You said you'd send that article to your brother. Here it is with a quick note. Ready to send?"
+
+**Suggested timing:**
+* The agent proposes not just *what* but *when*
+* "Based on your patterns, you're most receptive to reflection in the evening. Want me to surface this draft then?"
+
+#### **The Draft-and-Approve Model**
+
+Everything the agent proposes is a **draft**:
+
+* You review, edit, and approve before anything happens
+* Nothing is sent or acted on without your explicit consent
+* You can reject, modify, or ask for alternatives
+* The system learns from your edits to get better at sounding like you
+
+#### **Why This Isn't Inauthentic**
+
+Using your agent-self to help you act doesn't diminish your humanity—it amplifies it:
+
+* **The intention is yours.** The agent saves time; the care is real.
+* **The voice is yours.** Drafts are built from *your* patterns, *your* values, *your* way of expressing yourself.
+* **The approval is yours.** You decide what goes out and what doesn't.
+* **Time saved is reinvested.** Less friction means more presence with the people who matter.
+
+In a world where attention is scarce and life moves fast, your agent-self is a superpower—one that helps you be *more* human, not less.
 
 ---
 
@@ -641,6 +692,21 @@ Lucid evolves in phases:
 * **Slack bot integration** — DM yourself thoughts throughout the day; Lucid ingests them
 * **CLI tool** — Quick terminal commands: `mindshift log "felt anxious before the call"`
 * **Voice memo processing** — Drop audio files, get structured entries
+
+#### **Phase 2.5: Life Stream Integrations**
+
+For the agent-self to truly help you, it needs to know what's happening in your life. These integrations give Lucid ambient awareness—passively learning from your digital life so it can assist at the right moments.
+
+* **Text messages** — Read messages from known people (with permission); understand conversations, commitments made, relationships evolving
+* **Email** — Scan emails from people in your relational map; surface commitments, follow-ups, relationship context
+* **Calendar** — Know what's coming up; connect events to people, anticipate stress points, suggest preparation
+* **Other programmatic sources** — Anything that helps Lucid stay current: notes apps, task managers, health data
+
+**Privacy principles remain paramount:**
+* All processing happens locally
+* You control which sources are connected
+* You control which people/threads are visible
+* Nothing leaves your device
 
 #### **Phase 3: Rich Interfaces**
 * Web dashboard for visualizations (still local-first)
