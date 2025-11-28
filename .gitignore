@@ -1,0 +1,65 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, build with `go test -c`
+*.test
+
+# Go List
+go.list
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# OS files
+*.db
+*.DS_Store
+
+# Jetbrains
+.idea/
+
+# Eclipse
+.project
+
+# Notes
+todo.md
+
+# Distribution
+dist
+
+# Code coverage
+coverage.txt
+coverage.out
+
+# Fuzz Tests
+testdata
+
+# Node modules
+node_modules/
+
+# Pulumi
+.pulumi/
+
+# Pulumi Stack Configs - Safe to commit when using Pulumi ESC
+# These files should only contain environment references, not encrypted secrets
+# Review before committing to ensure no 'secure:' values are present
+# If you see 'secure:' values, you may have accidentally used pulumi config set --secret
+# instead of storing in Pulumi ESC. Remove the secret and add to ESC instead.
+
+# Environment files (legacy - now using Pulumi ESC)
+.env
+.env.*
+!.env.example
+
+# Deployment files
+infrastructure/bin
+
+# Lambda deployment artifacts
+functions/*/bootstrap
+functions/*/deployment.zip
+*.zip
+functions/playboro-api/playboro-api
+functions/api-authorizer/api-authorizer
