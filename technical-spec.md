@@ -1,6 +1,6 @@
 # Lucid — Technical Specification
 
-*Reference document for building the system. See [project.md](project.md) for the vision.*
+*Reference document for building the system. See [vision.md](vision.md) for the vision.*
 
 ---
 
