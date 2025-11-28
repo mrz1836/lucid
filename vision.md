@@ -278,6 +278,9 @@ People appear organically in your entries. When the system detects someone new, 
 
 The relational map isn't just a list—it's a web of connections that helps you see the patterns in how you relate.
 
+**Looking ahead: Shared Profiles**
+When someone you care about also uses Lucid, imagine choosing to share parts of your profile with them—and receiving theirs. Both systems suddenly understand the relationship from both sides. More on this in [Future Possibilities](#shared-profiles-relational-bridges).
+
 ### **Grow**
 
 **Coaching layer:**
@@ -353,6 +356,28 @@ Once the core is solid, Lucid could expand to:
 * **Web dashboard** — Visualizations of your journey over time
 
 The architecture is designed so **input can come from anywhere**, with secure local storage at the center.
+
+### **Shared Profiles (Relational Bridges)**
+When someone you care about also uses Lucid, you can choose to share a curated version of your personal profile with them—and receive theirs in return.
+
+**What gets shared (you choose):**
+* Aspects of your psychological profile you want them to understand
+* Your communication preferences and what helps you feel heard
+* Patterns you're working on and how they can support you
+* Your attachment style and what you need in moments of stress
+
+**What becomes possible:**
+* **Mutual understanding** — Both Lucid systems now understand the shared dynamic, not just one side
+* **Sculpted interactions** — Messages drafted with awareness of both parties' needs and triggers
+* **Pattern bridging** — "You both tend to withdraw when hurt. Here's how to reach toward each other instead."
+* **Relationship insights** — Surfacing complementary strengths and potential friction points
+
+This is vulnerability as a superpower—choosing to be known so you can be loved more fully.
+
+**Use cases (in order of priority):**
+1. **Close relationships** — Friends and family who want deeper mutual understanding
+2. **Couples** — Partners using Lucid together, potentially with therapist integration
+3. **Professional relationships** — Collaborators who want to work together more effectively
 
 ---
 
