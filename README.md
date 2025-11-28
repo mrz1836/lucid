@@ -1,18 +1,19 @@
 # Lucid
 
-**The tool for your inner life.**
+You have apps for your tasks, your money, your health. But nothing for understanding yourself—for the patterns you keep repeating, the insights you keep forgetting, the wounds that still shape how you show up.
 
-You have apps for your tasks, your money, your health. But nothing for understanding *yourself*—for the patterns you keep repeating, the insights you keep forgetting, the wounds that still shape how you show up.
+---
 
-Lucid is a secure, AI-powered personal operating system that plays four roles:
+Imagine waking up and knowing exactly what's been weighing on you—not vaguely, but precisely. You've mentioned feeling "not enough" four times this week. The system noticed. It connects this to a wound you identified months ago and asks: *Does this resonate?*
 
-- **Journal** — remembers everything and finds the patterns you can't see
-- **Therapist** — builds a living map of your fears, triggers, and growth edges, without judgment or cost
-- **Coach** — tracks your goals and reminds you of what you said mattered
-- **Agent-Self** — an extension of you that helps you *act*: drafts messages in your voice, follows through on commitments, and shows up for the people who matter
+Your friend's birthday is approaching. A message is already drafted—it mentions the trip you took together last year, the inside joke about coffee. It sounds like you, because it learned how you express care. You review it, maybe change a word, and send it. The intention was always yours. The system just cleared the friction.
 
-It adapts to your worldview—Stoicism, NVC, IFS, Kabbalah, or your own combination—so the insights land in the language you actually think in.
+At the end of the year, you look back and see not just what you did, but who you became. The fears you faced. The patterns you finally broke. The relationships you deepened. The goals you achieved—and what they taught you along the way.
 
-Everything runs locally. No cloud. No company reading your vulnerabilities. Your data is yours.
+You have a companion that truly knows you. Not a therapist you see once a week, not a journal you forget to write in, but something that holds your story across time. That notices when this week's frustration echoes a pattern from three months ago. That asks the questions you didn't know you needed to hear.
 
-Over time, Lucid becomes the companion you wish you'd always had—one that truly knows you, holds your story across time, and helps you become who you want to be.
+---
+
+This is what's possible when you finally have a system for your inner life.
+
+This is Lucid.

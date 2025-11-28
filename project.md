@@ -223,6 +223,30 @@ The philosophy: **capture first, structure later.** Never let the interface get 
 * Missing a day prompts a gentle check-in: "You were quiet yesterday. Everything okay?"
 * The system celebrates returns, not just perfect attendance
 
+**Historical entries:**
+
+Not everything important happened today. Lucid lets you add past events—traumas, key life moments, relationship history, formative experiences—and places them in the correct temporal context.
+
+* When adding a historical entry, the system requires a date or date range
+* If you don't provide one, it asks: *"When did this happen? (date or approximate range)"*
+* Supported formats: exact dates ("March 15, 2019"), approximate ("Spring 2019"), or ranges ("2015-2019")
+* Historical entries are stored with both *when you wrote it* and *when it happened*—preserving the full timeline
+
+When you add something from the past, the system queues a reprocessing of patterns, insights, and connections that may now be recontextualized. This happens during the next consolidation cycle, not immediately.
+
+**Bootstrapping mode:**
+
+When you first start Lucid, you need to teach it about your life. Bootstrapping mode is designed for this:
+
+* Enter with `/bootstrap` — "I'm teaching you about my life"
+* Add historical entries, key people, formative events, past wounds—as much as you want
+* The system batches reprocessing (doesn't analyze after every entry)
+* Pattern notifications are suppressed during teaching
+* Exit with `/bootstrap done` — triggers comprehensive consolidation
+* The system surfaces a summary: *"I've learned about X people, Y major events, Z patterns. Ready to begin."*
+
+You can re-enter bootstrapping mode anytime—when you remember something important, start therapy, or want to add context you didn't share before.
+
 ### **B. Understand**
 
 **Daily check-ins:**
@@ -349,6 +373,31 @@ It is your data, your mind, your life—you control it.
 * User can see all layers — transparency about what the system "thinks"
 * User can correct any layer — the system learns from corrections
 
+**Temporal architecture:**
+
+Every entry carries two timestamps:
+
+| Timestamp | Meaning |
+|-----------|---------|
+| **Recorded** | When you wrote this (always "now") |
+| **Occurred** | When it happened (can be past, can be a range) |
+
+For entries about the present, these are the same. For historical entries, they differ—and the system uses both intelligently.
+
+Temporal precision varies:
+
+| Precision | Example | How It's Stored |
+|-----------|---------|-----------------|
+| **Exact** | "March 15, 2019" | Single date |
+| **Approximate** | "Spring 2019" | Date with precision flag |
+| **Range** | "2015-2019" | Start and end dates |
+
+This temporal architecture enables:
+* Accurate timeline reconstruction
+* Historical entries placed in correct context
+* Queries like "How did I feel about work in 2020 vs now?"
+* Reprocessing of downstream data when historical context is added
+
 ### **Multi-Dimensional Memory**
 
 Not all memories are equal. Some define who you are; others are passing observations. Lucid treats memories as multi-dimensional rather than forcing them into rigid categories.
@@ -424,6 +473,33 @@ The Consolidation Agent runs periodically in the background—a kind of "dream s
 
 This mimics how human memory works—consolidation during rest strengthens important memories and lets unimportant ones fade. The difference is Lucid can surface what it finds: "I noticed this week's frustration with your boss echoes a pattern from three months ago. Worth exploring?"
 
+### **Historical Reprocessing**
+
+When you add a historical entry—something from your past that wasn't in the system before—it can change how everything afterward is understood. A core wound from childhood, once added, might recontextualize patterns the system identified months ago.
+
+**How it works:**
+1. Historical entry is stored with correct temporal placement
+2. System assesses the entry's salience (how foundational is it?)
+3. Higher-salience entries trigger wider reprocessing scope
+4. Affected downstream data (patterns, insights, connections) is queued for re-evaluation
+5. Reprocessing runs during the next consolidation cycle
+
+**What gets re-evaluated:**
+* Patterns identified after the historical event's date
+* Insights that might now have deeper context
+* Memory connections that could be strengthened or revised
+* Relational dynamics that may trace back to the new information
+
+**Notification settings (configurable):**
+
+| Setting | Behavior |
+|---------|----------|
+| **Surface for review** (default) | "Based on what you shared about [X], I've recontextualized 3 insights. Want to see them?" |
+| **Silent** | Updates automatically, surfaces in next reflection |
+| **Ask first** | "This may affect existing insights. Proceed with reprocessing?" |
+
+This ensures that adding historical context—whether during bootstrapping or years later—properly integrates into your evolving understanding of yourself.
+
 ### **Adaptive Evolution**
 
 Lucid doesn't just learn *about* you—it learns *how to work with* you.
@@ -466,6 +542,7 @@ Everything is reversible. You can see exactly how your experience has evolved ov
 | `/profile` | View/edit your psychological profile |
 | `/people` | View/explore relational map |
 | `/ask` | Ask the system a question about yourself |
+| `/bootstrap` | Enter bootstrapping mode to teach Lucid about your life history |
 
 ---
 
@@ -527,12 +604,13 @@ Agents invoke shared skills for common operations:
 | `consolidate_memories` | Strengthen connections, adjust salience, archive dormant memories |
 | `traverse_graph` | Follow memory connections to surface related context |
 | `adapt_approach` | Modify agent behavior based on accumulated feedback |
+| `process_historical_cascade` | Re-evaluate downstream patterns and insights after historical entry is added |
 
 ### **Data Layer (SQLite)**
 
 **Conceptual schema:**
 
-* `entries` — raw stream (immutable)
+* `entries` — raw stream (immutable), includes: recorded_at (when entered), occurred_at (when happened), occurred_at_end (for ranges), temporal_precision (exact/approximate/range)
 * `entities` — extracted people, places, events
 * `emotions` — emotional data points
 * `themes` — recurring patterns
@@ -550,6 +628,7 @@ Agents invoke shared skills for common operations:
 * `memories` — multi-dimensional memory store with salience, confidence, activation scores
 * `memory_connections` — graph edges between memories (type, strength)
 * `adaptations` — learned system behaviors and their evolution history
+* `reprocessing_queue` — historical entries awaiting cascade processing, tracks scope and status
 
 **Principles:**
 * SQLite for MVP (simple, local, portable)
