@@ -1,8 +1,4 @@
-# Lucid
-
-You have apps for your tasks, your money, your health. But nothing for understanding yourself—for the patterns you keep repeating, the insights you keep forgetting, the wounds that still shape how you show up.
-
----
+You've forgotten the same insight a dozen times. Made the same promise every January. Had the same realization in the shower that never quite stuck. Something keeps slipping through your fingers—and you're not sure what it is.
 
 Imagine waking up and knowing exactly what's been weighing on you—not vaguely, but precisely. You've mentioned feeling "not enough" four times this week. The system noticed. It connects this to a wound you identified months ago and asks: *Does this resonate?*
 
@@ -16,4 +12,4 @@ You have a companion that truly knows you. Not a therapist you see once a week, 
 
 This is what's possible when you finally have a system for your inner life.
 
-This is Lucid.
+This is [**Lucid**](vision.md).
