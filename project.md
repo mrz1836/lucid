@@ -1,49 +1,35 @@
 # **Lucid**
 
-### *A Private, Local, Intelligent System for Personal Growth, Self-Understanding & Life Management*
+### *A Secure, AI-Powered System for Personal Growth, Self-Understanding & Life Management*
 
 ---
 
-## **1. Overview**
+## **1. The Problem**
 
-Lucid is a **private, local-first personal operating system** for your inner life.
+Most people have no system for understanding themselves.
 
-Most people have no system for understanding themselves. They repeat the same patterns for decades. They lose track of what they're working toward. They forget the insights they've had. They don't see the connections between today's frustration and last year's wound. They don't notice that they keep having the same conflict with different people.
+They repeat the same patterns for decades. They lose track of what they're working toward. They forget the insights they've had. They don't see the connections between today's frustration and last year's wound. They don't notice that they keep having the same conflict with different people.
 
-Lucid changes that.
+People have tools for tasks. People have tools for money. People have tools for health.
 
-It's a **journal** that remembers everything and finds the patterns you can't see. A **therapist** that builds a living map of your fears, triggers, wounds, and growth edges—without judgment, without cost, available whenever you need it. A **coach** that tracks your goals, celebrates your progress, and gently reminds you of what you said mattered. A **relational memory** that knows the people in your life—their birthdays, your history together, the patterns that play out between you.
+**But no one has a tool for their inner life.**
 
-And it does all of this through the **philosophical frameworks you believe in**—whether that's Stoicism, NVC, Kabbalah, IFS, or your own combination. The system adapts to your worldview, not the other way around.
-
-Everything runs **locally on your device**. Your deepest reflections, your psychological profile, your relational map—none of it ever leaves your machine. No cloud. No company reading your vulnerabilities. Just you and a system that gets smarter about *you* over time.
-
-Lucid builds a **living narrative of your life**: daily reflections that compound into weekly insights, monthly patterns, yearly transformations. It connects today's emotional spike to the wound you identified six months ago. It notices that you've mentioned feeling "not enough" in four different contexts this month. It asks: *"Does this resonate?"*
-
-Over time, it becomes the companion you wish you'd always had—one that truly knows you, holds your story across time, and helps you become who you want to be.
-
-But Lucid doesn't just understand you—it helps you **act**. When your friend's birthday is coming up, Lucid drafts a message in your voice, suggests when to send it, and waits for your approval. When you've been meaning to reach out to someone, it proposes what you might say. When you made a commitment and forgot, it reminds you—with a draft ready to go.
-
-This isn't outsourcing your humanity. It's a **superpower**. The intention is entirely yours. The care is real. Lucid just removes the friction between wanting to show up and actually showing up. You approve everything—the agent proposes, you decide. And in a world where attention is scarce and life moves fast, having an agent-self that helps you follow through means you can be *more* present, not less.
-
-The deep profile you build here becomes the foundation for AI that genuinely represents you—not as a replacement, but as an extension of your capacity to connect.
-
-**This is the missing tool.** People have systems for tasks, money, and fitness. No one has a system for their inner life—until now.
+Lucid is that tool.
 
 ---
 
-## **2. Core Purpose**
+## **2. Why This Matters**
 
-To create a **deeply personalized, private, always-available system** that helps you:
+This isn't just another journaling app or habit tracker. Lucid fills a massive gap in how we live:
 
-* Understand your emotional patterns
-* Strengthen all major life pillars
-* Recognize recurring themes, conflicts, desires, and fears
-* Track progress on internal work and external goals
-* Notice blind spots and unconscious loops
-* Improve relationships, communication, and self-awareness
-* Transform long-term through continuous reflection and guidance
-* Act on your behalf—drafting, reminding, following through—in ways aligned with your voice and values
+* **Clarity** where things feel chaotic
+* **Structure** where things feel overwhelming
+* **Insight** where things feel mysterious
+* **Agency** where things feel stuck
+* **Security** where vulnerability is needed
+* **Growth** where patterns have persisted for years
+
+It is a **foundational tool for becoming who you want to be**—built with the deepest respect for your data ownership, your worldview, and your humanity.
 
 Lucid is built to answer one powerful question:
 
@@ -51,40 +37,35 @@ Lucid is built to answer one powerful question:
 
 ---
 
-## **3. Key Capabilities**
+## **3. What Lucid Is**
 
-### **A. Always-On Input (Your Life Stream)**
+Lucid is a **secure, AI-powered personal operating system** for your inner life. It plays four roles:
 
-You can capture:
+### **Journal**
+A journal that remembers everything and finds the patterns you can't see. Daily reflections that compound into weekly insights, monthly patterns, yearly transformations.
 
-* Daily reflections
-* Quick thoughts
-* Emotional spikes
-* Wins or breakthroughs
-* Fears and anxieties
-* Conflicts or patterns
-* Moments of clarity
-* Goals, desires, insights
+### **Therapist**
+A therapist that builds a living map of your fears, triggers, wounds, and growth edges—without judgment, without cost, available whenever you need it. It connects today's emotional spike to the wound you identified six months ago. It notices that you've mentioned feeling "not enough" in four different contexts this month. It asks: *"Does this resonate?"*
 
-Everything goes into a private, local “life stream” that the system analyzes over time.
+### **Coach**
+A coach that tracks your goals, celebrates your progress, and gently reminds you of what you said mattered. It gives *actionable guidance*, not abstract ideas.
 
-### **B. Daily Structured Check-Ins**
+### **Agent-Self**
+An extension of you that helps you **act**. When your friend's birthday is coming up, Lucid drafts a message in your voice, suggests when to send it, and waits for your approval. When you've been meaning to reach out to someone, it proposes what you might say. When you made a commitment and forgot, it reminds you—with a draft ready to go.
 
-Each day, the system guides you through:
+And it does all of this through the **philosophical frameworks you believe in**—whether that's Stoicism, NVC, Kabbalah, IFS, or your own combination. The system adapts to your worldview, not the other way around.
 
-* What happened
-* How you felt
-* What mattered
-* Which pillars were touched
-* Micro-wins and micro-losses
-* Any progress toward goals
-* Any emotional patterns
+Over time, it becomes the companion you wish you'd always had—one that truly knows you, holds your story across time, and helps you become who you want to be.
 
-This becomes the anchor for your self-understanding.
+---
 
-### **C. The Pillars Framework (Wheel of Life)**
+## **4. Core Concepts**
 
-Your life is organized into customizable pillars, such as:
+Three foundational ideas power everything Lucid does:
+
+### **Life Pillars**
+
+Your life is organized into customizable pillars:
 
 * Health
 * Emotions
@@ -96,133 +77,45 @@ Your life is organized into customizable pillars, such as:
 * Spirituality / Meaning
 * Creativity / Play
 
-Every entry is mapped to one or more pillars so you can see:
+Every entry is mapped to one or more pillars so you can see what's strong, what's neglected, what's turbulent, and what's trending. It creates a dynamic model of your life's balance.
 
-* What’s strong
-* What’s neglected
-* What’s turbulent
-* What’s trending
-
-It creates a dynamic model of your life’s balance.
-
-### **D. Personal Inner Profile (Therapist Layer)**
+### **Personal Profile**
 
 This is Lucid's deepest layer—a living psychological map that evolves as you do.
 
-#### **What Gets Tracked**
-
 Over time, the system learns and stores your:
 
-* **Fears** — what you avoid, what triggers anxiety, what you catastrophize
+* **Fears** — what you avoid, what triggers anxiety
 * **Core wounds** — early experiences that still shape present reactions
 * **Triggers** — specific situations, words, or dynamics that activate you
 * **Emotional loops** — predictable sequences (e.g., criticism → shame → withdrawal → resentment)
 * **Desires** — what you actually want vs. what you say you want
-* **Personal values** — what you protect, what you sacrifice for, what feels non-negotiable
-* **Attachment style** — anxious, avoidant, secure, or disorganized patterns in relationships
-* **Defense mechanisms** — how you protect yourself (intellectualization, projection, denial, humor, etc.)
-* **Cognitive distortions** — all-or-nothing thinking, mind reading, catastrophizing, personalization
+* **Personal values** — what you protect, what you sacrifice for
+* **Attachment style** — anxious, avoidant, secure, or disorganized patterns
+* **Defense mechanisms** — how you protect yourself
 * **Repeated relational patterns** — the same dynamic playing out with different people
-* **"Shadow" themes** — disowned parts of yourself that leak out sideways
-* **Goals for inner work** — what you're actively trying to heal or change
 
-#### **How Patterns Are Discovered**
-
-The system uses three methods, layered over time:
-
-1. **Explicit input** — You directly tell the system about past experiences, known triggers, or things you're working on. Early sessions include gentle "intake" questions inspired by therapeutic assessments.
-
-2. **Pattern inference** — As entries accumulate, the system notices recurring themes: "You've mentioned feeling 'not enough' in 4 different contexts this month." It surfaces these as hypotheses, not facts.
-
-3. **Validated insights** — When the system notices a pattern, it asks you to confirm or refine: "Does this resonate?" You can accept, reject, or nuance any interpretation. The profile only solidifies what you verify.
-
-#### **User Agency**
-
-You are always in control:
-
-* Every inferred pattern can be edited, rejected, or reframed
-* The system never claims certainty—it offers reflections
-* You can mark topics as "off-limits" or "sensitive"
-* You can export, review, or wipe your profile at any time
-
-#### **How It Helps**
-
-When new events arise, the system connects them to older patterns:
-
-* "This situation resembles the insecurity you described in June."
-* "Your anger here seems linked to the boundary issue you've mentioned before."
-* "You're using humor to deflect again—want to sit with what's underneath?"
-* "This is the third time this month you've felt unseen in a group setting."
-
-This layer helps you **see yourself more clearly**—not as a diagnosis, but as a living, evolving understanding.
-
-#### **Your Profile Across Time**
-
-The profile isn't just a snapshot of who you are today—it's a living record of who you've been.
-
-* The system preserves how your patterns, fears, and values evolve over time
-* You can look back: "What was I struggling with a year ago? How have I changed?"
-* Temporal markers show when patterns emerged, peaked, or resolved
-* See the arc of your growth, not just your current state
+The profile isn't just a snapshot of who you are today—it's a living record of who you've been. You can look back: "What was I struggling with a year ago? How have I changed?"
 
 This creates something unprecedented: **a longitudinal record of your inner life.**
 
-#### **A Foundation for Your Agent-Self**
-
-From day one, Lucid learns how you communicate—your voice, your tone, the way you express care, concern, gratitude, and boundaries. This isn't future functionality; it's how the system works.
-
-* Your communication style, values, and decision-making patterns
-* How you think, what you prioritize, how you respond under pressure
-* The frameworks you use to interpret the world
-
-As the system knows you better, its ability to help you *act* grows:
-
-* Drafting messages in your voice—birthday wishes, difficult conversations, follow-ups
-* Proposing what you might say when you've been meaning to reach out
-* Helping you follow through on commitments in a way that sounds like *you*
-* Suggesting timing and context so your actions land well
-
-The agent proposes; you approve. Nothing happens without your explicit consent. But the friction disappears—and you show up for the people who matter.
-
-The profile you build isn't just for self-understanding. It's the foundation for an **agent-self** that helps you operate in the world as your best self.
-
-### **E. Coaching Layer**
-
-The system tracks your external goals and habits:
-
-* Health routines
-* Communication goals
-* Work performance
-* Relationship improvements
-* Personal commitments
-
-It suggests:
-
-* Micro-goals for weak pillars
-* New habits based on your behavior
-* Experiments for self-growth
-* Ways to break recurring cycles
-
-It gives *actionable guidance*, not abstract ideas.
-
-### **F. Framework-Based Interpretation**
+### **Philosophical Frameworks**
 
 Lucid doesn't impose a single philosophy. You choose which frameworks shape how the system thinks—and you can **combine multiple frameworks** to create your own lens.
 
-#### **Available Frameworks**
+Available frameworks include:
 
-* **Alan Watts** → presence, detachment, identity fluidity, playful acceptance
-* **NVC (Nonviolent Communication)** → feelings & needs structure, empathy, requests vs. demands
-* **Kabbalah** → desire, restriction, transformation, receiving in order to give
-* **Gottman** → relationship health markers, bids for connection, repair attempts
 * **Stoicism** → discipline, emotional regulation, dichotomy of control
-* **IFS (Internal Family Systems)** → internal parts and sub-selves, exiles, managers, firefighters
-* **Attachment Theory** → anxious/avoidant/secure/disorganized patterns, earned security
-* **Taoism** → natural flow, wu wei, softness over force
-* **CBT** → cognitive distortions, thought records, behavioral experiments
+* **NVC (Nonviolent Communication)** → feelings & needs structure, empathy
+* **IFS (Internal Family Systems)** → internal parts and sub-selves
+* **Kabbalah** → desire, restriction, transformation
+* **Christianity** → grace, forgiveness, love
+* **Gottman** → relationship health markers, bids for connection
+* **Alan Watts** → presence, detachment, playful acceptance
+* **Attachment Theory** → anxious/avoidant/secure patterns
+* **Taoism** → natural flow, wu wei
+* **CBT** → cognitive distortions, thought records
 * **ACT** → acceptance, defusion, values-based action
-
-#### **How Frameworks Combine**
 
 Frameworks aren't mutually exclusive. You can layer them:
 
@@ -233,272 +126,32 @@ Frameworks aren't mutually exclusive. You can layer them:
 
 The system adapts its questions, labels, and guidance based on your active frameworks.
 
-#### **Example: Same Situation, Different Lenses**
+### **Companion Voice**
 
-*Situation: You feel resentful after your partner dismissed your idea at dinner.*
+Lucid isn't a friend—it's a trusted advisor. The voice is professional but warm, honest to the point of bluntness when needed, and non-judgmental while still challenging you.
 
-| Framework | Interpretation |
-|-----------|----------------|
-| **NVC** | "You're feeling hurt because your need for respect wasn't met. What request could you make?" |
-| **IFS** | "A young part of you feels unseen. Can you turn toward it with curiosity?" |
-| **Stoicism** | "Their reaction is outside your control. What *is* in your control here?" |
-| **Gottman** | "This might be a missed bid for connection. How could you try a repair attempt?" |
-| **Watts** | "Who is the 'you' that feels dismissed? What if this moment is just weather passing through?" |
+The system shifts between four modes based on context:
 
-You can receive all of these perspectives, or choose which ones feel useful for this moment.
+| Mode | When It Activates | How It Sounds |
+|------|-------------------|---------------|
+| **Coach** | Goals, accountability, action | Direct, motivating, focused on next steps |
+| **Mentor** | Career, craft, decisions, growth | Wise, asks guiding questions, offers perspective |
+| **Therapist** | Emotions, wounds, patterns, relationships | Gentle, validates first, then probes deeper |
+| **Mirror** | When you need reflection, not advice | Echoes back what you said, highlights contradictions, no judgment |
 
-Lucid **adapts to your worldview**, not the other way around.
+Mode detection happens automatically—if you're processing grief, the system won't jump into coach mode. But you can always override: "I don't need comfort right now, I need a plan."
 
-### **G. Multi-Timescale Reflection**
+The voice also adapts to your preferences over time. Some people want more warmth; others want it clinical and direct. Lucid learns which approach helps you move forward.
 
-The system produces meaningful reflections at different scopes:
+---
 
-#### **Daily**
+## **5. Your Agent-Self**
 
-“What happened today, underneath the surface?”
+This is what makes Lucid different from every other reflection tool.
 
-#### **Weekly**
+Lucid doesn't just help you understand yourself—it helps you **act**. Your agent-self is an AI extension that operates alongside you, helping you show up in the world.
 
-“What patterns repeated? Where did you grow? Where did you avoid yourself?”
-
-#### **Monthly**
-
-“What pillars are rising or falling? Which themes dominated?”
-
-#### **Yearly**
-
-“What transformations have begun? What long-term story is unfolding?”
-
-It builds a **living narrative** of your life.
-
-### **H. Entry Points & Capture Design**
-
-The hardest part of any reflection system is getting input. Lucid solves this through **multiple entry points** and **intelligent friction**—making capture effortless while rewarding deeper engagement.
-
-#### **Quick Capture Options**
-
-Not every moment requires a full reflection. Lucid meets you where you are:
-
-* **One-liner drop** — Just type a sentence: "Felt dismissed in the meeting." Done.
-* **Emotion picker** — Tap an emotion wheel when words won't come. The system asks one follow-up.
-* **Voice memo** — Speak freely. The system transcribes and extracts structure later.
-* **Photo + caption** — Capture a moment visually with a short note.
-* **Rating pulse** — "How are you right now?" 1-10 slider. Takes 2 seconds.
-* **Slack/message integration** — DM yourself throughout the day. Lucid ingests it at night.
-
-The goal: **zero friction for raw input, structured reflection when you're ready.**
-
-#### **Progressive Unlocking**
-
-Lucid rewards engagement by unlocking deeper features as you participate:
-
-| Milestone | Unlocks |
-|-----------|---------|
-| First 3 daily check-ins | Weekly reflection summaries |
-| 7 consecutive days of input | Pattern detection activated |
-| First month of entries | Monthly deep-dive report |
-| 10 validated insights | "Shadow work" suggestions |
-| 3 months of data | Yearly narrative begins compiling |
-
-Features aren't hidden to frustrate—they're gated because **they require data to be meaningful.** You can't get a useful "monthly pattern" report on day 2.
-
-#### **Streaks Without Punishment**
-
-Traditional streak mechanics punish you for missing days. Lucid uses **compassionate streaks**:
-
-* Streaks track consistency but don't reset to zero on a miss
-* Missing a day prompts a gentle check-in: "You were quiet yesterday. Everything okay?"
-* Long gaps trigger a "re-entry" flow: "It's been a while. Want to do a catch-up reflection?"
-* The system celebrates returns, not just perfect attendance
-
-#### **Making Depth Accessible**
-
-When you're emotionally overwhelmed, articulation is hard. Lucid offers scaffolding:
-
-* **Prompted starts** — "Right now I feel..." / "What's bothering me is..." / "I noticed..."
-* **Body check-in** — "Where do you feel this in your body?" (options: chest, stomach, throat, etc.)
-* **Intensity slider** — Can't name the feeling? Rate how activated you are.
-* **"Just vent" mode** — Stream of consciousness capture, no structure required. The system finds patterns later.
-
-The philosophy: **capture first, structure later.** Never let the interface get in the way of the moment.
-
-### **I. People & Relational Memory**
-
-People aren't database rows. They're constellations of memories, dynamics, feelings, and shared history. Lucid learns about the people in your life *through your reflections*, not through forms you fill out.
-
-#### **How People Emerge**
-
-People appear organically in your entries. When the system detects someone new—a name, a role, a relationship—it offers to learn more:
-
-* "You mentioned 'Sarah' for the first time. Want to tell me about her?"
-* The prompt is optional—you can skip it and let the relationship reveal itself over time
-* Or you can fill out as much or as little as feels right
-
-People become **first-class entities** with their own profile, but the profile grows naturally from your lived experience.
-
-#### **What the System Learns**
-
-Over time, Lucid builds understanding about each person:
-
-* **Who they are to you** — friend, family, colleague, partner, acquaintance
-* **The emotional texture** — how you generally feel around them, what they bring out in you
-* **Patterns that repeat** — recurring dynamics, triggers, joys
-* **Shared history** — how you met, key moments, turning points
-* **Important dates** — birthdays, anniversaries (learned from your entries, not a form)
-* **Current state** — where the relationship is now, what's active
-* **What you're working on** — boundaries to set, appreciation to express, repair to attempt
-
-#### **Person Profile**
-
-Each person has a living profile that includes:
-
-* Name and how you refer to them
-* Your relationship to them
-* Key characteristics (as *you* experience them)
-* Timeline of significant moments
-* Patterns the system has noticed
-* Goals related to this relationship
-* Entries where they appear
-
-#### **Relational Insights**
-
-The system connects the dots across your entries:
-
-* "You've mentioned feeling dismissed by [person] in 4 different entries. Is this a pattern worth exploring?"
-* "Your entries about [person] shifted noticeably after that conversation in March."
-* "You described [person] as 'exhausting' early on, but recent entries feel warmer."
-* "You tend to avoid conflict with [person]. Three times you've written about unspoken frustrations."
-
-#### **Connections Between People**
-
-Lucid understands that people exist in systems:
-
-* Family dynamics (how your relationship with one family member affects another)
-* Friend groups (shared contexts, group patterns)
-* Work relationships (professional boundaries, power dynamics)
-* How different people bring out different parts of you
-
-The relational map isn't just a list—it's a web of connections that helps you see the patterns in how you relate.
-
-### **J. Goals & Progress System**
-
-Goals should feel alive—connected to your values, adaptive to your reality, satisfying to complete. Not a rigid task list, but a map of where you're trying to go.
-
-#### **Where Goals Come From**
-
-**User-stated goals:**
-You explicitly tell the system what you're working toward:
-* "I want to exercise 3x/week"
-* "I want to set better boundaries at work"
-* "I want to be more present with my kids"
-
-**System-suggested goals:**
-The system notices patterns and offers possibilities:
-* "You've mentioned wanting more creative time in 7 entries this month. Want to make this a goal?"
-* "It seems like 'feeling less anxious in social situations' is something you're working toward. Track it?"
-
-These are always suggestions, never imposed.
-
-**Emergent goals:**
-Sometimes goals crystallize from repeated themes:
-* "It seems like 'being more present with my kids' is something you're actively working on—even if you haven't named it as a goal."
-* The system notices you're already doing the work, and asks if you want to make it explicit.
-
-#### **Goal Structure (Nested Hierarchy)**
-
-Goals support three levels from the start:
-
-**1. Goals** — The big picture outcome
-* "Improve my relationship with my body"
-* "Become a better communicator"
-* "Build financial security"
-
-**2. Sub-goals** — Concrete steps toward the goal
-* "Exercise consistently" (under body goal)
-* "Practice active listening" (under communication goal)
-* "Build 3-month emergency fund" (under financial goal)
-
-**3. Tasks** — Specific actions
-* "Go to the gym Tuesday" (under exercise sub-goal)
-* "Ask clarifying questions in next meeting" (under listening sub-goal)
-* "Set up auto-transfer of $200/month" (under emergency fund sub-goal)
-
-#### **Goal Properties**
-
-* Goals can be **concrete** ("Run a 5K") or **abstract** ("Feel more at peace with my body")
-* Goals **connect to pillars** (Health, Relationships, Work, etc.)
-* Goals can **connect to other goals** (setting boundaries relates to reducing anxiety)
-* Goals can be **paused, adjusted, or retired** without shame
-* Goals can have **experiments** — small tests to try before committing
-
-#### **Progress Visibility**
-
-Progress isn't gamified streaks—it's meaningful indicators:
-
-* "You're 60% toward this goal based on your own milestones"
-* Visual representation of movement over time
-* Connection to entries that relate to this goal
-* Celebration of completion that ties back to the journey
-
-#### **Completion Experience**
-
-When a goal is completed:
-
-* **Reflection prompt:** "What did achieving this teach you?"
-* **Connection:** "This relates to your larger goal of 'advocating for myself.' You've now completed 3 goals in that theme this year."
-* **Archive:** The goal is stored with the story of how you got there
-* **What's next:** Optional—the system may suggest related goals
-
-**Example flow:**
-
-> Goal: "Have a difficult conversation with my manager about workload"
->
-> Sub-goals: Clarify what I need → Practice what to say → Schedule the meeting → Have the conversation → Reflect on outcome
->
-> Related entries automatically linked throughout
->
-> On completion: "You did it. This connects to your larger pattern of learning to advocate for yourself. How do you feel?"
-
-### **K. Proactive Intelligence** *(Phase 2)*
-
-*Note: This describes future functionality. The MVP is pull-based—insights surface when you engage with the system.*
-
-The system doesn't just wait for you to write—it reaches out when something matters. Not nagging, but *noticing*.
-
-#### **Types of Proactive Moments**
-
-**Relationship reminders with drafts** (learned, not calendared):
-* "You mentioned wanting to call your sister more. It's been 3 weeks. Here are a few things you might say, based on what's been on your mind."
-* "Sarah's birthday is Friday. Based on what you've shared about her and your friendship, here's a message draft that feels like you. Want to send it Thursday evening, or adjust it?"
-
-**Pattern interrupts:**
-* "You have that presentation tomorrow. Last time you had one, you spiraled the night before. Want to do a grounding exercise?"
-* "You've been quiet for 4 days. That's unusual. Everything okay?"
-
-**Goal nudges:**
-* "You said you wanted to journal daily. It's been a week. No pressure—want to do a quick check-in?"
-* "You're 80% toward your reading goal for the month."
-
-**Insight delivery:**
-* "I noticed something across your last 10 entries. Want to hear it?"
-* "There's a theme emerging this month. When you're ready."
-
-**Celebration moments:**
-* "You handled that conflict differently than 3 months ago. That's growth."
-* "You've maintained your morning routine for 30 days."
-
-#### **Design Principles**
-
-* **Proactive ≠ pushy.** The system offers, never demands.
-* **User controls frequency** and types of reach-outs
-* **Timing matters** — not during a crisis, not at 2am
-* **The system learns** when you're receptive vs when to back off
-
-### **L. Agent Actions (Your Agent-Self)**
-
-Lucid doesn't just understand you—it helps you **do** things. This is the agent-assisted layer: your agent-self that operates alongside you, helping you show up in the world.
-
-#### **Types of Agent Actions**
+### **What It Does**
 
 **Message drafting:**
 * Birthday wishes, thank-you notes, difficult conversations—drafted in your voice
@@ -512,11 +165,11 @@ Lucid doesn't just understand you—it helps you **do** things. This is the agen
 * When you've made a promise or set an intention, the agent helps you follow through
 * "You said you'd send that article to your brother. Here it is with a quick note. Ready to send?"
 
-**Suggested timing:**
-* The agent proposes not just *what* but *when*
-* "Based on your patterns, you're most receptive to reflection in the evening. Want me to surface this draft then?"
+**Proactive intelligence:**
+* "You have that presentation tomorrow. Last time you had one, you spiraled the night before. Want to do a grounding exercise?"
+* "Sarah's birthday is Friday. Based on what you've shared about her, here's a message draft. Want to send it Thursday evening?"
 
-#### **The Draft-and-Approve Model**
+### **The Draft-and-Approve Model**
 
 Everything the agent proposes is a **draft**:
 
@@ -525,7 +178,7 @@ Everything the agent proposes is a **draft**:
 * You can reject, modify, or ask for alternatives
 * The system learns from your edits to get better at sounding like you
 
-#### **Why This Isn't Inauthentic**
+### **Why This Isn't Inauthentic**
 
 Using your agent-self to help you act doesn't diminish your humanity—it amplifies it:
 
@@ -534,66 +187,209 @@ Using your agent-self to help you act doesn't diminish your humanity—it amplif
 * **The approval is yours.** You decide what goes out and what doesn't.
 * **Time saved is reinvested.** Less friction means more presence with the people who matter.
 
-In a world where attention is scarce and life moves fast, your agent-self is a superpower—one that helps you be *more* human, not less.
+This isn't outsourcing your humanity. It's a **superpower**. In a world where attention is scarce and life moves fast, your agent-self helps you be *more* human, not less.
+
+The deep profile you build becomes the foundation for AI that genuinely represents you—not as a replacement, but as an extension of your capacity to connect.
 
 ---
 
-## **4. Architecture & Privacy**
+## **6. How It Works**
 
-### **Local-First by Design**
+### **A. Capture**
 
-* All data is stored privately on your device
-* All processing happens via **local agent workflows**
-* No cloud uploads
-* No third-party analytics
-* No servers to trust
+Everything goes into your secure "life stream" that the system analyzes over time.
 
-It is your data, your mind, your life—protected.
+**What you can capture:**
+* Daily reflections
+* Quick thoughts
+* Emotional spikes
+* Wins or breakthroughs
+* Fears and anxieties
+* Conflicts or patterns
+* Moments of clarity
+* Goals, desires, insights
 
-### **Knowledge Architecture**
+**Quick capture options:**
+* **One-liner drop** — Just type a sentence: "Felt dismissed in the meeting." Done.
+* **Emotion picker** — Tap an emotion wheel when words won't come.
+* **Voice memo** — Speak freely. The system transcribes and extracts structure later.
+* **Photo + caption** — Capture a moment visually with a short note.
+* **Rating pulse** — "How are you right now?" 1-10 slider. Takes 2 seconds.
 
-The system must support learning, growing, and adapting. Raw data is sacred. Processed understanding evolves. Nothing is locked in stone.
+The philosophy: **capture first, structure later.** Never let the interface get in the way of the moment.
 
-#### **Three-Layer Data Model**
+**Streaks without punishment:**
+* Streaks track consistency but don't reset to zero on a miss
+* Missing a day prompts a gentle check-in: "You were quiet yesterday. Everything okay?"
+* The system celebrates returns, not just perfect attendance
 
-**Layer 1: The Stream (Raw)**
-* Everything you input, exactly as you gave it
-* Timestamped, unmodified, immutable
-* Text entries, emotion picks, ratings, quick logs
-* This is the ground truth—never altered
+### **B. Understand**
 
-**Layer 2: Structured Understanding (Processed)**
-* Extracted from Layer 1 by agents
-* Entities: people, places, events, emotions, themes
-* Connections: what relates to what
-* Temporal markers: when things happened, how long patterns persist
-* This layer can be re-processed as agents improve
+**Daily check-ins:**
+Each day, the system guides you through what happened, how you felt, what mattered, and which pillars were touched.
 
-**Layer 3: Living Knowledge (Evolved)**
-* Your psychological profile (fears, desires, patterns)
-* Your relational map (people and dynamics)
-* Your goal state (active goals, progress, history)
-* Your framework preferences and how they're applied
-* **Temporal versioning** — snapshots of who you were at different periods, enabling comparison over time
-* This layer grows and changes over time
+**Pattern discovery:**
+The system uses three methods:
 
-#### **Design Principles**
+1. **Explicit input** — You directly tell the system about past experiences, known triggers, or things you're working on.
+2. **Pattern inference** — As entries accumulate, the system notices recurring themes: "You've mentioned feeling 'not enough' in 4 different contexts this month."
+3. **Validated insights** — When the system notices a pattern, it asks: "Does this resonate?" You can accept, reject, or nuance any interpretation.
 
-* **Raw is permanent** — never lose the original input
-* **Processed is rebuildable** — can re-extract if agents improve
-* **Knowledge is mutable** — your understanding of yourself changes
-* **User can see all layers** — transparency about what the system "thinks"
-* **User can correct any layer** — the system learns from corrections
+**Multi-timescale reflection:**
 
-#### **Query Capabilities**
+| Scale | Question |
+|-------|----------|
+| **Daily** | "What happened today, underneath the surface?" |
+| **Weekly** | "What patterns repeated? Where did you grow? Where did you avoid yourself?" |
+| **Monthly** | "What pillars are rising or falling? Which themes dominated?" |
+| **Yearly** | "What transformations have begun? What long-term story is unfolding?" |
 
-The system supports questions like:
-* "How did I feel about work 6 months ago vs now?"
-* "Show me all entries where I mentioned [person]"
-* "What patterns repeat in my romantic relationships?"
-* "What was I struggling with this time last year?"
+It builds a **living narrative** of your life.
 
-### **Agent Workflow System**
+**User agency:**
+* Every inferred pattern can be edited, rejected, or reframed
+* The system never claims certainty—it offers reflections
+* You can mark topics as "off-limits" or "sensitive"
+* You can export, review, or wipe your profile at any time
+
+### **C. Connect**
+
+People aren't database rows. They're constellations of memories, dynamics, feelings, and shared history. Lucid learns about the people in your life *through your reflections*, not through forms.
+
+**How people emerge:**
+People appear organically in your entries. When the system detects someone new, it offers to learn more:
+* "You mentioned 'Sarah' for the first time. Want to tell me about her?"
+
+**What the system learns about each person:**
+* Who they are to you
+* The emotional texture of the relationship
+* Patterns that repeat
+* Shared history and key moments
+* Important dates (learned from entries, not forms)
+* What you're working on in the relationship
+
+**Relational insights:**
+* "You've mentioned feeling dismissed by [person] in 4 different entries. Is this a pattern worth exploring?"
+* "Your entries about [person] shifted noticeably after that conversation in March."
+* "You tend to avoid conflict with [person]. Three times you've written about unspoken frustrations."
+
+The relational map isn't just a list—it's a web of connections that helps you see the patterns in how you relate.
+
+### **D. Grow**
+
+**Coaching layer:**
+The system tracks your external goals and habits and suggests:
+* Micro-goals for weak pillars
+* New habits based on your behavior
+* Experiments for self-growth
+* Ways to break recurring cycles
+
+**Goal structure (nested hierarchy):**
+
+| Level | Example |
+|-------|---------|
+| **Goal** | "Improve my relationship with my body" |
+| **Sub-goal** | "Exercise consistently" |
+| **Task** | "Go to the gym Tuesday" |
+
+**Where goals come from:**
+* **User-stated** — You explicitly tell the system what you're working toward
+* **System-suggested** — "You've mentioned wanting more creative time in 7 entries. Want to make this a goal?"
+* **Emergent** — The system notices you're already doing the work and asks if you want to make it explicit
+
+**When a goal is completed:**
+* Reflection prompt: "What did achieving this teach you?"
+* Connection: "This relates to your larger goal of 'advocating for myself.' You've now completed 3 goals in that theme this year."
+* Archive: The goal is stored with the story of how you got there
+
+### **E. Interpret**
+
+Every situation can be seen through multiple lenses.
+
+**Example: You feel resentful after your partner dismissed your idea at dinner.**
+
+| Framework | Interpretation |
+|-----------|----------------|
+| **NVC** | "You're feeling hurt because your need for respect wasn't met. What request could you make?" |
+| **IFS** | "A young part of you feels unseen. Can you turn toward it with curiosity?" |
+| **Stoicism** | "Their reaction is outside your control. What *is* in your control here?" |
+| **Gottman** | "This might be a missed bid for connection. How could you try a repair attempt?" |
+| **Watts** | "Who is the 'you' that feels dismissed? What if this moment is just weather passing through?" |
+
+You can receive all of these perspectives, or choose which ones feel useful for this moment.
+
+Lucid **adapts to your worldview**, not the other way around.
+
+---
+
+## **7. Your Data, Your Control**
+
+Your data is **stored securely on your device**—your deepest reflections, your psychological profile, your relational map. You own it completely.
+
+* All data is stored securely on your device
+* You own your data completely—export, delete, or migrate anytime
+* AI processing leverages external services (Claude, other LLMs) for intelligent analysis
+* No third-party analytics or data monetization
+* Transparent about what gets sent where
+
+It is your data, your mind, your life—you control it.
+
+**The three-layer data model:**
+
+| Layer | What It Contains |
+|-------|------------------|
+| **Raw (Stream)** | Everything you input, exactly as you gave it. Timestamped, unmodified, immutable. This is the ground truth—never altered. |
+| **Processed** | Entities extracted by agents: people, places, events, emotions, themes, connections. Can be re-processed as agents improve. |
+| **Knowledge** | Your psychological profile, relational map, goal state, framework preferences. This layer grows and changes over time. |
+
+**Design principles:**
+* Raw is permanent — never lose the original input
+* Processed is rebuildable — can re-extract if agents improve
+* Knowledge is mutable — your understanding of yourself changes
+* User can see all layers — transparency about what the system "thinks"
+* User can correct any layer — the system learns from corrections
+
+### **Multi-Dimensional Memory**
+
+Not all memories are equal. Some define who you are; others are passing observations. Lucid treats memories as multi-dimensional rather than forcing them into rigid categories.
+
+Every memory has four dimensions:
+
+| Dimension | What It Measures |
+|-----------|------------------|
+| **Salience** | How foundational is this? (ephemeral → significant → core) |
+| **Type** | What kind of memory? (factual, emotional, relational, insight, pattern) |
+| **Confidence** | How certain are we? (inferred → validated → user-stated) |
+| **Activation** | How recently accessed? (dormant → latent → active) |
+
+A single memory can be many things at once. "My father never said he was proud of me" is simultaneously:
+* **Core** (shapes your identity)
+* **Emotional** (carries deep feeling)
+* **Relational** (about a person)
+* **User-stated** (high confidence—you told the system directly)
+
+This multi-dimensional approach allows the system to:
+* Strengthen memories that keep appearing (activation increases salience)
+* Connect related memories across time and context
+* Let ephemeral observations fade unless they prove significant
+* Give more weight to things you've validated vs. things it inferred
+
+### **Memory Graph**
+
+Memories don't exist in isolation—they connect. Lucid maintains a graph of relationships between memories, people, patterns, and goals.
+
+Connection types include:
+* **Supports** — one memory reinforces another
+* **Contradicts** — memories that conflict (worth exploring)
+* **Relates-to** — thematic connection
+* **Caused-by** — causal relationship
+* **Example-of** — specific instance of a broader pattern
+
+This enables powerful traversal: "Show me everything connected to my fear of rejection" returns not just the fear itself, but the memories that formed it, the people involved, the patterns it creates, and the goals it blocks.
+
+---
+
+## **8. How It's Built**
 
 The app is powered by a modular set of **framework-agnostic agents**:
 
@@ -606,19 +402,111 @@ The app is powered by a modular set of **framework-agnostic agents**:
 | **Coach Agent** | Tracks goals, suggests actions, celebrates progress |
 | **Framework Agent** | Applies philosophical frameworks to any entry or insight |
 | **Reflection Agent** | Generates daily/weekly/monthly/yearly summaries |
+| **Consolidation Agent** | Strengthens memory connections, surfaces patterns, maintains the memory graph |
 
-#### **Framework-Agnostic Architecture**
-
-Agents do NOT hardcode frameworks. Instead:
+**Framework-agnostic architecture:**
 * The **Framework Agent** is a translation layer that applies any active framework
 * Other agents produce raw insights; Framework Agent interprets them through your chosen lenses
 * Adding a new framework = adding a framework definition, not changing agent code
 * You can have multiple frameworks active simultaneously
-* This means the system naturally supports all frameworks (Watts, NVC, Kabbalah, Stoicism, IFS, CBT, ACT, etc.) through configuration
 
-Each agent is replaceable, extensible, and customizable.
+Each agent is replaceable, extensible, and customizable. This makes Lucid **a platform**, not a static tool.
 
-This makes Lucid **a platform**, not a static tool.
+### **The Consolidation Process**
+
+The Consolidation Agent runs periodically in the background—a kind of "dream state" where the system processes, connects, and strengthens what it knows about you.
+
+| Frequency | What Happens |
+|-----------|--------------|
+| **Nightly** | Light processing: increase activation scores for today's memories, find immediate connections, flag potential patterns |
+| **Weekly** | Deeper analysis: strengthen memories that appeared multiple times, connect this week's themes to historical patterns, surface insights for review |
+| **Monthly** | Comprehensive review: evaluate salience scores, promote repeated patterns to higher salience, archive low-activation ephemeral data, generate a "state of mind" summary |
+
+This mimics how human memory works—consolidation during rest strengthens important memories and lets unimportant ones fade. The difference is Lucid can surface what it finds: "I noticed this week's frustration with your boss echoes a pattern from three months ago. Worth exploring?"
+
+### **Adaptive Evolution**
+
+Lucid doesn't just learn *about* you—it learns *how to work with* you.
+
+Over time, the system adapts:
+* **Prompts** — Questions evolve based on what resonates. If you respond deeply to IFS-style parts work, the system uses more of that.
+* **Commands** — Your `/checkin` flow becomes personalized. New commands emerge based on your patterns.
+* **Agent behaviors** — The Coach learns your motivation style. The Therapist learns how deep you want to go.
+* **Timing** — The system learns when you're most reflective, when you need gentle versus direct.
+
+**How it learns:**
+* Response depth (did you engage or dismiss?)
+* Explicit feedback ("this resonated" / "not quite")
+* Edits to agent-generated drafts
+* Time spent on reflections
+
+**Configurable autonomy:**
+
+The system starts conservative—every proposed adaptation requires your explicit approval. As trust builds, you can grant more autonomy:
+
+| Level | Behavior |
+|-------|----------|
+| **Conservative** | All adaptations require explicit approval (default) |
+| **Moderate** | Minor tweaks auto-apply; major changes need approval |
+| **Autonomous** | System adapts freely; surfaces changes for review |
+
+You control this setting. The system might suggest: "I've proposed 10 adaptations and you approved all of them. Want to let me handle small adjustments automatically?"
+
+Everything is reversible. You can see exactly how your experience has evolved over time, and revert any change that doesn't work.
+
+**User commands:**
+
+| Command | What it triggers |
+|---------|------------------|
+| `/checkin` | Daily structured check-in flow |
+| `/log` | Quick thought capture |
+| `/reflect` | Guided reflection session |
+| `/goals` | View/manage goals |
+| `/progress` | See progress across pillars and goals |
+| `/profile` | View/edit your psychological profile |
+| `/people` | View/explore relational map |
+| `/ask` | Ask the system a question about yourself |
+
+---
+
+## **9. Roadmap**
+
+Lucid evolves in phases:
+
+### **Phase 1: Desktop MVP**
+* Local desktop application (Mac/Linux)
+* Text-based daily check-ins and reflections
+* Core agent system
+* Markdown/JSON data storage you own completely
+
+### **Phase 2: Frictionless Capture**
+* **Slack bot integration** — DM yourself thoughts throughout the day
+* **CLI tool** — Quick terminal commands: `lucid log "felt anxious before the call"`
+* **Voice memo processing** — Drop audio files, get structured entries
+
+### **Phase 3: Life Stream Integrations**
+* **Text messages** — Understand conversations, commitments made, relationships evolving
+* **Email** — Surface commitments, follow-ups, relationship context
+* **Calendar** — Know what's coming up, anticipate stress points
+* **Other sources** — Notes apps, task managers, health data
+
+### **Phase 4: Rich Interfaces**
+* Web dashboard for visualizations
+* Mobile companion for quick capture
+* Calendar/timeline views of your journey
+
+### **Phase 5: Advanced Intelligence**
+* **Personal AI training** — Train AI agents that act with your values and communication style
+* **Social presence analysis** — Compare your internal self-understanding to your external digital footprint
+* **Cross-platform identity** — See yourself through different lenses
+
+The architecture is designed so **input can come from anywhere**, with secure local storage and powerful AI integrations for intelligent processing.
+
+---
+
+## **10. Appendix: Technical Architecture**
+
+*For the technically curious.*
 
 ### **Skills (Reusable Capabilities)**
 
@@ -636,21 +524,9 @@ Agents invoke shared skills for common operations:
 | `query_history` | Search past entries with filters |
 | `prompt_person_profile` | Generate prompts to enrich a newly detected person |
 | `link_to_goals` | Connect entries/insights to relevant goals |
-
-### **Commands (User Entry Points)**
-
-User-facing workflows:
-
-| Command | What it triggers |
-|---------|------------------|
-| `/checkin` | Daily structured check-in flow |
-| `/log` | Quick thought capture |
-| `/reflect` | Guided reflection session |
-| `/goals` | View/manage goals (nested hierarchy) |
-| `/progress` | See progress across pillars and goals |
-| `/profile` | View/edit your psychological profile |
-| `/people` | View/explore relational map |
-| `/ask` | Ask the system a question about yourself |
+| `consolidate_memories` | Strengthen connections, adjust salience, archive dormant memories |
+| `traverse_graph` | Follow memory connections to surface related context |
+| `adapt_approach` | Modify agent behavior based on accumulated feedback |
 
 ### **Data Layer (SQLite)**
 
@@ -671,6 +547,9 @@ User-facing workflows:
 * `user_frameworks` — which frameworks user has active
 * `insights` — generated insights
 * `reflections` — generated reflection documents
+* `memories` — multi-dimensional memory store with salience, confidence, activation scores
+* `memory_connections` — graph edges between memories (type, strength)
+* `adaptations` — learned system behaviors and their evolution history
 
 **Principles:**
 * SQLite for MVP (simple, local, portable)
@@ -678,73 +557,40 @@ User-facing workflows:
 * Full export capability (your data is yours)
 * Encryption at rest for sensitive data
 
-### **Platform Roadmap**
+### **Query Capabilities**
 
-Lucid evolves in phases:
+The system supports questions like:
+* "How did I feel about work 6 months ago vs now?"
+* "Show me all entries where I mentioned [person]"
+* "What patterns repeat in my romantic relationships?"
+* "What was I struggling with this time last year?"
 
-#### **Phase 1: Desktop MVP**
-* Local desktop application (Mac/Linux)
-* Text-based daily check-ins and reflections
-* Core agent system running locally
-* Markdown/JSON data storage you own completely
+### **Progressive Unlocking**
 
-#### **Phase 2: Frictionless Capture**
-* **Slack bot integration** — DM yourself thoughts throughout the day; Lucid ingests them
-* **CLI tool** — Quick terminal commands: `mindshift log "felt anxious before the call"`
-* **Voice memo processing** — Drop audio files, get structured entries
+Features unlock as you participate:
 
-#### **Phase 2.5: Life Stream Integrations**
+| Milestone | Unlocks |
+|-----------|---------|
+| First 3 daily check-ins | Weekly reflection summaries |
+| 7 consecutive days of input | Pattern detection activated |
+| First month of entries | Monthly deep-dive report |
+| 10 validated insights | "Shadow work" suggestions |
+| 3 months of data | Yearly narrative begins compiling |
 
-For the agent-self to truly help you, it needs to know what's happening in your life. These integrations give Lucid ambient awareness—passively learning from your digital life so it can assist at the right moments.
-
-* **Text messages** — Read messages from known people (with permission); understand conversations, commitments made, relationships evolving
-* **Email** — Scan emails from people in your relational map; surface commitments, follow-ups, relationship context
-* **Calendar** — Know what's coming up; connect events to people, anticipate stress points, suggest preparation
-* **Other programmatic sources** — Anything that helps Lucid stay current: notes apps, task managers, health data
-
-**Privacy principles remain paramount:**
-* All processing happens locally
-* You control which sources are connected
-* You control which people/threads are visible
-* Nothing leaves your device
-
-#### **Phase 3: Rich Interfaces**
-* Web dashboard for visualizations (still local-first)
-* Mobile companion for quick capture
-* Calendar/timeline views of your journey
-
-#### **Phase 4: Advanced Intelligence**
-* **Personal AI training** — use your profile to train AI agents that act with your values, communication style, and decision patterns
-* **Social presence analysis** — optional: "Who am I to the internet?" Compare your internal self-understanding to your external digital footprint
-* **Cross-platform identity** — see yourself through different lenses (internal vs external, past vs present)
-
-The architecture is designed so **input can come from anywhere**, while processing and storage remain entirely local.
+Features aren't hidden to frustrate—they're gated because **they require data to be meaningful.**
 
 ---
 
-## **5. Why This Matters**
+## **11. The Vision Realized**
 
-Lucid fills a massive gap:
+Imagine waking up and knowing exactly what's been weighing on you—not vaguely, but precisely. The system noticed you've mentioned feeling "overlooked" three times this week and connects it to a wound you identified months ago.
 
-### People have tools for tasks.
+Imagine your friend's birthday approaching and having a message already drafted—in your voice, mentioning your shared history, ready to send with one tap. Not because a robot wrote it, but because your agent-self knows how you express care.
 
-People have tools for money.
-People have tools for health.
-But no one has a tool for their *inner life*.
+Imagine looking back at the end of the year and seeing not just what you did, but who you became. The fears you faced. The patterns you broke. The relationships you deepened. The goals you achieved and what they taught you.
 
-Lucid changes that by providing:
+Imagine having a companion that truly knows you—not a therapist you see once a week, not a journal you forget to write in, but a living system that holds your story across time and helps you become who you want to be.
 
-* Clarity where things feel chaotic
-* Structure where things feel overwhelming
-* Insight where things feel mysterious
-* Agency where things feel stuck
-* Privacy where vulnerability is needed
-* Growth where patterns have persisted for years
+**This is what's possible when you finally have a system for your inner life.**
 
-It is a **foundational tool for becoming who you want to be**, built with the deepest respect for your privacy, your worldview, and your humanity.
-
----
-
-## **6. The Essence of Lucid**
-
-Lucid is a private, local, intelligent companion that listens to your life as you live it, organizes your experiences into the pillars that matter to you, interprets them through the frameworks you believe in, and guides you like a therapist and coach—helping you grow intentionally, heal over time, and truly see yourself.
+This is Lucid.
