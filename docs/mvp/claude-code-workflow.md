@@ -360,7 +360,25 @@ short-circuits the order.
      "most recent two" plus a `/log` prompt; one round-trip test
      where confirming an insight stamps `last_confirmed_at`.
 
-After step 6, the steel thread in [`README.md`](README.md) is end-to-
+7. **Implement grounded `/ask`.** Per
+   [`agent-contracts.md`](agent-contracts.md) §3
+   (`reflection.answer_grounded`):
+   * Storage: `read_insights(status=accepted, cap=50)`,
+     `read_reflections(cap=12)`. Both already exist from earlier
+     phases; no new ops needed.
+   * Reflection: third sub-mode, with the `answer | insufficient`
+     outcomes and the citations-must-be-in-slice rule.
+   * Safety/Consent: extend the example fixture set with the three
+     `/ask` rows from [`agent-contracts.md`](agent-contracts.md) §4
+     (`pass`, `block` for advice, `block` for unverified citation).
+   * Router: `/ask` plan from
+     [`architecture.md`](architecture.md) §2 — read-only; no writes.
+   * Verification: empty-store path returns "nothing validated yet";
+     happy path returns an `answer` whose `citations[]` are all in
+     the supplied slice; an LLM response that cites a fabricated id
+     is caught by validation and Safety blocks the message.
+
+After step 7, the steel thread in [`README.md`](README.md) is end-to-
 end. Anything beyond it is post-MVP and starts with a doc diff.
 
 ## What success looks like at handoff

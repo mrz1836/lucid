@@ -105,13 +105,21 @@ A single structured payload:
 
 `stop_reason` is one of:
 
-* `satisfied` — Intake has enough; the bundle is ready.
-* `max_questions_reached` — hit the cap, return what's there.
+* `satisfied` — Intake has enough; the bundle is ready. The router's
+  ack is the standard one: *"Saved as `raw_<id>`."*
+* `max_questions_reached` — hit the cap, return what's there. The
+  router's ack adds a brief acknowledgement of the cap before the id:
+  *"I've got what I need — saved as `raw_<id>`."* This is fixed
+  copy; Intake does not author it.
 * `user_exit` — the user typed `/done`, `/cancel`, or stopped responding;
-  Intake returns whatever it has, even if zero answers.
+  Intake returns whatever it has, even if zero answers. The router's
+  ack varies: if `answers` is non-empty it saves a partial bundle
+  (*"Saved what we had as `raw_<id>`."*); if empty it does not write
+  any record and acknowledges briefly (*"Stopped — nothing saved."*).
 
 Intake never decides whether the entry should exist. It returns the
-bundle; the router persists via `storage.write_raw`.
+bundle; the router persists via `storage.write_raw` for `satisfied`
+and `max_questions_reached`, and conditionally for `user_exit`.
 
 ### Allowed data access / tools
 
@@ -183,14 +191,24 @@ A processed artifact payload as in
 {
   "id": "raw_2026_05_05_19_42",
   "entry_id": "raw_2026_05_05_19_42",
+  "produced_at": "2026-05-05T19:42:14-04:00",
   "agent_version": "structuring-2026.05.0",
   "emotions": [{"name": "annoyed", "rationale": "..."}],
   "themes":   [{"name": "voice-not-heard", "rationale": "..."}],
-  "people":   [{"display_name": "M.", "first_mention": false}],
+  "people":   [{"display_name": "M.", "person_key": null, "first_mention": false}],
   "notes": null,
   "rejected_proposals": []
 }
 ```
+
+Structuring always returns `person_key: null` (it has no read access to
+`~/.lucid/people/`). The router runs `storage.update_person` for each
+mention immediately after Structuring returns and **before**
+`storage.write_processed`; that step resolves or creates the slug per
+[`data-model.md`](data-model.md) §"Naming conventions" and back-fills
+`person_key` on the payload. The artifact on disk is therefore never
+`null` for `person_key`. See §"How contracts compose" below for the
+exact router order.
 
 `rejected_proposals` is always returned as an empty array on the first
 write; later updates come from Reflection's rejection path via the
@@ -232,10 +250,14 @@ storage adapter, not from Structuring.
   `notes: "raw body empty"`. No retry.
 * **Validation rules:**
   * `id == entry_id` and both equal the raw entry id.
+  * `produced_at` is an ISO-8601 timestamp with the host's local TZ
+    offset (see [`data-model.md`](data-model.md) §"Naming conventions").
   * `agent_version` is set.
   * `emotions`, `themes`, `people` are arrays (possibly empty).
   * Each emotion/theme has `name` and `rationale`. Each person has
-    `display_name` and `first_mention`.
+    `display_name`, `person_key` (always `null` in Structuring's
+    output; never `null` on disk after `storage.update_person` runs),
+    and `first_mention`.
   * Either at least one of (`emotions`, `themes`, `people`) is
     non-empty, **or** `notes` is non-empty.
   * No diagnostic terms in `notes` (regex check against the phrase
@@ -245,12 +267,23 @@ storage adapter, not from Structuring.
 
 ### Purpose
 
-Given the new processed artifact and a small recent window, return one
-of: a single hypothesis-framed pattern proposal, an honest "no pattern
-yet" message, or an optional soft contradiction. On `/reflect`, surface
-validated insights; do **not** propose new patterns.
+Reflection has three sub-modes, one per command. Each sub-mode keeps
+to its slice; none of them reads raw entries.
 
-Reflection is the only place a hypothesis is ever introduced.
+* **`reflection.propose`** (used by `/checkin`) — given the new
+  processed artifact and a small recent window, return one of: a
+  single hypothesis-framed pattern proposal, an honest "no pattern
+  yet" message, or a soft contradiction.
+* **`reflection.surface_for_recall`** (used by `/reflect`) — surface
+  validated insights from the past week and ask whether they still
+  fit. Never proposes new patterns.
+* **`reflection.answer_grounded`** (used by `/ask`) — answer the
+  user's free-form question by quoting or paraphrasing the supplied
+  validated insights and weekly reflections only. Never proposes new
+  patterns; never reads raw entries.
+
+Reflection is the only place a hypothesis is ever introduced; that
+only happens in `reflection.propose`.
 
 ### Inputs
 
@@ -281,6 +314,25 @@ For per-week recall (`/reflect`):
 }
 ```
 
+For free-form Q&A (`/ask`):
+
+```text
+{
+  "command": "reflection.answer_grounded",
+  "question": "<the user's question, verbatim>",
+  "insights_slice":    [ { ...validated insights the router included... } ],
+  "reflections_slice": [ { ...weekly reflection records the router included... } ],
+  "agent_versions": { "reflection": "reflection-2026.05.0" }
+}
+```
+
+The router builds the slice deterministically: all insights with
+`status: accepted` are eligible, capped at the 50 most recent by
+`status_history[].at` of the last accept/confirm; weekly reflections
+are included by recency, capped at the 12 most recent ISO-week
+records. Reflection sees only this slice — it has no read access to
+raw entries, processed artifacts, or people records.
+
 ### Outputs
 
 For `reflection.propose`, exactly one of:
@@ -300,7 +352,7 @@ For `reflection.propose`, exactly one of:
   "message_text": "I don't have enough yet to say anything useful — want to keep going?"
 }
 
-// (c) soft contradiction (optional in MVP)
+// (c) soft contradiction
 {
   "outcome": "soft_contradiction",
   "message_text": "Earlier this week you said X; today reads more like Y. Want to look at the gap?",
@@ -330,18 +382,49 @@ If `insights_window` is empty, the router (not Reflection) handles the
 fallback to "most recent two insights regardless of age" plus a `/log`
 prompt.
 
+For `reflection.answer_grounded`, exactly one of:
+
+```json
+// (a) answer
+{
+  "outcome": "answer",
+  "answer_text": "Based on what you've validated so far, ...",
+  "citations": [
+    {"kind": "insight",    "id": "i_2026_05_05_a"},
+    {"kind": "reflection", "id": "reflection_2026_w18"}
+  ]
+}
+
+// (b) insufficient
+{
+  "outcome": "insufficient",
+  "answer_text": "I don't have enough validated material to answer that yet — want to capture one?",
+  "citations": []
+}
+```
+
+`answer_text` quotes or paraphrases the cited records only. Every id
+in `citations[]` must appear in the supplied slice. The output never
+introduces new patterns and never references entries outside the
+slice; on insufficient, `citations` is empty and the message points
+the user back at `/log` or `/checkin`.
+
 ### Allowed data access / tools
 
-* The current processed artifact (per-session) **or** the validated
-  insights window (per-week).
-* The recent window of processed artifacts (per-session only).
-* `rejected_shape_tags` for the same window.
-* One LLM call with the slice above.
-* `lucid.json` for `recent_window` (passed in by the router; Reflection
-  does not open the file).
+* For `reflection.propose`: the current processed artifact, the recent
+  window of processed artifacts, and `rejected_shape_tags` for the same
+  window.
+* For `reflection.surface_for_recall`: the validated insights window
+  only.
+* For `reflection.answer_grounded`: the supplied `insights_slice` and
+  `reflections_slice` and the user's `question` only.
+* One LLM call per invocation, with the slice above.
+* `lucid.json` for `recent_window` and `recent_window_max` (passed in
+  by the router; Reflection does not open the file).
 
 Reflection has **no** access to: raw entries, people records, sessions,
-reflections, anything outside the recent window, or any external system.
+the full insights store, anything outside the slice the router passed
+in, or any external system.
 
 ### Forbidden behavior
 
@@ -353,9 +436,20 @@ reflections, anything outside the recent window, or any external system.
   produce it in the first place.
 * Generating new patterns in the `/reflect` path. `surface_for_recall`
   is read-and-ask, not generate.
+* Generating new patterns or hypotheses in the `/ask` path.
+  `answer_grounded` quotes or paraphrases the cited records and
+  nothing else; if the slice cannot answer the question, the only
+  honest output is `outcome: "insufficient"`.
+* Citing ids in `answer_grounded.citations[]` that are not present in
+  the supplied `insights_slice` or `reflections_slice`. No invented
+  ids, no general-knowledge citations.
+* Advice, recommendations, or therapeutic framing in any output —
+  including `/ask` answers ("you should journal more", "consider
+  therapy", "this means you have anxious attachment").
 * Referencing supporting entries Reflection was not given. Citations
-  must be to ids inside `recent_window` (or, for soft contradictions,
-  to the current artifact and one window member).
+  must be to ids inside the supplied slice (for `propose`,
+  `recent_window`; for `surface_for_recall`, `insights_window`; for
+  `answer_grounded`, `insights_slice` ∪ `reflections_slice`).
 * Smuggling personal opinions, framework theory, or meta-commentary
   ("you should consider therapy", "this looks like attachment style
   X") into any output.
@@ -365,23 +459,42 @@ reflections, anything outside the recent window, or any external system.
 
 ### Failure handling and validation rules
 
-* If the LLM returns malformed output, Reflection retries once. If
-  still malformed, it returns `outcome: "no_pattern"` with a generic
-  message. A failed Reflection never silently produces an insight.
+* If the LLM returns malformed output for `propose`, Reflection
+  retries once. If still malformed, it returns `outcome: "no_pattern"`
+  with a generic message. A failed Reflection never silently produces
+  an insight.
+* If the LLM returns malformed output for `surface_for_recall`,
+  Reflection retries once. If still malformed, the router falls back
+  to surfacing each insight verbatim ("Earlier you saved: '<canonical
+  statement>'. Still resonating?") with no novel framing.
+* If the LLM returns malformed output for `answer_grounded`,
+  Reflection retries once. If still malformed, it returns
+  `outcome: "insufficient"` with a short fallback message.
 * If the recent window is empty (first or near-first entry),
-  Reflection returns `outcome: "no_pattern"`.
+  `propose` returns `outcome: "no_pattern"`.
 * If the current artifact has empty `emotions`, `themes`, **and**
-  `people`, Reflection returns `outcome: "no_pattern"`.
+  `people`, `propose` returns `outcome: "no_pattern"`.
+* If both `insights_slice` and `reflections_slice` are empty,
+  `answer_grounded` returns `outcome: "insufficient"` without an LLM
+  call.
 * **Validation rules:**
   * `outcome` is one of `proposal`, `no_pattern`, `soft_contradiction`,
-    `recall`.
+    `recall`, `answer`, `insufficient`.
   * For `proposal`: `proposal_text` is non-empty, hypothesis-framed,
     cites at least one `supporting_entry_ids`, and `shape_tag`
     matches `^[a-z0-9][a-z0-9-]{0,40}$` with ≤ 6 hyphen-segments.
   * For `proposal`: `shape_tag` is **not** in `rejected_shape_tags`.
-  * For `soft_contradiction`: cites exactly two `supporting_entry_ids`.
+  * For `soft_contradiction`: cites exactly two `supporting_entry_ids`,
+    and `message_text` ends in a question mark
+    ([`product-principles.md`](product-principles.md) §6).
   * For `recall`: `ordered_insights[]` is a subset of `insights_window`
     by id; no novel ids.
+  * For `answer`: `answer_text` is non-empty; `citations[]` is
+    non-empty; every `citations[].id` appears in the supplied slice
+    (insight ids in `insights_slice`, reflection ids in
+    `reflections_slice`).
+  * For `insufficient`: `answer_text` is non-empty; `citations[]` is
+    `[]`.
   * For all outcomes: phrase blocklist regex
     ([`product-principles.md`](product-principles.md) §6) returns no
     hits in any output text.
@@ -404,6 +517,7 @@ agent that ever blocks another agent's output.
     "from_agent": "intake" | "structuring_rendered" | "reflection",
     "intent": "ask_question" | "ack_capture" | "propose_pattern"
             | "no_pattern" | "soft_contradiction" | "recall"
+            | "answer" | "answer_insufficient"
             | "validation_followup",
     "text": "<the message that would be sent to the user>",
     "supporting_entry_ids": ["..."],
@@ -505,6 +619,9 @@ only for explicit user-visible acknowledgements like "saved as
 | "I don't have enough yet to say anything useful — want to keep going?" | pass | `ok` | (unchanged) |
 | "You're an avoidant attacher." | block | `diagnostic_language` | (router fallback) |
 | "Saved as raw_2026_05_05_19_42." | pass | `ok` | (unchanged) |
+| (intent: `answer`) "Based on `i_2026_05_05_a`, you've noted that …" | pass | `ok` | (unchanged) |
+| (intent: `answer`) "You should start journaling daily about this." | block | `agent_self_attempt` | (router fallback — `/ask` never advises) |
+| (intent: `answer`) "Based on `i_2026_99_99_z`, …" (id not in slice) | block | `unverified_claim` | (router fallback) |
 
 ## Optional / deferred contracts
 
@@ -607,8 +724,13 @@ that knows the order. Spelled out, the per-session sequence is:
   ├── Intake.gather                          → bundled_text
   ├── storage.write_raw(bundled_text)        → raw_id
   ├── Structuring.extract(raw_record)        → processed_payload
-  ├── Safety.evaluate(structuring_rendered)  → ack message (pass/rewrite/block)
+  │                                            (people[].person_key are all null)
+  ├── for each people[]:                       deterministic People routine;
+  │     storage.update_person(...)             resolves or creates slug,
+  │                                            back-fills person_key on payload
   ├── storage.write_processed(processed)     → processed_id
+  │                                            (no person_key is null on disk)
+  ├── Safety.evaluate(structuring_rendered)  → ack message (pass/rewrite/block)
   ├── Reflection.propose(processed,
   │                      recent_window,
   │                      rejected_shape_tags) → proposal | no_pattern | soft_contradiction
@@ -641,6 +763,20 @@ that knows the order. Spelled out, the per-session sequence is:
   └── on each user response:
         storage.update_insight_status(...)
         storage.write_reflection(...)        (append-only per ISO week)
+```
+
+`/ask` is read-only — it never writes:
+
+```
+/ask <question>
+  ├── storage.read_insights(status=accepted, cap=50)   → insights_slice
+  ├── storage.read_reflections(cap=12)                 → reflections_slice
+  ├── (router handles empty slice → returns "I don't have anything
+  │    validated yet — try /checkin or /log first.")
+  ├── Reflection.answer_grounded(question,
+  │                              insights_slice,
+  │                              reflections_slice)    → answer | insufficient
+  └── Safety.evaluate(answer_text)                     → outbound message
 ```
 
 Every arrow above is an explicit, named operation. There are no

@@ -125,6 +125,80 @@ can encode it. The voice is:
 This list is short on purpose. It exists to be enforced in agent prompts
 and verified by grep, not to cover every edge case.
 
+### Phrase blocklist (compiled regex)
+
+The Safety/Consent agent in
+[`agent-contracts.md`](agent-contracts.md) §4 compiles the regex
+below from this section. Any candidate outbound message that matches
+**must** be rewritten or blocked; this is the source of truth.
+
+```regex
+# Diagnostic / labeling
+\byou (always|never)\b                                                 # overclaim
+\byou (?:'?re|have) (?:an? )?(anxious|avoidant|secure|disorganized)\b  # attachment label (you're / you have)
+\b(anxious|avoidant|secure|disorganized) (attach\w*|tendenc\w*|style|type|behavior)\b  # noun-phrase form
+\b(clearly|obviously)\b                                                # flattening
+\b(i (diagnos|am diagnosing)|you'?re suffering from)\b                 # clinical
+\b(attachment style|trauma response|narcissist|borderline)\b           # clinical labels
+\b(therapy replacement|replaces? therapy|replaces? a therapist)\b      # boundary
+# Performance over presence
+(!{2,}|\bOMG\b|\bYay!|\byasss?\b)
+# Autonomous external action
+\b(send|dm|email|post|schedule|call|notify|webhook|publish|tweet)\b
+\b(auto[- ]?send|send automatically)\b
+# Coaching / advising in /ask or /reflect
+\byou should\b|\byou ought to\b|\bwhat you need to do is\b
+```
+
+The regex is matched case-insensitively and against word boundaries.
+Implementations may compile each line separately (so a hit reports
+which rule matched) but the union of these patterns is the contract.
+
+### Bundling rules: 90% user-authored, with examples
+
+[`agent-contracts.md`](agent-contracts.md) §1 requires Intake's
+`bundled_text` to be ≥ 90% user-authored tokens. The qualitative
+guidance: connective tissue should be invisible — paragraph breaks,
+ellipses, or one-line question prefixes are fine; reframing is not.
+
+**Acceptable** (user words preserved; only paragraph breaks and a
+question prefix added):
+
+```
+Q: What stuck with you?
+A: The bit where I tried to push back and then dropped it.
+
+Q: How did it land?
+A: Annoyed. A little embarrassed. Not at them, more at myself.
+```
+
+**Borderline** (a one-word paraphrase — keep the addition short and
+visibly a joining word, not editorial):
+
+```
+The dinner with M. and J. went sideways again. Afterward, the bit
+where I tried to push back and then dropped it. I just kind of agreed.
+Annoyed. A little embarrassed.
+```
+
+The word "Afterward" is connective; "I just kind of agreed" is the
+user's. Acceptable as long as the regenerated paragraph still reads
+≥ 90% user-authored.
+
+**Not acceptable** (Intake editorialized — rewrites, interprets,
+adds words the user did not say):
+
+```
+The dinner went poorly because the user felt unable to advocate for
+themselves, leading to a familiar pattern of folding. They reported
+some annoyance afterward.
+```
+
+Third person, interpretive, and uses words ("advocate", "familiar
+pattern", "folding") the user did not say. Reject and retry; if the
+retry fails, return `stop_reason: "user_exit"` per
+[`agent-contracts.md`](agent-contracts.md) §1 failure handling.
+
 ## 7. Approval before any external action
 
 The MVP does not send messages, post to channels, schedule events, or

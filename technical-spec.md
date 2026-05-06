@@ -19,6 +19,17 @@ The app is powered by a modular set of **framework-agnostic agents**:
 | **Reflection Agent** | Generates daily/weekly/monthly/yearly summaries |
 | **Consolidation Agent** | Strengthens memory connections, surfaces patterns, maintains the memory graph |
 
+> **MVP delta** (see [`docs/mvp/architecture.md`](docs/mvp/architecture.md)
+> §"Mapping `technical-spec.md` agents to MVP modules"):
+> the MVP ships **Intake**, **Structuring**, **Reflection**, and a new
+> **Safety/Consent** agent (added because the long-term spec assumes a
+> Therapist surface that the MVP does not). **People** is reduced to an
+> extractive deterministic routine (no profile prompts, no relational
+> map). **Therapist**, **Coach**, **Framework**, and **Consolidation**
+> are deferred; their seams are named in
+> [`docs/mvp/agent-contracts.md`](docs/mvp/agent-contracts.md)
+> §"Optional / deferred contracts".
+
 **Framework-agnostic architecture:**
 * The **Framework Agent** is a translation layer that applies any active framework
 * Other agents produce raw insights; Framework Agent interprets them through your chosen lenses
@@ -246,6 +257,15 @@ This enables powerful traversal: "Show me everything connected to my fear of rej
 * `memory_connections` — graph edges between memories (type, strength)
 * `adaptations` — learned system behaviors and their evolution history
 * `reprocessing_queue` — historical entries awaiting cascade processing, tracks scope and status
+
+> **MVP delta:** the MVP also introduces a first-class `sessions`
+> table (one row per chat thread / capture session). It is not in the
+> list above because the long-term spec absorbed sessions into the
+> consolidation cascade; the MVP needs sessions explicitly because
+> they are the audit trail for capture and the source of
+> `recent_window` for Reflection. Schema and migration mapping in
+> [`docs/mvp/data-model.md`](docs/mvp/data-model.md)
+> §"Sessions and channel memory" and §"SQLite migration path".
 
 **Principles:**
 * SQLite for MVP (simple, local, portable)

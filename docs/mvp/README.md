@@ -94,6 +94,9 @@ After these docs are approved, the very first build sequence is:
    processed artifact id.
 6. **Add weekly reflection stub** — a `/reflect` command that lists
    validated insights from the past week and asks "still resonating?".
+7. **Add grounded `/ask`** — a read-only command that answers free-form
+   questions by quoting validated insights and weekly reflections only.
+   No new patterns, no advice, no raw-entry access.
 
 Anything beyond this list is post-MVP. See
 [`claude-code-workflow.md`](claude-code-workflow.md) for how a coding agent
@@ -104,12 +107,14 @@ should execute this sequence.
 | File | What it covers |
 |------|----------------|
 | [`README.md`](README.md) | This page — canonical MVP entrypoint and steel-thread overview. |
-| [`product-principles.md`](product-principles.md) | Implementation principles derived from `vision.md`; voice; long-term roles vs. MVP focus. |
-| [`steel-thread.md`](steel-thread.md) | The exact end-to-end user loop, with happy / rejected / no-pattern paths and a synthetic transcript. |
+| [`product-principles.md`](product-principles.md) | Implementation principles derived from `vision.md`; voice; the literal phrase blocklist and bundling rules. |
+| [`steel-thread.md`](steel-thread.md) | The exact end-to-end user loop, with happy / rejected / no-pattern / soft-contradiction paths, the `/ask` stage, and synthetic transcripts. |
 | [`local-runtime.md`](local-runtime.md) | How Lucid runs locally on OpenClaw or Hermes via Discord before a standalone app exists. |
 | [`architecture.md`](architecture.md) | Module boundaries: harness, router, agents, storage adapter, structuring/reflection pipeline, safety gates. |
-| [`data-model.md`](data-model.md) | `~/.lucid/` layout and Markdown/JSON record schemas, with a migration path to the SQLite schema in `technical-spec.md`. |
-| [`agent-contracts.md`](agent-contracts.md) | Input/output/access/failure rules for Intake, Structuring, Reflection, and Safety/Consent agents. |
+| [`data-model.md`](data-model.md) | `~/.lucid/` layout, naming conventions (incl. `person_key` algorithm and TZ rule), record schemas, and SQLite migration. |
+| [`agent-contracts.md`](agent-contracts.md) | Input/output/access/failure rules for Intake, Structuring, Reflection (`propose` / `surface_for_recall` / `answer_grounded`), and Safety/Consent. |
+| [`error-states.md`](error-states.md) | Unified table of every failure mode: per-agent, storage, transport, empty-state. Each row names trigger, behavior, user message, disk side effect, recovery. |
+| [`acceptance-criteria.md`](acceptance-criteria.md) | Per-phase pass/fail checklist mapped to the seven build phases. Concrete test cases, verification commands, definition of done. |
 | [`claude-code-workflow.md`](claude-code-workflow.md) | How a coding agent should build Lucid: docs-first planning, small commits, deterministic scripts, bounded subagents. |
 | [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) | Final concise scope spec synthesized from the docs. |
 

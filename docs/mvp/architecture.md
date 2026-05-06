@@ -91,7 +91,7 @@ and the response to surface back through the harness.
 | `/checkin` | Intake.gather(session) → storage.write_raw(bundled_text) → Structuring.extract(raw_id) → Reflection.propose(processed_id, recent_window) → ack. |
 | `/reflect` | storage.read_recent_insights(7d) → Reflection.surface_for_recall(insights) → ack. (No new pattern proposals.) |
 | `/ask <q>` | storage.read_insights() ∪ storage.read_reflections() → Reflection.answer_grounded(q, slice) → ack. (Read-only.) |
-| `/bootstrap` | Mode flag toggled in `~/.lucid/lucid.json`; subsequent `/log` and `/checkin` write raw entries with explicit `occurred_at` and skip Reflection.propose until `/bootstrap done`. |
+| `/bootstrap` | Mode flag toggled in `~/.lucid/lucid.json` (`bootstrap_mode: true`); subsequent `/log` and `/checkin` write raw entries with explicit `occurred_at`, set `bootstrap: true` on the frontmatter, and skip Reflection.propose. `/bootstrap done` flips the flag back (`bootstrap_mode: false`); the MVP runs **no** consolidation pass on exit (the technical-spec consolidation cascade is deferred). The next `/checkin` after `/bootstrap done` resumes Reflection.propose normally. |
 
 **MVP rules.**
 * The router is the only place that decides agent ordering. Agents do
@@ -115,8 +115,8 @@ narrow job and only the data access required for that job.
 | Agent | Job | Reads | Writes |
 |-------|-----|-------|--------|
 | **Intake** | If `/checkin`, ask 2–4 follow-up questions and bundle the user's answers into one raw entry. | The current thread only. | One raw entry. |
-| **Structuring** | Extract emotions, themes, people mentions from a raw entry. | One raw entry. | One processed artifact. |
-| **Reflection** | Propose at most one possible pattern given a processed artifact and a small recent window of processed artifacts; or, on `/reflect`, surface validated insights. | One processed artifact + last N processed artifacts (default 7). | A proposal in the thread; on user accept, one insight record (via storage adapter). |
+| **Structuring** | Extract emotions, themes, people mentions from a raw entry. | One raw entry. | One processed artifact, written via `storage.update_person` (which back-fills `person_key` for each mention) followed by `storage.write_processed`. |
+| **Reflection** | Three sub-modes: on `/checkin`, propose at most one possible pattern from a processed artifact + small recent window; on `/reflect`, surface validated insights for the past week (no new patterns); on `/ask`, answer a free-form question by quoting validated insights and weekly reflections only. | Per sub-mode: one processed artifact + last N processed artifacts (default 7); validated insights for the week; or `insights_slice` (cap 50) + `reflections_slice` (cap 12). | A proposal in the thread; on user accept, one insight record. On `/reflect`, status updates + append to weekly reflection. On `/ask`, a grounded answer with citations — no writes. |
 | **Safety/Consent** | Gate any output that looks like diagnosis, autonomous action, or unbounded context use. | The output of any other agent. | Either passes the output through, or rewrites/blocks it with a flagged reason. |
 
 **Minimal-now agents.**
@@ -194,12 +194,19 @@ be obvious in code, not implicit in agent prompts.
 
 1. Intake.gather → bundled text.
 2. storage.write_raw(text) → raw_id.
-3. Structuring.extract(raw_id) → processed payload.
-4. storage.write_processed(processed_payload) → processed_id.
-5. Reflection.propose(processed_id, last_7_processed_ids) → either
+3. Structuring.extract(raw_id) → processed payload (every `people[]`
+   entry has `person_key: null`; Structuring has no read access to
+   `~/.lucid/people/`).
+4. For each `people[]` mention: storage.update_person(...) — the
+   deterministic People routine resolves an existing slug or creates a
+   new one per [`data-model.md`](data-model.md) §"Naming conventions",
+   and back-fills `person_key` on the payload.
+5. storage.write_processed(processed_payload) → processed_id (no
+   `person_key` is `null` on disk).
+6. Reflection.propose(processed_id, last_7_processed_ids) → either
    (a) one proposal, (b) "no pattern yet", or (c) soft contradiction.
-6. If proposal: present in thread, await user response.
-7. On accepted/nuanced: storage.write_insight(...) with provenance.
+7. If proposal: present in thread, await user response.
+8. On accepted/nuanced: storage.write_insight(...) with provenance.
    On rejected: storage.append_rejected_proposal(processed_id, ...).
    On no answer: nothing is written.
 
@@ -210,6 +217,19 @@ be obvious in code, not implicit in agent prompts.
 3. Reflection.surface_for_recall(list) → ordered messages.
 4. For each, await user "still resonating?" response.
 5. On any response, storage.update_insight_status(...).
+
+**Per-question sequence (`/ask`):**
+
+1. storage.read_insights(status=accepted, cap=50) → insights_slice.
+2. storage.read_reflections(cap=12) → reflections_slice.
+3. If both slices empty: return a grounded "nothing validated yet"
+   message and stop (no LLM call, no writes).
+4. Reflection.answer_grounded(question, insights_slice,
+   reflections_slice) → `answer` (with citations) or `insufficient`.
+5. Safety.evaluate(answer_text) → outbound message.
+
+`/ask` never writes. Citations must be a subset of the supplied
+slices.
 
 **MVP rules.**
 * Reflection.propose is the only place a hypothesis is ever
@@ -231,12 +251,29 @@ code, not just in prose.
 | **Hypothesis-language gate** | Reflection output uses hypothesis phrasing ("I noticed", "one possible pattern", "does this resonate?"). Diagnostic phrases are blocked or rewritten. | After Reflection.propose, before the harness posts. |
 | **One-pattern-per-session gate** | At most one proposal per session is presented to the user. Multiple proposals collapse to the highest-confidence one or "no pattern yet". | Inside the structuring/reflection pipeline. |
 | **Approval-before-action gate** | No external send, schedule, or post is permitted. Any draft surfaces in-thread for explicit user approval, and the MVP has no "send" path at all. | At the router boundary. |
-| **Context-slice gate** | Agents may receive only the data the router authorized for that step (e.g. one raw entry, last N processed artifacts). The full history is never passed. | Around every LLM call. |
+| **Context-slice gate** | Agents may receive only the data the router authorized for that step (e.g. one raw entry, last N processed artifacts). The full history is never passed. | Around every LLM call. See "Mechanism" below. |
 | **Synthetic-only fixtures gate** | Tests, examples, and docs reference only synthetic content. | In `scripts/` and CI checks; see [`claude-code-workflow.md`](claude-code-workflow.md). |
 | **Public-boundary gate** | The Lucid repo never references private personal projects, identities, or operational paths beyond `~/projects/lucid/` and `~/.lucid/`. | A `grep` check in the verification phase. |
 
 These gates are not optional polish. They are how the architecture
 keeps the loop honest under change.
+
+**Mechanism — how the context-slice gate is enforced.** The router
+constructs a typed `AgentContext<T>` for every agent invocation,
+where `T` is the explicit slice schema for that sub-mode (for
+example, `AgentContext<IntakeInput>`,
+`AgentContext<StructuringInput>`,
+`AgentContext<ReflectionProposeInput>`,
+`AgentContext<ReflectionAnswerGroundedInput>`). The agent function
+signature accepts only `AgentContext<T>` — there is no global
+`storage` handle, no shared session map, and no module-level
+filesystem reader available to the agent code. The harness layer
+also has no read access to `~/.lucid/` (it routes through the
+storage adapter only). Because the only data an agent can reach is
+the data the router placed in its `AgentContext<T>`, "context-slice"
+is enforced by construction, not by convention. New agents must
+declare a new `T` and a new router plan; that is the only way to
+extend what an agent sees.
 
 ## Mapping `technical-spec.md` agents to MVP modules
 

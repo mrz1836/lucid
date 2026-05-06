@@ -114,7 +114,7 @@ Five commands, one router, no menus. Defined in
 | `/log <text>` | Single-shot capture. No follow-ups. Acknowledges with the raw id. | `raw/<id>.md`, `sessions/<sid>.json` | Friction-free path. |
 | `/checkin` | Guided capture. Intake asks 2–4 follow-ups, then bundles answers into one raw entry, then structures and proposes (at most) one pattern. | `raw/<id>.md`, `sessions/<sid>.json`, `processed/<id>.json`, optional `insights/<iid>.md` or appended `rejected_proposals[]`. | Default path for daily use. |
 | `/reflect` | Weekly recall. Lists validated insights from the last 7 days, asks "still resonating?". | `reflections/<rid>.md` (append). Insight status updates via the storage adapter. | Read-and-ask only. Never proposes new patterns. |
-| `/ask <q>` | Read-only Q&A grounded in validated insights and weekly reflections. | None. | Strict context-slice gate. |
+| `/ask <q>` | Read-only Q&A grounded in validated insights and weekly reflections. Cites the records it draws from; returns `insufficient` when the slice cannot answer. | None. | Strict context-slice gate. Full contract in [`../docs/mvp/agent-contracts.md`](../docs/mvp/agent-contracts.md) §3 (`reflection.answer_grounded`). |
 | `/bootstrap` | Toggles a mode where `/log` and `/checkin` write entries with explicit `occurred_at` and skip Reflection.propose until `/bootstrap done`. | Same as `/log` / `/checkin` with `bootstrap: true` frontmatter. | Used to load historical context without firing pattern proposals. |
 
 Commands beyond this list are out of scope for the MVP.
@@ -187,7 +187,7 @@ per-agent contracts in
 | Agent | Reads | Writes |
 |-------|-------|--------|
 | Intake | The current thread only. | One raw entry (via storage adapter). |
-| Structuring | One raw entry. | One processed artifact. |
+| Structuring | One raw entry. | One processed artifact (via `storage.update_person` + `storage.write_processed`; the router back-fills `person_key` between the two). |
 | Reflection | One processed artifact + last N processed (default 7). | A proposal in-thread; on accept, one insight. |
 | Safety/Consent | The output of any other agent. | Passes, rewrites, or blocks with a flagged reason. |
 
@@ -243,12 +243,13 @@ host. These are evaluable, not aspirational.
 | S-3 | Reflection proposes at most one possible pattern per session, in hypothesis language. | Per-session log shows ≤1 proposal; Safety/Consent gate logs zero rewrites for diagnostic phrasing on accepted outputs. |
 | S-4 | Accepted, nuanced, and rejected validation paths each produce the right artifacts (insight with provenance, insight with `nuanced_from_proposal: true`, or appended `rejected_proposals[]`). | Spot-check three sessions, one per path. |
 | S-5 | `/reflect` lists validated insights from the past 7 days and updates `last_confirmed_at` / `last_softened_at` / `retired_at` on user response without creating new proposals. | Weekly reflection record present; insight frontmatter updated; no new proposal IDs. |
-| S-6 | Public-boundary check passes: `grep -R "zai\|Zai\|~/projects/zai" ~/projects/lucid` returns no matches. | CI or manual grep. |
-| S-7 | Diagnostic-language check passes: `grep -R "diagnos\|therapist replacement\|guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
-| S-8 | The user reports the loop "felt like Lucid" — voice was trusted-advisor, hypothesis framing held, no nudges arrived without invitation. | Subjective — captured in the first weekly `/reflect` after one week of real use. |
+| S-6 | `/ask` answers a free-form question only with `citations[]` whose ids appear in the supplied slice; never proposes a new pattern; never writes any record under `~/.lucid/`. | Spot-check three `/ask` invocations over a populated store; verify `citations[]` ⊆ slice; verify `~/.lucid/` is byte-identical before and after each `/ask`. |
+| S-7 | Public-boundary check passes: `grep -R "zai\|Zai\|~/projects/zai" ~/projects/lucid` returns no matches. | CI or manual grep. |
+| S-8 | Diagnostic-language check passes: `grep -R "diagnos\|therapist replacement\|guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
+| S-9 | The user reports the loop "felt like Lucid" — voice was trusted-advisor, hypothesis framing held, no nudges arrived without invitation. | Subjective — captured in the first weekly `/reflect` after one week of real use. |
 
-S-8 is the only subjective metric. It is the final test: the platform
-can pass S-1..S-7 and still fail the product. Failing S-8 means the
+S-9 is the only subjective metric. It is the final test: the platform
+can pass S-1..S-8 and still fail the product. Failing S-9 means the
 loop works mechanically but does not feel like Lucid; that is a
 voice/principles regression, not a code regression.
 
@@ -277,10 +278,22 @@ verification.
 6. **Add the weekly reflection stub.** Implement `/reflect` as
    read-and-ask over `~/.lucid/insights/`. Append to
    `~/.lucid/reflections/`. No new proposals.
+7. **Add grounded `/ask`.** Implement `Reflection.answer_grounded`
+   over the validated insights and weekly reflections. Read-only,
+   cites the records it draws from, returns `insufficient` when the
+   slice cannot answer, and never writes.
 
-Anything beyond this list — `/ask`, `/bootstrap`, additional skills,
-SQLite migration, framework selection, the Agent-Self approval gate —
-follows the same pattern: contract first, code second.
+`/bootstrap` is not a separate phase: it is a mode flag on
+`lucid.json` and a frontmatter field on raw entries, wired in during
+Phase 5 (the insight validation flow) because Reflection.propose has
+to know to suppress proposals while `bootstrap: true`. The
+post-`/bootstrap done` consolidation surface remains deferred per
+[`../docs/mvp/agent-contracts.md`](../docs/mvp/agent-contracts.md)
+§"Consolidation (deferred / replaced)".
+
+Anything beyond this list — additional skills, SQLite migration,
+framework selection, the Agent-Self approval gate, the consolidation
+cascade — follows the same pattern: contract first, code second.
 
 ## 10. How to use this spec
 
@@ -289,9 +302,17 @@ follows the same pattern: contract first, code second.
   doc-set link relevant to the change you are making. Follow the
   docs-first rule in
   [`../docs/mvp/claude-code-workflow.md`](../docs/mvp/claude-code-workflow.md).
+  When implementing a phase, work against the test cases and
+  verification commands in
+  [`../docs/mvp/acceptance-criteria.md`](../docs/mvp/acceptance-criteria.md).
+  When a failure path is unclear, consult
+  [`../docs/mvp/error-states.md`](../docs/mvp/error-states.md) before
+  inventing one.
 * **For a reviewer:** every PR must trace its change back to a section
   in this spec or to a deliberate, documented change of this spec.
-  Anything else is scope creep.
+  "Done" means the relevant section of
+  [`../docs/mvp/acceptance-criteria.md`](../docs/mvp/acceptance-criteria.md)
+  passes. Anything else is scope creep.
 * **For the user:** this is the contract that says what the first
   Lucid you can run will and will not do. It will feel narrow. That is
   the point — the broader product in [`../vision.md`](../vision.md)

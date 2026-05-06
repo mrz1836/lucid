@@ -49,16 +49,67 @@ the MVP; sharding can be added later without breaking ids.
 
 | Kind | Convention | Example |
 |------|------------|---------|
-| Raw entry id | `raw_YYYY_MM_DD_HH_MM` (creation time, local TZ) | `raw_2026_05_05_19_42` |
+| Raw entry id | `raw_YYYY_MM_DD_HH_MM` (creation time, local TZ). Append `_SS` if a same-minute collision is detected. | `raw_2026_05_05_19_42`, or `raw_2026_05_05_19_42_07` on collision |
 | Processed artifact id | Same id as the raw entry it describes. | `raw_2026_05_05_19_42.json` |
 | Insight id | `i_YYYY_MM_DD_<slot>` where `<slot>` is `a`, `b`, ... per day. | `i_2026_05_05_a` |
-| Session id | `session_YYYY_MM_DD_HH_MM` (thread open time). | `session_2026_05_05_19_42` |
-| Person key | `person_<short-slug>` where the slug is a non-identifying short tag, **not** a real name. | `person_a-river` |
+| Session id | `session_YYYY_MM_DD_HH_MM` (thread open time, same `_SS` rule). | `session_2026_05_05_19_42` |
+| Person key | `person_<initial>-<word>` derived deterministically from the display name. See "person_key derivation" below. | `person_a-river` |
 | Reflection id | `reflection_YYYY_wWW` (ISO week). | `reflection_2026_w18` |
 
 People keys deliberately do not encode real names; the storage adapter
 maintains a `display_name` field separately so the on-disk filenames
 remain low-signal.
+
+#### Time zone rule
+
+All timestamps under `~/.lucid/` are ISO-8601 with the host's local TZ
+offset (for example `2026-05-05T19:42:11-04:00`). The MVP does not
+normalize to UTC, does not store a separate timezone field, and does
+not assume DST behavior beyond what the host's clock reports. SQLite
+migration preserves the offset on read by storing the literal string.
+
+#### Same-minute id collision rule
+
+Raw entry, processed artifact, and session ids all encode minute
+precision. If `storage.write_raw` (or `write_session`) is called and
+the candidate id already exists on disk, the writer appends `_SS`
+(zero-padded seconds) and tries again. If `_SS` also collides, the
+writer appends `_SSS` (a small monotonic counter, starting at 1)
+until the id is unique. Writers never overwrite an existing id under
+`raw/` or `sessions/`.
+
+#### `person_key` derivation
+
+Given a `display_name` from Structuring, the deterministic People
+routine produces a low-signal slug as follows:
+
+```text
+normalized = lowercase(strip_punct_and_whitespace(display_name))
+hash       = sha256(normalized)              # 32 bytes
+b0, b1     = hash[0], hash[1]                # first two bytes
+b2, b3     = hash[2], hash[3]                # next two bytes
+N          = len(WORDLIST)                   # 256, fixed
+word1      = WORDLIST[(b0 * 256 + b1) % N]
+word2      = WORDLIST[(b2 * 256 + b3) % N]
+key        = "person_" + word1[0] + "-" + word2
+```
+
+* `WORDLIST` is the fixed file at
+  `~/projects/lucid/data/person_keys_wordlist.txt`, one one-syllable
+  low-signal English word per line (river, pine, meadow, stone,
+  wren, ...). The list is committed with the repo and is read-only;
+  changing it is a breaking schema change.
+* If the resulting `key` already exists in `~/.lucid/people/` for a
+  **different** normalized name, the writer appends `-2`, `-3`, ...
+  until unique (`person_a-river`, `person_a-river-2`, ...). This is
+  the only reason a slug ever drifts from the deterministic output.
+* `aka[]` on the people record carries every display variant ever
+  seen so a future search can resolve "M." back to `person_a-river`.
+
+Structuring never derives this slug itself; the People routine
+inside the storage adapter does, immediately before
+`storage.write_processed` runs (see
+[`agent-contracts.md`](agent-contracts.md) §"How contracts compose").
 
 ### `lucid.json`
 
@@ -74,8 +125,12 @@ The single global config file. Tiny, hand-editable, agent-readable.
   "people_dir": "people",
   "sessions_dir": "sessions",
   "reflections_dir": "reflections",
+  "wordlist_path": "data/person_keys_wordlist.txt",
   "recent_window": 7,
+  "recent_window_max": 14,
   "intake_max_questions": 4,
+  "ask_insights_cap": 50,
+  "ask_reflections_cap": 12,
   "agent_versions": {
     "intake": "intake-2026.05.0",
     "structuring": "structuring-2026.05.0",
@@ -85,6 +140,17 @@ The single global config file. Tiny, hand-editable, agent-readable.
   "bootstrap_mode": false
 }
 ```
+
+* `wordlist_path` is resolved relative to the repo root
+  (`~/projects/lucid/`); the file is read-only and shipped with the
+  repo, not under `~/.lucid/`.
+* `recent_window` is the per-session Reflection window default;
+  `recent_window_max` is the hard ceiling — the router refuses any
+  configured value above this and clips to 14.
+* `ask_insights_cap` and `ask_reflections_cap` are the slice caps the
+  router applies to `/ask` (see
+  [`agent-contracts.md`](agent-contracts.md) §3
+  `reflection.answer_grounded`).
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt
@@ -227,7 +293,7 @@ each write must record the agent version that produced it.
 | `agent_version` | yes | Stamps the prompt/version that produced this artifact. |
 | `emotions[]` | yes | Short list, each with a one-line rationale. May be empty. |
 | `themes[]` | yes | Short list of recurring or newly noticed themes. May be empty. |
-| `people[]` | yes | Each entry pairs a `display_name` (as written) with a stable `person_key` (see below) and a `first_mention` flag. |
+| `people[]` | yes | Each entry pairs a `display_name` (as written) with a stable `person_key` (see below) and a `first_mention` flag. The on-disk artifact never has `person_key: null`; the Structuring agent emits `null` and the router runs `storage.update_person` (the deterministic People routine) before `write_processed`, which back-fills the slug per [`agent-contracts.md`](agent-contracts.md) §"How contracts compose". |
 | `notes` | no | Optional free-text the agent wants to preserve. Not surfaced to the user. |
 | `rejected_proposals[]` | yes | Appended to when Reflection's proposal is rejected. See "Insight provenance" below. |
 
@@ -514,7 +580,7 @@ The mapping below is the contract.
 | `processed/<id>.json` `themes[]` | `themes` | One row per theme, joined to `entries` via `entry_id`. |
 | `processed/<id>.json` `people[]` | `entities` + `person_entries` | `entities` for the canonical person; `person_entries` for the join. |
 | `processed/<id>.json` `rejected_proposals[]` | `reprocessing_queue` (with a "rejected proposal" status) **and** a small per-artifact log table that survives migration. | Rejection rationale stays addressable so Reflection can avoid re-proposing the same shape. |
-| `insights/<iid>.md` | `insights` + `memories` | `memories` carries salience/activation/confidence (the four dimensions in `technical-spec.md`); they default to "validated" / "active" / "core?-no" until adaptive evolution lands. |
+| `insights/<iid>.md` | `insights` + `memories` | `memories` carries the four dimensions from `technical-spec.md` (salience, type, confidence, activation). MVP-migrated rows default to `confidence='validated'`, `activation='active'`, `salience='unscored'`, `type='insight'` until the adaptive-evolution loop lands and starts assigning real salience. |
 | `people/<key>.json` | `people` (+ `relationships` once relational profile lands) | `aka[]` becomes a related table or JSON column. |
 | `sessions/<sid>.json` | `sessions` (a new table the spec implies but does not enumerate) | Session is a new first-class concept the MVP introduces; SQLite gets the same table. |
 | `sessions/channel_*.md` | A small `channels` table or kept as a file even after migration. | Channel memory is small enough that staying as a file post-migration is fine. |

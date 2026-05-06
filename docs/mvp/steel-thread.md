@@ -120,8 +120,11 @@ exact contract). It returns one of three outcomes:
 2. **No pattern yet.** An honest "I don't have enough to say anything
    useful yet" message.
 3. **Soft contradiction.** A gentle observation that the latest entry
-   sits oddly next to a previous one, framed as a question. (Optional in
-   the MVP; only used when the contradiction is close to the surface.)
+   sits oddly next to a previous one, framed as a question. Used only
+   when the contradiction is close to the surface; if it is not, the
+   honest output is `no_pattern`. The message must reference exactly
+   two supporting entry ids and must end in a question mark
+   ([`agent-contracts.md`](agent-contracts.md) §3 validation rules).
 
 **Hard rules:**
 
@@ -194,6 +197,70 @@ required for the MVP).
   patterns. New proposals come from Reflection on fresh entries, not
   from the recall command.
 * `/reflect` never sends a notification, only responds when invoked.
+
+### Stage 6 — Ask (grounded Q&A)
+
+**Trigger:** the user runs `/ask <question>` in any thread.
+
+**Behavior:** Reflection's `answer_grounded` sub-mode answers from
+**only** the validated insights and weekly reflection records the
+router supplies — never raw entries, never new patterns, never
+general knowledge. The answer cites the records it draws from, and
+when the slice cannot answer the question, the system says so.
+
+* The router reads `~/.lucid/insights/` (status `accepted`, capped
+  at the 50 most recent by last accept/confirm) and
+  `~/.lucid/reflections/` (capped at the 12 most recent ISO-week
+  records). These two slices are the only material the agent sees.
+* The agent returns one of two outcomes:
+  * **`answer`** — a short, grounded response with a `citations[]`
+    list of insight and reflection ids. Every cited id is in the
+    supplied slice.
+  * **`insufficient`** — an honest "I don't have enough validated
+    material to answer that yet — want to capture one?" response.
+* `/ask` writes nothing. It does not create insights, does not update
+  status, does not append to reflections.
+* Safety/Consent gates the answer the same way it gates every other
+  outbound message; advice/recommendation phrasing is blocked
+  (see [`agent-contracts.md`](agent-contracts.md) §4).
+
+**Hard rules:**
+
+* `/ask` is **read-only**. It never writes any record under
+  `~/.lucid/`.
+* `/ask` never proposes new patterns. New patterns come from
+  `/checkin`, period.
+* `/ask` never reads raw entries or processed artifacts. The
+  validated insights and weekly reflections are the user's curated,
+  signed-off material — those are the only sources it speaks from.
+* `/ask` never gives advice, recommendations, or therapeutic framing.
+  If the user wants action, they ask `/checkin`; if they want a
+  pattern check, they validate one. `/ask` is a mirror, not a coach.
+
+**Synthetic transcript:**
+
+```
+user:    /ask what have I learned about how I act in groups?
+
+Lucid:   From what you've validated:
+
+         - You've saved one insight (i_2026_05_05_a) noting that when
+           M. is in the room and a group decision is in motion, you
+           tend to test an idea once and back off if it isn't picked
+           up immediately.
+         - In the most recent weekly reflection (reflection_2026_w18)
+           you confirmed that insight still fits.
+
+         I don't have anything else validated about groups yet — that
+         is the only one. Want to capture more?
+```
+
+Notes: the answer cites two ids only, both from the supplied slice
+(one insight, one weekly reflection). The agent does not generalize,
+does not advise, does not propose a new pattern, and is honest about
+the bounds of what it knows. If the slice had been empty, the
+response would have been: *"I don't have anything validated yet —
+try `/checkin` or `/log` first."*
 
 ## Three flow paths
 
@@ -305,6 +372,130 @@ Notes on what the transcript is doing:
 * The pattern is framed as a hypothesis, not a label.
 * The user's nuance becomes the canonical insight, with provenance.
 * The closing line is calm and explicit, not performative.
+
+## Voice across paths
+
+The canonical transcript above shows the happy path. The snippets
+below give prompt designers concrete voice anchors for the other
+paths — rejected proposal, soft contradiction,
+`max_questions_reached`, Safety/Consent block fallback, and the
+empty-`/reflect` case. All synthetic.
+
+### Rejected proposal
+
+```
+Lucid:   I noticed family conversations have come up three times this
+         month with hurt nearby. One possible pattern: defaulting to
+         defensiveness when family is the topic. Does this resonate,
+         or is it off?
+
+user:    No — I'm not defensive in general. This one was different
+         because I was tired.
+
+Lucid:   Got it — I'll set this one aside, not file it as fact. I'll
+         remember the reason ("tired, not defensive") so I don't
+         re-propose the same shape.
+```
+
+The system does not re-argue the proposal, does not apologize
+performatively, and explicitly names the rejection rationale so the
+user knows it landed. The `shape_tag` for this proposal is appended
+to `rejected_proposals[]` on the processed artifact (see
+[`data-model.md`](data-model.md) §"Insight provenance and rejected
+proposals").
+
+### Soft contradiction
+
+```
+Lucid:   Earlier this week (raw_2026_05_03_21_10) you wrote that
+         pushing back felt energizing. Today (raw_2026_05_05_19_42)
+         it reads more like folding left you annoyed at yourself.
+         I don't have a pattern, just a gap — want to look at it?
+```
+
+Two supporting entry ids cited explicitly. The message ends in a
+question; the system does not pick a side. If the user does not
+engage, no insight is written and the gap is not re-surfaced unless
+fresh evidence reopens it.
+
+### `max_questions_reached`
+
+```
+user:    /checkin
+
+Lucid:   Hi. Anything in particular on your mind, or want me to start
+         with the usual?
+
+user:    Just a hard day.
+
+Lucid:   1) What part of it stuck with you?
+
+user:    Tired.
+
+Lucid:   2) And how did that land for you, after?
+
+user:    Numb.
+
+Lucid:   3) Anything specific that pulled at you, or more diffuse?
+
+user:    Diffuse.
+
+Lucid:   4) One last — anything you want to mark for later, or is the
+         tiredness the headline?
+
+user:    Headline.
+
+Lucid:   I've got what I need — saved as raw_2026_05_05_22_18.
+```
+
+Four short answers, then the cap. The router's ack copy is fixed
+("I've got what I need — saved as `raw_<id>`") per
+[`agent-contracts.md`](agent-contracts.md) §1. Reflection still
+runs against the bundle in the next stage; this snippet only covers
+the Intake portion.
+
+### Safety/Consent block (router fallback)
+
+If Reflection produced an output that violated the phrase blocklist
+or attempted an external action, Safety/Consent blocks it and the
+router substitutes a short fallback. The user sees this rather than
+the unsafe content:
+
+```
+Lucid:   I held that response — let me ask differently.
+
+         Looking at the last few entries, I'm not sure I have a clean
+         pattern yet. Want to keep going, or leave it here?
+```
+
+The fallback is honest about what happened ("I held that response"),
+gives the user a way out, and never explains the underlying rule.
+Safety/Consent's `notes` field carries the justification but is not
+surfaced to the user (see
+[`agent-contracts.md`](agent-contracts.md) §4).
+
+### `/reflect` with no validated insights from the past week
+
+```
+user:    /reflect
+
+Lucid:   Quiet week — nothing landed as a validated insight in the
+         last seven days. Want me to surface the two most recent ones
+         from before that, just to check in on them? Or would you
+         rather drop a /log first and come back to /reflect later?
+
+user:    Show me the older two.
+
+Lucid:   Earlier you saved: "When M. is in the room and a group
+         decision is in motion, I tend to test an idea once and back
+         off if it isn't picked up immediately." Still resonating,
+         anything change?
+```
+
+The empty-window fallback is a router decision (the agent contract
+says so explicitly): if `insights_window` is empty, surface the two
+most recent insights regardless of age and offer a `/log` path. No
+new patterns are proposed — `/reflect` is read-and-ask only.
 
 ## What this loop intentionally is not
 
