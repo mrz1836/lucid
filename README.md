@@ -13,3 +13,12 @@ You have a companion that truly knows you. Not a therapist you see once a week, 
 This is what's possible when you finally have a system for your inner life.
 
 This is [**Lucid**](vision.md).
+
+---
+
+## Read more
+
+- [Vision](vision.md) — the long-form product vision and the four roles Lucid plays.
+- [Technical specification](technical-spec.md) — the reference architecture for the full system.
+- [MVP docs](docs/mvp/README.md) — the first buildable steel thread: capture → structure → one possible pattern → user validation → weekly recall.
+- [MVP scope spec](specs/mvp-scope.md) — the build-ready contract for that steel thread.
