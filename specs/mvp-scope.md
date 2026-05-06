@@ -228,7 +228,7 @@ they are not in the steel thread.
 * No multi-pattern proposals per session. The cap is one.
 * No production runtime data inside the Lucid repo. `~/.lucid/` is
   outside the repo.
-* No `zai` references, no private biographical detail, no real-user
+* No private integration-name references, no private biographical detail, no real-user
   examples. Public-boundary gate enforces this.
 
 ## 8. Success metrics
@@ -244,7 +244,7 @@ host. These are evaluable, not aspirational.
 | S-4 | Accepted, nuanced, and rejected validation paths each produce the right artifacts (insight with provenance, insight with `nuanced_from_proposal: true`, or appended `rejected_proposals[]`). | Spot-check three sessions, one per path. |
 | S-5 | `/reflect` lists validated insights from the past 7 days and updates `last_confirmed_at` / `last_softened_at` / `retired_at` on user response without creating new proposals. | Weekly reflection record present; insight frontmatter updated; no new proposal IDs. |
 | S-6 | `/ask` answers a free-form question only with `citations[]` whose ids appear in the supplied slice; never proposes a new pattern; never writes any record under `~/.lucid/`. | Spot-check three `/ask` invocations over a populated store; verify `citations[]` ⊆ slice; verify `~/.lucid/` is byte-identical before and after each `/ask`. |
-| S-7 | Public-boundary check passes: `grep -R "zai\|Zai\|~/projects/zai" ~/projects/lucid` returns no matches. | CI or manual grep. |
+| S-7 | Public-boundary check passes: forbidden-term sweep for private integration names and private repo paths returns no matches; use self-nonmatching patterns such as `z[a]i`, `Z[a]i`, and `~/projects/z[a]i`. | CI or manual grep. |
 | S-8 | Diagnostic-language check passes: `grep -R "diagnos\|therapist replacement\|guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
 | S-9 | The user reports the loop "felt like Lucid" — voice was trusted-advisor, hypothesis framing held, no nudges arrived without invitation. | Subjective — captured in the first weekly `/reflect` after one week of real use. |
 

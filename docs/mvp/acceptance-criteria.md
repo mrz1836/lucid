@@ -335,7 +335,7 @@ Run after each phase lands.
 
 | Check | Command |
 |-------|---------|
-| Public-boundary grep | `grep -R "zai\|Zai\|~/projects/zai" ~/projects/lucid` returns nothing. |
+| Public-boundary grep | Forbidden-term sweep for private integration names and private repo paths returns nothing. Use an escaped pattern that does not match its own documentation, e.g. `grep -R "z[a]i\|Z[a]i\|~/projects/z[a]i" ~/projects/lucid`. |
 | Diagnostic-language grep | `grep -niE -f scripts/phrase_blocklist.regex ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` — every hit is inside a "phrase to avoid" or "non-goal" block. |
 | Link integrity | `python scripts/check_links.py docs/mvp/*.md specs/*.md` — every relative link resolves. |
 | Synthetic-only fixtures | Manual review of any new transcript / fixture; no real names, dates, or identifiers. |
