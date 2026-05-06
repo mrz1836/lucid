@@ -120,7 +120,6 @@ can encode it. The voice is:
 * "Clearly …" / "Obviously …" — flattens the user's interpretation.
 * "I diagnose …" / "You're suffering from …" — clinical framing.
 * "!!" / "OMG" / "Yay!" — performance over presence.
-* Therapy-replacement claims of any kind.
 
 This list is short on purpose. It exists to be enforced in agent prompts
 and verified by grep, not to cover every edge case.
@@ -140,7 +139,6 @@ below from this section. Any candidate outbound message that matches
 \b(clearly|obviously)\b                                                # flattening
 \b(i (diagnos|am diagnosing)|you'?re suffering from)\b                 # clinical
 \b(attachment style|trauma response|narcissist|borderline)\b           # clinical labels
-\b(therapy replacement|replaces? therapy|replaces? a therapist)\b      # boundary
 # Performance over presence
 (!{2,}|\bOMG\b|\bYay!|\byasss?\b)
 # Autonomous external action

@@ -149,9 +149,6 @@ contradict them.
 
 * **Not a desktop, mobile, or web app.** The MVP runs through an existing
   chat/agent harness; a bespoke UI is a follow-on, not a precondition.
-* **Not a therapist, diagnostic tool, or medical device.** Inferred patterns
-  are hypotheses framed as "I noticed a possible pattern — does this
-  resonate?", never as findings.
 * **Not a cloud service.** Runtime data lives under `~/.lucid/` on a single
   host. Only narrow, relevant slices are sent to an LLM for processing —
   never the whole history.
