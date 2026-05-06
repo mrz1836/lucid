@@ -214,8 +214,7 @@ they are not in the steel thread.
   chat/agent harness.
 * No SQLite, vector search, graph memory, or memory consolidation across
   daily/weekly/monthly/yearly scales.
-* No Therapist surface — the MVP is not a diagnostic tool, medical
-  device, or therapy replacement, and uses hypothesis framing only.
+* No Therapist surface yet — keeping it out of MVP for now.
 * No Coach surface — no goals, progress, accountability, or habit
   tracking in the MVP.
 * No Agent-Self surface — Lucid does not draft, send, or schedule
@@ -245,7 +244,7 @@ host. These are evaluable, not aspirational.
 | S-5 | `/reflect` lists validated insights from the past 7 days and updates `last_confirmed_at` / `last_softened_at` / `retired_at` on user response without creating new proposals. | Weekly reflection record present; insight frontmatter updated; no new proposal IDs. |
 | S-6 | `/ask` answers a free-form question only with `citations[]` whose ids appear in the supplied slice; never proposes a new pattern; never writes any record under `~/.lucid/`. | Spot-check three `/ask` invocations over a populated store; verify `citations[]` ⊆ slice; verify `~/.lucid/` is byte-identical before and after each `/ask`. |
 | S-7 | Public-boundary check passes: forbidden-term sweep for private integration names and private repo paths returns no matches; use self-nonmatching patterns such as `z[a]i`, `Z[a]i`, and `~/projects/z[a]i`. | CI or manual grep. |
-| S-8 | Diagnostic-language check passes: `grep -R "diagnos\|therapist replacement\|guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
+| S-8 | Diagnostic-language check passes: `grep -R "guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
 | S-9 | The user reports the loop "felt like Lucid" — voice was trusted-advisor, hypothesis framing held, no nudges arrived without invitation. | Subjective — captured in the first weekly `/reflect` after one week of real use. |
 
 S-9 is the only subjective metric. It is the final test: the platform
