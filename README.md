@@ -40,9 +40,13 @@ The first entry is one line. The bell rings at 9:30.
 
 Three doors, depending on who you are:
 
-- **You want to start living this — tonight, no software.** Copy [docs/calibration.md](docs/calibration.md) to `personal/calibration.md` and answer its questions. Set the bell, stage the environment — five minutes, and Phase 0 is running. The rest of Day 0 is one weekend, and the checklist is in the guide.
-- **You want to build it.** Read [docs/mvp/scope.md](docs/mvp/scope.md) (one page, build-ready), then [docs/mvp/README.md](docs/mvp/README.md), then follow the phase order — the acceptance criteria tell you when each phase is done.
 - **You want to understand it.** Read [docs/architecture.md](docs/architecture.md) first (the whole design in ~150 lines), then [vision.md](docs/vision.md) for the felt version, then [docs/engine.md](docs/engine.md) for the mechanics.
+- **You want to build it.** Read [docs/mvp/scope.md](docs/mvp/scope.md) (one page, build-ready), then [docs/mvp/README.md](docs/mvp/README.md), then follow the phase order — the acceptance criteria tell you when each phase is done.
+- **You want to start living this — tonight, no software.** Copy [docs/calibration.md](docs/calibration.md) to `personal/calibration.md` and answer its questions. Set the bell, stage the environment — five minutes, and Phase 0 is running. The rest of Day 0 is one weekend, and the checklist is in the guide.
+
+
+
+<br>
 
 ## Read more
 
