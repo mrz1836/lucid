@@ -40,7 +40,7 @@ Sort your full lists — every project, hobby, aspiration, obligation — into: 
 
 ## The Charter **(required for Day 0 — at least section 6)**
 
-Write plainly, in your own voice, one sitting, imperfect. Version it. Date it.
+Write plainly, in your own voice, one sitting, imperfect. Version it. Date it. Keep it as `personal/charter.md` — same privacy rule as this file; amendments append with reasons at quarterly reviews only (architecture P8).
 
 1. **Identity:** "I am becoming the kind of person who…" — five to ten lines.
 2. **One year:** a specific evening, one year from today — where you are, what your body can do, what's within reach, who's around.

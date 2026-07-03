@@ -18,6 +18,14 @@ This is [**Lucid**](vision.md).
 
 ---
 
+## Where to start
+
+Three doors, depending on who you are:
+
+- **You want to start living this — tonight, no software.** Copy [docs/instance-template.md](docs/instance-template.md) to `personal/instance.md` and fill in the Calibration and Active configuration sections. Set the bell, stage the environment — five minutes, and Phase 0 is running. The rest of Day 0 is one weekend, and the checklist is in the template.
+- **You want to build it.** Read [specs/mvp-scope.md](specs/mvp-scope.md) (one page, build-ready), then [docs/mvp/README.md](docs/mvp/README.md), then follow the phase order — the acceptance criteria tell you when each phase is done.
+- **You want to understand it.** Read [docs/architecture.md](docs/architecture.md) first (the whole design in ~150 lines), then [vision.md](vision.md) for the felt version, then [docs/engine.md](docs/engine.md) for the mechanics.
+
 ## Read more
 
 - [Vision](vision.md) — the long-form product vision and the roles Lucid plays.
