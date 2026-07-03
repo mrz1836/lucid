@@ -153,6 +153,7 @@ The single global config file. Tiny, hand-editable, agent-readable.
   "intake_max_questions": 4,
   "ask_insights_cap": 50,
   "ask_reflections_cap": 12,
+  "proposal_pause": {"unanswered_threshold": 3, "pause_days": 14},
   "agent_versions": {
     "intake": "intake-2026.05.0",
     "structuring": "structuring-2026.05.0",
@@ -173,6 +174,10 @@ The single global config file. Tiny, hand-editable, agent-readable.
   router applies to `/ask` (see
   [`agent-contracts.md`](agent-contracts.md) §3
   `reflection.answer_grounded`).
+* `proposal_pause` configures the router-level proposal pause: after
+  `unanswered_threshold` consecutive unanswered proposals, the router
+  stops invoking `reflection.propose` for `pause_days` days (see
+  [`agent-contracts.md`](agent-contracts.md) §3 "Proposal pause").
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt
@@ -302,7 +307,8 @@ each write must record the agent version that produced it.
     {"display_name": "J.", "person_key": "person_b-pine", "first_mention": true}
   ],
   "notes": "Pattern of testing-then-folding may be worth flagging for Reflection.",
-  "rejected_proposals": []
+  "rejected_proposals": [],
+  "unanswered_proposals": []
 }
 ```
 
@@ -318,6 +324,7 @@ each write must record the agent version that produced it.
 | `people[]` | yes | Each entry pairs a `display_name` (as written) with a stable `person_key` (see below) and a `first_mention` flag. The on-disk artifact never has `person_key: null`; the Structuring agent emits `null` and the router runs `storage.update_person` (the deterministic People routine) before `write_processed`, which back-fills the slug per [`agent-contracts.md`](agent-contracts.md) §"How contracts compose". |
 | `notes` | no | Optional free-text the agent wants to preserve. Not surfaced to the user. |
 | `rejected_proposals[]` | yes | Appended to when Reflection's proposal is rejected. See "Insight provenance" below. |
+| `unanswered_proposals[]` | yes | Appended to when Reflection's proposal goes unanswered. Each entry is `{shape_tag, proposed_at}` — an exact parallel to `rejected_proposals[]`, kept as a separate array because silence is not rejection (see [`agent-contracts.md`](agent-contracts.md) §2). |
 
 ### Empty / "no useful structure" case
 
@@ -335,7 +342,8 @@ keeps the loop honest:
   "themes": [{"name": "rest", "rationale": "'read for an hour', 'quiet day'"}],
   "people": [],
   "notes": "Single short entry; not enough signal for a pattern proposal.",
-  "rejected_proposals": []
+  "rejected_proposals": [],
+  "unanswered_proposals": []
 }
 ```
 
@@ -581,6 +589,7 @@ number of files:
 | Reflection (propose) | `processed/<id>.json` + last N processed | (only writes on user response) |
 | Validation — accepted/nuanced | `processed/<id>.json` | `insights/<iid>.md` |
 | Validation — rejected | — | append `rejected_proposals[]` to `processed/<id>.json` |
+| Validation — unanswered | — | append `unanswered_proposals[]` to `processed/<id>.json` |
 | Recall (`/reflect`) | `insights/*.md` filtered by week | `reflections/<rid>.md` (append) |
 
 No SQL. No graph queries. Everything is a small named read or write
@@ -601,7 +610,7 @@ The mapping below is the contract.
 | `processed/<id>.json` `emotions[]` | `emotions` | One row per emotion, joined to `entries` via `entry_id`. |
 | `processed/<id>.json` `themes[]` | `themes` | One row per theme, joined to `entries` via `entry_id`. |
 | `processed/<id>.json` `people[]` | `entities` + `person_entries` | `entities` for the canonical person; `person_entries` for the join. |
-| `processed/<id>.json` `rejected_proposals[]` | `reprocessing_queue` (with a "rejected proposal" status) **and** a small per-artifact log table that survives migration. | Rejection rationale stays addressable so Reflection can avoid re-proposing the same shape. |
+| `processed/<id>.json` `rejected_proposals[]` and `unanswered_proposals[]` | `reprocessing_queue` (with a "rejected proposal" status) **and** a small per-artifact log table that survives migration. | Rejection rationale and unanswered-shape entries stay addressable so Reflection can avoid re-proposing the same shape; the two arrays remain distinct because silence is not rejection. |
 | `insights/<iid>.md` | `insights` + `memories` | `memories` carries the four dimensions from `technical-spec.md` (salience, type, confidence, activation). MVP-migrated rows default to `confidence='validated'`, `activation='active'`, `salience='unscored'`, `type='insight'` until the adaptive-evolution loop lands and starts assigning real salience. |
 | `people/<key>.json` | `people` (+ `relationships` once relational profile lands) | `aka[]` becomes a related table or JSON column. |
 | `sessions/<sid>.json` | `sessions` (a new table the spec implies but does not enumerate) | Session is a new first-class concept the MVP introduces; SQLite gets the same table. |

@@ -20,14 +20,16 @@ nothing in [`architecture.md`](architecture.md) or
 swappable; the contracts are not.
 
 > **Integration note.** The Engine module
-> ([`engine-module.md`](engine-module.md)) adds four commands
-> (`/closeout`, `/closeout skip`, `/mode`, `/status`), one runtime tree
+> ([`engine-module.md`](engine-module.md)) adds five commands
+> (`/closeout`, `/closeout skip`, `/closeout backfill`, `/mode`,
+> `/status`), one runtime tree
 > (`~/.lucid/engine/`), and a scheduler job (the bell prompt and the
 > morning tripwire). The tripwire is the single sanctioned exception to
 > "nothing is ever pushed": pre-committed template sends (bell, L1, L2,
 > monthly witness heartbeat), each behind a recorded consent flag. The
 > observations module ([`observations-module.md`](observations-module.md))
-> adds the micro-log command family, three runtime trees
+> adds the micro-log command family plus the `/packet clinician`
+> export, three runtime trees
 > (`observations/`, `registries/`, `projections/`), and a second
 > scheduler job — the **enrichment job**, which pushes nothing but is
 > the runtime's only network client: outbound fetches solely to the
@@ -150,11 +152,39 @@ Two reasons this lives outside the repo:
    never be committed, pushed, or synced to anything the user did not
    explicitly choose.
 2. **Rebuildability.** `processed/`, `insights/`, `reflections/`,
-   `engine/status.json`, and `projections/` can be rebuilt if the
-   agents or scripts improve. The trees that must survive forever —
-   the backup set — are `raw/`, `observations/`, `registries/`, and
-   `engine/` (minus `status.json`): they are primary data that exists
+   `engine/status.json`, and `projections/` (minus
+   `projections/exports.log`, the append-only export record) can be
+   rebuilt if the agents or scripts improve. The trees that must
+   survive forever — the backup set — are `raw/`, `observations/`,
+   `registries/`, `engine/` (minus `status.json`), and
+   `projections/exports.log`: they are primary data that exists
    nowhere else.
+
+## The helper role
+
+Hand-editable Markdown and JSON under `~/.lucid/` are deliberate
+design — and they structurally induce a human role this page must
+name. **The helper** is anyone who installs, configures, repairs, or
+hand-edits the host or `~/.lucid/` on the user's behalf.
+
+Binding rules:
+
+* **A helper holds de facto access above every aperture ring.** Root
+  on the box outranks every disclosure contract in
+  [`vision.md`](../vision.md) §7. Accepting help is therefore a
+  **disclosure**, not a technicality — the user makes it consciously,
+  like any other release.
+* **Helper access is recorded** — who, when, what scope — as a line
+  in the calibration amendment log
+  ([`calibration.md`](../calibration.md) §"Amendment log").
+* **Prefer session-shaped help.** The user present and the screen
+  shared beats unattended access; unattended access is the exception
+  to record, not the default to assume.
+* **The witness and the helper should be different people.** A
+  helper-witness voids Ring 0 as a structural boundary — presence-only
+  accountability ([`engine.md`](../engine.md) §4) means nothing to
+  someone who can open the files. If the two roles cannot be
+  separated, that acceptance is recorded in the witness contract.
 
 ## Discord as the first UI surface
 
@@ -248,12 +278,13 @@ agents without changing the user's mental model.
 ## Lucid command surface
 
 The MVP exposes three command families through one router: the five
-Mirror commands below; the four Engine commands in
+Mirror commands below; the five Engine commands in
 [`engine-module.md`](engine-module.md) (`/closeout`, `/closeout skip`,
-`/mode`, `/status`); and the observation micro-logs in
-[`observations-module.md`](observations-module.md) (`/pain`, `/ate`,
-`/drank`, `/bm`, `/mood`, `/obs`, `/day` — deterministic one-liners,
-all aliasing one router intent plus one read-only view). The Mirror
+`/closeout backfill`, `/mode`, `/status`); and the observation
+commands in [`observations-module.md`](observations-module.md)
+(`/pain`, `/ate`, `/drank`, `/bm`, `/mood`, `/obs`, `/day` —
+deterministic one-liners, all aliasing one router intent plus one
+read-only view — plus the `/packet clinician` export). The Mirror
 five are listed here in priority order; the first three are the steel
 thread and the last two are quality-of-life affordances.
 

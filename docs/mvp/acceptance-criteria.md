@@ -207,7 +207,8 @@ diff only in `produced_at`; no `person_key` is `null` on disk.
   [`agent-contracts.md`](agent-contracts.md) §4 (full
   pass/rewrite/block decisions).
 * Storage adapter has `write_insight` (with provenance),
-  `append_rejected_proposal`, `update_insight_status`.
+  `append_rejected_proposal`, `append_unanswered_proposal`,
+  `update_insight_status`.
 
 ### Test cases
 
@@ -220,6 +221,8 @@ diff only in `produced_at`; no `person_key` is `null` on disk.
 | 5.5 | Reflection emits a phrase-blocklist hit ("you always …") | Safety rewrites to "I noticed a possible pattern: …"; the user sees only the rewritten message; rewrite preserves `supporting_entry_ids`. |
 | 5.6 | Reflection emits an external-action verb ("I'll send M. a follow-up") | Safety blocks; router fallback "I held that response — let me ask differently." surfaces; nothing stored. |
 | 5.7 | A `/checkin` with `bootstrap_mode: true` | Reflection.propose is **not** invoked; capture-only ack. |
+| 5.8 | Same as 5.1 but the user exits without answering | No insight written; `processed/<id>.json` `unanswered_proposals[]` appended with `{shape_tag, proposed_at}`; no re-prompt in the same session; the `shape_tag` is suppressed in the next window with the same mechanics as a rejected one. |
+| 5.9 | Three consecutive proposals go unanswered (across sessions) | The router pauses proposals for 14 days: subsequent `/checkin`s still capture and structure, `reflection.propose` is not invoked, and no message mentions the pause; an answered proposal (accepted / nuanced / rejected) resets the counter (`lucid.json` `proposal_pause`, [`agent-contracts.md`](agent-contracts.md) §3). |
 
 ### Verification commands
 
@@ -233,6 +236,10 @@ done
 python scripts/check_no_rejected_shape_reuse.py \
   ~/.lucid/processed/ ~/.lucid/insights/
 
+# Unanswered proposals carry the required fields
+jq -e '.unanswered_proposals | all(has("shape_tag") and has("proposed_at"))' \
+   ~/.lucid/processed/*.json > /dev/null
+
 # Phrase blocklist regression — agent prompt files
 grep -niE -f scripts/phrase_blocklist.regex ~/projects/lucid/prompts/*.md \
   && { echo "FAIL: blocklist hit in prompts"; exit 1; } || true
@@ -240,10 +247,11 @@ grep -niE -f scripts/phrase_blocklist.regex ~/projects/lucid/prompts/*.md \
 
 ### Definition of done
 
-All test cases pass; no insight is missing provenance; no rejected
-`shape_tag` is re-proposed in the same window; Safety blocks every
-external-action verb; phrase-blocklist regex returns no hits in any
-prompt file.
+All test cases pass; no insight is missing provenance; no rejected or
+unanswered `shape_tag` is re-proposed in the same window; the proposal
+pause engages after three consecutive unanswered proposals and is
+never mentioned to the user; Safety blocks every external-action verb;
+phrase-blocklist regex returns no hits in any prompt file.
 
 ## Phase 6 — Weekly recall (`/reflect`)
 
@@ -262,7 +270,7 @@ prompt file.
 | # | Input | Expected output |
 |---|-------|-----------------|
 | 6.1 | `/reflect` with three accepted insights from the past 7 days | Each surface_text is generated; user response per insight (confirm / soften / retire) updates `status_history[]`; `~/.lucid/reflections/reflection_<YYYY>_w<WW>.md` appended. |
-| 6.2 | `/reflect` with zero insights from the past 7 days | Per [`error-states.md`](error-states.md) §R-7: surface most-recent-two regardless of age + `/log` prompt; no proposal generated. |
+| 6.2 | `/reflect` with zero insights from the past 7 days | Per [`error-states.md`](error-states.md) §R-7: surface most-recent-two regardless of age + `/log` prompt; when entries have accumulated since the last `/checkin` without a Reflection pass, the fixed pointer line "There are entries since your last check-in — /checkin when you want to look for a pattern together." is appended ([`agent-contracts.md`](agent-contracts.md) §3); no proposal generated. |
 | 6.3 | `/reflect` with zero insights anywhere | Per §E-3: "Nothing validated yet — try `/checkin` first." No reflection record written. |
 | 6.4 | `/reflect` invoked twice in the same ISO week | The second invocation appends to the same `reflection_<YYYY>_w<WW>.md` change log; does not duplicate the body summary. |
 | 6.5 | LLM produces malformed `ordered_insights` | Per §R-8: verbatim insights surfaced with no novel framing. |

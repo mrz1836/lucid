@@ -81,12 +81,12 @@ Engine loop wraps around it nightly.
                     · one journal line            (≤ 2 minutes, no LLM)
                     │                     │
                     ▼                     ▼
-        engine/days/<day>.json      raw/<id>.md  ──►  Structuring ──►
-        engine/status.json                             Reflection proposes ≤1
-        (streaks, adherence,                           pattern → "does this
-         budget burn)                                  resonate?" → insight
-                    │                                  or rejection
-                    ▼
+        engine/days/<day>.json      raw/<id>.md  ──►  Structuring (async
+        engine/status.json                             downstream pass) ──►
+        (streaks, adherence,                           next /checkin: Reflection
+         budget burn)                                  proposes ≤1 pattern →
+                    │                                  "does this resonate?"
+                    ▼                                  → insight or rejection
         09:00  tripwire (cron): completed → reset · 1 miss → L1 nudge
                naming the floor · 2 consecutive → L2 to witness
                (dead-man: fires on ABSENCE of a day record)
@@ -101,6 +101,10 @@ Engine loop wraps around it nightly.
 [`engine-module.md`](engine-module.md)):
 
 * At most one pattern proposal per session; hypothesis language only.
+* Structuring is a downstream pass and the proposal happens at the
+  next `/checkin` — never inside the nightly close-out, which stays
+  deterministic and agent-free end to end
+  ([`agent-contracts.md`](agent-contracts.md) §3).
 * Each agent sees only the slice the router authorized.
 * No autonomous message beyond the pre-committed templates; no
   outbound fetch beyond opted-in enrichers through the audited adapter
@@ -123,18 +127,20 @@ observation commands in
 | `/checkin` | Guided capture: 2–4 follow-ups → one raw entry → structuring → ≤1 pattern proposal. | `raw/`, `sessions/`, `processed/`, optional `insights/` |
 | `/closeout` | Nightly deterministic close-out: link flags, capacity, journal line. Idempotent per logical day. | `engine/days/`, `raw/` (journal line), `sessions/`, rebuilt `engine/status.json` |
 | `/closeout skip` | Record an honest miss (does not suppress escalation). | `engine/days/` |
+| `/closeout backfill [yesterday\|<YYYY-MM-DD>] [<compact form>]` | Create or correct the record for a recent past day (default: the most recent logical day without a completed record; window 7 days) — the chain ran but went unrecorded. Same compact form as `/closeout`; derived state recomputes over folded records; never unsends an already-fired L1/L2. | `engine/days/` (`backfilled: true` record or appended `corrections[]`), `raw/` (journal line), rebuilt `engine/status.json` |
 | `/mode <green\|yellow\|red>` | Declare today's mode; rejected after bell time. | `engine/days/` |
-| `/status` | Read-only ambient state: streak, mode-relative adherence, budget burn, days to next gate. | None |
+| `/status` | Read-only ambient state: streak, mode-relative adherence co-presented with the floor-day ratio and raw days-accounted (the honest-number pairing), budget burn, days to next gate; surfaces `stake_owed` and "witness lapsed — L2 disarmed" state ([`engine-module.md`](engine-module.md)). | None |
 | `/reflect` | Weekly recall of validated insights; "still resonating?". Never proposes new patterns. | `reflections/` |
 | `/ask <q>` | Read-only grounded Q&A over validated insights + reflections, with citations. | None |
 | `/bootstrap` | Historical-entry mode: explicit `occurred_at`, proposals suppressed until `/bootstrap done`. | as `/log`/`/checkin` |
 | `/pain` `/ate` `/drank` `/bm` `/mood` `/obs <kind>` | Observation micro-logs — one line, deterministic, sub-second, no LLM. All alias one router intent. | `observations/` (+ `registries/` on match) |
 | `/obs where <place>` | Sticky stated location (feeds enrichers; never device-derived). | `observations/`, `registries/places/` |
 | `/day [date]` | Read-only joined day view: engine record + observations + enrichment + entry list. | None |
+| `/packet clinician [@<date>\|all]` | Render the clinician packet projection; post only its path. Window: since the last packet export (first-ever: trailing 90 days); `@<date>` overrides the window start, `all` exports everything. | `projections/` (packet + one line appended to `projections/exports.log`) |
 
 Commands beyond this list are out of scope for the MVP. Three
-families, one router: the Mirror five, the Engine four, the
-observation micro-logs (phases 11–12).
+families, one router: the Mirror five, the Engine five, the
+observation micro-logs plus the packet export (phases 11–12).
 
 ## 5. Required storage layout
 
@@ -162,6 +168,7 @@ unchanged), [`engine-module.md`](engine-module.md)
 ├── observations/            # frozen-envelope events, JSONL per logical day
 ├── registries/              # long-lived referents: injuries, threads, places, eras
 └── projections/             # rebuildable views/exports — deletable wholesale
+                             # (exception: exports.log, the append-only export record)
 ```
 
 All the data-model mutability and naming rules stand. New binding rules:
@@ -172,8 +179,11 @@ tree; `chain_start` is stamped once, on the first completed close-out.
 Observation rules: the event envelope is frozen; JSONL lines are never
 rewritten (corrections are new events via `refs.corrects`); registries
 are primary, backup-critical data with append-only `status_history[]`;
-`projections/` is deletable wholesale. **The backup set is `raw/`,
-`observations/`, `registries/`, `engine/` (minus `status.json`).**
+`projections/` is deletable wholesale — except `projections/exports.log`,
+the append-only export record, which records what has left the
+instance and is not recomputable. **The backup set is `raw/`,
+`observations/`, `registries/`, `engine/` (minus `status.json`), plus
+`projections/exports.log`.**
 
 ## 6. Agent / module boundaries
 
@@ -250,9 +260,9 @@ user's host. These are evaluable, not aspirational.
 | S-8 | Diagnostic-language check passes: `grep -R "guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
 | S-9 | The user reports the loop "felt like Lucid" — voice was trusted-advisor, hypothesis framing held, no nudges arrived without invitation. | Subjective — captured in the first weekly `/reflect` after one week of real use. S-9 is the only subjective metric and the final test: the platform can pass S-1..S-8 and still fail the product. |
 | S-10 | `/closeout` completes in ≤ 2 minutes of user interaction and writes both the day record and the raw journal entry. | Prompt-count cap (links + 3); both files present and cross-referenced (`raw_entry_id`). |
-| S-11 | Logical-day math is correct across the rollover boundary. | Fixture: 23:50 close-out → today; 03:50 → yesterday; same-day repeat is a no-op. |
-| S-12 | Adherence is mode-relative and `status.json` is deterministic. | Yellow floor-day scores 1.0; delete + rebuild reproduces the file byte-for-byte. |
-| S-13 | The tripwire fires on absence, honestly and narrowly. | Simulated clock: 1 miss → exactly one L1 naming the floor; 2 consecutive → exactly one L2; L2 payload greps clean of journal/capacity content; unconfirmed witness blocks L2. |
+| S-11 | Logical-day math is correct across the rollover boundary. | Fixture: 23:50 close-out → today; 03:50 → yesterday; 04:12 with yesterday unrecorded and today's bell not yet rung → yesterday; 04:12 with yesterday already completed → today; same-day repeat is a no-op. |
+| S-12 | Adherence is mode-relative and `status.json` is deterministic. | Yellow floor-day scores 1.0; delete + rebuild reproduces the file byte-for-byte, with `corrections[]` folded in array order (last write per field wins). |
+| S-13 | The tripwire fires on absence, honestly and narrowly. | Simulated clock: 1 miss → exactly one L1 naming the floor; 2 consecutive → exactly one L2; L2 payload greps clean of journal/capacity content; unconfirmed witness blocks L2; a same-morning `/closeout backfill` (or attributed close-out) landing before the tripwire run produces no L1/L2. |
 | S-14 | The chain survives tooling failure. | Kill the harness at bell time; the phone-alarm fallback + next-day `corrections[]` backfill path is documented and exercised once. Priority order holds: no data-loss scenario blocks the practice. |
 | S-15 | After 30 days: an honest engine record (every logical day accounted: completed, floor, missed, or Away) **and** ≥ 1 validated insight exist for the same user. | The falsifiable question in §1, checked at the first gate. |
 | S-16 | Micro-logs are frictionless and judgment-free: sub-second ack, valid frozen envelope, correct logical-day attribution across the 04:00 boundary, and no evaluative language in any ack template. | Latency sample; envelope validator; boundary fixture; grep ack templates for streak/score/praise terms. |

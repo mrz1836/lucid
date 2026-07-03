@@ -69,12 +69,23 @@ advance):
 | L2 witness escalation | The witness's confirmed channel, after two consecutive misses | Fixed template: streak state and declared mode only — **never** journal content, capacity values, or any Mirror data | `engine/witness.json` with `confirmed_at` set by an explicit witness confirmation |
 
 The witness consent additionally covers a **monthly heartbeat**: one
-fixed line ("all quiet — N-day streak") to the same channel, same
-template discipline. It exists so silence stays meaningful — the
-witness's briefed backstop (engine §4) is "a full month of *total*
-silence means ask once," which only works if a healthy system is never
-totally silent. The heartbeat is part of the L2 send class, not a
-fourth consent.
+fixed line to the same channel, same template discipline. The
+heartbeat is a **present-state snapshot, never a month summary** — it
+reports the state at send time, so it can never falsely imply a quiet
+month. Two templates, selected by `escalation_state` at send time:
+
+| State at send time | Template (fixed, sent verbatim) |
+|--------------------|--------------------------------|
+| No open escalation | `monthly status: all clear — N-day streak, no open escalation.` |
+| An escalation fired this month and remains open | `monthly status: N-day streak; an escalation fired this month and remains open — you have already seen it.` |
+
+It exists so silence stays meaningful — the witness's briefed backstop
+(engine §4) is "a full calendar month with *neither* an L2 nor a
+heartbeat means the tooling died; ask once," which only works if a
+healthy system is never totally silent. The heartbeat is part of the
+L2 send class, not a fourth consent. In Phase 0 the user sends it by
+hand, **template verbatim** — paraphrase dissolves the template
+discipline and risks content leakage.
 
 Binding rules: these are the **only** autonomous sends in the MVP; all
 three use fixed templates with no LLM in the path; L2 cannot be
@@ -89,8 +100,9 @@ superseded *only* for these three sends.
 |---------|------|--------|
 | `/closeout` | Deterministic guided close-out (see sequence below). No agents. | `engine/days/<day-id>.json`; one raw entry via `storage.write_raw` (`command: /closeout`); `sessions/<sid>.json`; rebuilt `engine/status.json` |
 | `/mode <green\|yellow\|red>` | Declare today's mode. Rejected after today's bell time (engine §2: fixed at the Bell; no retroactive amendment). | `engine/days/<day-id>.json` (mode field, append-style: first declaration wins after bell) |
-| `/status` | Read-only: current streak, rolling adherence vs declared mode, error-budget burn, days to next gate. This is the MVP's **L0 ambient surface**. | None |
+| `/status` | Read-only: current streak, rolling adherence vs declared mode — always co-presented with the floor-day ratio and raw days-accounted (the **honest-number pairing**, engine §3) — error-budget burn, days to next gate; plus `stake_owed` when a breach has outlived the stake execution window (engine §4), and "witness lapsed — L2 disarmed" while the witness contract is lapsed (see §`witness.json`). This is the MVP's **L0 ambient surface**. | None |
 | `/closeout skip` | Records an explicit miss for the logical day (honest zero, distinct from silence — silence is what the dead-man tripwire detects). | `engine/days/<day-id>.json` with `missed: true` |
+| `/closeout backfill [yesterday\|<YYYY-MM-DD>] [<compact form>]` | Creates or corrects a record for a recent past day — the chain **ran** but went unrecorded (P10's text-to-self path, now with a command). Deterministic; accepts the same compact form as `/closeout`. See sequence below. | `engine/days/<day-id>.json` (created with `"backfilled": true`, or a `corrections[]` append); one raw entry via `storage.write_raw` (`command: /closeout backfill`); rebuilt `engine/status.json` |
 
 `/chain` (editing chain config in-channel) is deliberately **not** a
 command: parameters change at most once per weekly Retro (engine §5),
@@ -99,8 +111,15 @@ and making edits slightly effortful is the point.
 
 ### `/closeout` sequence
 
-1. Resolve the **logical day**: if now < `rollover` (default 04:00
-   local), the day is yesterday's date (engine §1).
+1. Resolve the **logical day** — binding attribution rule: *a
+   close-out belongs to the bell that initiated it.* If now <
+   `rollover` (default 04:00 local), the day is yesterday's date
+   (engine §1). Additionally, if now ≥ `rollover` **and** the previous
+   logical day has no day record **and** the current logical day's
+   bell has not yet rung, the close-out attributes to the **previous
+   logical day** — a night-shift 04:12 close-out still answers last
+   night's bell. `/closeout today` explicitly forces
+   current-logical-day attribution.
 2. If a day record already exists with `completed: true` → say so,
    stop (idempotent).
 3. Prompt once per link, in chain order: `done / floor / skipped`.
@@ -138,6 +157,40 @@ records; the parser is deterministic (a script, per
 [`claude-code-workflow.md`](claude-code-workflow.md) §"Deterministic
 scripts").
 
+### `/closeout backfill` sequence
+
+`/closeout backfill [yesterday|<YYYY-MM-DD>] [<compact form>]` records
+that the chain **ran** but went unrecorded — the phone-alarm night,
+the text-to-self (engine §2, P10), now with a command instead of a
+hand edit. Default target: the most recent logical day without a
+completed record. The window is `backfill_window_days` (`chain.json`,
+default 7); backfills beyond it are rejected (see §"Error states").
+If no day record exists for the target day, one is created with
+`"backfilled": true`; if one exists, a `corrections[]` entry is
+appended (schema below). The journal line is written to `raw/` by the
+router via `storage.write_raw` (`command: /closeout backfill`),
+exactly like `/closeout`'s — the Engine still never reads it (P3).
+Both paths end with `storage.rebuild_engine_status`.
+
+Retraction semantics are arithmetic, not negotiation:
+
+* The tripwire evaluates **folded** state at run time — a backfill
+  landing before the tripwire run means no L1/L2 fires.
+* An already-sent L1/L2 is **never unsent**. The record folds to
+  completed; `escalation_state`, streak, and error budget recompute on
+  rebuild; the witness-facing view and the next heartbeat reflect
+  the corrected state; the human ask-once conversation absorbs any
+  already-fired L2. There is no retraction send — the message ceiling
+  holds.
+* A breach recorded then corrected within the window voids the stake
+  obligation **only if** the folded record shows no breach occurred.
+
+Honesty guards: the backfill count is Tier-3 telemetry reviewed at
+Retro — a rising count is a capture-friction canary, never a score.
+Correcting an explicit `/closeout skip` to completed is allowed within
+the window; the correction trail stays visible, and that transparency
+(P8) is the guard.
+
 ## Storage additions — `~/.lucid/engine/`
 
 ```
@@ -166,6 +219,7 @@ append-only per engine §2).
   "label": "Journal. Dock. Read.",
   "bell_time": "21:30",
   "rollover": "04:00",
+  "backfill_window_days": 7,
   "links": [
     {"key": "journal", "name": "One journal line", "floor": "one line, spoken or typed"},
     {"key": "dock",    "name": "Phone to charger", "floor": "phone on charger"},
@@ -199,7 +253,11 @@ the floor (engine §5) — floor nights in Away Mode count as completions.
   "confirmed_at": "2026-07-05T18:20:00-04:00",
   "confirmation_text": "confirmed — I'll ask about it, once",
   "sees": ["streak", "declared_mode", "escalation_state"],
-  "stake_shared": true
+  "stake_shared": true,
+  "status_history": [
+    {"at": "2026-07-05T18:00:00-04:00", "status": "briefed"},
+    {"at": "2026-07-05T18:20:00-04:00", "status": "confirmed"}
+  ]
 }
 ```
 
@@ -219,6 +277,18 @@ stake (engine §4 — a stake the witness has never seen cannot execute
 without renegotiation). The witness sees *only* what the L2 template
 carries; they get no access to `~/.lucid/` at all.
 
+**Lifecycle.** A witness may resign at any time. On resignation or
+sustained unreachability the contract enters **witness-lapsed state**:
+`l2_enabled` goes false, the ladder degrades to L1-only, and `/status`
+surfaces "witness lapsed — L2 disarmed" until a replacement completes
+the full Day-0 witness flow — briefing, stake shown, confirmation,
+channel scoping (engine §4). Every transition (`briefed`, `confirmed`,
+`lapsed`, `resigned`, a replacement's re-`confirmed`) appends to
+`status_history[]` — the registries precedent
+([`../observations.md`](../observations.md) §1): transitions are
+recorded, never overwritten. Re-briefing is quarterly, folded into the
+stake review (engine §4).
+
 ### Day record — `engine/days/YYYY/MM/day_YYYY_MM_DD.json`
 
 ```json
@@ -236,6 +306,7 @@ carries; they get no access to `~/.lucid/` at all.
   "capacity": 3,
   "limiter_tag": "wrist",
   "raw_entry_id": "raw_2026_07_02_22_41",
+  "backfilled": false,
   "corrections": []
 }
 ```
@@ -245,26 +316,59 @@ telemetry, never surfaced to the witness view, and the raw journal
 entry does not repeat them (the Mirror can be granted them later as a
 consented covariate; the MVP keeps the trees separate).
 `raw_entry_id` is a pointer for provenance; the Engine never
-dereferences it.
+dereferences it. `backfilled: true` marks a record created after its
+logical day by `/closeout backfill`.
+
+**`corrections[]` (binding schema).** A day record is never rewritten;
+it is corrected by appended entries, folded at read time:
+
+```json
+{"at": "<ISO local>", "fields": { ...subset... }, "reason": "<short text>", "source": "user"}
+```
+
+* **Foldable fields:** `links`, `floor_day`, `completed`, `missed`,
+  `partial`, `capacity`, `limiter_tag`, `raw_entry_id`. **Never
+  foldable:** `mode`, `mode_declared_at`, `logical_date`, `day_id`,
+  `recorded_at` — the mode is fixed at the bell and there is no
+  retroactive amendment (engine §2); a correction attempting an
+  immutable field is rejected (see §"Error states").
+* **Fold rule:** apply corrections in array order; last write per
+  field wins; the original record body stays byte-identical.
+* All derived state — streak, adherence, error-budget burn,
+  `escalation_state` — is computed over **folded** records, so a
+  valid backfill automatically restores a streak and refunds budget.
+  Sends are never unsent; records are corrected; projections
+  recompute.
 
 ### `status.json` (derived — rebuildable from `days/` + `chain.json`)
 
 Current streak · longest streak · rolling 7-day and 30-day adherence
 (each day scored against its **declared mode**: a Yellow day executed
-at floors scores 1.0) · floor-day ratio · error-budget burn (isolated
-misses in the trailing 30 days vs budget) · consecutive-miss count ·
+at floors scores 1.0) · floor-day ratio · raw days-accounted (days
+with any record in the window) · error-budget burn (isolated misses in
+the trailing 30 days vs budget) · consecutive-miss count ·
 `escalation_state` (`none | l1_fired | l2_fired`) · days to next gate.
-Deleting this file and rerunning `rebuild_engine_status` must
-reproduce it byte-for-byte from the same inputs.
+Adherence never travels alone: every surface that shows it —
+status.json and `/status` included — co-presents the floor-day ratio
+and raw days-accounted (the **honest-number pairing**, engine §3).
+Floors count as full completions for all teeth math; the co-numbers,
+never a score, are what keep the record honest without shame math.
+`rebuild_engine_status` computes over **folded** day records
+(`corrections[]` applied in array order). Deleting this file and
+rerunning `rebuild_engine_status` must reproduce it byte-for-byte from
+the same inputs, corrections included.
 
 ## The tripwire (scheduled job)
 
 One scheduled job, morning-run (default 09:00), wired through the
 harness's native scheduler (cron):
 
-1. Compute yesterday's logical day. If a day record exists with
-   `completed: true` (or a floor-counting Away Mode night) → reset
-   `escalation_state`, done.
+1. Compute yesterday's logical day. If the **folded** day record
+   (`corrections[]` applied) shows `completed: true` (or a
+   floor-counting Away Mode night) → reset `escalation_state`, done.
+   The tripwire always evaluates folded state at run time: a
+   `/closeout backfill` — or a rollover-attributed close-out — landing
+   before this run means no L1/L2 fires.
 2. No record, or `missed: true`: if the day before was completed →
    **L1**: post the fixed nudge template in the user's channel; set
    `escalation_state: l1_fired`.
@@ -274,10 +378,18 @@ harness's native scheduler (cron):
    The message contains streak and declared-mode data only.
 4. On the first run of each calendar month, additionally post the
    heartbeat line to the witness channel (if `witness.json` is
-   confirmed) — see §"Consent amendment".
+   confirmed and not lapsed) — see §"Consent amendment".
+   **Same-run collision:** if an L2 posts on the same run, the
+   heartbeat is suppressed that month — the L2 is the month's proof
+   of life.
 5. **L3 is not automated in the MVP.** The stake executes by the
    humans it binds; the tripwire's job ends at making the breach
    impossible to miss. A `l2_fired` state on `/status` is the record.
+   On a breach, the user executes the stake within the stake
+   execution window (default 72 hours) and confirms to the witness
+   (engine §4); past the window, `/status` surfaces `stake_owed`, and
+   gates cannot ratchet (simplify/hold only) while a stake is owed.
+   No new sends exist for any of this.
 
 Dead-man semantics are preserved exactly: the tripwire fires on the
 **absence** of a day record. Self-report (`/closeout skip`) produces
@@ -297,8 +409,11 @@ makeup work exists anywhere in the system.
 | Close-out interrupted mid-flow | Write partial | "Saved what we got — floor still counts if the survival link ran." | Day record `partial: true` | `/closeout` again appends corrections |
 | Tripwire can't reach witness channel | Fall back | L1-style message to user: "L2 fired but couldn't reach <witness> — you owe the message." | `escalation_state: l2_fired` | Manual |
 | Clock/rollover ambiguity (e.g., travel TZ) | Trust host clock | — | Local-TZ timestamps per [`data-model.md`](data-model.md) | Away Mode pre-specs the trip |
+| `/closeout backfill` beyond `backfill_window_days` | Reject | "That's outside the backfill window (7 days). The record stands — the budget absorbs it; the Retro can annotate context." | None | Retro annotation |
+| `/closeout backfill` targeting a day with `completed: true` | Idempotent no-op | "Already closed out — streak N." | None | — |
+| Correction attempts an immutable field | Reject | "Mode and day identity are fixed at the bell — no retroactive amendment (engine §2)." | None | — |
 | `status.json` corrupt/missing | Rebuild silently | — | Regenerated from `days/` | By design (P2) |
-| Harness down at bell time | Nothing | — | None | **The chain runs anyway** — phone alarm is the Phase-0 fallback; a text-to-self is a valid record, backfilled via `corrections[]` (P10) |
+| Harness down at bell time | Nothing | — | None | **The chain runs anyway** — phone alarm is the Phase-0 fallback; a text-to-self is a valid record, backfilled via `/closeout backfill` (P10) |
 
 ## Acceptance criteria (build phases 8–10)
 
@@ -310,15 +425,21 @@ structuring/insight phases — since the Engine module is agent-free.
 
 **Phase 8 — Engine scaffold + `/closeout`.**
 Day records write correctly for both sides of the rollover boundary
-(23:50 → today; 03:50 → yesterday); a same-day repeat is a no-op;
-`chain_start` is stamped exactly once; the journal line lands in
-`raw/` with `command: /closeout` and valid frontmatter; close-out
+and the attribution rule (23:50 → today; 03:50 → yesterday; 04:12 with
+yesterday unrecorded and today's bell not yet rung → yesterday; 04:12
+with yesterday already completed → today); a same-day repeat is a
+no-op; `chain_start` is stamped exactly once; the journal line lands
+in `raw/` with `command: /closeout` and valid frontmatter; close-out
 transcript shows ≤ (links + 3) prompts (two-minute budget by
-construction).
+construction); a `/closeout backfill yesterday` inside the window
+creates a `backfilled: true` record (or appends a correction) while a
+target beyond `backfill_window_days` is rejected.
 
 **Phase 9 — Derived status + `/mode` + `/status`.**
 `rebuild_engine_status` is deterministic (delete + rebuild ⇒
-identical); adherence is mode-relative (fixture: a Yellow floor-day
+identical, including day records carrying `corrections[]` — the fold
+is part of the byte-reproducibility criterion); adherence is
+mode-relative (fixture: a Yellow floor-day
 scores 1.0, an undeclared floor-day scores 1.0 on links but Crux-less
 Green scoring only applies once the Crux ships post-MVP — MVP scores
 links only); `/mode` after `bell_time` is rejected; error-budget burn

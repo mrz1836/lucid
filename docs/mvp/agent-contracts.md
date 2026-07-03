@@ -210,7 +210,8 @@ A processed artifact payload as in
   "themes":   [{"name": "voice-not-heard", "rationale": "..."}],
   "people":   [{"display_name": "M.", "person_key": null, "first_mention": false}],
   "notes": null,
-  "rejected_proposals": []
+  "rejected_proposals": [],
+  "unanswered_proposals": []
 }
 ```
 
@@ -223,9 +224,14 @@ mention immediately after Structuring returns and **before**
 `null` for `person_key`. See §"How contracts compose" below for the
 exact router order.
 
-`rejected_proposals` is always returned as an empty array on the first
-write; later updates come from Reflection's rejection path via the
-storage adapter, not from Structuring.
+`rejected_proposals` and `unanswered_proposals` are always returned as
+empty arrays on the first write; later appends come from the validation
+paths via the storage adapter (`storage.append_rejected_proposal`,
+`storage.append_unanswered_proposal`), never from Structuring. An
+`unanswered_proposals[]` entry is `{shape_tag, proposed_at}` — an exact
+parallel to `rejected_proposals[]`, kept as a separate array because
+silence is not rejection. Both arrays feed the suppression window in
+§3.
 
 ### Allowed data access / tools
 
@@ -308,6 +314,7 @@ For per-session proposal (`/checkin`):
   "current_processed":  { ...processed artifact... },
   "recent_window":      [ { ...up to N processed artifacts... } ],
   "rejected_shape_tags": [ "family-defensiveness-default", ... ],
+  "unanswered_shape_tags": [ "quiet-day-flatness", ... ],
   "agent_versions": { "reflection": "reflection-2026.05.0" }
 }
 ```
@@ -316,6 +323,29 @@ For per-session proposal (`/checkin`):
 via `lucid.json` `recent_window`, capped at a small constant).
 `rejected_shape_tags` is the union of `shape_tag`s from
 `rejected_proposals[]` across the window plus the current artifact.
+`unanswered_shape_tags` is the same union taken from
+`unanswered_proposals[]` — shapes the user let pass without answering.
+The two arrays stay separate on the artifact because silence is not
+rejection, but both suppress re-proposal with identical window
+mechanics: an unanswered shape ages out of the window exactly as a
+rejected one does. There is no permanent memory in either direction.
+
+The window is **source-inclusive**: it holds processed artifacts from
+every capture path — `/log`, `/checkin`, and the `/closeout` journal
+line — so nightly lines feed pattern detection without the nightly act
+depending on AI. `reflection.propose` itself runs **only inside
+`/checkin` sessions**; no proposal is ever generated or delivered in
+the close-out flow, which stays deterministic and agent-free
+(architecture P9).
+
+**Proposal pause.** After 3 consecutive unanswered proposals (counted
+across sessions), the router stops invoking `reflection.propose` for
+14 days. `/checkin` still captures and structures during the pause;
+Reflection is simply not called, and the pause is silent — no copy
+ever mentions it, because silence is a complete answer. Any answered
+proposal (accepted, nuanced, or rejected) resets the counter. Defaults
+live in `lucid.json`:
+`"proposal_pause": {"unanswered_threshold": 3, "pause_days": 14}`.
 
 For per-week recall (`/reflect`):
 
@@ -393,7 +423,12 @@ For `reflection.surface_for_recall`:
 
 If `insights_window` is empty, the router (not Reflection) handles the
 fallback to "most recent two insights regardless of age" plus a `/log`
-prompt.
+prompt. When the window is empty **and** processed artifacts have
+accumulated since the last `/checkin` without a Reflection pass, the
+router also appends one fixed pointer line: *"There are entries since
+your last check-in — /checkin when you want to look for a pattern
+together."* This is recall-side router copy, not a proposal —
+`/reflect` still generates nothing.
 
 For `reflection.answer_grounded`, exactly one of:
 
@@ -425,8 +460,8 @@ the user back at `/log` or `/checkin`.
 ### Allowed data access / tools
 
 * For `reflection.propose`: the current processed artifact, the recent
-  window of processed artifacts, and `rejected_shape_tags` for the same
-  window.
+  window of processed artifacts, and the `rejected_shape_tags` and
+  `unanswered_shape_tags` unions for the same window.
 * For `reflection.surface_for_recall`: the validated insights window
   only.
 * For `reflection.answer_grounded`: the supplied `insights_slice` and
@@ -442,8 +477,10 @@ in, or any external system.
 ### Forbidden behavior
 
 * Proposing more than one pattern in a session.
-* Proposing a pattern whose `shape_tag` is in `rejected_shape_tags` for
-  the same window.
+* Proposing a pattern whose `shape_tag` is in `rejected_shape_tags` or
+  `unanswered_shape_tags` for the same window. Silence is not
+  rejection, but a shape the user let pass is not re-proposed while it
+  sits in the window.
 * Diagnostic, prescriptive, or labeling language. The Safety/Consent
   agent will block or rewrite such output, but Reflection should not
   produce it in the first place.
@@ -496,7 +533,8 @@ in, or any external system.
   * For `proposal`: `proposal_text` is non-empty, hypothesis-framed,
     cites at least one `supporting_entry_ids`, and `shape_tag`
     matches `^[a-z0-9][a-z0-9-]{0,40}$` with ≤ 6 hyphen-segments.
-  * For `proposal`: `shape_tag` is **not** in `rejected_shape_tags`.
+  * For `proposal`: `shape_tag` is **not** in `rejected_shape_tags`
+    and **not** in `unanswered_shape_tags`.
   * For `soft_contradiction`: cites exactly two `supporting_entry_ids`,
     and `message_text` ends in a question mark
     ([`product-principles.md`](product-principles.md) §6).
@@ -755,7 +793,10 @@ that knows the order. Spelled out, the per-session sequence is:
   ├── Safety.evaluate(structuring_rendered)  → ack message (pass/rewrite/block)
   ├── Reflection.propose(processed,
   │                      recent_window,
-  │                      rejected_shape_tags) → proposal | no_pattern | soft_contradiction
+  │                      rejected_shape_tags,
+  │                      unanswered_shape_tags) → proposal | no_pattern | soft_contradiction
+  │                                            (skipped entirely while the
+  │                                             proposal pause is active — see §3)
   ├── Safety.evaluate(reflection_output)     → outbound message
   ├── (await user response)
   └── on accepted/nuanced:
@@ -763,7 +804,7 @@ that knows the order. Spelled out, the per-session sequence is:
       on rejected:
         storage.append_rejected_proposal(...)
       on no answer:
-        (nothing written)
+        storage.append_unanswered_proposal(...)
 ```
 
 `/log` skips Intake, Structuring, and Reflection at capture time:
@@ -774,12 +815,20 @@ that knows the order. Spelled out, the per-session sequence is:
   └── Safety.evaluate(ack)                   → "saved as raw_<id>"
 ```
 
+Structuring still runs over every raw entry — `/log` and `/closeout`
+journal lines included — as a downstream pass at the next session or
+scheduled run ([`scope.md`](scope.md) S-2); the resulting artifact
+enters `recent_window` at the next `/checkin`. No proposal is generated
+or delivered outside a `/checkin` session.
+
 `/reflect` is read-and-ask only:
 
 ```
 /reflect
   ├── storage.read_insights(window=7d)       → list
-  ├── (router handles empty case → most recent 2 + /log prompt)
+  ├── (router handles empty case → most recent 2 + /log prompt,
+  │    + the /checkin pointer line when unprocessed entries
+  │      have accumulated — see §3)
   ├── Reflection.surface_for_recall(list)    → ordered_insights
   ├── Safety.evaluate(each surface_text)     → outbound messages
   └── on each user response:

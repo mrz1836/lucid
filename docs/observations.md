@@ -321,7 +321,19 @@ projections at review cadence, per P9). Named projection kinds:
   because the worst flare days are often the unlogged ones, and
   unlogged is explicitly distinct from below-threshold. The episode
   table carries a "days logged / days spanned" column so gaps stay
-  visible.
+  visible. Episodes generalize into **sentinels** — the same
+  mechanism, wider authorship: a user may pre-register an episode
+  definition over **any enabled kind or tag** (mood ≤ 2 for 3+ days;
+  ≥ N events tagged `#urge` in 7 days), in the observations
+  configuration, in their own words. A tripped sentinel renders
+  **only in user-invoked surfaces** — `/day`, the episode table,
+  Retro materials the user pulls — never a push, never an autonomous
+  message, never witness-visible, never Engine-coupled, and revocable
+  instantly. The system may *propose* episode definitions only for
+  registry-linked physical kinds (pain, injury); for everything
+  else — mood, distress-adjacent tags — sentinel definitions are
+  user-authored only: the system never suggests watching a distress
+  signal (§9 states the boundary this preserves).
 * **Correlates** — candidate associations with lags (pain vs. sleep,
   vs. pressure, vs. intake classes, vs. weekday), computed with honest
   statistics and presented **through the resonance gate** as
@@ -332,23 +344,43 @@ projections at review cadence, per P9). Named projection kinds:
   computed but never surfaced, because logging density is itself
   correlated with symptom state. Accepted correlates become insights
   with provenance like any other.
-* **Clinician packet** — an export for a care appointment, windowed
-  (default: since the previous packet export). One-page header,
-  derived deterministically: active injuries (registry status
-  active/managed), current regimen (most recent dose per distinct
-  med), episode count and durations in range. Then: capacity/mode
-  series (already promised by engine §2), pain and symptom series with
-  med and intervention events as markers on the same timeline, and the
-  user-selected subset of everything else. **Note fields are excluded
-  by default** (per-export opt-in); location and weather series
-  likewise. The packet is written to `projections/` and only its
-  *path* is ever posted to a chat surface. The user chooses
-  resolution; opaque tags stay opaque unless they decide otherwise.
-  The packet is the first shipped **aperture** — the per-recipient
-  sharing contracts of [`vision.md`](vision.md) §7 (depth rings,
-  registers, the disclosure log); later aperture formats (therapy
-  packet, counsel brief) are new projections under the same
-  render → review → release → record discipline.
+* **Clinician packet** — an export for a care appointment, rendered
+  by `/packet clinician [@<date>|all]`, windowed: since the previous
+  packet export; **the first-ever export covers the trailing 90
+  days**; `@<date>` overrides the window start, `all` exports
+  everything. One-page header, derived deterministically: any
+  standing **clinical-context lines** the user has authored in the
+  observations configuration (`"packet": {"clinical_context":
+  ["<user-authored line>", ...]}`) rendered verbatim — e.g., a
+  recovery status the prescriber must know — then active injuries
+  (registry status active/managed), current regimen (derived from the
+  most recent `taken: true` event per distinct med; a med whose most
+  recent event is `taken: false` renders with `(last logged: skipped
+  <date>)` rather than disappearing), episode count and durations in
+  range. Then: capacity/mode series (already promised by engine §2),
+  pain and symptom series with med and intervention events as markers
+  on the same timeline, and the user-selected subset of everything
+  else. **Note fields are excluded by default** (per-export opt-in);
+  location and weather series likewise. Clinical-context lines are
+  user-authored disclosure, so they are exempt from the notes-off
+  default — but the off-limits registry still excludes at every
+  layer, and the lines are reviewed at every
+  render → review → release pass. The packet is written to
+  `projections/` and only its *path* is ever posted to a chat
+  surface; every render appends one line to `projections/exports.log`
+  (what, window, when, path) — the MVP seed of the disclosure log
+  ([`vision.md`](vision.md) §7, "Record"). Discovery is a
+  deterministic template, not curiosity and not a question: the ack
+  for `/obs intervention` may append, at most once per 30 days, the
+  line
+  `A clinician packet for appointments is available: /packet clinician.`
+  The user chooses resolution; opaque tags stay opaque
+  unless they decide otherwise. The packet is the first shipped
+  **aperture** — the per-recipient sharing contracts of
+  [`vision.md`](vision.md) §7 (depth rings, registers, the disclosure
+  log); later aperture formats (therapy packet, counsel brief) are
+  new projections under the same render → review → release → record
+  discipline.
 * **Thread views** — see registries, below.
 
 **Cross-tree rule, binding:** agent context slices never include the
@@ -423,6 +455,16 @@ and your own record (P6).
   only by the same deterministic parser (appending correction events
   on a version bump), never by an agent; observation events are never
   eligible for the prose structuring pass.
+* **Sustained-distress silence is a decision, not an oversight** —
+  closed here, with reasons. The system never initiates contact on
+  any content threshold: not a mood run, not a tag pattern, not a
+  tripped sentinel — that would breach the sanctuary rule
+  (architecture P3) and the message-send ceiling, and a system that
+  watches your words for reasons to reach out converts testimony into
+  surveillance. What sentinels (§7) change is authorship, not this
+  boundary: a user who *wants* a tripline over their own signals can
+  now write one — scoped to their own eyes, rendered only on surfaces
+  they pull.
 * **Off-limits registry** (architecture §5) applies: any kind, tag,
   registry entry, or era can be excluded from inference entirely.
   `context.location` is sensitive by default (§3).
@@ -439,7 +481,9 @@ and your own record (P6).
 Pain scale 0–10 (NRS) · Bristol 1–7 · mood/sleep-quality 1–5 ·
 interference 0–10 · curiosity budget 1/day, backoff 7 days, retire at
 3 ignores · episode gap tolerance 1 day · coordinate quantization 2
-decimals · clinician packet window = since last export, notes and
-location excluded · enrichers off until opted in · all kinds off until
-enabled · sticky location coarse (city) unless the user chooses finer.
+decimals · clinician packet window = since last export (first-ever
+export: trailing 90 days), notes and location excluded · packet
+discovery pointer at most once per 30 days · enrichers off until
+opted in · all kinds off until enabled · sticky location coarse
+(city) unless the user chooses finer.
 All instance-overridable with reasons (P8).

@@ -53,6 +53,7 @@ own *scope*; the older MVP docs own *conventions*.
 | `/obs <kind> ...` | Generic form for every other enabled kind (`symptom`, `sleep`, `med`, `intervention`, `measurement`, `memory`, `where`). | Same |
 | `/obs where <place>` | Sticky location: writes a `context.location` event; creates/merges the place registry entry. | Event + `registries/places/<key>.json` |
 | `/day [date\|yesterday]` | Read-only day view: engine day record + observations + enrichment + entry ids for one logical day, plus range events spanning it. | None |
+| `/packet clinician [@<date>\|all]` | Renders the clinician packet projection per [`../observations.md`](../observations.md) §7 and posts only its *path*. Window: since the last packet export; **first-ever export: trailing 90 days**; `@<date>` overrides the window start, `all` exports everything. Header includes any standing `packet.clinical_context` lines from `observations/config.json`, verbatim; regimen derives from the most recent `taken: true` event per distinct med, and a med whose latest event is `taken: false` renders `(last logged: skipped <date>)` rather than disappearing. | Packet under `projections/` + one line appended to `projections/exports.log` (what, window, when, path) |
 
 Acks return within one second; no LLM call exists in the path, so
 offline capture works. `logical_date` derivation (rollover for exact
@@ -60,6 +61,16 @@ times only, calendar date for approximate/range, occurred_at's own
 offset) is specified in [`../observations.md`](../observations.md) §2
 and is the file-placement rule — a backdated event appends to the file
 for its logical date, not today's.
+
+Two `/packet clinician` rules beyond the table: **every** render
+appends its `projections/exports.log` line — the MVP seed of the
+disclosure log ([`../vision.md`](../vision.md) §7, "Record") — and
+discovery is a deterministic template, not curiosity: the ack for
+`/obs intervention` may append, at most once per 30 days, the line
+`A clinician packet for appointments is available: /packet clinician.`
+(last-pointer date in ephemeral scheduler state, like curiosity
+ask-state — never the Ledger, never a standalone ping, never a
+question).
 
 ## Storage additions
 
@@ -74,6 +85,7 @@ for its logical date, not today's.
 │   ├── places/place_<slug>.json
 │   └── eras/era_<slug>.json
 └── projections/             # rebuildable — deletable wholesale, incl. the range index
+                             # (exception: exports.log, the append-only export record)
 ```
 
 New storage-adapter ops: `append_observation`, `read_observations(day|range|kind)`,
@@ -88,7 +100,9 @@ well-formed lines, single-writer, never line count).
 **Backup invariant (binding — supersedes the older Mirror-only rule):** `raw/`,
 `observations/`, `registries/`, and `engine/` (minus `status.json`)
 are the permanent, backup-critical trees; `processed/`, `insights/`,
-`reflections/`, `engine/status.json`, and `projections/` are
+`reflections/`, `engine/status.json`, and `projections/` (minus
+`projections/exports.log`, which records what has left the instance
+and is not recomputable) are
 rebuildable. Registries are primary data — a place's coordinates and
 an injury's notes exist nowhere else — with append-only
 `status_history[]` per [`../observations.md`](../observations.md) §1.
@@ -112,6 +126,7 @@ derivation in the MVP.)
   "kinds_enabled": ["pain", "intake", "elimination", "mood"],
   "curiosity_budget_per_day": 1,
   "agent_slice_optins": {},
+  "packet": {"clinical_context": ["in recovery — flag anything habit-forming"]},
   "enrichers": [
     {"name": "weather", "enabled": false, "sends": "quantized lat/lon + date",
      "endpoint": "open-meteo", "cadence": "daily"},
@@ -215,12 +230,19 @@ audit log contains only pinned-host URLs with coordinate/date
 parameters, coordinates quantized to ≤ 2 decimals (grep the log
 against content words and full-precision coordinates); fetch failure
 appends an audit-log line and no event; series export produces valid
-CSV for pain/mood/capacity joined on `logical_date`; first clinician packet
-renders the windowed header (active injuries, current regimen,
-episode count) + capacity/mode + pain series with med/intervention
-markers, **excludes note fields, location, and weather by default**,
+CSV for pain/mood/capacity joined on `logical_date`; the first
+`/packet clinician` render uses the trailing-90-day window and
+renders the header (`packet.clinical_context` lines verbatim, active
+injuries, current regimen — most recent `taken: true` per distinct
+med; fixture: a med whose latest event is `taken: false` renders
+`(last logged: skipped <date>)`, never dropped — episode count) +
+capacity/mode + pain series with med/intervention markers,
+**excludes note fields, location, and weather by default**,
 is written under `projections/`, and only its path is posted to the
-chat surface (grep the posted message for body content).
+chat surface (grep the posted message for body content); every render
+appends one `projections/exports.log` line (what, window, when,
+path); two `/obs intervention` events a week apart append the
+discovery line exactly once.
 
 ## What this module intentionally is not (MVP)
 

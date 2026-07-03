@@ -23,6 +23,7 @@ end-to-end for one person on one host.
                                           │
                                           ▼
                               Reflection proposes ONE possible pattern
+                              (inside /checkin only — see Stage 3)
                                           │
                                           ▼
                               "Does this resonate?"
@@ -131,6 +132,11 @@ exact contract). It returns one of three outcomes:
 * Reflection proposes **at most one** pattern per session. Multiple
   competing patterns are explicitly out of scope for the MVP — that path
   becomes a menu, not a steel thread.
+* Reflection proposes **only inside `/checkin` sessions**. Entries
+  captured via `/log` or the `/closeout` journal line are structured
+  asynchronously and enter the recent window at the next `/checkin` —
+  the proposal arrives there, never inline
+  ([`agent-contracts.md`](agent-contracts.md) §3).
 * Reflection always asks **"Does this resonate?"** at the end of a
   proposal. There is no path that quietly stores a pattern as fact.
 * Reflection never uses diagnostic language. See
@@ -167,9 +173,18 @@ All three are first-class.
 
 **Hard rules:**
 
-* The user can always exit without answering. In that case, no insight
-  is created and no rejection is recorded — the proposal is simply
-  considered unanswered.
+* The user can always exit without answering. No insight is created
+  and no rejection is recorded — instead the processed artifact gains
+  an `unanswered_proposals[]` entry (`{shape_tag, proposed_at}`), kept
+  separate from `rejected_proposals[]` because silence is not
+  rejection. The shape is suppressed for the near window with the same
+  mechanics as a rejected one, and it ages out identically
+  ([`agent-contracts.md`](agent-contracts.md) §3).
+* After three consecutive unanswered proposals (counted across
+  sessions), the router pauses proposals for 14 days: `/checkin` still
+  captures and structures, but `reflection.propose` is not invoked.
+  The pause is silent — no copy ever mentions it. Any answered
+  proposal (accepted, nuanced, or rejected) resets the counter.
 * The system never re-prompts inside the same session. If the user goes
   quiet, Reflection holds.
 
@@ -189,7 +204,11 @@ required for the MVP).
   rewrite.
 * If there are no validated insights from the past week, `/reflect`
   surfaces the most recent two regardless of age, then offers a `/log`
-  prompt.
+  prompt. If entries have also accumulated since the last `/checkin`
+  without a Reflection pass, the router appends one fixed pointer
+  line: *"There are entries since your last check-in — /checkin when
+  you want to look for a pattern together."* This is recall-side
+  router copy, not a proposal.
 
 **Hard rules:**
 
@@ -287,10 +306,11 @@ try `/checkin` or `/log` first."*
 2. Raw entry is written.
 3. Structuring extracts `emotions: [hurt, defensive]`,
    `themes: [family]`, `people: [Sibling B]`.
-4. Reflection proposes: "I noticed family conversations have come up
-   three times this month with hurt nearby. One possible pattern:
-   defaulting to defensiveness when family is the topic. Does this
-   resonate?"
+4. At the user's next `/checkin`, the artifact sits in Reflection's
+   recent window. Reflection proposes: "I noticed family conversations
+   have come up three times this month with hurt nearby. One possible
+   pattern: defaulting to defensiveness when family is the topic. Does
+   this resonate?"
 5. User responds: "No — I'm not defensive in general. This one was
    different because I was tired."
 6. No insight record is created. The processed artifact records the
@@ -303,9 +323,9 @@ try `/checkin` or `/log` first."*
 2. Raw entry is written.
 3. Structuring extracts `emotions: [calm]`, `themes: [rest]`,
    `people: []`.
-4. Reflection looks at recent entries, finds nothing strong enough to
-   propose. It returns: *"I don't have enough yet to say anything useful
-   — want to keep going?"*
+4. At the next `/checkin`, Reflection looks at recent entries, finds
+   nothing strong enough to propose. It returns: *"I don't have enough
+   yet to say anything useful — want to keep going?"*
 5. No insight is created and no rejection is recorded. The processed
    artifact stands alone.
 6. Friday's `/reflect` does not include this entry; nothing to recall.
@@ -494,8 +514,12 @@ Lucid:   Earlier you saved: "When M. is in the room and a group
 
 The empty-window fallback is a router decision (the agent contract
 says so explicitly): if `insights_window` is empty, surface the two
-most recent insights regardless of age and offer a `/log` path. No
-new patterns are proposed — `/reflect` is read-and-ask only.
+most recent insights regardless of age and offer a `/log` path. When
+entries have accumulated since the last `/checkin` without a
+Reflection pass, the router also appends the fixed pointer line
+*"There are entries since your last check-in — /checkin when you want
+to look for a pattern together."* — recall-side copy, not a proposal.
+No new patterns are proposed — `/reflect` is read-and-ask only.
 
 ## What this loop intentionally is not
 

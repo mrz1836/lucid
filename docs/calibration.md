@@ -61,14 +61,20 @@ Write plainly, in your own voice, one sitting, imperfect. Version it. Date it. K
 3. **Five years:** the same scene, five years out.
 4. **The lenses, yours:** one paragraph on each framework in your stack — what it actually means to *you*, not to its author.
 5. **Non-negotiables:** the three to five things that stay true even in the worst week.
-6. **The stake:** what a breach costs — concrete, mildly painful, mechanically executable (engine §4) — written while strong.
+6. **The stake:** what a breach costs — concrete, mildly painful, mechanically executable (engine §4) — written while strong. On a breach you execute it yourself within the stake execution window (default 72 hours, engine §8) and confirm to the witness, who verifies with one line. Choose a beneficiary who is not your witness — the person verifying a payment must not be its recipient.
 7. **Forever unmeasured:** outcomes the system may serve with rooms and readiness but must never metricize (architecture P4). Naming them here is what protects them.
 
 Show the witness sections 5 **and 6** — they hold you to the non-negotiables and they hold the stake.
 
 ## Witness arrangement **(required for Day 0)**
 
-Name, channel they actually see, briefing date, confirmation. The brief is one paragraph: what they'll see (streak, mode, escalation state — never content), when they'll hear from the system (only when two consecutive misses fire the dead-man switch), and their one job (ask about it, once). Record that they've seen the stake.
+Name, channel they actually see, briefing date, confirmation.
+
+**Choosing one.** Someone who will actually ask once, without drama — the job is a question, not a lecture. Not the stake's beneficiary (Charter §6): the person verifying a payment must not be its recipient. Mutual witnessing is permitted, with one caution: keep the two contracts formally separate, each with its own brief and its own stake.
+
+**The brief** is one paragraph: what they'll see (streak, mode, escalation state — never content), when they'll hear from the system (the L2 dead-man message after two consecutive misses, plus the monthly heartbeat — engine §4), and their three jobs — when L2 fires, ask about it, once; when a stake executes, confirm with one line that it happened; hold the written stake. One more line, consented now so it arrives expected rather than surveillant: if an L2 goes unanswered and total silence persists for 7 days, they are licensed — as a human, outside the system, in their own words, without Lucid framing — to reach out once more. Record that they've seen the stake.
+
+**Keeping it live.** Re-brief quarterly, folded into the stake review: one message reconfirming the contract, recorded. A witness may resign at any time; on resignation or sustained unreachability, L2 disarms and the ladder runs L1-only until a replacement completes this full arrangement from the top — briefing, stake shown, confirmation, channel scoping (engine §4).
 
 ## Off-limits registry **(required for Day 0 — may be empty, must be chosen)**
 
@@ -88,4 +94,4 @@ The first structured entries in your Ledger, answered as voice or text captures:
 
 ## Amendment log
 
-Append-only. One line per change: id, date, what, why.
+Append-only. One line per change: id, date, what, why. Helper access — anyone who installs, configures, repairs, or hand-edits the host or `~/.lucid/` on your behalf ([`local-runtime.md`](mvp/local-runtime.md)) — is recorded here too: who, when, scope.

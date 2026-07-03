@@ -258,6 +258,20 @@ later — the three engine templates are the ceiling for autonomous
 messaging, not a precedent, and the enricher consent class is the
 ceiling for autonomous fetching.
 
+**A return-after-silence send was considered and refused.** When a
+user goes quiet — even after an unanswered L2 — no fourth template
+reaches out on day N. The reasons are the decision: amnesty on words
+means silence is never audited, and a system that pings into silence
+converts absence into obligation — the shame mechanics that build
+habit graveyards. The three templates remain the ceiling. The
+compensating design is human, not mechanical: the witness brief
+([`../engine.md`](../engine.md) §4) licenses the witness, after seven
+days of total silence following an unanswered L2, to reach out once
+more — as a person, outside the system, in their own words, without
+Lucid framing. Licensed at Day 0, so it arrives expected, not
+surveillant. That is briefing text, not a send path; the ceiling is
+untouched.
+
 ## 8. Simple-first architecture
 
 Every architectural choice should pick the boring option that proves the
@@ -289,7 +303,7 @@ Each principle above has a concrete check:
 
 | Principle | Verification |
 |-----------|--------------|
-| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`scope.md`](scope.md) §4: the Mirror five, the Engine four, and the observation micro-logs. |
+| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`scope.md`](scope.md) §4: the Mirror five, the Engine five, and the observation micro-logs plus the `/packet clinician` export. |
 | Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals, the chat-transport caveat in [`local-runtime.md`](local-runtime.md), or the consented enricher-fetch class in §7 / [`observations-module.md`](observations-module.md). |
 | Hypotheses, not diagnoses | Grep MVP docs for diagnostic phrases ("you are", "clearly", "diagnos", "guarantee"); each hit must be a non-goal call-out. |
 | Approval before action | Grep for "send automatically", "auto-send", or similar; should appear only as forbidden patterns. |
