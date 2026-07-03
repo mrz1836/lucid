@@ -10,7 +10,7 @@ It follows the same conventions as the rest of this doc set: module
 charters, named storage ops, binding schemas, per-phase acceptance
 criteria. Where this page and an older MVP doc disagree about *scope*
 (the old docs predate the Engine), this page and
-[`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) win; where they
+[`scope.md`](scope.md) win; where they
 disagree about *conventions* (naming, mutability, adapter discipline),
 the older docs win.
 

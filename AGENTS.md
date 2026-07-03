@@ -9,7 +9,7 @@ certainty — hypothesis language only, never diagnosis.
 
 ## Read before acting
 
-1. [`specs/mvp-scope.md`](specs/mvp-scope.md) — the canonical build scope.
+1. [`docs/mvp/scope.md`](docs/mvp/scope.md) — the canonical build scope.
 2. [`docs/mvp/README.md`](docs/mvp/README.md) — the MVP doc set entrypoint.
 3. [`docs/architecture.md`](docs/architecture.md) — the system design and
    its ten principles (P1–P10).
@@ -41,7 +41,7 @@ certainty — hypothesis language only, never diagnosis.
 ## Before you suggest a change
 
 - Confirm it is in scope per [`docs/mvp/README.md`](docs/mvp/README.md)
-  §"What this MVP is not" and `specs/mvp-scope.md` §7.
+  §"What this MVP is not" and `docs/mvp/scope.md` §7.
 - Prefer a deterministic script over an LLM call for parsing, schema
   validation, dates, fixtures, and greps.
 - Work against the acceptance criteria

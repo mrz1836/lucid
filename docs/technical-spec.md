@@ -7,13 +7,13 @@
 ## v2 addendum — the behavioral Engine and the Ledger
 
 This spec predates the architecture v2 merge in
-[docs/architecture.md](docs/architecture.md). Everything below remains
+[docs/architecture.md](architecture.md). Everything below remains
 the reference design for the **Mirror** half (agents, consolidation,
 memory graph, historical reprocessing). Three reconciliations apply on
 top of it:
 
 1. **The Engine is a new, agent-free module.** The behavioral engine
-   ([docs/engine.md](docs/engine.md)) is deterministic by design —
+   ([docs/engine.md](engine.md)) is deterministic by design —
    close-out capture, streak arithmetic, template escalation — and is
    deliberately *not* an agent in the table below (architecture P9: the
    runtime never depends on AI). Its conceptual schema additions:
@@ -41,7 +41,7 @@ top of it:
    envelope with registries for long-lived referents (injuries,
    threads, places, eras — generalizing the `people` pattern) and
    deterministic enrichers (weather, daylight) appending context —
-   [docs/observations.md](docs/observations.md). Conceptual schema
+   [docs/observations.md](observations.md). Conceptual schema
    additions: `observations` (envelope columns + JSON payload),
    `registries`, `enrichment_log`. Projections (series, episodes,
    correlates, clinician packet) are computed views; correlation
@@ -49,7 +49,7 @@ top of it:
 
 The Consolidation Agent's "dream state" and the adaptive-evolution
 loop remain deferred until after the MVP in
-[specs/mvp-scope.md](specs/mvp-scope.md); the Engine's weekly Retro is
+[mvp/scope.md](mvp/scope.md); the Engine's weekly Retro is
 the human-run precursor of both.
 
 ---
@@ -69,7 +69,7 @@ The app is powered by a modular set of **framework-agnostic agents**:
 | **Reflection Agent** | Generates daily/weekly/monthly/yearly summaries |
 | **Consolidation Agent** | Strengthens memory connections, surfaces patterns, maintains the memory graph |
 
-> **MVP delta** (see [`docs/mvp/architecture.md`](docs/mvp/architecture.md)
+> **MVP delta** (see [`docs/mvp/architecture.md`](mvp/architecture.md)
 > §"Mapping `technical-spec.md` agents to MVP modules"):
 > the MVP ships **Intake**, **Structuring**, **Reflection**, and a new
 > **Safety/Consent** agent (added because the long-term spec assumes a
@@ -77,7 +77,7 @@ The app is powered by a modular set of **framework-agnostic agents**:
 > extractive deterministic routine (no profile prompts, no relational
 > map). **Therapist**, **Coach**, **Framework**, and **Consolidation**
 > are deferred; their seams are named in
-> [`docs/mvp/agent-contracts.md`](docs/mvp/agent-contracts.md)
+> [`docs/mvp/agent-contracts.md`](mvp/agent-contracts.md)
 > §"Optional / deferred contracts".
 
 **Framework-agnostic architecture:**
@@ -314,7 +314,7 @@ This enables powerful traversal: "Show me everything connected to my fear of rej
 > consolidation cascade; the MVP needs sessions explicitly because
 > they are the audit trail for capture and the source of
 > `recent_window` for Reflection. Schema and migration mapping in
-> [`docs/mvp/data-model.md`](docs/mvp/data-model.md)
+> [`docs/mvp/data-model.md`](mvp/data-model.md)
 > §"Sessions and channel memory" and §"SQLite migration path".
 
 **Principles:**

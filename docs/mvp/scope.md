@@ -2,12 +2,12 @@
 
 > **Status:** build-ready, v2 (unified nightly loop). This is the
 > canonical scope contract for the first implementable Lucid steel
-> thread. It synthesizes the doc set in [`../docs/mvp/`](../docs/mvp/)
+> thread. It synthesizes the doc set in [`README.md`](README.md)
 > into a single page a coding agent or reviewer can read in one
 > sitting. v1 of this spec was Mirror-only; v2 adds the Engine module
-> per [`../docs/architecture.md`](../docs/architecture.md) (the
+> per [`../architecture.md`](../architecture.md) (the
 > system-level merge) and
-> [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md).
+> [`engine-module.md`](engine-module.md).
 
 The longer surfaces — vision, system architecture, engine spec,
 principles, runtime, MVP architecture, data model, agent contracts,
@@ -23,10 +23,10 @@ who they are becoming. And the reflection tools that exist share a
 failure mode with the habit tools that exist: reflection without a
 behavior layer yields insight that is never applied; behavior tracking
 without a reflection layer yields compliance without understanding
-([`../docs/architecture.md`](../docs/architecture.md) §1).
+([`../architecture.md`](../architecture.md) §1).
 
 The full Lucid answer lives in [`../vision.md`](../vision.md) and
-[`../docs/architecture.md`](../docs/architecture.md): two subsystems —
+[`../architecture.md`](../architecture.md): two subsystems —
 the **Mirror** (understanding) and the **Engine** (behavior) — over
 one user-owned event store, under one consent model.
 
@@ -51,24 +51,25 @@ close-out is the unifying act: one command feeds both subsystems.
 
 | Decision | Choice | Why | Source |
 |----------|--------|-----|--------|
-| Surface | Local chat thread (Discord today) via OpenClaw or Hermes — recommended path is OpenClaw + Discord. | Avoids building UI before the loop is proven; works on the phone at the bell; zero install for a second user. | [`../docs/mvp/local-runtime.md`](../docs/mvp/local-runtime.md) |
-| Subsystems | Mirror thread (capture → structure → one pattern → recall) **plus** the Engine module (close-out, streaks, escalation). | The central claim is only testable with both halves live. | [`../docs/architecture.md`](../docs/architecture.md) §1, §8 Phase 2 |
-| Engine intelligence | **None.** The Engine module is agent-free: deterministic close-out, arithmetic streaks, template escalation. | Architecture P9 (runtime never depends on AI); deterministic-scripts-first. | [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md) |
-| Observations | Agent-free micro-logs (`/pain`, `/ate`, `/drank`, `/bm`, `/mood`, `/obs`), registries, `/day` view, one opt-in enricher, first exports — phases 11–12. **Inventory, never obligation**: no observation carries a streak, target, or score. | Bakes the body/health/context record into the frozen event envelope now, so decades of views can be added later without touching the foundation. | [`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md), [`../docs/observations.md`](../docs/observations.md) |
-| Roles | Journal + Mirror/Reflection + committed-practice accountability. Therapist-style mapping, Coach voice, and Agent-Self remain named seams. | Smallest honest proof of both halves. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §1 |
-| Capture | `/log` (free-form), `/checkin` (2–4 follow-ups), `/closeout` (nightly, deterministic) — nothing else on the prose side; observation micro-logs are the separate structured family in the row above. | Capture-first, structure-later; the close-out journal line is an ordinary raw entry. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §4 |
-| Pattern proposal | Exactly one possible pattern per session, framed as a hypothesis. | Stops the system from collapsing into a confident diagnostic engine. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §5 |
-| Storage | Markdown + JSON files under `~/.lucid/`. No SQLite, no graph, no cloud. | Boring, replaceable, lossless subset of the spec's SQLite schema. | [`../docs/mvp/data-model.md`](../docs/mvp/data-model.md) |
-| Reflection cadence | Manual `/reflect`, weekly. | One cadence before four. | [`../docs/mvp/steel-thread.md`](../docs/mvp/steel-thread.md) Stage 5 |
-| External action | **Messages:** none, except the pre-committed templates — bell prompt, L1 nudge (user's own channel), L2 witness escalation + monthly heartbeat (topline status only, dead-man semantics, witness-confirmed). **Fetches:** none, except opted-in enrichers — read-only, quantized coordinates + dates to pinned keyless endpoints, through one audited adapter op (S-17). | Pre-commitment is consent granted in advance (architecture P5); a system with an unwired escalation path is a suggestion; fetches are not sends. | [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md) §"Consent amendment", [`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md) §"The enrichment job" |
-| Sanctuary boundary | The Engine module reads/writes `~/.lucid/engine/` only; no read path to raw/processed/insights/people. Witness view computed from Engine data only. | Teeth attach to acts, never to content (architecture P3). | [`../docs/engine.md`](../docs/engine.md) §4 |
-| Voice | Trusted advisor — warm, honest, non-judgmental, humble about certainty. Hypothesis language only. The Engine has no voice: fixed templates. | Encodes the only voice constraints a future agent prompt needs. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §6 |
+| Surface | Local chat thread (Discord today) via OpenClaw or Hermes — recommended path is OpenClaw + Discord. | Avoids building UI before the loop is proven; works on the phone at the bell; zero install for a second user. | [`local-runtime.md`](local-runtime.md) |
+| Subsystems | Mirror thread (capture → structure → one pattern → recall) **plus** the Engine module (close-out, streaks, escalation). | The central claim is only testable with both halves live. | [`../architecture.md`](../architecture.md) §1, §8 Phase 2 |
+| Engine intelligence | **None.** The Engine module is agent-free: deterministic close-out, arithmetic streaks, template escalation. | Architecture P9 (runtime never depends on AI); deterministic-scripts-first. | [`engine-module.md`](engine-module.md) |
+| Observations | Agent-free micro-logs (`/pain`, `/ate`, `/drank`, `/bm`, `/mood`, `/obs`), registries, `/day` view, one opt-in enricher, first exports — phases 11–12. **Inventory, never obligation**: no observation carries a streak, target, or score. | Bakes the body/health/context record into the frozen event envelope now, so decades of views can be added later without touching the foundation. | [`observations-module.md`](observations-module.md), [`../observations.md`](../observations.md) |
+| Roles | Journal + Mirror/Reflection + committed-practice accountability. Therapist-style mapping, Coach voice, and Agent-Self remain named seams. | Smallest honest proof of both halves. | [`product-principles.md`](product-principles.md) §1 |
+| Capture | `/log` (free-form), `/checkin` (2–4 follow-ups), `/closeout` (nightly, deterministic) — nothing else on the prose side; observation micro-logs are the separate structured family in the row above. | Capture-first, structure-later; the close-out journal line is an ordinary raw entry. | [`product-principles.md`](product-principles.md) §4 |
+| Pattern proposal | Exactly one possible pattern per session, framed as a hypothesis. | Stops the system from collapsing into a confident diagnostic engine. | [`product-principles.md`](product-principles.md) §5 |
+| Storage | Markdown + JSON files under `~/.lucid/`. No SQLite, no graph, no cloud. | Boring, replaceable, lossless subset of the spec's SQLite schema. | [`data-model.md`](data-model.md) |
+| Reflection cadence | Manual `/reflect`, weekly. | One cadence before four. | [`steel-thread.md`](steel-thread.md) Stage 5 |
+| External action | **Messages:** none, except the pre-committed templates — bell prompt, L1 nudge (user's own channel), L2 witness escalation + monthly heartbeat (topline status only, dead-man semantics, witness-confirmed). **Fetches:** none, except opted-in enrichers — read-only, quantized coordinates + dates to pinned keyless endpoints, through one audited adapter op (S-17). | Pre-commitment is consent granted in advance (architecture P5); a system with an unwired escalation path is a suggestion; fetches are not sends. | [`engine-module.md`](engine-module.md) §"Consent amendment", [`observations-module.md`](observations-module.md) §"The enrichment job" |
+| Sanctuary boundary | The Engine module reads/writes `~/.lucid/engine/` only; no read path to raw/processed/insights/people. Witness view computed from Engine data only. | Teeth attach to acts, never to content (architecture P3). | [`../engine.md`](../engine.md) §4 |
+| Voice | Trusted advisor — warm, honest, non-judgmental, humble about certainty. Hypothesis language only. The Engine has no voice: fixed templates. | Encodes the only voice constraints a future agent prompt needs. | [`product-principles.md`](product-principles.md) §6 |
+| Implementation | Contracts are language-agnostic; the build is **Go** — one static `lucid` binary (core + CLI), with the chat harness as a thin surface over the same router. Language and database lock-in are reviewed at the post-MVP retro. | Single-binary durability suits a tool that must outlive its tooling; the owner's toolchain is Go; nothing locks before the loop earns it. | [`../adr/0001-implementation-language.md`](../adr/0001-implementation-language.md), [`0003`](../adr/0003-runtime-surface.md) |
 
 ## 3. Steel-thread flow
 
 Two threads, one substrate. The Mirror thread is unchanged from v1
 (full version with happy / rejected / no-pattern paths in
-[`../docs/mvp/steel-thread.md`](../docs/mvp/steel-thread.md)); the
+[`steel-thread.md`](steel-thread.md)); the
 Engine loop wraps around it nightly.
 
 ```
@@ -95,8 +96,8 @@ Engine loop wraps around it nightly.
 ```
 
 **Hard caps the loop enforces** (mirrored as gates in
-[`../docs/mvp/architecture.md`](../docs/mvp/architecture.md) §6 and
-[`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md)):
+[`architecture.md`](architecture.md) §6 and
+[`engine-module.md`](engine-module.md)):
 
 * At most one pattern proposal per session; hypothesis language only.
 * Each agent sees only the slice the router authorized.
@@ -109,11 +110,11 @@ Engine loop wraps around it nightly.
 ## 4. Required commands
 
 Three command families, one router, no menus. Mirror commands are
-defined in [`../docs/mvp/architecture.md`](../docs/mvp/architecture.md) §2;
+defined in [`architecture.md`](architecture.md) §2;
 Engine commands in
-[`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md);
+[`engine-module.md`](engine-module.md);
 observation commands in
-[`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md).
+[`observations-module.md`](observations-module.md).
 
 | Command | Behavior | Writes |
 |---------|----------|--------|
@@ -136,11 +137,11 @@ observation micro-logs (phases 11–12).
 
 ## 5. Required storage layout
 
-Defined in [`../docs/mvp/data-model.md`](../docs/mvp/data-model.md)
+Defined in [`data-model.md`](data-model.md)
 (Mirror trees, naming conventions, TZ and collision rules — all
-unchanged), [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md)
+unchanged), [`engine-module.md`](engine-module.md)
 (Engine tree and schemas), and
-[`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md)
+[`observations-module.md`](observations-module.md)
 (observations, registries, and projections trees and schemas).
 
 ```
@@ -176,7 +177,7 @@ are primary, backup-critical data with append-only `status_history[]`;
 ## 6. Agent / module boundaries
 
 The six v1 modules stand as specced in
-[`../docs/mvp/architecture.md`](../docs/mvp/architecture.md). Two
+[`architecture.md`](architecture.md). Two
 modules are added:
 
 | Module | Charter | Replaceable when |
@@ -192,7 +193,7 @@ ops (the enrichment job additionally uses the single audited
 `fetch_enrichment` network op).
 
 Cross-cutting agent rules from
-[`../docs/mvp/agent-contracts.md`](../docs/mvp/agent-contracts.md)
+[`agent-contracts.md`](agent-contracts.md)
 stand unchanged, with one addition: **no agent may read the `engine/`,
 `observations/`, or `registries/` trees, nor any projection derived
 from them** (path-prefix denylist, fail closed), and the modules may
@@ -217,13 +218,13 @@ proposals, no production data in the repo — with these amendments:
   recorded consent flag, none containing Mirror content.
 * **Added:** No Crux dispatch, portfolio management, gate automation,
   or Retro tooling — those remain manual practices per
-  [`../docs/engine.md`](../docs/engine.md) in this phase. `/status`
+  [`../engine.md`](../engine.md) in this phase. `/status`
   reports days-to-gate; humans decide gates.
 * **Added:** No multi-chain support; one chain until the first gate.
 * **Added:** No Tier 2 passive telemetry (screen metrics, wearables).
 * **Added:** No nutrition database, calorie counting, or diet scoring —
   intake logging is inventory, permanently
-  ([`../docs/observations.md`](../docs/observations.md) §0, §9).
+  ([`../observations.md`](../observations.md) §0, §9).
 * **Added:** No device-derived location, health-kit, or wearable sync;
   enrichers are opt-in and outbound-minimal (coordinates + dates only).
 * **Added:** No medical advice or diagnosis anywhere; health
@@ -254,7 +255,7 @@ S-9 "felt like Lucid"). v2 adds:
 
 Phases 1–7 are unchanged from v1 (scaffold, `/log`, `/checkin`,
 structuring, insight validation, `/reflect`, `/ask`) — see
-[`../docs/mvp/acceptance-criteria.md`](../docs/mvp/acceptance-criteria.md).
+[`acceptance-criteria.md`](acceptance-criteria.md).
 v2 adds:
 
 8. **Engine scaffold + `/closeout`.** `engine/` tree, chain.json,
@@ -269,9 +270,9 @@ v2 adds:
     (weather), series CSV, clinician packet v0.
 
 Acceptance criteria for 8–10 live in
-[`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md); for
+[`engine-module.md`](engine-module.md); for
 11–12 in
-[`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md).
+[`observations-module.md`](observations-module.md).
 **Dependency note:** phases 8–12 depend only on phases 1–2 (phase 12
 additionally needs the harness scheduler, which phase 10 also uses but
 does not own). For a user whose primary failure mode is ignition, the
@@ -280,18 +281,18 @@ chain gets defended and the body record starts accumulating weeks
 before the first pattern proposal, and the close-out journal lines
 give Structuring a real corpus on day one. The cathedral clause binds throughout: build
 hours never displace runtime execution
-([`../docs/architecture.md`](../docs/architecture.md) §8).
+([`../architecture.md`](../architecture.md) §8).
 
 ## 10. How to use this spec
 
 * **For a coding agent:** read this page, then
-  [`../docs/mvp/README.md`](../docs/mvp/README.md), then the doc
+  [`README.md`](README.md), then the doc
   relevant to your change. Docs-first per
-  [`../docs/mvp/claude-code-workflow.md`](../docs/mvp/claude-code-workflow.md);
+  [`claude-code-workflow.md`](claude-code-workflow.md);
   work against
-  [`../docs/mvp/acceptance-criteria.md`](../docs/mvp/acceptance-criteria.md)
-  and [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md);
-  consult [`../docs/mvp/error-states.md`](../docs/mvp/error-states.md)
+  [`acceptance-criteria.md`](acceptance-criteria.md)
+  and [`engine-module.md`](engine-module.md);
+  consult [`error-states.md`](error-states.md)
   before inventing a failure path.
 * **For a reviewer:** every PR traces to a section of this spec or a
   documented change to it. "Done" means the relevant acceptance
@@ -304,10 +305,10 @@ hours never displace runtime execution
 
 | Source file | What it provides |
 |-------------|------------------|
-| [`../README.md`](../README.md) | Emotional landing page. Preserved as-is. |
+| [`../README.md`](../../README.md) | Emotional landing page. Preserved as-is. |
 | [`../vision.md`](../vision.md) | Long-form product vision (the Mirror half's origin). |
-| [`../docs/architecture.md`](../docs/architecture.md) | The system-level merge: Mirror + Engine over one Ledger, ten principles, phased roadmap. **Where v1 docs and this architecture disagree on scope, the architecture wins.** |
-| [`../docs/engine.md`](../docs/engine.md) | The behavioral engine specification (chains, modes, telemetry, accountability, governance). |
-| [`../docs/instance-template.md`](../docs/instance-template.md) | Per-user calibration template; the repo carries no instance data. |
+| [`../architecture.md`](../architecture.md) | The system-level merge: Mirror + Engine over one Ledger, ten principles, phased roadmap. **Where v1 docs and this architecture disagree on scope, the architecture wins.** |
+| [`../engine.md`](../engine.md) | The behavioral engine specification (chains, modes, telemetry, accountability, governance). |
+| [`../calibration.md`](../calibration.md) | The calibration guide — per-user setup (`lucid init` in the packaged app); the repo carries no personal data. |
 | [`../technical-spec.md`](../technical-spec.md) | Reference implementation architecture for the full system. |
-| [`../docs/mvp/`](../docs/mvp/) | The MVP doc set. This scope is the synthesis; for conventions, the doc set is authoritative; for scope, this page + `engine-module.md` are. |
+| [`README.md`](README.md) | The MVP doc set. This scope is the synthesis; for conventions, the doc set is authoritative; for scope, this page + `engine-module.md` are. |

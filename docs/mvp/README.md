@@ -4,7 +4,7 @@ This directory is the canonical entrypoint for the **first buildable steel
 thread** of Lucid. It is scoped to a local, single-user companion that runs on
 top of an existing chat/agent runtime (no standalone app yet).
 
-The full Lucid product vision in [`vision.md`](../../vision.md) is much broader
+The full Lucid product vision in [`vision.md`](../vision.md) is much broader
 than this MVP. These docs narrow the surface area to one end-to-end loop a
 future implementer can build and run locally without making the harder
 long-term product decisions first.
@@ -15,7 +15,7 @@ long-term product decisions first.
 > The MVP now ships two cooperating halves: the Mirror steel thread
 > documented across this set (unchanged), plus the agent-free Engine
 > module specified in [`engine-module.md`](engine-module.md). The
-> synthesis lives in [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md)
+> synthesis lives in [`scope.md`](scope.md)
 > (v2). Where an older page here disagrees with those two documents on
 > *scope*, they win; on *conventions* (naming, storage discipline,
 > gates), this set remains authoritative.
@@ -149,7 +149,7 @@ After these docs are approved, the very first build sequence is:
     enricher, series CSVs, clinician packet v0.
 
 Phases 8–12 depend only on phases 1–2 and may be built immediately
-after them; [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9
+after them; [`scope.md`](scope.md) §9
 recommends exactly that order for ignition-limited users. Acceptance
 criteria for 8–10 live in [`engine-module.md`](engine-module.md), for
 11–12 in [`observations-module.md`](observations-module.md).
@@ -174,7 +174,7 @@ should execute this sequence.
 | [`error-states.md`](error-states.md) | Unified table of every failure mode: per-agent, storage, transport, empty-state. Each row names trigger, behavior, user message, disk side effect, recovery. |
 | [`acceptance-criteria.md`](acceptance-criteria.md) | Per-phase pass/fail checklist for build phases 1–7 (phases 8–10 carry theirs in [`engine-module.md`](engine-module.md), 11–12 in [`observations-module.md`](observations-module.md)). Concrete test cases, verification commands, definition of done. |
 | [`claude-code-workflow.md`](claude-code-workflow.md) | How a coding agent should build Lucid: docs-first planning, small commits, deterministic scripts, bounded subagents. |
-| [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) | Final concise scope spec synthesized from the docs. |
+| [`scope.md`](scope.md) | Final concise scope spec synthesized from the docs. |
 
 Several files in this list are added in later phases. Until then, broken
 relative links signal "documented next" rather than missing intent.
@@ -187,8 +187,8 @@ contradict them.
 | Source file | What it provides | How the MVP uses it |
 |-------------|------------------|---------------------|
 | [`README.md`](../../README.md) | Emotional landing page describing the felt experience of Lucid. | Preserved as-is in voice; MVP docs link out from it without diluting the landing-page role. |
-| [`vision.md`](../../vision.md) | Long-form vision: five roles (Journal, Therapist, Coach, Engine, Agent-Self), pillars, profile, frameworks, capture/understand/connect/grow loop, agent-self, shared profiles, future possibilities. | MVP docs translate the vision into implementation principles and select a single steel-thread loop plus the Engine module, deferring most platform-scale features. |
-| [`technical-spec.md`](../../technical-spec.md) | Reference architecture: agent set, consolidation cycles, historical reprocessing, adaptive evolution, commands, skills, three-layer data model, SQLite schema, memory graph, bootstrapping. | MVP docs reduce this to a smaller set of agents and a Markdown/JSON data model, with explicit migration paths back to the full spec. |
+| [`vision.md`](../vision.md) | Long-form vision: five roles (Journal, Therapist, Coach, Engine, Agent-Self), pillars, profile, frameworks, capture/understand/connect/grow loop, agent-self, shared profiles, future possibilities. | MVP docs translate the vision into implementation principles and select a single steel-thread loop plus the Engine module, deferring most platform-scale features. |
+| [`technical-spec.md`](../technical-spec.md) | Reference architecture: agent set, consolidation cycles, historical reprocessing, adaptive evolution, commands, skills, three-layer data model, SQLite schema, memory graph, bootstrapping. | MVP docs reduce this to a smaller set of agents and a Markdown/JSON data model, with explicit migration paths back to the full spec. |
 | [`.gitignore`](../../.gitignore) | Repo hygiene baseline. | MVP docs do not require new ignored paths; runtime data lives outside the repo at `~/.lucid/`. |
 
 ## Relationship to the broader vision

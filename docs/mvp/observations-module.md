@@ -8,7 +8,7 @@ parsers, arithmetic, and template output; no LLM in any path
 (architecture P9, "deterministic scripts before clever agents").
 
 Precedence follows the same rule as [`engine-module.md`](engine-module.md):
-this page and [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md)
+this page and [`scope.md`](scope.md)
 own *scope*; the older MVP docs own *conventions*.
 
 ## Binding rules inherited

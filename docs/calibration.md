@@ -1,6 +1,20 @@
-# Lucid — Instance Configuration Template
+# Lucid — Calibration
 
-**How to use this file.** Copy it to `personal/instance.md` in your own Lucid home or fork, fill it in, and keep it out of any shared history (`personal/` is gitignored in this repo; verify that before your first commit). The specs ([`architecture.md`](architecture.md), [`engine.md`](engine.md)) are generalized and shareable; this file is where *your* body, schedule, history, and stakes live. Nothing in the system's mechanics assumes any particular life — this file is the only place calibration happens.
+**What this is.** Lucid ships generalized: the specs
+([`architecture.md`](architecture.md), [`engine.md`](engine.md),
+[`observations.md`](observations.md)) describe mechanics that work for
+anyone and contain no facts about any person. Calibration is the step
+that aims those mechanics at *your* measured life — your failure
+topology, your energy map, your body, your stakes. This document is
+the guided form; in the packaged app it becomes `lucid init`, an
+interactive first-run wizard that asks these same questions and writes
+the same file.
+
+**How to use it today.** Copy it to `personal/calibration.md` in your
+own Lucid home or fork, fill it in, and keep it out of any shared
+history (`personal/` is gitignored in this repo; verify that before
+your first commit). Nothing in the system's mechanics assumes any
+particular life — this file is the only place calibration happens.
 
 Everything in [engine §8](engine.md) has a default. Override anything here, with a one-line reason (architecture P8). Sections marked **(required for Day 0)** gate the program start; the rest can accrete.
 

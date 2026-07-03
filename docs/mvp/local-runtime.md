@@ -74,6 +74,11 @@ without rewriting Lucid.
 The choice between them is operational, not architectural. Lucid
 modules see the harness only through a thin command/router interface
 (see [`architecture.md`](architecture.md) §"Command/router layer").
+Implementation-wise, everything below that interface is the `lucid`
+core — one Go binary exposing the same router to the CLI and to
+harness agents alike ([`../adr/0001-implementation-language.md`](../adr/0001-implementation-language.md),
+[`../adr/0003-runtime-surface.md`](../adr/0003-runtime-surface.md));
+the harness invokes the binary, it never reimplements Lucid logic.
 
 ## Local workspace shape
 
@@ -87,25 +92,30 @@ No private user data lives here.
 ```
 ~/projects/lucid/
 ├── README.md                    # emotional landing page
-├── vision.md                    # long-form vision
-├── technical-spec.md            # reference architecture
+├── CLAUDE.md / AGENTS.md        # coding-agent orientation (kept identical)
 ├── docs/
-│   └── mvp/                     # this MVP doc set
-├── specs/
-│   └── mvp-scope.md             # build-ready scope
-├── skills/                      # (future) reusable Lucid skills
-├── commands/                    # (future) /log, /checkin, /reflect, etc.
+│   ├── vision.md                # long-form vision
+│   ├── architecture.md          # the canonical system design
+│   ├── engine.md                # behavioral engine spec
+│   ├── observations.md          # observation & enrichment layer spec
+│   ├── calibration.md           # per-user setup guide (lucid init)
+│   ├── technical-spec.md        # reference architecture
+│   ├── adr/                     # architecture decision records
+│   └── mvp/                     # this MVP doc set, incl. scope.md
+├── cmd/lucid/                   # (future) Go binary entrypoint (ADR-0001/0003)
+├── internal/                    # (future) router, storage adapter, engine,
+│                                #          observations, gates, schedulers
 ├── agents/                      # (future) Intake, Structuring, Reflection,
-│                                #          Safety/Consent agent definitions
+│                                #          Safety/Consent prompt definitions
 └── scripts/                     # (future) deterministic helpers:
-                                 #   schema validation, fixture gen,
-                                 #   path migration, link checks
+                                 #   schema validation, fixture gen, link checks
 ```
 
-`skills/`, `commands/`, `agents/`, and `scripts/` are listed as
-**future implementation directories**. They are not created in the docs
-phase; they exist in this layout so a coding agent has a known home for
-the first build sequence in
+`cmd/`, `internal/`, `agents/`, and `scripts/` are listed as
+**future implementation directories** following standard Go project
+layout ([`../adr/0001-implementation-language.md`](../adr/0001-implementation-language.md)).
+They are not created in the docs phase; they exist in this layout so a
+coding agent has a known home for the first build sequence in
 [`claude-code-workflow.md`](claude-code-workflow.md).
 
 The repo never holds private runtime data. The split between source
@@ -319,7 +329,7 @@ target. When that future arrives, the seam is well-defined:
 
 | Today (harness) | Future (standalone Lucid app) |
 |-----------------|-------------------------------|
-| Discord channel + thread | Native chat surface (desktop or mobile, per [`vision.md`](../../vision.md)). |
+| Discord channel + thread | Native chat surface (desktop or mobile, per [`vision.md`](../vision.md)). |
 | OpenClaw / Hermes process model | Lucid-owned runtime with its own session model. |
 | Command/router invoked by the harness | Same router, invoked directly by the app's UI. |
 | Channel memory file | Same idea, owned by the app's session manager. |

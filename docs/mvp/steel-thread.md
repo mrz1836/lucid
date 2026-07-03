@@ -6,7 +6,7 @@ is the implementation contract for the steel-thread overview in
 [`product-principles.md`](product-principles.md).
 
 There is one loop. Other capture modes, reflection cadences, and agent
-roles in [`vision.md`](../../vision.md) are deferred until this loop works
+roles in [`vision.md`](../vision.md) are deferred until this loop works
 end-to-end for one person on one host.
 
 ## The loop

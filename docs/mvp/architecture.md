@@ -300,7 +300,7 @@ extend what an agent sees.
 ## Mapping `technical-spec.md` agents to MVP modules
 
 The reference architecture in
-[`technical-spec.md`](../../technical-spec.md) lists eight agents and a
+[`technical-spec.md`](../technical-spec.md) lists eight agents and a
 rich skill set. The MVP keeps the names, reduces the surface, and
 records the seams.
 

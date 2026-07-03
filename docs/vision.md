@@ -51,7 +51,7 @@ A therapist that builds a living map of your fears, triggers, wounds, and growth
 A coach that tracks your goals, celebrates your progress, and gently reminds you of what you said mattered. It gives *actionable guidance*, not abstract ideas.
 
 ### **Engine**
-A behavior layer with real teeth — because insight that is never applied is just a more articulate way of staying stuck. The Engine initiates and defends a small set of committed daily practices: a bell that starts the chain (never memory, never motivation), a floor version for the worst days, honest escalation when you slip — up to a human witness who sees only that you showed up, never what you said. Reflection tools fail without a behavior layer; behavior tools fail without a reflection layer. Lucid is deliberately both, with a hard boundary between them: the Engine enforces *acts*, and everything you *say* in reflection lives under absolute amnesty. Full design in [docs/architecture.md](docs/architecture.md) and [docs/engine.md](docs/engine.md).
+A behavior layer with real teeth — because insight that is never applied is just a more articulate way of staying stuck. The Engine initiates and defends a small set of committed daily practices: a bell that starts the chain (never memory, never motivation), a floor version for the worst days, honest escalation when you slip — up to a human witness who sees only that you showed up, never what you said. Reflection tools fail without a behavior layer; behavior tools fail without a reflection layer. Lucid is deliberately both, with a hard boundary between them: the Engine enforces *acts*, and everything you *say* in reflection lives under absolute amnesty. Full design in [docs/architecture.md](architecture.md) and [docs/engine.md](engine.md).
 
 ### **Agent-Self**
 An extension of you that helps you **act**. When your friend's birthday is coming up, Lucid drafts a message in your voice, suggests when to send it, and waits for your approval. When you've been meaning to reach out to someone, it proposes what you might say. When you made a commitment and forgot, it reminds you—with a draft ready to go.
@@ -144,7 +144,7 @@ The system shifts between four modes based on context:
 
 Mode detection happens automatically—if you're processing grief, the system won't jump into coach mode. But you can always override: "I don't need comfort right now, I need a plan."
 
-*(Naming note: architecture v2 renames the Therapist voice mode to **Reflect** and the Mirror voice mode to **Echo** — the old names collided with the clinical boundary and the Mirror subsystem. See [docs/architecture.md](docs/architecture.md) §6; the behaviors in the table above are unchanged.)*
+*(Naming note: architecture v2 renames the Therapist voice mode to **Reflect** and the Mirror voice mode to **Echo** — the old names collided with the clinical boundary and the Mirror subsystem. See [docs/architecture.md](architecture.md) §6; the behaviors in the table above are unchanged.)*
 
 The voice also adapts to your preferences over time. Some people want more warmth; others want it clinical and direct. Lucid learns which approach helps you move forward.
 
@@ -219,13 +219,13 @@ Everything goes into your secure "life stream" that the system analyzes over tim
 * **Emotion picker** — Tap an emotion wheel when words won't come.
 * **Voice memo** — Speak freely. The system transcribes and extracts structure later.
 * **Photo + caption** — Capture a moment visually with a short note.
-* **Rating pulse** — "How are you right now?" One tap, 2 seconds. (Realized as the `/mood` observation on its 1–5 scale — see [docs/observations.md](docs/observations.md).)
-* **Body micro-logs** — `/pain 6 shoulder`, `/ate eggs and toast`, `/bm 4`, `/mood 2 wired`. One line each, clinical-standard scales, building a medical-grade personal record over years — pain, injuries, meals, sleep, symptoms — plus the world's half of the day (weather, daylight, where you were) filled in automatically from sources you approve. Inventory, never obligation: nothing here is ever scored or streaked. See [docs/observations.md](docs/observations.md).
+* **Rating pulse** — "How are you right now?" One tap, 2 seconds. (Realized as the `/mood` observation on its 1–5 scale — see [docs/observations.md](observations.md).)
+* **Body micro-logs** — `/pain 6 shoulder`, `/ate eggs and toast`, `/bm 4`, `/mood 2 wired`. One line each, clinical-standard scales, building a medical-grade personal record over years — pain, injuries, meals, sleep, symptoms — plus the world's half of the day (weather, daylight, where you were) filled in automatically from sources you approve. Inventory, never obligation: nothing here is ever scored or streaked. See [docs/observations.md](observations.md).
 
 The philosophy: **capture first, structure later.** Never let the interface get in the way of the moment.
 
 **Streaks without punishment:**
-* Streaks exist only where you granted them teeth: the Engine tracks the small set of practices you formally committed to ([docs/engine.md](docs/engine.md)) — and even there a return after a miss is one floor-level night, never makeup work
+* Streaks exist only where you granted them teeth: the Engine tracks the small set of practices you formally committed to ([docs/engine.md](engine.md)) — and even there a return after a miss is one floor-level night, never makeup work
 * Everything you *say* is never scored: capture volume, journaling depth, observation logging, silence about content carry no streaks, no quotas, no "you were quiet" pushes — if you've been away, the welcome happens when *you* open the door, at your next check-in, not via a notification
 * Teeth on acts, amnesty on words — the one clean boundary the whole system is built on
 
@@ -346,7 +346,7 @@ This is your mind, your life, your data—you control it completely.
 ## **8. What We're Building**
 
 ### **MVP: The unified nightly loop**
-* Runs on an existing local chat harness (see [specs/mvp-scope.md](specs/mvp-scope.md)) — a standalone desktop app is the follow-on, not the precondition
+* Runs on an existing local chat harness (see [mvp/scope.md](mvp/scope.md)) — a standalone desktop app is the follow-on, not the precondition
 * The Engine's two-minute nightly close-out doubles as capture: one act writes the day's record and the journal entry
 * Core agent system for the Mirror half (intake, structuring, reflection); the Engine half is deliberately agent-free
 * Markdown/JSON data storage you own completely

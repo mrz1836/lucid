@@ -1,7 +1,7 @@
 # Lucid — Behavioral Engine Specification
 
 **Version:** 1.1 · **Date:** 2026-07-02 · **Status:** Canonical
-**Scope:** The Engine subsystem defined in [`docs/architecture.md`](architecture.md) §3. This document specifies runtime mechanics, telemetry, accountability, and governance. It contains no instance data; user calibration lives in `personal/instance.md` (template: [`docs/instance-template.md`](instance-template.md)).
+**Scope:** The Engine subsystem defined in [`docs/architecture.md`](architecture.md) §3. This document specifies runtime mechanics, telemetry, accountability, and governance. It contains no instance data; user calibration lives in `personal/calibration.md` (template: [`docs/calibration.md`](calibration.md)).
 
 **Changelog.** v1.0 was the first extraction from the design dialogue. v1.1 restores mechanisms present in the source designs (`night-chain-design.md`, `wake-architecture.md`) that were dropped in the extraction — the priority order, the restart ritual, the baseline week, the runtime footprint cap, the dispatch definition, the one-day tooling timebox, the failure-mode table, the AI boundary, the excavation block, and the Day-0 gate semantics — and closes four decisions the sources left open: mode-declaration timing, capacity polarity, the Crux queue's ingestion path, and the witness's custody of the stake.
 

@@ -1,7 +1,7 @@
 # Lucid MVP — Product Principles
 
 These principles translate the long-form vision in
-[`vision.md`](../../vision.md) into concrete implementation constraints for
+[`vision.md`](../vision.md) into concrete implementation constraints for
 the first buildable Lucid steel thread. They sit one level above the agent
 contracts in [`agent-contracts.md`](agent-contracts.md): every agent prompt,
 storage decision, and command flow should be checkable against this page.
@@ -289,7 +289,7 @@ Each principle above has a concrete check:
 
 | Principle | Verification |
 |-----------|--------------|
-| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §4: the Mirror five, the Engine four, and the observation micro-logs. |
+| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`scope.md`](scope.md) §4: the Mirror five, the Engine four, and the observation micro-logs. |
 | Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals, the chat-transport caveat in [`local-runtime.md`](local-runtime.md), or the consented enricher-fetch class in §7 / [`observations-module.md`](observations-module.md). |
 | Hypotheses, not diagnoses | Grep MVP docs for diagnostic phrases ("you are", "clearly", "diagnos", "guarantee"); each hit must be a non-goal call-out. |
 | Approval before action | Grep for "send automatically", "auto-send", or similar; should appear only as forbidden patterns. |

@@ -336,8 +336,8 @@ Run after each phase lands.
 | Check | Command |
 |-------|---------|
 | Public-boundary grep | Forbidden-term sweep for private integration names and private repo paths returns nothing. Use an escaped pattern that does not match its own documentation, e.g. `grep -R "z[a]i\|Z[a]i\|~/projects/z[a]i" ~/projects/lucid`. |
-| Diagnostic-language grep | `grep -niE -f scripts/phrase_blocklist.regex ~/projects/lucid/docs ~/projects/lucid/specs ~/projects/lucid/README.md` — every hit is inside a "phrase to avoid" or "non-goal" block. |
-| Link integrity | `python scripts/check_links.py docs/mvp/*.md specs/*.md` — every relative link resolves. |
+| Diagnostic-language grep | `grep -niE -f scripts/phrase_blocklist.regex ~/projects/lucid/docs ~/projects/lucid/README.md` — every hit is inside a "phrase to avoid" or "non-goal" block. |
+| Link integrity | `python scripts/check_links.py docs/**/*.md README.md` — every relative link resolves. |
 | Synthetic-only fixtures | Manual review of any new transcript / fixture; no real names, dates, or identifiers. |
 | Schema validators | Every record kind under `~/.lucid/` validates against its schema in [`data-model.md`](data-model.md). |
 
@@ -352,7 +352,7 @@ Run after each phase lands.
   phases 11–12 (the observations module) in
   [`observations-module.md`](observations-module.md); phases 8–12
   depend only on phases 1–2 and may run right after them
-  ([`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9). This
+  ([`scope.md`](scope.md) §9). This
   page owns phases 1–7. Phase 1 scaffolds the six Mirror directories
   only; `engine/` is created in phase 8, and `observations/`,
   `registries/`, `projections/` in phase 11.

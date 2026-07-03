@@ -4,7 +4,7 @@ This page defines the **on-disk shape of a working Lucid MVP**. It
 turns the storage adapter's named ops in
 [`architecture.md`](architecture.md) §4 into concrete files, formats,
 and schemas. The reference layout in
-[`technical-spec.md`](../../technical-spec.md) (SQLite, multi-layer
+[`technical-spec.md`](../technical-spec.md) (SQLite, multi-layer
 memory, graph edges, salience scores) is preserved as a future target;
 the MVP gets there by upgrading this layout, not by replacing it.
 
@@ -23,7 +23,7 @@ The two design rules that drive everything below:
 These rules trace directly to
 [`product-principles.md`](product-principles.md) §3 (local-first) and
 §4 (capture first, structure later) and to the three-layer model in
-[`technical-spec.md`](../../technical-spec.md).
+[`technical-spec.md`](../technical-spec.md).
 
 ## Top-level layout
 
@@ -589,7 +589,7 @@ against the storage adapter.
 ## SQLite migration path
 
 The MVP layout is a deliberate, lossless subset of the SQLite schema
-in [`technical-spec.md`](../../technical-spec.md). When SQLite is
+in [`technical-spec.md`](../technical-spec.md). When SQLite is
 introduced, the storage adapter's named ops stay the same; their
 implementation moves from filesystem reads/writes to SQL.
 
@@ -643,7 +643,7 @@ backup format. This keeps
   responsibility; the MVP does not implement automated backup.
 * **Not synced.** Nothing under `~/.lucid/` is mirrored to a cloud
   service in the MVP. Shared profiles (per
-  [`vision.md`](../../vision.md)) remain a future possibility behind
+  [`vision.md`](../vision.md)) remain a future possibility behind
   explicit per-relationship export, not a sync.
 
 The next docs in the set turn this storage layout into agent contracts

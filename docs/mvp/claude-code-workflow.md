@@ -21,7 +21,7 @@ The companion docs are:
   the build sequence implements.
 * [`data-model.md`](data-model.md) — the on-disk shape.
 * [`local-runtime.md`](local-runtime.md) — the harness story.
-* [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) — the final
+* [`scope.md`](scope.md) — the final
   build-ready scope (added in Phase 5).
 
 ## Cardinal rule: docs-first, not docs-after
@@ -55,7 +55,7 @@ land in the right doc set without ingesting the whole repo.
 
 * **Both are pointers, not duplicates.** They name the canonical doc
   ([`README.md`](README.md)) and the canonical scope spec
-  ([`../../specs/mvp-scope.md`](../../specs/mvp-scope.md)) and tell
+  ([`scope.md`](scope.md)) and tell
   the agent to read those before answering.
 * **Both stay short** (≤ ~60 lines). They contain orientation
   ("Lucid is a local-first inner-life companion; the MVP is a single
@@ -154,7 +154,7 @@ reproducible, and usually wrong at the margins.
   helper that takes seeds and emits valid records. The fixtures match
   the schemas; tests run against them.
 * **Link checks.** Markdown link integrity across `docs/mvp/*.md`,
-  `specs/`, and the root `README.md`. A 30-line script is enough.
+  `docs/`, and the root `README.md`. A 30-line script is enough.
 * **Public-boundary grep.** A script enforces that the Lucid repo
   never references private projects, identities, or paths outside
   `~/projects/lucid/` and `~/.lucid/`. Pattern list lives in
@@ -190,7 +190,7 @@ Recommended commands once they have something to drive:
 | `lucid validate` | Schema validation + link check + public-boundary grep + phrase-blocklist grep across docs and code. Read-only. |
 | `lucid fixture <kind>` | Emits a synthetic record (`raw`, `processed`, `insight`, `session`, `reflection`) to stdout. Used by tests and demos. |
 | `lucid replay <raw-id>` | Re-runs Structuring against an existing raw entry and writes a new processed artifact. Idempotent. |
-| `lucid lint` | Markdown formatting + heading-level checks across `docs/mvp/` and `specs/`. |
+| `lucid lint` | Markdown formatting + heading-level checks across `docs/`. |
 | `lucid status` | Walks `~/.lucid/` and prints counts (raw, processed, insights, sessions, reflections) plus any schema violations. Read-only. |
 
 These commands are **not implemented in the docs phase**. They are
@@ -297,7 +297,7 @@ Engine phases 8–10 ([`engine-module.md`](engine-module.md)) and the
 observation phases 11–12
 ([`observations-module.md`](observations-module.md)) depend only on
 phases 1–2 and may be built immediately after them, before phases 3–7.
-[`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9 recommends
+[`scope.md`](scope.md) §9 recommends
 exactly that (1, 2, 8, 9, 10, 11, 12, 3–7) so the chain is defended and
 the body record accumulating weeks before the first pattern proposal.
 The module phases follow every rule on this page (docs-first,
@@ -408,7 +408,7 @@ and answer all of these from the docs alone:
 * What does each agent promise? — [`agent-contracts.md`](agent-contracts.md).
 * How do I build it? — this page.
 * What is the canonical scope? —
-  [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md).
+  [`scope.md`](scope.md).
 
 If any of those answers requires reading code, the docs are wrong and
 the next phase is a doc fix, not a code change.
