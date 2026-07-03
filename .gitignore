@@ -27,6 +27,10 @@ go.list
 # Notes
 todo.md
 
+# Private instance data — health and relationship context.
+# Must never enter shared or published history (see docs/architecture.md §5).
+personal/
+
 # Distribution
 dist
 
