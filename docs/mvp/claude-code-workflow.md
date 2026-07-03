@@ -290,9 +290,17 @@ A phase whose verification step is "looks good" is not done.
 
 ## First build sequence (after docs approval)
 
-This is the **only** sanctioned ordering of the first six build phases
-after the docs land. Future tasks add to the end of this list; nothing
-short-circuits the order.
+This is the **only** sanctioned ordering of the Mirror-thread build
+phases after the docs land. Future tasks add to the end of this list;
+nothing short-circuits the order — with one sanctioned interleave: the
+Engine phases 8–10 ([`engine-module.md`](engine-module.md)) depend
+only on phases 1–2 and may be built immediately after them, before
+phases 3–7. [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9
+recommends exactly that (1, 2, 8, 9, 10, 3–7) so the chain is defended
+weeks before the first pattern proposal. The Engine phases follow every
+rule on this page (docs-first, deterministic scripts — the Engine is
+*entirely* deterministic scripts — one commit per phase, verification
+per [`engine-module.md`](engine-module.md)).
 
 1. **Scaffold `~/.lucid/`.** Create the layout from
    [`data-model.md`](data-model.md): `raw/`, `processed/`,

@@ -28,6 +28,11 @@ before any code change.
 * **No external send is ever a recovery option.** Failure recovery
   never escalates to a webhook, email, or DM. Lucid is local-first
   per [`product-principles.md`](product-principles.md) §3 and §7.
+  (The Engine's three pre-committed template sends are *designed*
+  behavior with their own error table in
+  [`engine-module.md`](engine-module.md) — they are never used as a
+  failure-recovery path for anything on this page, and no failure
+  here may trigger one.)
 
 ## Per-agent failures
 

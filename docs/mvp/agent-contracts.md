@@ -55,6 +55,12 @@ future agent unless a contract explicitly overrides them.
 * **Synthetic-only fixtures.** Tests, examples, and prompts in the
   repo reference synthetic content only
   ([`product-principles.md`](product-principles.md) §9).
+* **The sanctuary boundary is bidirectional.** No agent may read
+  `~/.lucid/engine/` (no router plan may include it in any slice), and
+  the Engine module ([`engine-module.md`](engine-module.md)) may
+  invoke no agent. Enforcement teeth and reflective content never
+  touch (architecture P3); the only join is that `/closeout`'s journal
+  line enters `raw/` as an ordinary entry, via the router.
 
 These rules are non-negotiable. Every contract below assumes them.
 

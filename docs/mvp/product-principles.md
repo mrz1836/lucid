@@ -9,9 +9,20 @@ storage decision, and command flow should be checkable against this page.
 The MVP entrypoint is [`README.md`](README.md). The exact user loop is in
 [`steel-thread.md`](steel-thread.md).
 
-## 1. Lucid's four long-term roles are preserved
+> **v2 note.** The system architecture in
+> [`../architecture.md`](../architecture.md) added the **Engine** — a
+> behavior subsystem with committed-practice accountability. Its MVP
+> slice ([`engine-module.md`](engine-module.md)) amends three things on
+> this page: the role table gains an Engine row (§1), the steel thread
+> gains a nightly engine loop joined at `/closeout` (§2), and
+> approval-before-action gains exactly three pre-committed template
+> sends (§7). Everything else on this page stands unchanged, and the
+> sanctuary rule is absolute: nothing the Engine does ever touches,
+> scores, or exposes reflective content (architecture P3).
 
-The full vision describes four distinct roles. The MVP does not delete any
+## 1. Lucid's five long-term roles are preserved
+
+The full vision describes five distinct roles. The MVP does not delete any
 of them — it picks which to prove first and keeps the others as named,
 deferred surfaces so future work has a clear seam to slot into.
 
@@ -19,7 +30,8 @@ deferred surfaces so future work has a clear seam to slot into.
 |------|------------------------------------|---------------|
 | **Journal** | Remembers everything; surfaces patterns the user can't see. Capture-first, structure-later. | **Required now.** The steel thread is a Journal-first loop: capture → raw entry → structuring → optional pattern. |
 | **Therapist** | Builds a living map of fears, triggers, wounds, growth edges. Connects today's spike to a wound from months ago. | **Mostly deferred.** The MVP only proposes one possible pattern per session and frames it as a hypothesis. No wound-mapping, no trigger inventory, no diagnostic language. |
-| **Coach** | Tracks goals, celebrates progress, suggests next actions. | **Deferred.** Goals, progress tracking, and accountability nudges are out of scope. Reflection is the only "looking forward" affordance, and only as recall. |
+| **Coach** | Tracks goals, celebrates progress, suggests next actions. | **Deferred.** Goals, progress narrative, and conversational encouragement are out of scope. Reflection is the only "looking forward" affordance, and only as recall. |
+| **Engine** | Defends committed daily practices: bell, chain, floors, honest escalation up to a human witness ([`../engine.md`](../engine.md)). | **Required now, deliberately voiceless.** The agent-free module in [`engine-module.md`](engine-module.md): deterministic close-out, streak arithmetic, template escalation. Teeth attach to the *act* only; content is sanctuary. |
 | **Agent-Self** | Drafts messages, follow-ups, and external actions in the user's voice; user approves. | **Deferred except as a constraint.** The MVP never sends or schedules anything externally. The Agent-Self surface is named so it can be added later behind the same approval boundary. |
 
 The MVP role focus is **Journal + Mirror/Reflection**. Everything else is a
@@ -27,17 +39,20 @@ named seam, not a hidden assumption.
 
 ## 2. The MVP is one steel thread, not a menu
 
-There is exactly one user loop in scope:
+There is exactly one user loop in scope — with a nightly engine wrapper
+joined to it at a single act:
 
-> capture → raw entry → structure → one possible pattern → user validation
-> → weekly recall.
+> bell → chain runs in the world → `/closeout` (day record **+** raw
+> journal entry) → structure → one possible pattern → user validation
+> → weekly recall; tripwire the morning after.
 
 If a feature does not contribute to that loop end-to-end, it does not ship
 in the MVP. This is the single most important scope guard in the project.
 
 Practical consequences:
 
-* No second capture mode beyond `/log` (free-form) and `/checkin` (guided).
+* No capture mode beyond `/log` (free-form), `/checkin` (guided), and
+  the `/closeout` journal line (deterministic).
 * No second structuring path beyond a single extraction pass.
 * No second reflection cadence beyond one weekly recall command.
 * No alternate UIs running in parallel.
@@ -200,13 +215,19 @@ retry fails, return `stop_reason: "user_exit"` per
 ## 7. Approval before any external action
 
 The MVP does not send messages, post to channels, schedule events, or
-trigger external systems on the user's behalf. If a future feature would
-do so, the docs require it to land behind an explicit, user-visible
-approval gate.
+trigger external systems on the user's behalf — with exactly **three
+pre-committed template exceptions**: the bell prompt, the L1 nudge
+(both to the user's own channel), and the L2 witness escalation
+(topline status only, dead-man semantics, witness-confirmed). Each is
+consent granted in advance and in writing (architecture P5), behind a
+recorded flag, with no LLM in the path; the full contract is
+[`engine-module.md`](engine-module.md) §"Consent amendment". Nothing
+else sends, ever. If a future feature would, the docs require it to
+land behind an explicit, user-visible approval gate.
 
 This is a named constraint even though Agent-Self is deferred. Encoding it
 now prevents the seam from being filled with a silently-autonomous agent
-later.
+later — the three engine templates are the ceiling, not a precedent.
 
 ## 8. Simple-first architecture
 
@@ -239,8 +260,8 @@ Each principle above has a concrete check:
 
 | Principle | Verification |
 |-----------|--------------|
-| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are `/log`, `/checkin`, and `/reflect`. |
-| Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals. |
+| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are `/log`, `/checkin`, `/reflect`, `/ask`, `/bootstrap`, and the engine four (`/closeout`, `/closeout skip`, `/mode`, `/status`). |
+| Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals or the chat-transport caveat in [`local-runtime.md`](local-runtime.md). |
 | Hypotheses, not diagnoses | Grep MVP docs for diagnostic phrases ("you are", "clearly", "diagnos", "guarantee"); each hit must be a non-goal call-out. |
 | Approval before action | Grep for "send automatically", "auto-send", or similar; should appear only as forbidden patterns. |
 | Synthetic examples | Manual review of every transcript and named person against `vision.md` style — none reference Z or any real identity. |

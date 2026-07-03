@@ -19,6 +19,30 @@ nothing in [`architecture.md`](architecture.md) or
 [`data-model.md`](data-model.md) should need to change. The harness is
 swappable; the contracts are not.
 
+> **v2 note.** The Engine module
+> ([`engine-module.md`](engine-module.md)) adds four commands
+> (`/closeout`, `/closeout skip`, `/mode`, `/status`), one runtime tree
+> (`~/.lucid/engine/`), and one scheduler job (the bell prompt and the
+> morning tripwire). The tripwire is the single sanctioned exception to
+> "nothing is ever pushed": three pre-committed template sends, each
+> behind a recorded consent flag. Everything else on this page stands.
+
+### The privacy boundary of a chat surface (read this before choosing)
+
+Local-first means the **system of record** is `~/.lucid/` on the
+user's host — but with a chat harness, every message *in transit*
+(journal lines, check-in answers) passes through the chat provider's
+servers, subject to their retention and policies. For an inner-life
+journal this is a real tradeoff, accepted deliberately in the MVP to
+avoid building UI before the loop is proven. Mitigations, in order:
+use a private, single-user server; prefer terse capture in-channel and
+voice memos recorded on-device when depth is needed (transcribe
+locally, `/bootstrap` the text in); keep the off-limits registry in
+mind — the most sensitive material can wait for the standalone app,
+which removes this boundary entirely. The Engine's L2 witness message
+never contains content, so escalation adds no exposure. Name this
+tradeoff to any second user before they start.
+
 ## Supported harnesses
 
 Two local harnesses are supported by the MVP docs.
@@ -193,9 +217,12 @@ agents without changing the user's mental model.
 
 ## Lucid command surface
 
-The MVP exposes exactly five commands. They are listed here in
-priority order; the first three are the steel thread and the last two
-are quality-of-life affordances.
+The MVP exposes exactly nine commands: the five Mirror commands below,
+plus the four Engine commands specified in
+[`engine-module.md`](engine-module.md) (`/closeout`, `/closeout skip`,
+`/mode`, `/status`). The Mirror five are listed here in priority
+order; the first three are the steel thread and the last two are
+quality-of-life affordances.
 
 | Command | Purpose | Stage in steel thread |
 |---------|---------|-----------------------|
@@ -221,7 +248,9 @@ not a menu").
 * Every command's output ends with what was written and where (e.g.
   "saved as `raw_2026_05_05_19_42`"). Provenance over magic.
 * Commands never send anything outside the harness — see
-  [`product-principles.md`](product-principles.md) §7.
+  [`product-principles.md`](product-principles.md) §7. (The Engine's
+  three pre-committed template sends are scheduler jobs, not commands;
+  see [`engine-module.md`](engine-module.md).)
 
 ## Local cron / consolidation
 
@@ -250,6 +279,12 @@ When cron is added, it lives in `scripts/` (in the repo) and reads/writes
 only `~/.lucid/`. It never opens network sockets, never DMs the user,
 never speaks for Lucid. If it has anything to say, the next `/reflect`
 surfaces it.
+
+The **Engine tripwire** is a separate, required scheduler job with the
+opposite contract — it exists precisely to speak unprompted, within the
+three-template ceiling. Its spec, consent flags, and error paths live
+in [`engine-module.md`](engine-module.md); it shares nothing with the
+optional Mirror cron above except the scheduler.
 
 ## When the harness goes away
 

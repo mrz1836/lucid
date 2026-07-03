@@ -505,9 +505,13 @@ new patterns are proposed — `/reflect` is read-and-ask only.
 * **Not a multi-pattern proposal engine.** One pattern per session is a
   hard cap.
 * **Not an autonomous notifier.** `/reflect` is invoked by the user. No
-  push, no scheduled DM, no proactive outreach in the MVP.
+  push, no scheduled DM, no proactive outreach in the Mirror thread.
+  (The Engine's bell and tripwire are the sole, pre-committed
+  exceptions, and they never carry reflective content — see
+  [`engine-module.md`](engine-module.md).)
 * **Not a goals or coaching surface.** The Coach role from `vision.md`
-  is deferred entirely.
+  is deferred entirely. The Engine module records committed acts but
+  has no voice and proposes nothing.
 * **Not a draft-and-send surface.** The Agent-Self role is deferred.
   Lucid never composes external messages in the MVP.
 * **Not a profile editor.** Validated insights accumulate as files; the

@@ -346,8 +346,12 @@ Run after each phase lands.
 * Phase ordering: [`README.md`](README.md) §"Recommended first
   implementation path" and
   [`claude-code-workflow.md`](claude-code-workflow.md) §"First build
-  sequence" — these three pages must enumerate the same seven phases
-  in the same order.
+  sequence" — these three pages must enumerate the same phases 1–7 in
+  the same order. Phases 8–10 (the Engine module) are specified with
+  their own acceptance criteria in
+  [`engine-module.md`](engine-module.md); they depend only on phases
+  1–2 and may run right after them
+  ([`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9).
 * Failure modes referenced as `§I-1`, `§S-3`, etc. live in
   [`error-states.md`](error-states.md).
 * Schemas referenced in `jq` checks live in

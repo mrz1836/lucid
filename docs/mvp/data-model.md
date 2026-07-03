@@ -37,13 +37,25 @@ These rules trace directly to
 ├── sessions/               # thread/session metadata (.json) + channel memory
 │   ├── session_2026_05_05_19_42.json
 │   └── channel_lucid.md
-└── reflections/            # weekly reflection records (.md)
-    └── reflection_2026_w18.md
+├── reflections/            # weekly reflection records (.md)
+│   └── reflection_2026_w18.md
+└── engine/                 # Engine tree — schemas owned by engine-module.md
+    ├── chain.json
+    ├── witness.json
+    ├── days/2026/07/day_2026_07_02.json
+    └── status.json
 ```
 
 Subdirectories under `raw/` use a `YYYY/MM/` shard so a single
-directory does not grow unbounded. All other directories are flat in
-the MVP; sharding can be added later without breaking ids.
+directory does not grow unbounded (and `engine/days/` shards the same
+way). All other directories are flat in the MVP; sharding can be added
+later without breaking ids.
+
+The `engine/` tree's record schemas, mutability rules, and derived-file
+semantics are owned by [`engine-module.md`](engine-module.md); it
+follows every convention on this page (local-TZ timestamps, append-only
+discipline, adapter-only access) and adds one naming kind:
+`day_YYYY_MM_DD` for logical-day records.
 
 ### Naming conventions
 
@@ -175,7 +187,7 @@ occurred_at_precision: exact          # exact | approximate | range
 occurred_at_end: null                  # set when precision: range
 source: discord
 session_id: session_2026_05_05_19_42
-command: /checkin                      # /log | /checkin | /bootstrap
+command: /checkin                      # /log | /checkin | /bootstrap | /closeout
 intake_questions:
   - "What part of it stuck with you afterward?"
   - "How did that land for you, after?"
@@ -204,7 +216,7 @@ folding.
 | `occurred_at_end` | no | Only set when `precision: range`. |
 | `source` | yes | Harness identifier (`discord`, `cli`, future surfaces). |
 | `session_id` | yes | The session/thread this entry belongs to. |
-| `command` | yes | Which command produced it. |
+| `command` | yes | Which command produced it: `/log`, `/checkin`, `/bootstrap`, or `/closeout` (the nightly journal line — see [`engine-module.md`](engine-module.md)). |
 | `intake_questions` | no | Present for `/checkin`; the questions Intake actually asked. |
 | `agent_versions` | yes | Which agent versions touched the entry at write time. |
 | `bootstrap` | yes | `true` when written during a `/bootstrap` session; Reflection.propose is suppressed for these. |

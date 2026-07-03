@@ -9,6 +9,15 @@ The goal: make the architecture **boring and buildable** before it is
 ambitious. Every module here can be deleted and replaced when something
 better arrives, because each one has a small, explicit contract.
 
+> **v2 note.** A seventh module exists: the **Engine module**
+> ([`engine-module.md`](engine-module.md)) — deterministic, agent-free,
+> reads/writes `~/.lucid/engine/` only, plus one scheduler job (bell +
+> tripwire). It sits beside the storage adapter, routes its commands
+> (`/closeout`, `/closeout skip`, `/mode`, `/status`) through the same
+> router, and is invisible to every agent contract on this page: no
+> agent slice may include the engine tree, and the Engine invokes no
+> agent. The module map below is unchanged for the Mirror thread.
+
 ## Module map
 
 ```
@@ -92,6 +101,7 @@ and the response to surface back through the harness.
 | `/reflect` | storage.read_recent_insights(7d) → Reflection.surface_for_recall(insights) → ack. (No new pattern proposals.) |
 | `/ask <q>` | storage.read_insights() ∪ storage.read_reflections() → Reflection.answer_grounded(q, slice) → ack. (Read-only.) |
 | `/bootstrap` | Mode flag toggled in `~/.lucid/lucid.json` (`bootstrap_mode: true`); subsequent `/log` and `/checkin` write raw entries with explicit `occurred_at`, set `bootstrap: true` on the frontmatter, and skip Reflection.propose. `/bootstrap done` flips the flag back (`bootstrap_mode: false`); the MVP runs **no** consolidation pass on exit (the technical-spec consolidation cascade is deferred). The next `/checkin` after `/bootstrap done` resumes Reflection.propose normally. |
+| `/closeout`, `/closeout skip`, `/mode`, `/status` | Engine module plans — deterministic, no agents. Full router plans in [`engine-module.md`](engine-module.md). `/closeout` is the one command that writes to two trees: `engine/days/` (via the engine ops) and `raw/` (the journal line, via `storage.write_raw`). |
 
 **MVP rules.**
 * The router is the only place that decides agent ordering. Agents do
