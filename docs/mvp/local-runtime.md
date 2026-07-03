@@ -22,10 +22,18 @@ swappable; the contracts are not.
 > **v2 note.** The Engine module
 > ([`engine-module.md`](engine-module.md)) adds four commands
 > (`/closeout`, `/closeout skip`, `/mode`, `/status`), one runtime tree
-> (`~/.lucid/engine/`), and one scheduler job (the bell prompt and the
+> (`~/.lucid/engine/`), and a scheduler job (the bell prompt and the
 > morning tripwire). The tripwire is the single sanctioned exception to
-> "nothing is ever pushed": three pre-committed template sends, each
-> behind a recorded consent flag. Everything else on this page stands.
+> "nothing is ever pushed": pre-committed template sends (bell, L1, L2,
+> monthly witness heartbeat), each behind a recorded consent flag. The
+> observations module ([`observations-module.md`](observations-module.md))
+> adds the micro-log command family, three runtime trees
+> (`observations/`, `registries/`, `projections/`), and a second
+> scheduler job — the **enrichment job**, which pushes nothing but is
+> the runtime's only network client: outbound fetches solely to the
+> endpoints declared per opted-in enricher in
+> `observations/config.json`, through one audited adapter op.
+> Everything else on this page stands.
 
 ### The privacy boundary of a chat surface (read this before choosing)
 
@@ -39,9 +47,15 @@ use a private, single-user server; prefer terse capture in-channel and
 voice memos recorded on-device when depth is needed (transcribe
 locally, `/bootstrap` the text in); keep the off-limits registry in
 mind — the most sensitive material can wait for the standalone app,
-which removes this boundary entirely. The Engine's L2 witness message
-never contains content, so escalation adds no exposure. Name this
-tradeoff to any second user before they start.
+which removes this boundary entirely. **Observation micro-logs are
+structured health data** (`/bm 4`, `/pain 6 knee`, `/obs med …`) with
+the same transit exposure — arguably worse, being machine-parseable —
+so enabling the `pain`, `elimination`, or `med` kinds on a chat
+harness shows the transport caveat once at enable time
+([`observations-module.md`](observations-module.md), binding rule 5).
+The Engine's L2 witness message never contains content, so escalation
+adds no exposure. Name this tradeoff to any second user before they
+start.
 
 ## Supported harnesses
 
@@ -110,6 +124,10 @@ the cloud, not in any backup the user has not deliberately set up.
 ├── people/                      # lightweight people references (JSON)
 ├── sessions/                    # thread/session metadata (JSON)
 ├── reflections/                 # weekly reflection records (Markdown)
+├── engine/                      # chain config, day records, witness, status
+├── observations/                # frozen-envelope events (JSONL) + config
+├── registries/                  # injuries, threads, places, eras
+├── projections/                 # rebuildable views/exports
 └── lucid.json                   # tiny config (paths, agent versions)
 ```
 
@@ -121,10 +139,12 @@ Two reasons this lives outside the repo:
 1. **Privacy.** Runtime files contain raw inner-life content. They must
    never be committed, pushed, or synced to anything the user did not
    explicitly choose.
-2. **Rebuildability.** `processed/`, `insights/`, and `reflections/`
-   can be rebuilt from `raw/` if the agents improve. `raw/` is the only
-   tree that must survive forever, and `~/.lucid/raw/` is the path the
-   user backs up.
+2. **Rebuildability.** `processed/`, `insights/`, `reflections/`,
+   `engine/status.json`, and `projections/` can be rebuilt if the
+   agents or scripts improve. The trees that must survive forever —
+   the backup set — are `raw/`, `observations/`, `registries/`, and
+   `engine/` (minus `status.json`): they are primary data that exists
+   nowhere else.
 
 ## Discord as the first UI surface
 
@@ -217,12 +237,15 @@ agents without changing the user's mental model.
 
 ## Lucid command surface
 
-The MVP exposes exactly nine commands: the five Mirror commands below,
-plus the four Engine commands specified in
+The MVP exposes three command families through one router: the five
+Mirror commands below; the four Engine commands in
 [`engine-module.md`](engine-module.md) (`/closeout`, `/closeout skip`,
-`/mode`, `/status`). The Mirror five are listed here in priority
-order; the first three are the steel thread and the last two are
-quality-of-life affordances.
+`/mode`, `/status`); and the observation micro-logs in
+[`observations-module.md`](observations-module.md) (`/pain`, `/ate`,
+`/drank`, `/bm`, `/mood`, `/obs`, `/day` — deterministic one-liners,
+all aliasing one router intent plus one read-only view). The Mirror
+five are listed here in priority order; the first three are the steel
+thread and the last two are quality-of-life affordances.
 
 | Command | Purpose | Stage in steel thread |
 |---------|---------|-----------------------|
@@ -280,11 +303,14 @@ only `~/.lucid/`. It never opens network sockets, never DMs the user,
 never speaks for Lucid. If it has anything to say, the next `/reflect`
 surfaces it.
 
-The **Engine tripwire** is a separate, required scheduler job with the
-opposite contract — it exists precisely to speak unprompted, within the
-three-template ceiling. Its spec, consent flags, and error paths live
-in [`engine-module.md`](engine-module.md); it shares nothing with the
-optional Mirror cron above except the scheduler.
+Two other scheduler jobs have their own contracts, specified in their
+module pages, sharing nothing with the optional Mirror cron above
+except the scheduler itself: the **Engine tripwire**
+([`engine-module.md`](engine-module.md)) exists precisely to speak
+unprompted, within the pre-committed template ceiling; the
+**enrichment job** ([`observations-module.md`](observations-module.md))
+never speaks at all but performs the runtime's only network fetches —
+outbound, read-only, allowlisted, audited.
 
 ## When the harness goes away
 

@@ -10,8 +10,12 @@ the MVP gets there by upgrading this layout, not by replacing it.
 
 The two design rules that drive everything below:
 
-1. **Raw is permanent.** `~/.lucid/raw/` is the only tree the user
-   absolutely must never lose. Every other directory is rebuildable.
+1. **Primary data is permanent.** The trees the user absolutely must
+   never lose are `raw/` and — since v2 — `observations/`,
+   `registries/`, and `engine/` (minus the derived `status.json`):
+   each holds testimony or configuration that exists nowhere else.
+   `processed/`, `insights/`, `reflections/`, `engine/status.json`,
+   and `projections/` are rebuildable.
 2. **Processed is rebuildable.** If the agents improve,
    `~/.lucid/processed/` and `~/.lucid/insights/` can be regenerated
    from `~/.lucid/raw/` plus the user's accept/reject responses.
@@ -39,11 +43,14 @@ These rules trace directly to
 │   └── channel_lucid.md
 ├── reflections/            # weekly reflection records (.md)
 │   └── reflection_2026_w18.md
-└── engine/                 # Engine tree — schemas owned by engine-module.md
-    ├── chain.json
-    ├── witness.json
-    ├── days/2026/07/day_2026_07_02.json
-    └── status.json
+├── engine/                 # Engine tree — schemas owned by engine-module.md
+│   ├── chain.json
+│   ├── witness.json
+│   ├── days/2026/07/day_2026_07_02.json
+│   └── status.json
+├── observations/           # frozen-envelope events — owned by observations-module.md
+├── registries/             # injuries, threads, places, eras — same key derivation as people/
+└── projections/            # rebuildable views/exports — deletable wholesale
 ```
 
 Subdirectories under `raw/` use a `YYYY/MM/` shard so a single
@@ -52,10 +59,13 @@ way). All other directories are flat in the MVP; sharding can be added
 later without breaking ids.
 
 The `engine/` tree's record schemas, mutability rules, and derived-file
-semantics are owned by [`engine-module.md`](engine-module.md); it
-follows every convention on this page (local-TZ timestamps, append-only
-discipline, adapter-only access) and adds one naming kind:
-`day_YYYY_MM_DD` for logical-day records.
+semantics are owned by [`engine-module.md`](engine-module.md); the
+`observations/`, `registries/`, and `projections/` trees by
+[`observations-module.md`](observations-module.md). All follow every
+convention on this page (local-TZ timestamps, append-only discipline,
+adapter-only access, the `people/` key derivation for registry slugs)
+and add two naming kinds: `day_YYYY_MM_DD` for logical-day records and
+`obs_YYYY_MM_DD_<seq>` for observation events.
 
 ### Naming conventions
 

@@ -9,14 +9,20 @@ The goal: make the architecture **boring and buildable** before it is
 ambitious. Every module here can be deleted and replaced when something
 better arrives, because each one has a small, explicit contract.
 
-> **v2 note.** A seventh module exists: the **Engine module**
-> ([`engine-module.md`](engine-module.md)) — deterministic, agent-free,
-> reads/writes `~/.lucid/engine/` only, plus one scheduler job (bell +
-> tripwire). It sits beside the storage adapter, routes its commands
-> (`/closeout`, `/closeout skip`, `/mode`, `/status`) through the same
-> router, and is invisible to every agent contract on this page: no
-> agent slice may include the engine tree, and the Engine invokes no
-> agent. The module map below is unchanged for the Mirror thread.
+> **v2 note.** Two further modules exist beside the six below, both
+> deterministic and agent-free, both routing their commands through
+> the same router, both invisible to every agent contract on this
+> page (no agent slice may include their trees; they invoke no
+> agents). The **Engine module** ([`engine-module.md`](engine-module.md))
+> reads/writes `~/.lucid/engine/` only. The **observations module**
+> ([`observations-module.md`](observations-module.md)) owns
+> `~/.lucid/observations/`, `registries/`, and `projections/`, with
+> commands `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs`
+> `/day`. The harness scheduler runs two jobs: the Engine tripwire
+> (bell + escalation) and the enrichment job (opt-in, fetch-only —
+> see the §4 network exception). The module map below is unchanged
+> for the Mirror thread; the six-module count and "fewer than ten
+> ops" line refer to the Mirror thread only.
 
 ## Module map
 
@@ -184,7 +190,13 @@ the file layout from agents and the router.
 * Insights have provenance: `write_insight` requires raw entry ids,
   processed artifact id, agent prompt/version, and the user's response
   text. Without those, it raises.
-* No network. The adapter is filesystem-only in the MVP.
+* No network — with exactly one narrow exception:
+  `fetch_enrichment(enricher, url)`, the single audited op through
+  which opt-in enrichers query their pinned, keyless endpoints
+  ([`observations-module.md`](observations-module.md) §"The enrichment
+  job"). The op validates every URL against a per-enricher allowlist
+  and writes the outbound audit log itself; no other op, agent, or
+  module opens a socket.
 
 **Replace when.** SQLite migration. The adapter's named ops survive;
 their implementation moves from files to tables. See
@@ -260,7 +272,7 @@ code, not just in prose.
 |------|----------------|---------------|
 | **Hypothesis-language gate** | Reflection output uses hypothesis phrasing ("I noticed", "one possible pattern", "does this resonate?"). Diagnostic phrases are blocked or rewritten. | After Reflection.propose, before the harness posts. |
 | **One-pattern-per-session gate** | At most one proposal per session is presented to the user. Multiple proposals collapse to the highest-confidence one or "no pattern yet". | Inside the structuring/reflection pipeline. |
-| **Approval-before-action gate** | No external send, schedule, or post is permitted. Any draft surfaces in-thread for explicit user approval, and the MVP has no "send" path at all. | At the router boundary. |
+| **Approval-before-action gate** | No agent-initiated external send, schedule, or post is permitted. Any draft surfaces in-thread for explicit user approval; the only autonomous *messages* are the Engine's pre-committed templates, and the only autonomous *fetches* are consented enricher queries through `fetch_enrichment` — both module-owned, neither reachable by an agent. | At the router boundary. |
 | **Context-slice gate** | Agents may receive only the data the router authorized for that step (e.g. one raw entry, last N processed artifacts). The full history is never passed. | Around every LLM call. See "Mechanism" below. |
 | **Synthetic-only fixtures gate** | Tests, examples, and docs reference only synthetic content. | In `scripts/` and CI checks; see [`claude-code-workflow.md`](claude-code-workflow.md). |
 | **Public-boundary gate** | The Lucid repo never references private personal projects, identities, or operational paths beyond `~/projects/lucid/` and `~/.lucid/`. | A `grep` check in the verification phase. |
@@ -323,6 +335,8 @@ each future addition a localized change, not a redesign.
 | **Shared profiles (relational bridges)** | A new agent + a new storage namespace under `~/.lucid/shared/`, gated behind explicit per-relationship consent. | The local-first invariant: shared profiles are exported, not synced. |
 | **Memory graph** | A new storage namespace and a new `traverse_graph` skill, fed by existing processed artifacts. | Raw layer; insight provenance. |
 | **Richer frameworks (Stoicism, NVC, IFS, ...)** | New Framework agent + framework definitions under `~/projects/lucid/agents/frameworks/`. | All other agent contracts. |
+| **New enrichers (air quality, wearable import, ...)** | A new entry in `observations/config.json` + an allowlist row for `fetch_enrichment`. Opt-in, outbound-minimal, keyless (a keyed source needs its own consent line). | The frozen event envelope; the fetch-audit discipline. |
+| **New observation kinds / registries / projections** | One row in [`../observations.md`](../observations.md) §3, a payload schema, optionally a shorthand — per the extension model in [`../architecture.md`](../architecture.md) §4b. | The envelope, the sanctuary denylist, every agent contract. |
 | **Therapist / Coach surfaces** | New named agents behind the Safety/Consent gate. Each requires its own contract in [`agent-contracts.md`](agent-contracts.md) before it ships. | One-pattern-per-session and approval-before-action gates. |
 
 If a proposed feature does not fit one of these extension points, the

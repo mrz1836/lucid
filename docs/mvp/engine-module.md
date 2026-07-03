@@ -205,7 +205,13 @@ the floor (engine §5) — floor nights in Away Mode count as completions.
 
 Mechanics: the witness gets access to one dedicated channel (e.g., a
 `#witness` channel on the user's server, or any channel the harness
-can post to that the witness actually reads). Confirmation is the
+can post to that the witness actually reads). **Binding permission
+rule:** the witness's access MUST be scoped by explicit channel
+permissions to the witness channel only — `#lucid` and every thread
+under it (where journal lines and observation micro-logs are typed)
+must be invisible to the witness role. Witness setup is incomplete,
+and `l2_enabled` stays false, until both the confirmation message and
+the channel-permission scoping are recorded. Confirmation is the
 witness's own message in that channel, recorded verbatim with a
 timestamp; until `confirmed_at` is set, `l2_enabled` cannot be turned
 on. `stake_shared: true` records that the witness has seen the written

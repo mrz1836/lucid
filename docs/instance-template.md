@@ -60,6 +60,10 @@ Name, channel they actually see, briefing date, confirmation. The brief is one p
 
 Topics excluded from inference or marked sensitive (architecture §5).
 
+## Observations configuration
+
+Which observation kinds are on ([engine of record: `observations.md`](observations.md) §3 — pain, symptom, intake, elimination, mood, sleep, med, measurement), with a one-line reason each — enable what you'll actually use; kinds are free to add later. **Injury inventory:** every current and historical injury or chronic condition as a registry seed (name, onset — approximate is fine, status), at whatever resolution you choose. **Threads:** the handful of inner and outer things you're working on, each as an intent statement — no metrics, no deadlines; their progress is narrative, reviewed quarterly. **Enrichers:** which external sources are on (weather, daylight, calendar-frame), your sticky starting location (a city is enough), and the standing reminder that each source's `sends` field is a contract. **Curiosity budget:** how many micro-questions per day you'll tolerate (default 1; 0 is valid).
+
 ## Scheduled
 
 Ledger location · first weekly Retro (calendar slot) · first quarterly Hearing (date) · known travel with its Away Mode configuration (which Links compress, what the Floor becomes, which capture surface substitutes) · Gate 1/2/3 candidate Links (each wrapped in a Flywheel identity where possible; each fitting the footprint cap).

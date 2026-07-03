@@ -35,7 +35,7 @@ All test inputs are synthetic per
 
 | # | Input | Expected output |
 |---|-------|-----------------|
-| 1.1 | First run of the scaffold script on a host where `~/.lucid/` does not exist | All seven directories created; `lucid.json` written with the schema in [`data-model.md`](data-model.md) §"`lucid.json`"; one `.keep` file under each directory proving the path is writable. |
+| 1.1 | First run of the scaffold script on a host where `~/.lucid/` does not exist | All six Mirror directories created (raw, processed, insights, people, sessions, reflections — module trees come with their phases); `lucid.json` written with the schema in [`data-model.md`](data-model.md) §"`lucid.json`"; one `.keep` file under each directory proving the path is writable. |
 | 1.2 | Second run on the same host | Idempotent — no errors, no overwrites, `lucid.json` unchanged. |
 | 1.3 | Run on a host where `~/.lucid/raw/2026/05/` already has one existing entry | The existing entry is **not** modified; the scaffold only fills missing pieces. |
 | 1.4 | `lucid.json` is hand-edited to set `recent_window: 999` (above the cap) | Next router boot clips to `recent_window_max: 14` and warns; `lucid.json` is rewritten with the clipped value. |
@@ -347,11 +347,15 @@ Run after each phase lands.
   implementation path" and
   [`claude-code-workflow.md`](claude-code-workflow.md) §"First build
   sequence" — these three pages must enumerate the same phases 1–7 in
-  the same order. Phases 8–10 (the Engine module) are specified with
-  their own acceptance criteria in
-  [`engine-module.md`](engine-module.md); they depend only on phases
-  1–2 and may run right after them
-  ([`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9).
+  the same order. Phases 8–10 (the Engine module) carry their own
+  acceptance criteria in [`engine-module.md`](engine-module.md), and
+  phases 11–12 (the observations module) in
+  [`observations-module.md`](observations-module.md); phases 8–12
+  depend only on phases 1–2 and may run right after them
+  ([`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9). This
+  page owns phases 1–7. Phase 1 scaffolds the six Mirror directories
+  only; `engine/` is created in phase 8, and `observations/`,
+  `registries/`, `projections/` in phase 11.
 * Failure modes referenced as `§I-1`, `§S-3`, etc. live in
   [`error-states.md`](error-states.md).
 * Schemas referenced in `jq` checks live in

@@ -31,6 +31,7 @@ Three doors, depending on who you are:
 - [Vision](vision.md) — the long-form product vision and the roles Lucid plays.
 - [System architecture](docs/architecture.md) — the canonical merge: the Mirror (understanding) and the Engine (behavior) over one user-owned Ledger, and the ten principles that govern both.
 - [Engine specification](docs/engine.md) — chains, bells, floors, operating modes, telemetry, and the accountability ladder.
+- [Observation layer](docs/observations.md) — body signals, intake, mood, context, and memory fragments on one frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation.
 - [Instance template](docs/instance-template.md) — set up your own instance; specs are shared, calibration is yours. (Private instance data lives in `personal/`, which never enters shared history.)
 - [Technical specification](technical-spec.md) — the reference architecture for the full system.
 - [MVP docs](docs/mvp/README.md) — the first buildable slice: the unified nightly loop (close-out → capture → structure → one possible pattern → validation → weekly recall).

@@ -10,7 +10,12 @@ recovery path. It is the unified table that
 
 The rules below are binding. If a coding agent encounters a failure
 mode not listed here, the correct response is a doc edit on this page
-before any code change.
+before any code change. **Scope note (v2):** this page owns the
+Mirror-thread failure modes; the deterministic modules own theirs in
+the same table format —
+[`engine-module.md`](engine-module.md) §"Error states" and
+[`observations-module.md`](observations-module.md) §"Error states".
+The cross-cutting principles below bind all three tables.
 
 ## Cross-cutting principles
 
@@ -20,7 +25,9 @@ before any code change.
 * **No silent state.** Every failure either surfaces a user-visible
   message or writes a record that names what went wrong (e.g.
   `notes: "structuring failed (parse)"`). There is no quietly
-  swallowed error.
+  swallowed error. (Enricher fetch failures satisfy this by writing
+  to the outbound audit log rather than messaging the user —
+  enrichment is never load-bearing, and the log is the record.)
 * **Hypothesis framing survives errors.** Fallback messages are calm
   and honest. They do not perform empathy and do not invent a status
   the system did not earn ("I held that response — let me ask

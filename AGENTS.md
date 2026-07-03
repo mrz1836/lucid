@@ -25,12 +25,18 @@ certainty — hypothesis language only, never diagnosis.
 - **Public-safe boundary.** No private project names, identities, or
   paths beyond `~/projects/lucid/` and `~/.lucid/`. Synthetic fixtures
   only.
-- **Sanctuary (architecture P3).** No agent reads `~/.lucid/engine/`;
-  the Engine module invokes no agent and never touches reflective
-  content. Do not weaken this in either direction.
-- **No external sends** beyond the three pre-committed Engine templates
-  (bell, L1 nudge, L2 witness) specified in
-  [`docs/mvp/engine-module.md`](docs/mvp/engine-module.md).
+- **Sanctuary (architecture P3).** No agent reads `~/.lucid/engine/`,
+  `~/.lucid/observations/`, or `~/.lucid/registries/`; the Engine and
+  observation modules invoke no agent. Observations are inventory,
+  never obligation — no streaks, scores, or targets on them, ever.
+  Do not weaken any of this in either direction.
+- **No autonomous messages** beyond the pre-committed Engine templates
+  (bell, L1 nudge, L2 witness + monthly heartbeat —
+  [`docs/mvp/engine-module.md`](docs/mvp/engine-module.md)), and **no
+  outbound fetches** beyond opted-in enrichers through the single
+  audited `fetch_enrichment` op ([`docs/observations.md`](docs/observations.md) §5:
+  quantized coordinates + dates to pinned keyless endpoints, nothing
+  else). Fetches are not sends; neither ceiling is a precedent.
 
 ## Before you suggest a change
 

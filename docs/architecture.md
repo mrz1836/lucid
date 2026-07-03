@@ -4,7 +4,7 @@
 
 **Changelog.** v2.0 merged a behavioral engine (designed July 2026, formerly codenamed WAKE) into the Lucid concept as a first-class subsystem, unified both under a single event substrate and consent model, and renamed the self-sustaining portfolio status from "Engine" to "Flywheel" to avoid collision with the Engine subsystem. v2.1 generalizes the document for any user (instance data lives in a per-user configuration, never in specs), restores mechanisms that were dropped between design drafts (the runtime priority order, the AI-dependency boundary, the excavation practice, the dispatch definition), resolves the two remaining name collisions ("Mirror" the voice mode → **Echo**; "Green" the domain marker → **Steady**), and aligns the roadmap with the buildable MVP in [`specs/mvp-scope.md`](../specs/mvp-scope.md). v1.x refers to the original concept document.
 
-**Related documents:** [`vision.md`](../vision.md) (product vision), [`technical-spec.md`](../technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/instance-template.md`](instance-template.md) (per-user configuration template), [`docs/mvp/`](mvp/README.md) and [`specs/mvp-scope.md`](../specs/mvp-scope.md) (the first buildable slice). A user's own calibration lives in `personal/instance.md`, which is excluded from any shared history (§5).
+**Related documents:** [`vision.md`](../vision.md) (product vision), [`technical-spec.md`](../technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/observations.md`](observations.md) (observation & enrichment layer), [`docs/instance-template.md`](instance-template.md) (per-user configuration template), [`docs/mvp/`](mvp/README.md) and [`specs/mvp-scope.md`](../specs/mvp-scope.md) (the first buildable slice). A user's own calibration lives in `personal/instance.md`, which is excluded from any shared history (§5).
 
 ## 1. Overview
 
@@ -24,7 +24,7 @@ The central architectural claim: reflection tools fail without a behavior layer,
 
 **P5 — Consent is symmetric.** Draft-and-approve governs both directions: outbound actions (messages, sends) and inbound self-model changes (inferences, labels) are proposals until the user approves, edits, or rejects them. Pre-committed actions (the Engine's escalation ladder, the stake) are not an exception — they are consent granted in advance, in writing, while strong, and revocable only at governed review.
 
-**P6 — Local-first sovereignty.** All data lives in user-owned, plain, exportable formats. AI functions as a stateless analyst over relevant excerpts; it is never the system of record. No analytics, no monetization, optional local models.
+**P6 — Local-first sovereignty, built to outlive its tools.** All data lives in user-owned, plain, exportable formats. AI functions as a stateless analyst over relevant excerpts; it is never the system of record. No analytics, no monetization, optional local models. The corpus is a decades-scale asset: the event envelope is frozen, payload schemas are versioned and documented, and the whole Ledger is always exportable as a directory of plain files — so the record you keep this year stays fully legible to whatever far-better tools exist in ten.
 
 **P7 — Ignition-first runtime.** The Engine assumes starting — not persisting — is the scarce resource. External initiation (bells), minimum-viable floors, and slot defense are primary mechanisms; motivation is never a dependency.
 
@@ -36,7 +36,7 @@ The central architectural claim: reflection tools fail without a behavior layer,
 
 ## 3. Subsystems
 
-**Mirror.** Responsibilities: capture ingestion, multi-timescale reflection (daily/weekly/monthly/yearly), pattern inference, the Personal Profile, the relational map, framework-based interpretation, and voice modes (§6). Writes capture and inference events; reads the full Ledger. Prohibited: enforcement of any kind.
+**Mirror.** Responsibilities: capture ingestion — both prose (journal, one-liners, voice) and the structured **observation layer** (body signals, intake, mood, context, memory fragments; full specification in [`docs/observations.md`](observations.md)) — multi-timescale reflection (daily/weekly/monthly/yearly), pattern inference, the Personal Profile, the relational map, framework-based interpretation, and voice modes (§6). Writes capture and inference events; reads the full Ledger. Prohibited: enforcement of any kind — including over observations, which are inventory, never obligation.
 
 **Engine.** Responsibilities: bells, chains, floors, the Crux protocol, the dispatch, operating modes, capacity signal, telemetry tiers, gates, retros, hearings, portfolio statuses, and the accountability ladder. Full specification in [`docs/engine.md`](engine.md). Writes completion, mode, and governance events; reads runtime projections and the avoided-task queue only — the Engine never reads Mirror content.
 
@@ -54,11 +54,45 @@ Default domain set: **Body, Play, Mind, People, Craft, Inner, Health** — user-
 
 Every tracked item carries exactly one portfolio status: **Flywheel** (self-sustaining, zero maintenance cost, load-bearing for oblique outcomes), **Active** (holds a runtime slot; deliberately scarce), **Bench** (available for spontaneous engagement, permanently untracked, guilt formally revoked), or **Parked** (dormant, with a standing quarterly Hearing where it may be Activated, Benched, or retired with a written reason — Parked is a repo with no open issues, not a graveyard). Activation is zero-sum: a new Active item must displace or be gated in. New Active items are wrapped in an existing Flywheel identity wherever possible — a strength practice belongs to the sport it serves, not to "fitness" — because identity-wrapped practices route around the direct-pursuit failure mode (P4).
 
+## 4b. Extension model — how Lucid grows without changing
+
+The foundation is exactly three parts: the **Ledger** holds events
+(append-only, bitemporal, one frozen envelope), **Registries** hold
+referents (people, injuries, threads, places, eras — long-lived things
+events point at), and **Projections** hold views (rebuildable,
+versioned, disposable). Every future capability is one of four
+extension axes, and only these:
+
+1. **A new event kind** — a typed payload inside the frozen envelope
+   (e.g., a pain observation, a meal, a memory fragment).
+2. **A new registry** — a new class of referent, following the
+   `people/` pattern.
+3. **A new enricher** — a deterministic, opt-in, outbound-minimal
+   source that appends context annotations ([`observations.md`](observations.md) §5).
+4. **A new projection** — a new way to view, join, question, or export
+   what is already recorded.
+
+What is *never* an extension: changing the envelope, mutating past
+events, adding a subsystem beyond those already named in §3
+(Agent-Self, Charter, and Witness are base design activated by
+roadmap phase, not extensions — the prohibition covers *new*
+subsystems), or letting a new capability grow teeth outside the
+Engine's Gate process. Registries themselves are not a new subsystem
+— they generalize the existing people store. Payload
+schemas version forward; projections read what they understand and
+skip what they don't. The **logical day is the universal join key**
+across engine records, observations, enrichment, and entries. This is
+the contract that lets views multiply for decades — dashboards,
+correlations, exports, future-AI analysis — while the record beneath
+them never has to be migrated, re-consented, or re-understood.
+
 ## 5. Consent and privacy model
 
 The **resonance gate** is the lifecycle for all inferences: proposed → presented with supporting evidence and the question "does this resonate?" → accepted, edited, or rejected → merged into the Profile only on acceptance, with rejections retained as events. The system never asserts a pattern; it offers one.
 
-An **off-limits registry** lets the user mark topics as sensitive or excluded from inference entirely. The Profile is exportable and wipeable; the Ledger beneath it is not — facts persist, labels belong to the user. The Witness visibility contract (§3) is enforced at the projection layer: witness-facing views are computed from Engine events only.
+An **off-limits registry** lets the user mark topics as sensitive or excluded from inference entirely. The Profile is exportable and wipeable; the Ledger beneath it is not — facts persist, labels belong to the user. The Witness visibility contract (§3) is enforced at the projection layer: witness-facing views are computed from Engine events only — no observation, enrichment, or Mirror content is ever witness-visible.
+
+**Enricher consent.** Sources that fetch external context (weather, daylight — [`observations.md`](observations.md) §5) are opt-in per source, with what each transmits declared in the instance configuration. Outbound minimalism is binding: coordinates and dates may leave; content and identifiers never do. Location is stated by the user, never harvested from a device; device integrations are a future, separately-consented chapter.
 
 **Instance isolation.** Specifications are generalized and shareable; calibration is personal and private. Each user's configuration — health context, relationships, stakes, portfolio — lives in `personal/instance.md` (from the template in [`docs/instance-template.md`](instance-template.md)) and is excluded from any shared or published history (`personal/` is gitignored). If collaborators, mirrors, or repo-scoped agents are ever added, audit history before any visibility change. This same split is what makes Lucid usable by more than one person: friends fork the specs and write their own instance; nothing about the system's mechanics assumes any particular user's body, schedule, or biography.
 

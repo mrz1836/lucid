@@ -54,12 +54,13 @@ close-out is the unifying act: one command feeds both subsystems.
 | Surface | Local chat thread (Discord today) via OpenClaw or Hermes — recommended path is OpenClaw + Discord. | Avoids building UI before the loop is proven; works on the phone at the bell; zero install for a second user. | [`../docs/mvp/local-runtime.md`](../docs/mvp/local-runtime.md) |
 | Subsystems | Mirror thread (capture → structure → one pattern → recall) **plus** the Engine module (close-out, streaks, escalation). | The central claim is only testable with both halves live. | [`../docs/architecture.md`](../docs/architecture.md) §1, §8 Phase 2 |
 | Engine intelligence | **None.** The Engine module is agent-free: deterministic close-out, arithmetic streaks, template escalation. | Architecture P9 (runtime never depends on AI); deterministic-scripts-first. | [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md) |
+| Observations | Agent-free micro-logs (`/pain`, `/ate`, `/drank`, `/bm`, `/mood`, `/obs`), registries, `/day` view, one opt-in enricher, first exports — phases 11–12. **Inventory, never obligation**: no observation carries a streak, target, or score. | Bakes the body/health/context record into the frozen event envelope now, so decades of views can be added later without touching the foundation. | [`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md), [`../docs/observations.md`](../docs/observations.md) |
 | Roles | Journal + Mirror/Reflection + committed-practice accountability. Therapist-style mapping, Coach voice, and Agent-Self remain named seams. | Smallest honest proof of both halves. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §1 |
-| Capture | `/log` (free-form), `/checkin` (2–4 follow-ups), `/closeout` (nightly, deterministic) — nothing else. | Capture-first, structure-later; the close-out journal line is an ordinary raw entry. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §4 |
+| Capture | `/log` (free-form), `/checkin` (2–4 follow-ups), `/closeout` (nightly, deterministic) — nothing else on the prose side; observation micro-logs are the separate structured family in the row above. | Capture-first, structure-later; the close-out journal line is an ordinary raw entry. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §4 |
 | Pattern proposal | Exactly one possible pattern per session, framed as a hypothesis. | Stops the system from collapsing into a confident diagnostic engine. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §5 |
 | Storage | Markdown + JSON files under `~/.lucid/`. No SQLite, no graph, no cloud. | Boring, replaceable, lossless subset of the spec's SQLite schema. | [`../docs/mvp/data-model.md`](../docs/mvp/data-model.md) |
 | Reflection cadence | Manual `/reflect`, weekly. | One cadence before four. | [`../docs/mvp/steel-thread.md`](../docs/mvp/steel-thread.md) Stage 5 |
-| External action | None, **except three pre-committed template sends**: the bell prompt, the L1 nudge (both to the user's own channel), and the L2 witness escalation (topline status only, dead-man semantics, witness-confirmed). | Pre-commitment is consent granted in advance (architecture P5); a system with an unwired escalation path is a suggestion. | [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md) §"Consent amendment" |
+| External action | **Messages:** none, except the pre-committed templates — bell prompt, L1 nudge (user's own channel), L2 witness escalation + monthly heartbeat (topline status only, dead-man semantics, witness-confirmed). **Fetches:** none, except opted-in enrichers — read-only, quantized coordinates + dates to pinned keyless endpoints, through one audited adapter op (S-17). | Pre-commitment is consent granted in advance (architecture P5); a system with an unwired escalation path is a suggestion; fetches are not sends. | [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md) §"Consent amendment", [`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md) §"The enrichment job" |
 | Sanctuary boundary | The Engine module reads/writes `~/.lucid/engine/` only; no read path to raw/processed/insights/people. Witness view computed from Engine data only. | Teeth attach to acts, never to content (architecture P3). | [`../docs/engine.md`](../docs/engine.md) §4 |
 | Voice | Trusted advisor — warm, honest, non-judgmental, humble about certainty. Hypothesis language only. The Engine has no voice: fixed templates. | Encodes the only voice constraints a future agent prompt needs. | [`../docs/mvp/product-principles.md`](../docs/mvp/product-principles.md) §6 |
 
@@ -88,7 +89,9 @@ Engine loop wraps around it nightly.
                naming the floor · 2 consecutive → L2 to witness
                (dead-man: fires on ABSENCE of a day record)
 
-        anytime:  /log  /checkin  /mode  /status  /ask     weekly: /reflect
+        anytime:  /log  /checkin  /mode  /status  /ask  +  micro-logs
+                  (/pain /ate /drank /bm /mood /slept /obs /day)
+        weekly:   /reflect
 ```
 
 **Hard caps the loop enforces** (mirrored as gates in
@@ -97,16 +100,20 @@ Engine loop wraps around it nightly.
 
 * At most one pattern proposal per session; hypothesis language only.
 * Each agent sees only the slice the router authorized.
-* No external send beyond the three pre-committed templates; no LLM in
-  any Engine path.
+* No autonomous message beyond the pre-committed templates; no
+  outbound fetch beyond opted-in enrichers through the audited adapter
+  op; no LLM in any Engine or observation path.
 * L2 payload contains zero bytes of journal, capacity, or Profile data.
 * Mode declarations are fixed at the bell; no retroactive amendment.
 
 ## 4. Required commands
 
-Nine commands, one router, no menus. Mirror commands are defined in
-[`../docs/mvp/architecture.md`](../docs/mvp/architecture.md) §2; Engine
-commands in [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md).
+Three command families, one router, no menus. Mirror commands are
+defined in [`../docs/mvp/architecture.md`](../docs/mvp/architecture.md) §2;
+Engine commands in
+[`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md);
+observation commands in
+[`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md).
 
 | Command | Behavior | Writes |
 |---------|----------|--------|
@@ -119,15 +126,22 @@ commands in [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md).
 | `/reflect` | Weekly recall of validated insights; "still resonating?". Never proposes new patterns. | `reflections/` |
 | `/ask <q>` | Read-only grounded Q&A over validated insights + reflections, with citations. | None |
 | `/bootstrap` | Historical-entry mode: explicit `occurred_at`, proposals suppressed until `/bootstrap done`. | as `/log`/`/checkin` |
+| `/pain` `/ate` `/drank` `/bm` `/mood` `/obs <kind>` | Observation micro-logs — one line, deterministic, sub-second, no LLM. All alias one router intent. | `observations/` (+ `registries/` on match) |
+| `/obs where <place>` | Sticky stated location (feeds enrichers; never device-derived). | `observations/`, `registries/places/` |
+| `/day [date]` | Read-only joined day view: engine record + observations + enrichment + entry list. | None |
 
-Commands beyond this list are out of scope for the MVP.
+Commands beyond this list are out of scope for the MVP. Three
+families, one router: the Mirror five, the Engine four, the
+observation micro-logs (phases 11–12).
 
 ## 5. Required storage layout
 
 Defined in [`../docs/mvp/data-model.md`](../docs/mvp/data-model.md)
 (Mirror trees, naming conventions, TZ and collision rules — all
-unchanged) plus [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md)
-(Engine tree and schemas).
+unchanged), [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md)
+(Engine tree and schemas), and
+[`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md)
+(observations, registries, and projections trees and schemas).
 
 ```
 ~/.lucid/
@@ -138,11 +152,14 @@ unchanged) plus [`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md)
 ├── people/                  # lightweight person references (.json)
 ├── sessions/                # session metadata + channel memory
 ├── reflections/             # weekly reflection records (.md)
-└── engine/                  # ENGINE TREE — the only tree the Engine module touches
-    ├── chain.json           # chain config (hand-edited at Retros only)
-    ├── witness.json         # witness contract + consent record
-    ├── days/                # one record per logical day (append-only per day)
-    └── status.json          # derived streak/adherence projection (rebuildable)
+├── engine/                  # ENGINE TREE — the only tree the Engine module touches
+│   ├── chain.json           # chain config (hand-edited at Retros only)
+│   ├── witness.json         # witness contract + consent record
+│   ├── days/                # one record per logical day (append-only per day)
+│   └── status.json          # derived streak/adherence projection (rebuildable)
+├── observations/            # frozen-envelope events, JSONL per logical day
+├── registries/              # long-lived referents: injuries, threads, places, eras
+└── projections/             # rebuildable views/exports — deletable wholesale
 ```
 
 All v1 mutability and naming rules stand. New binding rules:
@@ -150,28 +167,38 @@ All v1 mutability and naming rules stand. New binding rules:
 rewrite); `status.json` must be byte-reproducible from `days/` +
 `chain.json`; `capacity` and `limiter_tag` exist only in the engine
 tree; `chain_start` is stamped once, on the first completed close-out.
+Observation rules: the event envelope is frozen; JSONL lines are never
+rewritten (corrections are new events via `refs.corrects`); registries
+are primary, backup-critical data with append-only `status_history[]`;
+`projections/` is deletable wholesale. **The backup set is `raw/`,
+`observations/`, `registries/`, `engine/` (minus `status.json`).**
 
 ## 6. Agent / module boundaries
 
 The six v1 modules stand as specced in
-[`../docs/mvp/architecture.md`](../docs/mvp/architecture.md). One
-module is added:
+[`../docs/mvp/architecture.md`](../docs/mvp/architecture.md). Two
+modules are added:
 
 | Module | Charter | Replaceable when |
 |--------|---------|------------------|
 | **Engine module** | Defend one committed daily chain: bell, close-out capture, logical-day and streak arithmetic, mode-relative adherence, escalation tripwire. Deterministic; agent-free; reads/writes `engine/` only. | The standalone app absorbs it; the schemas and dead-man semantics survive. |
+| **Observations module** | Take inventory: micro-log parsing on the frozen event envelope, registries, the day view, the enrichment job, series/packet exports. Deterministic; agent-free; owns `observations/`, `registries/`, `projections/`. | Same — the envelope and consent rules survive any UI. |
 
-The Engine module sits beside the storage adapter and router — it is
-**not** an agent contract, because it contains no reasoning step. The
-scheduled tripwire is the one component the router does not order; it
-runs on the harness scheduler and uses the same storage adapter ops.
+Both sit beside the storage adapter and router — neither is an agent
+contract, because neither contains a reasoning step. Two components
+run on the harness scheduler rather than the router: the Engine
+tripwire and the enrichment job; both use the same storage adapter
+ops (the enrichment job additionally uses the single audited
+`fetch_enrichment` network op).
 
 Cross-cutting agent rules from
 [`../docs/mvp/agent-contracts.md`](../docs/mvp/agent-contracts.md)
-stand unchanged, with one addition: **no agent may read the
-`engine/` tree**, and the Engine module may invoke no agent. The
-sanctuary boundary is enforced by construction in both directions
-(the same `AgentContext<T>` mechanism as the context-slice gate).
+stand unchanged, with one addition: **no agent may read the `engine/`,
+`observations/`, or `registries/` trees, nor any projection derived
+from them** (path-prefix denylist, fail closed), and the modules may
+invoke no agent. The sanctuary boundary is enforced by construction in
+both directions (the same `AgentContext<T>` mechanism as the
+context-slice gate).
 
 ## 7. Non-goals
 
@@ -194,6 +221,15 @@ proposals, no production data in the repo — with these amendments:
   reports days-to-gate; humans decide gates.
 * **Added:** No multi-chain support; one chain until the first gate.
 * **Added:** No Tier 2 passive telemetry (screen metrics, wearables).
+* **Added:** No nutrition database, calorie counting, or diet scoring —
+  intake logging is inventory, permanently
+  ([`../docs/observations.md`](../docs/observations.md) §0, §9).
+* **Added:** No device-derived location, health-kit, or wearable sync;
+  enrichers are opt-in and outbound-minimal (coordinates + dates only).
+* **Added:** No medical advice or diagnosis anywhere; health
+  projections are data for the user and their care team.
+* **Added:** No agent reads observations or registries in the MVP;
+  correlation and excavation surfaces are post-MVP contract diffs.
 
 ## 8. Success metrics
 
@@ -210,6 +246,9 @@ S-9 "felt like Lucid"). v2 adds:
 | S-13 | The tripwire fires on absence, honestly and narrowly. | Simulated clock: 1 miss → exactly one L1 naming the floor; 2 consecutive → exactly one L2; L2 payload greps clean of journal/capacity content; unconfirmed witness blocks L2. |
 | S-14 | The chain survives tooling failure. | Kill the harness at bell time; the phone-alarm fallback + next-day `corrections[]` backfill path is documented and exercised once. Priority order holds: no data-loss scenario blocks the practice. |
 | S-15 | After 30 days: an honest engine record (every logical day accounted: completed, floor, missed, or Away) **and** ≥ 1 validated insight exist for the same user. | The falsifiable question in §1, checked at the first gate. |
+| S-16 | Micro-logs are frictionless and judgment-free: sub-second ack, valid frozen envelope, correct logical-day attribution across the 04:00 boundary, and no evaluative language in any ack template. | Latency sample; envelope validator; boundary fixture; grep ack templates for streak/score/praise terms. |
+| S-17 | Enrichment is provably minimal: every logged outbound query contains only coordinates and dates; enricher events are source-attributed and idempotent. | Grep the enricher's query log; rerun fixture. |
+| S-18 | The clinician packet renders capacity/mode + pain series + med record with zero journal content by default. | Generate against fixtures; grep output for body text. |
 
 ## 9. Build phases
 
@@ -224,16 +263,24 @@ v2 adds:
    `status.json`, mode-relative adherence, budget burn.
 10. **Tripwire.** Scheduled job, bell prompt, L1/L2 templates,
     witness confirmation flow, dead-man semantics.
+11. **Micro-logs + registries + `/day`.** The observation envelope,
+    deterministic parsers, registry keys, the joined day view.
+12. **Enrichment + exports.** Sticky location, one enricher
+    (weather), series CSV, clinician packet v0.
 
 Acceptance criteria for 8–10 live in
-[`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md).
-**Dependency note:** phases 8–10 depend only on phases 1–2. For a
-user whose primary failure mode is ignition, the recommended build
-order is 1, 2, 8, 9, 10, then 3–7 — the chain gets defended weeks
-before the first pattern proposal, and the accumulating close-out
-journal lines give Structuring a real corpus on day one. The
-cathedral clause binds throughout: build hours never displace runtime
-execution ([`../docs/architecture.md`](../docs/architecture.md) §8).
+[`../docs/mvp/engine-module.md`](../docs/mvp/engine-module.md); for
+11–12 in
+[`../docs/mvp/observations-module.md`](../docs/mvp/observations-module.md).
+**Dependency note:** phases 8–12 depend only on phases 1–2 (phase 12
+additionally needs the harness scheduler, which phase 10 also uses but
+does not own). For a user whose primary failure mode is ignition, the
+recommended build order is 1, 2, 8, 9, 10, 11, 12, then 3–7 — the
+chain gets defended and the body record starts accumulating weeks
+before the first pattern proposal, and the close-out journal lines
+give Structuring a real corpus on day one. The cathedral clause binds throughout: build
+hours never displace runtime execution
+([`../docs/architecture.md`](../docs/architecture.md) §8).
 
 ## 10. How to use this spec
 

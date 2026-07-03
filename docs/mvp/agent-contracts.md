@@ -56,11 +56,18 @@ future agent unless a contract explicitly overrides them.
   repo reference synthetic content only
   ([`product-principles.md`](product-principles.md) §9).
 * **The sanctuary boundary is bidirectional.** No agent may read
-  `~/.lucid/engine/` (no router plan may include it in any slice), and
-  the Engine module ([`engine-module.md`](engine-module.md)) may
-  invoke no agent. Enforcement teeth and reflective content never
-  touch (architecture P3); the only join is that `/closeout`'s journal
-  line enters `raw/` as an ordinary entry, via the router.
+  `~/.lucid/engine/`, `~/.lucid/observations/`, `~/.lucid/registries/`,
+  or any projection derived from them — the router's context-slice
+  gate enforces this as a **path-prefix denylist at slice-build time,
+  fail closed**. The Engine and observation modules
+  ([`engine-module.md`](engine-module.md),
+  [`observations-module.md`](observations-module.md)) invoke no agent.
+  Enforcement teeth, body data, and reflective content never touch
+  (architecture P3); the only join is that `/closeout`'s journal line
+  enters `raw/` as an ordinary entry, via the router. Widening agent
+  access to observation-derived data requires both a contract diff on
+  this page and a recorded per-instance opt-in
+  (`observations/config.json` `agent_slice_optins`), default off.
 
 These rules are non-negotiable. Every contract below assumes them.
 
@@ -509,10 +516,19 @@ in, or any external system.
 
 ### Purpose
 
-Be the last filter on every outbound Lucid message and the gate on any
-proposed external action. Pass safe outputs through unchanged; rewrite
-or block unsafe ones with a flagged reason. Safety/Consent is the only
-agent that ever blocks another agent's output.
+Be the last filter on every **agent-authored** outbound Lucid message
+and the gate on any proposed external action. Pass safe outputs
+through unchanged; rewrite or block unsafe ones with a flagged reason.
+Safety/Consent is the only agent that ever blocks another agent's
+output. Scope, binding (mirrors
+[`product-principles.md`](product-principles.md) §6): deterministic
+module output (Engine templates, observation acks, `/day` views) does
+not route through this gate — it is static or user-echo content,
+pre-vetted against the phrase blocklist at commit time — and verbatim
+user-authored text quoted back to the user (a micro-log note, an
+insight in the user's own words) is exempt from the external-action
+verb and diagnostic-language rules: "need to call the doctor" in the
+user's own note is testimony, not an action attempt.
 
 ### Inputs
 

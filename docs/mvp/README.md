@@ -116,8 +116,10 @@ transcript lives in [`steel-thread.md`](steel-thread.md).
 After these docs are approved, the very first build sequence is:
 
 1. **Scaffold `~/.lucid/`** — create the layout described in
-   [`data-model.md`](data-model.md) (raw, processed, insights, sessions,
-   reflections) with a single seed file proving the path is writable.
+   [`data-model.md`](data-model.md) (raw, processed, insights, people,
+   sessions, reflections) with a single seed file proving the path is
+   writable. (Module trees come with their phases: `engine/` in phase
+   8; `observations/`, `registries/`, `projections/` in phase 11.)
 2. **Implement `/log`** — the simplest capture: take a one-line message,
    write an immutable raw entry, return an entry id. No structuring yet.
 3. **Implement `/checkin`** — the guided variant: ask 2–4 clarifying
@@ -140,11 +142,17 @@ After these docs are approved, the very first build sequence is:
    mode-relative adherence projection, error-budget burn.
 10. **The tripwire** — scheduled bell prompt and L1/L2 escalation with
     dead-man semantics and the witness consent flow.
+11. **Observation micro-logs + registries + `/day`** — the frozen
+    event envelope, deterministic one-line capture for pain, intake,
+    mood, and the rest, plus the joined day view.
+12. **Enrichment + exports** — sticky stated location, one weather
+    enricher, series CSVs, clinician packet v0.
 
-Phases 8–10 depend only on phases 1–2 and may be built immediately
+Phases 8–12 depend only on phases 1–2 and may be built immediately
 after them; [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §9
 recommends exactly that order for ignition-limited users. Acceptance
-criteria for 8–10 live in [`engine-module.md`](engine-module.md).
+criteria for 8–10 live in [`engine-module.md`](engine-module.md), for
+11–12 in [`observations-module.md`](observations-module.md).
 
 Anything beyond this list is post-MVP. See
 [`claude-code-workflow.md`](claude-code-workflow.md) for how a coding agent
@@ -158,12 +166,13 @@ should execute this sequence.
 | [`product-principles.md`](product-principles.md) | Implementation principles derived from `vision.md`; voice; the literal phrase blocklist and bundling rules. |
 | [`steel-thread.md`](steel-thread.md) | The exact end-to-end user loop, with happy / rejected / no-pattern / soft-contradiction paths, the `/ask` stage, and synthetic transcripts. |
 | [`engine-module.md`](engine-module.md) | The Engine MVP slice: `/closeout`, `/mode`, `/status`, the `~/.lucid/engine/` tree, streak/adherence math, the escalation tripwire, the pre-committed-send consent amendment, and acceptance criteria for phases 8–10. |
+| [`observations-module.md`](observations-module.md) | The observation MVP slice: micro-logs (`/pain`, `/ate`, `/bm`, `/mood`, `/obs`), registries (injuries, threads, places, eras), the `/day` view, one opt-in enricher, first exports, and acceptance criteria for phases 11–12. Canonical layer spec: [`../observations.md`](../observations.md). |
 | [`local-runtime.md`](local-runtime.md) | How Lucid runs locally on OpenClaw or Hermes via Discord before a standalone app exists. |
 | [`architecture.md`](architecture.md) | Module boundaries: harness, router, agents, storage adapter, structuring/reflection pipeline, safety gates. |
 | [`data-model.md`](data-model.md) | `~/.lucid/` layout, naming conventions (incl. `person_key` algorithm and TZ rule), record schemas, and SQLite migration. |
 | [`agent-contracts.md`](agent-contracts.md) | Input/output/access/failure rules for Intake, Structuring, Reflection (`propose` / `surface_for_recall` / `answer_grounded`), and Safety/Consent. |
 | [`error-states.md`](error-states.md) | Unified table of every failure mode: per-agent, storage, transport, empty-state. Each row names trigger, behavior, user message, disk side effect, recovery. |
-| [`acceptance-criteria.md`](acceptance-criteria.md) | Per-phase pass/fail checklist mapped to the seven build phases. Concrete test cases, verification commands, definition of done. |
+| [`acceptance-criteria.md`](acceptance-criteria.md) | Per-phase pass/fail checklist for build phases 1–7 (phases 8–10 carry theirs in [`engine-module.md`](engine-module.md), 11–12 in [`observations-module.md`](observations-module.md)). Concrete test cases, verification commands, definition of done. |
 | [`claude-code-workflow.md`](claude-code-workflow.md) | How a coding agent should build Lucid: docs-first planning, small commits, deterministic scripts, bounded subagents. |
 | [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) | Final concise scope spec synthesized from the docs. |
 

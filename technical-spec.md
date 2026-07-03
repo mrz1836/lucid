@@ -35,6 +35,18 @@ top of it:
    narrative, and suggestion duties — voice and encouragement, never
    teeth.
 
+4. **The observation layer is a new, agent-free capture family.**
+   Structured body/context events (pain, intake, elimination, mood,
+   sleep, measurements, memory fragments) live in a frozen event
+   envelope with registries for long-lived referents (injuries,
+   threads, places, eras — generalizing the `people` pattern) and
+   deterministic enrichers (weather, daylight) appending context —
+   [docs/observations.md](docs/observations.md). Conceptual schema
+   additions: `observations` (envelope columns + JSON payload),
+   `registries`, `enrichment_log`. Projections (series, episodes,
+   correlates, clinician packet) are computed views; correlation
+   findings route through the resonance gate like any inference.
+
 The Consolidation Agent's "dream state" and the adaptive-evolution
 loop remain deferred until after the MVP in
 [specs/mvp-scope.md](specs/mvp-scope.md); the Engine's weekly Retro is

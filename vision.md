@@ -219,15 +219,15 @@ Everything goes into your secure "life stream" that the system analyzes over tim
 * **Emotion picker** — Tap an emotion wheel when words won't come.
 * **Voice memo** — Speak freely. The system transcribes and extracts structure later.
 * **Photo + caption** — Capture a moment visually with a short note.
-* **Rating pulse** — "How are you right now?" 1-10 slider. Takes 2 seconds.
+* **Rating pulse** — "How are you right now?" One tap, 2 seconds. (Realized as the `/mood` observation on its 1–5 scale — see [docs/observations.md](docs/observations.md).)
+* **Body micro-logs** — `/pain 6 shoulder`, `/ate eggs and toast`, `/bm 4`, `/mood 2 wired`. One line each, clinical-standard scales, building a medical-grade personal record over years — pain, injuries, meals, sleep, symptoms — plus the world's half of the day (weather, daylight, where you were) filled in automatically from sources you approve. Inventory, never obligation: nothing here is ever scored or streaked. See [docs/observations.md](docs/observations.md).
 
 The philosophy: **capture first, structure later.** Never let the interface get in the way of the moment.
 
 **Streaks without punishment:**
-* Streaks track consistency but don't reset to zero on a miss
-* Missing a day prompts a gentle check-in: "You were quiet yesterday. Everything okay?"
-* The system celebrates returns, not just perfect attendance
-* One clean boundary: this applies to everything you *say* — capture volume, journaling depth, silence about content are never scored. The Engine separately enforces the *act* of showing up for the small set of practices you formally committed to ([docs/engine.md](docs/engine.md)), and even there a return is one floor-level night, never makeup work. Teeth on acts, amnesty on words.
+* Streaks exist only where you granted them teeth: the Engine tracks the small set of practices you formally committed to ([docs/engine.md](docs/engine.md)) — and even there a return after a miss is one floor-level night, never makeup work
+* Everything you *say* is never scored: capture volume, journaling depth, observation logging, silence about content carry no streaks, no quotas, no "you were quiet" pushes — if you've been away, the welcome happens when *you* open the door, at your next check-in, not via a notification
+* Teeth on acts, amnesty on words — the one clean boundary the whole system is built on
 
 **Historical entries:**
 Not everything important happened today. Lucid lets you add past events—traumas, key life moments, relationship history, formative experiences—and places them in the correct temporal context. When you add something from the past, it can recontextualize patterns the system has already noticed.

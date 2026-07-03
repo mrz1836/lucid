@@ -11,14 +11,19 @@ The MVP entrypoint is [`README.md`](README.md). The exact user loop is in
 
 > **v2 note.** The system architecture in
 > [`../architecture.md`](../architecture.md) added the **Engine** — a
-> behavior subsystem with committed-practice accountability. Its MVP
-> slice ([`engine-module.md`](engine-module.md)) amends three things on
-> this page: the role table gains an Engine row (§1), the steel thread
-> gains a nightly engine loop joined at `/closeout` (§2), and
-> approval-before-action gains exactly three pre-committed template
-> sends (§7). Everything else on this page stands unchanged, and the
-> sanctuary rule is absolute: nothing the Engine does ever touches,
-> scores, or exposes reflective content (architecture P3).
+> behavior subsystem with committed-practice accountability — and the
+> **observation layer** ([`../observations.md`](../observations.md)).
+> Their MVP slices ([`engine-module.md`](engine-module.md),
+> [`observations-module.md`](observations-module.md)) amend four
+> things on this page: the role table gains an Engine row (§1), the
+> steel thread gains a nightly engine loop and an observation
+> micro-log family (§2), approval-before-action gains three
+> pre-committed template sends plus a consent class for enricher
+> *fetches* (§7), and the voice gate is scoped to agent-authored text
+> (§6). Everything else stands unchanged, and the sanctuary rule is
+> absolute: nothing the Engine or the enrichers do ever touches,
+> scores, or exposes reflective content (architecture P3), and
+> observations are inventory, never obligation.
 
 ## 1. Lucid's five long-term roles are preserved
 
@@ -51,8 +56,14 @@ in the MVP. This is the single most important scope guard in the project.
 
 Practical consequences:
 
-* No capture mode beyond `/log` (free-form), `/checkin` (guided), and
-  the `/closeout` journal line (deterministic).
+* No conversational capture mode beyond `/log` (free-form), `/checkin`
+  (guided), and the `/closeout` journal line. The observation
+  micro-logs ([`observations-module.md`](observations-module.md)) are
+  data-entry shorthands, not flows — one line, one intent, no LLM;
+  their ack may carry at most one deterministic, budgeted, always-
+  skippable curiosity micro-question per day (never a standalone
+  ping, silence never recorded, backoff per
+  [`../observations.md`](../observations.md) §6).
 * No second structuring path beyond a single extraction pass.
 * No second reflection cadence beyond one weekly recall command.
 * No alternate UIs running in parallel.
@@ -143,8 +154,16 @@ and verified by grep, not to cover every edge case.
 
 The Safety/Consent agent in
 [`agent-contracts.md`](agent-contracts.md) §4 compiles the regex
-below from this section. Any candidate outbound message that matches
-**must** be rewritten or blocked; this is the source of truth.
+below from this section. Any **agent-authored** candidate outbound
+message that matches **must** be rewritten or blocked; this is the
+source of truth. Scope, binding: the gate governs text an agent
+composed. Verbatim user-authored content quoted back to the user — a
+micro-log note ("need to call the doctor") echoed in an ack or a
+`/day` view, an insight statement in the user's own words — is the
+user's testimony, not agent speech, and is exempt; likewise the
+deterministic template output of the Engine and observation modules,
+which is pre-vetted against this list at commit time rather than at
+runtime.
 
 ```regex
 # Diagnostic / labeling
@@ -225,9 +244,19 @@ recorded flag, with no LLM in the path; the full contract is
 else sends, ever. If a future feature would, the docs require it to
 land behind an explicit, user-visible approval gate.
 
+**Sends are not the same thing as fetches.** Separately from the
+message-send ceiling above, opt-in **enrichers**
+([`../observations.md`](../observations.md) §5) perform read-only,
+outbound-minimal data fetches (quantized coordinates + dates to a
+pinned, keyless endpoint, through a single audited adapter op, never
+content, never identifiers, disabled by default). They post no
+messages anywhere and can never be a recovery or notification path.
+
 This is a named constraint even though Agent-Self is deferred. Encoding it
 now prevents the seam from being filled with a silently-autonomous agent
-later — the three engine templates are the ceiling, not a precedent.
+later — the three engine templates are the ceiling for autonomous
+messaging, not a precedent, and the enricher consent class is the
+ceiling for autonomous fetching.
 
 ## 8. Simple-first architecture
 
@@ -260,8 +289,8 @@ Each principle above has a concrete check:
 
 | Principle | Verification |
 |-----------|--------------|
-| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are `/log`, `/checkin`, `/reflect`, `/ask`, `/bootstrap`, and the engine four (`/closeout`, `/closeout skip`, `/mode`, `/status`). |
-| Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals or the chat-transport caveat in [`local-runtime.md`](local-runtime.md). |
+| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`../../specs/mvp-scope.md`](../../specs/mvp-scope.md) §4: the Mirror five, the Engine four, and the observation micro-logs. |
+| Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals, the chat-transport caveat in [`local-runtime.md`](local-runtime.md), or the consented enricher-fetch class in §7 / [`observations-module.md`](observations-module.md). |
 | Hypotheses, not diagnoses | Grep MVP docs for diagnostic phrases ("you are", "clearly", "diagnos", "guarantee"); each hit must be a non-goal call-out. |
 | Approval before action | Grep for "send automatically", "auto-send", or similar; should appear only as forbidden patterns. |
 | Synthetic examples | Manual review of every transcript and named person against `vision.md` style — none reference Z or any real identity. |
