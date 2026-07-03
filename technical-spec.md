@@ -4,6 +4,44 @@
 
 ---
 
+## v2 addendum — the behavioral Engine and the Ledger
+
+This spec predates the architecture v2 merge in
+[docs/architecture.md](docs/architecture.md). Everything below remains
+the reference design for the **Mirror** half (agents, consolidation,
+memory graph, historical reprocessing). Three reconciliations apply on
+top of it:
+
+1. **The Engine is a new, agent-free module.** The behavioral engine
+   ([docs/engine.md](docs/engine.md)) is deterministic by design —
+   close-out capture, streak arithmetic, template escalation — and is
+   deliberately *not* an agent in the table below (architecture P9: the
+   runtime never depends on AI). Its conceptual schema additions:
+   `chains` (config, versioned at retros), `day_records` (per logical
+   day: link states, declared mode, capacity, floor/miss flags),
+   `escalations` (L1/L2 events with dead-man provenance), `witnesses`
+   (contract + consent record). Engine tables are readable by
+   witness-facing projections only in topline form; no agent reads them
+   (architecture P3).
+2. **The raw stream is the Ledger.** What this spec calls the Raw layer
+   and the Engine's event log are one append-only, bitemporal store
+   (`recorded_at` / `occurred_at` — already specified below). Engine
+   events and Mirror captures are peers in it; every derived layer
+   (Processed, Knowledge, streaks, balance views) is a rebuildable
+   projection over it (architecture P2).
+3. **The Coach agent narrows.** Accountability for committed practices
+   moved to the Engine (with real enforcement mechanics the Coach was
+   never allowed to have). The Coach agent retains goals, progress
+   narrative, and suggestion duties — voice and encouragement, never
+   teeth.
+
+The Consolidation Agent's "dream state" and the adaptive-evolution
+loop remain deferred until after the MVP in
+[specs/mvp-scope.md](specs/mvp-scope.md); the Engine's weekly Retro is
+the human-run precursor of both.
+
+---
+
 ## Agent Architecture
 
 The app is powered by a modular set of **framework-agnostic agents**:

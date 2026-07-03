@@ -39,7 +39,7 @@ Lucid is built to answer one powerful question:
 
 ## **3. What Lucid Is**
 
-Lucid is a **secure, AI-powered personal operating system** for your inner life. It plays four roles:
+Lucid is a **secure, AI-powered personal operating system** for your inner life. It plays five roles:
 
 ### **Journal**
 A journal that remembers everything and finds the patterns you can't see. Daily reflections that compound into weekly insights, monthly patterns, yearly transformations.
@@ -49,6 +49,9 @@ A therapist that builds a living map of your fears, triggers, wounds, and growth
 
 ### **Coach**
 A coach that tracks your goals, celebrates your progress, and gently reminds you of what you said mattered. It gives *actionable guidance*, not abstract ideas.
+
+### **Engine**
+A behavior layer with real teeth — because insight that is never applied is just a more articulate way of staying stuck. The Engine initiates and defends a small set of committed daily practices: a bell that starts the chain (never memory, never motivation), a floor version for the worst days, honest escalation when you slip — up to a human witness who sees only that you showed up, never what you said. Reflection tools fail without a behavior layer; behavior tools fail without a reflection layer. Lucid is deliberately both, with a hard boundary between them: the Engine enforces *acts*, and everything you *say* in reflection lives under absolute amnesty. Full design in [docs/architecture.md](docs/architecture.md) and [docs/engine.md](docs/engine.md).
 
 ### **Agent-Self**
 An extension of you that helps you **act**. When your friend's birthday is coming up, Lucid drafts a message in your voice, suggests when to send it, and waits for your approval. When you've been meaning to reach out to someone, it proposes what you might say. When you made a commitment and forgot, it reminds you—with a draft ready to go.
@@ -141,6 +144,8 @@ The system shifts between four modes based on context:
 
 Mode detection happens automatically—if you're processing grief, the system won't jump into coach mode. But you can always override: "I don't need comfort right now, I need a plan."
 
+*(Naming note: architecture v2 renames the Therapist voice mode to **Reflect** and the Mirror voice mode to **Echo** — the old names collided with the clinical boundary and the Mirror subsystem. See [docs/architecture.md](docs/architecture.md) §6; the behaviors in the table above are unchanged.)*
+
 The voice also adapts to your preferences over time. Some people want more warmth; others want it clinical and direct. Lucid learns which approach helps you move forward.
 
 ---
@@ -222,6 +227,7 @@ The philosophy: **capture first, structure later.** Never let the interface get 
 * Streaks track consistency but don't reset to zero on a miss
 * Missing a day prompts a gentle check-in: "You were quiet yesterday. Everything okay?"
 * The system celebrates returns, not just perfect attendance
+* One clean boundary: this applies to everything you *say* — capture volume, journaling depth, silence about content are never scored. The Engine separately enforces the *act* of showing up for the small set of practices you formally committed to ([docs/engine.md](docs/engine.md)), and even there a return is one floor-level night, never makeup work. Teeth on acts, amnesty on words.
 
 **Historical entries:**
 Not everything important happened today. Lucid lets you add past events—traumas, key life moments, relationship history, formative experiences—and places them in the correct temporal context. When you add something from the past, it can recontextualize patterns the system has already noticed.
@@ -339,10 +345,10 @@ This is your mind, your life, your data—you control it completely.
 
 ## **8. What We're Building**
 
-### **MVP: Desktop App**
-* Local desktop application (Mac/Linux)
-* Text-based daily check-ins and reflections
-* Core agent system (intake, structuring, therapist, coach, reflection)
+### **MVP: The unified nightly loop**
+* Runs on an existing local chat harness (see [specs/mvp-scope.md](specs/mvp-scope.md)) — a standalone desktop app is the follow-on, not the precondition
+* The Engine's two-minute nightly close-out doubles as capture: one act writes the day's record and the journal entry
+* Core agent system for the Mirror half (intake, structuring, reflection); the Engine half is deliberately agent-free
 * Markdown/JSON data storage you own completely
 
 ### **Future Possibilities**
