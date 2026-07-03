@@ -57,13 +57,3 @@ node_modules/
 .env
 .env.*
 !.env.example
-
-# Deployment files
-infrastructure/bin
-
-# Lambda deployment artifacts
-functions/*/bootstrap
-functions/*/deployment.zip
-*.zip
-functions/playboro-api/playboro-api
-functions/api-authorizer/api-authorizer
