@@ -9,7 +9,7 @@ storage decision, and command flow should be checkable against this page.
 The MVP entrypoint is [`README.md`](README.md). The exact user loop is in
 [`steel-thread.md`](steel-thread.md).
 
-> **v2 note.** The system architecture in
+> **Integration note.** The system architecture in
 > [`../architecture.md`](../architecture.md) added the **Engine** — a
 > behavior subsystem with committed-practice accountability — and the
 > **observation layer** ([`../observations.md`](../observations.md)).

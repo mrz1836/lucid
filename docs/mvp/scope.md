@@ -1,13 +1,14 @@
 # Lucid MVP Scope
 
-> **Status:** build-ready, v2 (unified nightly loop). This is the
+> **Status:** build-ready (the unified nightly loop). This is the
 > canonical scope contract for the first implementable Lucid steel
-> thread. It synthesizes the doc set in [`README.md`](README.md)
-> into a single page a coding agent or reviewer can read in one
-> sitting. v1 of this spec was Mirror-only; v2 adds the Engine module
-> per [`../architecture.md`](../architecture.md) (the
-> system-level merge) and
-> [`engine-module.md`](engine-module.md).
+> thread. It synthesizes the surrounding doc set (entrypoint:
+> [`README.md`](README.md)) into a single page a coding agent or
+> reviewer can read in one sitting — the Mirror thread plus the
+> Engine and observation modules, per
+> [`../architecture.md`](../architecture.md) (the system-level
+> design), [`engine-module.md`](engine-module.md), and
+> [`observations-module.md`](observations-module.md).
 
 The longer surfaces — vision, system architecture, engine spec,
 principles, runtime, MVP architecture, data model, agent contracts,
@@ -63,11 +64,11 @@ close-out is the unifying act: one command feeds both subsystems.
 | External action | **Messages:** none, except the pre-committed templates — bell prompt, L1 nudge (user's own channel), L2 witness escalation + monthly heartbeat (topline status only, dead-man semantics, witness-confirmed). **Fetches:** none, except opted-in enrichers — read-only, quantized coordinates + dates to pinned keyless endpoints, through one audited adapter op (S-17). | Pre-commitment is consent granted in advance (architecture P5); a system with an unwired escalation path is a suggestion; fetches are not sends. | [`engine-module.md`](engine-module.md) §"Consent amendment", [`observations-module.md`](observations-module.md) §"The enrichment job" |
 | Sanctuary boundary | The Engine module reads/writes `~/.lucid/engine/` only; no read path to raw/processed/insights/people. Witness view computed from Engine data only. | Teeth attach to acts, never to content (architecture P3). | [`../engine.md`](../engine.md) §4 |
 | Voice | Trusted advisor — warm, honest, non-judgmental, humble about certainty. Hypothesis language only. The Engine has no voice: fixed templates. | Encodes the only voice constraints a future agent prompt needs. | [`product-principles.md`](product-principles.md) §6 |
-| Implementation | Contracts are language-agnostic; the build is **Go** — one static `lucid` binary (core + CLI), with the chat harness as a thin surface over the same router. Language and database lock-in are reviewed at the post-MVP retro. | Single-binary durability suits a tool that must outlive its tooling; the owner's toolchain is Go; nothing locks before the loop earns it. | [`../adr/0001-implementation-language.md`](../adr/0001-implementation-language.md), [`0003`](../adr/0003-runtime-surface.md) |
+| Implementation | Contracts are language-agnostic; the build is **Go** — one static `lucid` binary (core + CLI), with the chat harness as a thin surface over the same router. Core dependencies: `go-flywheel` (durable job runtime for bell/tripwire/heartbeat/enrichment when installed) and `go-foundation` (base layer). Language and database lock-in are reviewed at the post-MVP retro. | Single-binary durability suits a tool that must outlive its tooling; the owner's toolchain is Go and first-party; nothing locks before the loop earns it. | [`../adr/0001-implementation-language.md`](../adr/0001-implementation-language.md), [`0003`](../adr/0003-runtime-surface.md), [`0004`](../adr/0004-core-dependencies.md) |
 
 ## 3. Steel-thread flow
 
-Two threads, one substrate. The Mirror thread is unchanged from v1
+Two threads, one substrate. The Mirror thread is the original steel thread
 (full version with happy / rejected / no-pattern paths in
 [`steel-thread.md`](steel-thread.md)); the
 Engine loop wraps around it nightly.
@@ -163,7 +164,7 @@ unchanged), [`engine-module.md`](engine-module.md)
 └── projections/             # rebuildable views/exports — deletable wholesale
 ```
 
-All v1 mutability and naming rules stand. New binding rules:
+All the data-model mutability and naming rules stand. New binding rules:
 `engine/days/` is append-only per day-id (`corrections[]`, never
 rewrite); `status.json` must be byte-reproducible from `days/` +
 `chain.json`; `capacity` and `limiter_tag` exist only in the engine
@@ -176,7 +177,7 @@ are primary, backup-critical data with append-only `status_history[]`;
 
 ## 6. Agent / module boundaries
 
-The six v1 modules stand as specced in
+The six Mirror-thread modules stand as specced in
 [`architecture.md`](architecture.md). Two
 modules are added:
 
@@ -203,7 +204,7 @@ context-slice gate).
 
 ## 7. Non-goals
 
-Everything in the v1 non-goals list stands — no mobile/web/desktop
+Every Mirror-thread non-goal stands — no mobile/web/desktop
 app, no SQLite/graph/consolidation, no Therapist surface, no
 Agent-Self or send path beyond the three pre-committed templates, no
 frameworks layer, no shared profiles, no cloud, no multi-pattern
@@ -234,13 +235,20 @@ proposals, no production data in the repo — with these amendments:
 
 ## 8. Success metrics
 
-S-1 … S-9 from v1 stand verbatim (raw-entry integrity, idempotent
-structuring, one-pattern cap, three validation paths, weekly recall,
-grounded `/ask`, public-boundary and diagnostic-language greps, and
-S-9 "felt like Lucid"). v2 adds:
+The MVP succeeds when each of the following is true on a single
+user's host. These are evaluable, not aspirational.
 
 | # | Metric | How it is checked |
 |---|--------|-------------------|
+| S-1 | The user can run `/log` and `/checkin` and find an immutable raw entry under `~/.lucid/raw/` within the same session. | File present; frontmatter valid; body matches what was sent. |
+| S-2 | Structuring produces a processed artifact for every raw entry, idempotently. | `~/.lucid/processed/<raw-id>.json` exists; rerunning the structuring pass overwrites only the artifact, never the raw entry. |
+| S-3 | Reflection proposes at most one possible pattern per session, in hypothesis language. | Per-session log shows ≤1 proposal; Safety/Consent gate logs zero rewrites for diagnostic phrasing on accepted outputs. |
+| S-4 | Accepted, nuanced, and rejected validation paths each produce the right artifacts (insight with provenance, insight with `nuanced_from_proposal: true`, or appended `rejected_proposals[]`). | Spot-check three sessions, one per path. |
+| S-5 | `/reflect` lists validated insights from the past 7 days and updates `last_confirmed_at` / `last_softened_at` / `retired_at` on user response without creating new proposals. | Weekly reflection record present; insight frontmatter updated; no new proposal IDs. |
+| S-6 | `/ask` answers a free-form question only with `citations[]` whose ids appear in the supplied slice; never proposes a new pattern; never writes any record under `~/.lucid/`. | Spot-check three `/ask` invocations over a populated store; verify `citations[]` ⊆ slice; verify `~/.lucid/` is byte-identical before and after each `/ask`. |
+| S-7 | Public-boundary check passes: forbidden-term sweep for private integration names and private repo paths returns no matches; use self-nonmatching patterns such as `z[a]i`, `Z[a]i`, and `~/projects/z[a]i`. | CI or manual grep. |
+| S-8 | Diagnostic-language check passes: `grep -R "guarantee\|send automatically" ~/projects/lucid/docs ~/projects/lucid/README.md` shows no hits outside non-goal call-outs. | Manual grep. |
+| S-9 | The user reports the loop "felt like Lucid" — voice was trusted-advisor, hypothesis framing held, no nudges arrived without invitation. | Subjective — captured in the first weekly `/reflect` after one week of real use. S-9 is the only subjective metric and the final test: the platform can pass S-1..S-8 and still fail the product. |
 | S-10 | `/closeout` completes in ≤ 2 minutes of user interaction and writes both the day record and the raw journal entry. | Prompt-count cap (links + 3); both files present and cross-referenced (`raw_entry_id`). |
 | S-11 | Logical-day math is correct across the rollover boundary. | Fixture: 23:50 close-out → today; 03:50 → yesterday; same-day repeat is a no-op. |
 | S-12 | Adherence is mode-relative and `status.json` is deterministic. | Yellow floor-day scores 1.0; delete + rebuild reproduces the file byte-for-byte. |
@@ -253,10 +261,10 @@ S-9 "felt like Lucid"). v2 adds:
 
 ## 9. Build phases
 
-Phases 1–7 are unchanged from v1 (scaffold, `/log`, `/checkin`,
+Phases 1–7 are the Mirror thread (scaffold, `/log`, `/checkin`,
 structuring, insight validation, `/reflect`, `/ask`) — see
 [`acceptance-criteria.md`](acceptance-criteria.md).
-v2 adds:
+The modules add:
 
 8. **Engine scaffold + `/closeout`.** `engine/` tree, chain.json,
    day records, rollover math, journal line into `raw/`.
@@ -267,7 +275,7 @@ v2 adds:
 11. **Micro-logs + registries + `/day`.** The observation envelope,
     deterministic parsers, registry keys, the joined day view.
 12. **Enrichment + exports.** Sticky location, one enricher
-    (weather), series CSV, clinician packet v0.
+    (weather), series CSV, first clinician packet.
 
 Acceptance criteria for 8–10 live in
 [`engine-module.md`](engine-module.md); for
@@ -306,8 +314,8 @@ hours never displace runtime execution
 | Source file | What it provides |
 |-------------|------------------|
 | [`../README.md`](../../README.md) | Emotional landing page. Preserved as-is. |
-| [`../vision.md`](../vision.md) | Long-form product vision (the Mirror half's origin). |
-| [`../architecture.md`](../architecture.md) | The system-level merge: Mirror + Engine over one Ledger, ten principles, phased roadmap. **Where v1 docs and this architecture disagree on scope, the architecture wins.** |
+| [`../vision.md`](../vision.md) | Long-form product vision: the five roles, the aperture sharing model (§7), shared profiles. |
+| [`../architecture.md`](../architecture.md) | The system-level design: Mirror + Engine over one Ledger, ten principles, phased roadmap. **Where an older MVP page and the architecture disagree on scope, the architecture wins.** |
 | [`../engine.md`](../engine.md) | The behavioral engine specification (chains, modes, telemetry, accountability, governance). |
 | [`../calibration.md`](../calibration.md) | The calibration guide — per-user setup (`lucid init` in the packaged app); the repo carries no personal data. |
 | [`../technical-spec.md`](../technical-spec.md) | Reference implementation architecture for the full system. |

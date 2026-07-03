@@ -4,9 +4,9 @@
 
 ---
 
-## v2 addendum — the behavioral Engine and the Ledger
+## Addendum — the behavioral Engine and the Ledger
 
-This spec predates the architecture v2 merge in
+This spec predates the Mirror + Engine merge in
 [docs/architecture.md](architecture.md). Everything below remains
 the reference design for the **Mirror** half (agents, consolidation,
 memory graph, historical reprocessing). Three reconciliations apply on

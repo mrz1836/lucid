@@ -14,3 +14,4 @@ new one; records are append-only, like everything else here
 | [0001](0001-implementation-language.md) | Implementation language: Go | Accepted for MVP; lock-in reviewed at post-MVP retro |
 | [0002](0002-storage.md) | Storage: plain files first, SQLite as a projection later | Accepted |
 | [0003](0003-runtime-surface.md) | Runtime surface: one core binary, thin surfaces | Accepted |
+| [0004](0004-core-dependencies.md) | Core dependencies: `go-flywheel` (job runtime) and `go-foundation` (base layer) | Accepted |

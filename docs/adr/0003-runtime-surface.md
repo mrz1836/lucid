@@ -19,9 +19,11 @@ contract, in this order:
 
 1. **CLI** — `lucid init` (the calibration wizard —
    [`../calibration.md`](../calibration.md)), `lucid log|closeout|mode|
-   status|day|validate|export`, plus the schedulers. The CLI is the
-   reference surface: if a behavior can't be reached from it, the
-   behavior doesn't exist yet.
+   status|day|validate|export`, plus the schedulers (backed by
+   `go-flywheel` when running standalone —
+   [ADR-0004](0004-core-dependencies.md)). The CLI is the reference
+   surface: if a behavior can't be reached from it, the behavior
+   doesn't exist yet.
 2. **Chat harness** — OpenClaw/Hermes agents translate channel
    messages to the same router intents and relay responses. This is
    the phone-and-friends surface, and the bell/tripwire delivery

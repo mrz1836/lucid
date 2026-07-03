@@ -30,7 +30,7 @@ The engine is aimed at *your* measured profile, not the average participant in a
 
 **Failure topology, ranked.** Order these by how your past attempts actually died: (a) never actually started, (b) crowded out by work/urgent, (c) forgotten entirely, (d) strong start that faded. Your #1 determines which mechanisms are primary: ignition failure → bells, floors, staged environment; crowding → slot defense and the Crux; forgetting → ambient state (L0); fading → error budgets and the tripwire. Design for your #1; the rest come nearly free.
 
-**Success predicates.** Look at anything you've sustained for years without trying. What made it survive? Common predicates: immediately fun rather than eventually rewarding; tied to identity; outcomes arriving obliquely as byproducts. Whatever your survivors share is your engine — aim it rather than fighting it. List your Flywheels (things that already run at zero cost) here; they are load-bearing and must stay unmanaged.
+**Success predicates.** Look at anything you've sustained for years without trying. What made it survive? Common predicates: immediately fun rather than eventually rewarding; tied to identity; outcomes arriving obliquely as byproducts. Whatever your survivors share is your engine — aim it rather than fighting it. List your Anchors (things that already run at zero cost) here; they are load-bearing and must stay unmanaged.
 
 **Energy and time map.** Your peak window (and whether it's currently sold to something); your discretionary window and its quality. Placement rules follow: the Crux slot goes in the peak; nothing requiring a launch sequence is ever scheduled in a trough.
 
@@ -50,7 +50,7 @@ The engine is aimed at *your* measured profile, not the average participant in a
 
 ## Portfolio snapshot
 
-Sort your full lists — every project, hobby, aspiration, obligation — into: **Flywheel** (self-sustaining, untouched), **Active** (the one Chain, for now), **Bench** (available for spontaneous play, untracked forever, guilt formally revoked), **Parked** (dormant, with a standing quarterly Hearing), plus domains marked **Steady** (stable, monitored, unmanaged). The sort itself is timeboxed: one sitting, imperfect, amendable at any Retro.
+Sort your full lists — every project, hobby, aspiration, obligation — into: **Anchor** (self-sustaining, untouched), **Active** (the one Chain, for now), **Bench** (available for spontaneous play, untracked forever, guilt formally revoked), **Parked** (dormant, with a standing quarterly Hearing), plus domains marked **Steady** (stable, monitored, unmanaged). The sort itself is timeboxed: one sitting, imperfect, amendable at any Retro.
 
 ## The Charter **(required for Day 0 — at least section 6)**
 
@@ -80,7 +80,7 @@ Which observation kinds are on ([engine of record: `observations.md`](observatio
 
 ## Scheduled
 
-Ledger location · first weekly Retro (calendar slot) · first quarterly Hearing (date) · known travel with its Away Mode configuration (which Links compress, what the Floor becomes, which capture surface substitutes) · Gate 1/2/3 candidate Links (each wrapped in a Flywheel identity where possible; each fitting the footprint cap).
+Ledger location · first weekly Retro (calendar slot) · first quarterly Hearing (date) · known travel with its Away Mode configuration (which Links compress, what the Floor becomes, which capture surface substitutes) · Gate 1/2/3 candidate Links (each wrapped in a Anchor identity where possible; each fitting the footprint cap).
 
 ## Intake corpus
 

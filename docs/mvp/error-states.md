@@ -10,7 +10,7 @@ recovery path. It is the unified table that
 
 The rules below are binding. If a coding agent encounters a failure
 mode not listed here, the correct response is a doc edit on this page
-before any code change. **Scope note (v2):** this page owns the
+before any code change. **Scope note:** this page owns the
 Mirror-thread failure modes; the deterministic modules own theirs in
 the same table format —
 [`engine-module.md`](engine-module.md) §"Error states" and

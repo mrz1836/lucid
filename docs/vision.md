@@ -45,7 +45,7 @@ Lucid is a **secure, AI-powered personal operating system** for your inner life.
 A journal that remembers everything and finds the patterns you can't see. Daily reflections that compound into weekly insights, monthly patterns, yearly transformations.
 
 ### **Therapist**
-A therapist that builds a living map of your fears, triggers, wounds, and growth edges—without judgment, without cost, available whenever you need it. It connects today's emotional spike to the wound you identified six months ago. It notices that you've mentioned feeling "not enough" in four different contexts this month. It asks: *"Does this resonate?"*
+A therapist that builds a living map of your fears, triggers, wounds, and growth edges—without judgment, without cost, available whenever you need it. It connects today's emotional spike to the wound you identified six months ago. It notices that you've mentioned feeling "not enough" in four different contexts this month. It asks: *"Does this resonate?"* And it knows its own boundary: this is pattern cartography, not treatment. Wound-level work belongs with a human professional—and Lucid's superpower there is making sure you *arrive* at that work carrying the longitudinal map no fifty-minute session could ever reconstruct (see [Sharing](#7-sharing-the-right-truth-at-the-right-depth-for-the-right-person)).
 
 ### **Coach**
 A coach that tracks your goals, celebrates your progress, and gently reminds you of what you said mattered. It gives *actionable guidance*, not abstract ideas.
@@ -64,7 +64,7 @@ Over time, it becomes the companion you wish you'd always had—one that truly k
 
 ## **4. Core Concepts**
 
-Three foundational ideas power everything Lucid does:
+Four foundational ideas power everything Lucid does:
 
 ### **Life Pillars**
 
@@ -144,7 +144,7 @@ The system shifts between four modes based on context:
 
 Mode detection happens automatically—if you're processing grief, the system won't jump into coach mode. But you can always override: "I don't need comfort right now, I need a plan."
 
-*(Naming note: architecture v2 renames the Therapist voice mode to **Reflect** and the Mirror voice mode to **Echo** — the old names collided with the clinical boundary and the Mirror subsystem. See [docs/architecture.md](architecture.md) §6; the behaviors in the table above are unchanged.)*
+*(Naming note: the architecture renames the Therapist voice mode to **Reflect** and the Mirror voice mode to **Echo** — the old names collided with the clinical boundary and the Mirror subsystem. See [docs/architecture.md](architecture.md) §6; the behaviors in the table above are unchanged.)*
 
 The voice also adapts to your preferences over time. Some people want more warmth; others want it clinical and direct. Lucid learns which approach helps you move forward.
 
@@ -235,7 +235,7 @@ Not everything important happened today. Lucid lets you add past events—trauma
 ### **Understand**
 
 **Daily check-ins:**
-Each day, the system guides you through what happened, how you felt, what mattered, and which pillars were touched.
+Each day, the system can guide you through what happened, how you felt, what mattered, and which pillars were touched—always offered, never required. The only daily *obligation* in all of Lucid is the Engine's two-minute close-out, and it needs no conversation at all: the system runs even when no AI is reachable, because the practice must never depend on the mirror being awake.
 
 **Pattern discovery:**
 The system uses three methods:
@@ -329,7 +329,75 @@ Lucid **adapts to your worldview**, not the other way around.
 
 ---
 
-## **7. Your Data, Your Control**
+## **7. Sharing: The Right Truth, at the Right Depth, for the Right Person**
+
+Here is a quiet tragedy of being a person: **you are the only one who has ever had access to all of you** — and everyone who could help gets fragments, chosen under pressure, from memory.
+
+The doctor gets fifteen minutes and whatever you happened to remember in the waiting room. The therapist gets this week's noise, not this year's signal — and spends three sessions rediscovering context you could never quite convey. Your best friend gets the version of the story you can bear to tell at dinner. Your partner gets your weather but not your climate. You spend your whole life summarizing yourself, badly, at the worst possible moments.
+
+Once your record exists, this changes completely. Sharing stops being an accident of recall and becomes a deliberate act **with a dial**.
+
+### **Apertures**
+
+Every person you share with gets an **aperture** — a named, per-person contract for how much light leaves the record. An aperture has four settings:
+
+| Setting | What it controls |
+|---------|------------------|
+| **Depth** | How far in they can see — five rings, below. |
+| **Scope** | Which domains and topics are in or out (health only for the doctor; work stress off-limits for mom). Your off-limits registry always wins, at every ring. |
+| **Register** | How *they* prefer information: one clinical page, a narrative letter, plain talk over coffee, bullet points. The same truth, shaped for the reader. |
+| **Cadence** | One-off export, or a standing arrangement — a fresh packet before every therapy session, a quarterly letter to your closest friend. |
+
+**The five rings of depth:**
+
+| Ring | They receive | Made for |
+|------|-------------|----------|
+| **0 — Presence** | That you showed up. Streak, mode, escalation state. Nothing else. | The Engine's witness (this ring already exists — see [docs/engine.md](engine.md) §4). |
+| **1 — Signals** | Structured summaries and series: pain, sleep, mood, capacity, episodes, med history. No prose, ever. | Doctors, physical therapists. |
+| **2 — Patterns** | Validated insights, themes over time, the shape of the season — everything you've already confirmed through the resonance gate. | Therapists, coaches. |
+| **3 — Selections** | Chosen entries and memories, in your words, hand-picked per release. | Close friends, family. |
+| **4 — Context** | The deep view: profile, history, the real weather. For the people you've decided get to actually know you. | A partner. The friend who's really asking. |
+
+Different people, different rings, zero re-explaining. And for the people you trust most — if you don't mind being real with your closest friends, set the ring high and let them actually see you. Vulnerability stops costing an hour of context-setting every time.
+
+### **Professional-grade, actually**
+
+* **The clinician packet** ([docs/observations.md](observations.md) §7): a windowed export since your last visit — one-page header (active injuries, current regimen, episode count), then pain and capacity series with medications and interventions as markers on one timeline. The record no doctor has time to take, in the format they wish patients brought.
+* **The therapy packet**: since-last-session narrative, newly validated insights, the pattern timeline, mood series, and — if you choose — the questions you want to work on. Rendered **in the therapist's own modality**: the frameworks layer doubles as a translation layer, so a CBT therapist receives thought-record shapes, an IFS therapist receives parts language, a Gottman couples counselor receives bids and repair attempts — the same record, translated. Three sessions of context-rebuilding collapse into five minutes of reading.
+* **The counsel brief**: for the friend or partner — plain words, no clinical furniture. Where I've been since we last really talked. What's heavy. What's getting better. How you can help.
+
+### **Nothing leaves without your eyes on it**
+
+Every export follows the same consent model as everything else in Lucid — draft-and-approve, pointed outward:
+
+1. **Render** — the aperture produces the exact artifact the recipient will see.
+2. **Review** — you read it *as them*. Edit, redact, hold anything back.
+3. **Release** — a document handed over by you. Recipients get artifacts, not accounts; nothing is live, nothing syncs, nothing updates behind your back.
+4. **Record** — the release is logged: what, to whom, when, at what ring.
+
+That last step quietly becomes one of Lucid's most valuable features: **Lucid remembers what each person knows about you.** Before the hard conversation, ask: *"What does she already know? What have I never told her?"* You can't unsend a document — so the system makes sure you never lose track of what's been shared, with whom, at what depth.
+
+### **Ingest: sharing is a loop, not an export button**
+
+The information comes back — and the record gets richer for it:
+
+* **The therapist's reflections and homework** come in as captures linked to that person and that session — so next session's packet includes what you did with the last one.
+* **The doctor's assessment and plan** land in the injury registry and med record — the professional's words at professional fidelity, marked as theirs.
+* **Outside perspectives** — the most powerful and most carefully handled ingest of all. Your best friend records two minutes of "here's what I see happening to you." Your partner writes what they need you to understand. These become **perspective entries**: testimony *about* you, stored in *their* voice, attributed to *them* — and they never merge into your self-model as fact. Like every inference, they pass through the resonance gate: *does this land?* Accept it, sit with it, or set it aside — but it's kept either way, because the gap between how you see yourself and how the people who love you see you is some of the highest-signal data that exists.
+* **Another Lucid** — when someone you love runs their own, apertures become bidirectional and standing. That's [Shared Profiles](#shared-profiles-relational-bridges): two records, two consenting owners, one relationship finally visible from both sides.
+
+### **The boundaries that make it safe**
+
+* **Sharing is always your act.** Lucid may *remind* you ("session with Dana tomorrow — want the packet drafted?") but can never release. There is no automatic disclosure of anything, ever.
+* **The off-limits registry is absolute** — excluded topics never render at any ring, in any format, for anyone.
+* **The witness stays at Ring 0** structurally, not by preference. Accountability never buys access to content.
+* **Depth can always narrow.** Rings can be lowered, apertures closed, standing cadences stopped — and the disclosure log keeps you honest with yourself about what already left.
+
+You were never meant to carry the whole archive of yourself alone, retelling it badly to everyone who could help. Build the record once. Open it to each person exactly as far as they've earned — and let the people and professionals in your life finally work with the truth instead of the trailer.
+
+---
+
+## **8. Your Data, Your Control**
 
 Your innermost thoughts deserve the highest protection. Here's how Lucid handles your data:
 
@@ -339,11 +407,13 @@ Your innermost thoughts deserve the highest protection. Here's how Lucid handles
 
 **No hidden agendas:** No third-party analytics. No data monetization. Full transparency about what goes where.
 
+**Disclosure you can audit:** Every export you release is logged — what, to whom, when, at what depth (§7). Sharing is powerful precisely because it is deliberate, reviewable, and remembered.
+
 This is your mind, your life, your data—you control it completely.
 
 ---
 
-## **8. What We're Building**
+## **9. What We're Building**
 
 ### **MVP: The unified nightly loop**
 * Runs on an existing local chat harness (see [mvp/scope.md](mvp/scope.md)) — a standalone desktop app is the follow-on, not the precondition
@@ -351,20 +421,24 @@ This is your mind, your life, your data—you control it completely.
 * Core agent system for the Mirror half (intake, structuring, reflection); the Engine half is deliberately agent-free
 * Markdown/JSON data storage you own completely
 
+The core ships as one Go binary — CLI and chat surfaces over the same
+router, per the [decision records](adr/README.md) — so "install it and
+it works" is the bar, not the aspiration.
+
 ### **Future Possibilities**
 Once the core is solid, Lucid could expand to:
-* **Slack/Discord bot** — DM yourself thoughts throughout the day
-* **CLI tool** — Quick terminal commands for capture
-* **Voice memo processing** — Speak freely, get structured entries
-* **Mobile companion** — Quick capture on the go
-* **Calendar integration** — Anticipate stress points, know what's coming
-* **Email/text awareness** — Understand commitments and relationship dynamics
-* **Web dashboard** — Visualizations of your journey over time
+* **Aperture exports** — the full sharing system of §7: rings, registers, standing cadences, the disclosure log (the clinician packet ships first, in the MVP's observation phases)
+* **Ingest surfaces** — session notes, outside perspectives, professional plans flowing back into the record through the resonance gate
+* **Voice memo processing** — speak freely, get structured entries
+* **Mobile companion** — quick capture on the go
+* **Calendar integration** — anticipate stress points, know what's coming
+* **Email/text awareness** — understand commitments and relationship dynamics
+* **Web dashboard** — visualizations of your journey over time
 
 The architecture is designed so **input can come from anywhere**, with secure local storage at the center.
 
 ### **Shared Profiles (Relational Bridges)**
-When someone you care about also uses Lucid, you can choose to share a curated version of your personal profile with them—and receive theirs in return.
+When someone you care about also uses Lucid, you can choose to share a curated version of your personal profile with them—and receive theirs in return. In aperture terms (§7): a standing, **bidirectional** aperture between two records — the export and ingest loop, running both ways, by two consenting owners.
 
 **What gets shared (you choose):**
 * Aspects of your psychological profile you want them to understand
@@ -387,9 +461,11 @@ This is vulnerability as a superpower—choosing to be known so you can be loved
 
 ---
 
-## **9. The Vision Realized**
+## **10. The Vision Realized**
 
 Imagine waking up and knowing exactly what's been weighing on you—not vaguely, but precisely. The system noticed you've mentioned feeling "overlooked" three times this week and connects it to a wound you identified months ago.
+
+Imagine sitting down across from your therapist, and she's already read five minutes of exactly what mattered: the two insights you validated since last session, the sleep crash mid-month, the pattern that resurfaced Thursday—in her own modality, at the depth you chose. The first twenty minutes of every session used to be archaeology. Now they're work. And your doctor, next Tuesday, gets a different aperture entirely: one page, two series, every medication and flare since March. Same record. Right truth, right depth, right person.
 
 Imagine your friend's birthday approaching and having a message already drafted—in your voice, mentioning your shared history, ready to send with one tap. Not because a robot wrote it, but because your agent-self knows how you express care.
 

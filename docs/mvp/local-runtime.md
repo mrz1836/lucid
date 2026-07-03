@@ -19,7 +19,7 @@ nothing in [`architecture.md`](architecture.md) or
 [`data-model.md`](data-model.md) should need to change. The harness is
 swappable; the contracts are not.
 
-> **v2 note.** The Engine module
+> **Integration note.** The Engine module
 > ([`engine-module.md`](engine-module.md)) adds four commands
 > (`/closeout`, `/closeout skip`, `/mode`, `/status`), one runtime tree
 > (`~/.lucid/engine/`), and a scheduler job (the bell prompt and the

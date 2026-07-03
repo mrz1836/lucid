@@ -11,7 +11,7 @@ the MVP gets there by upgrading this layout, not by replacing it.
 The two design rules that drive everything below:
 
 1. **Primary data is permanent.** The trees the user absolutely must
-   never lose are `raw/` and — since v2 — `observations/`,
+   never lose are `raw/`, `observations/`,
    `registries/`, and `engine/` (minus the derived `status.json`):
    each holds testimony or configuration that exists nowhere else.
    `processed/`, `insights/`, `reflections/`, `engine/status.json`,

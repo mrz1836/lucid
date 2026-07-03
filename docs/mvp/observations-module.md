@@ -85,7 +85,7 @@ with whole-line fsync writes; event ids per the seq rule in
 [`../observations.md`](../observations.md) §2 (max-seq + 1 from
 well-formed lines, single-writer, never line count).
 
-**Backup invariant (binding, amends the v1 rule):** `raw/`,
+**Backup invariant (binding — supersedes the older Mirror-only rule):** `raw/`,
 `observations/`, `registries/`, and `engine/` (minus `status.json`)
 are the permanent, backup-critical trees; `processed/`, `insights/`,
 `reflections/`, `engine/status.json`, and `projections/` are
@@ -215,8 +215,8 @@ audit log contains only pinned-host URLs with coordinate/date
 parameters, coordinates quantized to ≤ 2 decimals (grep the log
 against content words and full-precision coordinates); fetch failure
 appends an audit-log line and no event; series export produces valid
-CSV for pain/mood/capacity joined on `logical_date`; clinician packet
-v0 renders the windowed header (active injuries, current regimen,
+CSV for pain/mood/capacity joined on `logical_date`; first clinician packet
+renders the windowed header (active injuries, current regimen,
 episode count) + capacity/mode + pain series with med/intervention
 markers, **excludes note fields, location, and weather by default**,
 is written under `projections/`, and only its path is posted to the

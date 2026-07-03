@@ -1,23 +1,23 @@
 # Lucid — Observation & Enrichment Layer
 
-**Version:** 1.1 · **Date:** 2026-07-03 · **Status:** Canonical
+**Date:** 2026-07-03 · **Status:** Canonical — a living concept, evolving with the project
 **Scope:** The structured half of the Mirror's capture surface defined in
 [`architecture.md`](architecture.md) §3: body signals, intake, mood,
 context, and memory fragments — plus the registries they reference, the
 enrichers that annotate them, and the projections that make them
 useful. This document contains no instance data; which kinds a user
-enables lives in their instance configuration.
+enables lives in their calibration.
 
-**Changelog.** v1.1 (same day, post-adversarial-review): corrections
-became reference events (the envelope's `corrections[]` field is
-removed — it was unimplementable under append-only JSONL); the `refs`
-contract is now explicit; the micro-log grammar gained per-kind head
-rules, the `@` backdating token, dictation tolerance, and defaults for
-bare forms; `intervention` joined the kind vocabulary and the pain
-payload gained clinically load-bearing optional fields; enricher rules
-gained keyless-only, IP disclosure, coordinate quantization, and as-of
-location semantics; the clinician packet gained a window, a header, and
-notes-off-by-default; curiosity gained a backoff rule.
+**Design notes (from adversarial review).** Corrections are reference
+events rather than in-place edits (an in-place `corrections[]` field
+would be unimplementable under append-only JSONL); the `refs` contract
+is explicit; the micro-log grammar carries per-kind head rules, the
+`@` backdating token, dictation tolerance, and defaults for bare
+forms; `intervention` is a first-class kind and the pain payload
+carries clinically load-bearing optional fields; enricher rules
+require keyless endpoints, IP disclosure, coordinate quantization, and
+as-of location semantics; the clinician packet is windowed, headed,
+and notes-off-by-default; curiosity has a backoff rule.
 
 ## 0. The governing corollary
 
@@ -344,6 +344,11 @@ projections at review cadence, per P9). Named projection kinds:
   likewise. The packet is written to `projections/` and only its
   *path* is ever posted to a chat surface. The user chooses
   resolution; opaque tags stay opaque unless they decide otherwise.
+  The packet is the first shipped **aperture** — the per-recipient
+  sharing contracts of [`vision.md`](vision.md) §7 (depth rings,
+  registers, the disclosure log); later aperture formats (therapy
+  packet, counsel brief) are new projections under the same
+  render → review → release → record discipline.
 * **Thread views** — see registries, below.
 
 **Cross-tree rule, binding:** agent context slices never include the

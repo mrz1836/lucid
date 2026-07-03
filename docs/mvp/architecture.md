@@ -9,7 +9,7 @@ The goal: make the architecture **boring and buildable** before it is
 ambitious. Every module here can be deleted and replaced when something
 better arrives, because each one has a small, explicit contract.
 
-> **v2 note.** Two further modules exist beside the six below, both
+> **Integration note.** Two further modules exist beside the six below, both
 > deterministic and agent-free, both routing their commands through
 > the same router, both invisible to every agent contract on this
 > page (no agent slice may include their trees; they invoke no

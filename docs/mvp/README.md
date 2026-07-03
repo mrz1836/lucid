@@ -9,14 +9,14 @@ than this MVP. These docs narrow the surface area to one end-to-end loop a
 future implementer can build and run locally without making the harder
 long-term product decisions first.
 
-> **v2 note (unified nightly loop).** Since this set was written, the
+> **Integration note (the unified nightly loop).** Since this set was written, the
 > system-level architecture in [`../architecture.md`](../architecture.md)
 > merged a behavioral **Engine** into Lucid as a first-class subsystem.
 > The MVP now ships two cooperating halves: the Mirror steel thread
 > documented across this set (unchanged), plus the agent-free Engine
 > module specified in [`engine-module.md`](engine-module.md). The
 > synthesis lives in [`scope.md`](scope.md)
-> (v2). Where an older page here disagrees with those two documents on
+>. Where an older page here disagrees with those two documents on
 > *scope*, they win; on *conventions* (naming, storage discipline,
 > gates), this set remains authoritative.
 
@@ -146,7 +146,7 @@ After these docs are approved, the very first build sequence is:
     event envelope, deterministic one-line capture for pain, intake,
     mood, and the rest, plus the joined day view.
 12. **Enrichment + exports** — sticky stated location, one weather
-    enricher, series CSVs, clinician packet v0.
+    enricher, series CSVs, first clinician packet.
 
 Phases 8–12 depend only on phases 1–2 and may be built immediately
 after them; [`scope.md`](scope.md) §9
@@ -187,7 +187,7 @@ contradict them.
 | Source file | What it provides | How the MVP uses it |
 |-------------|------------------|---------------------|
 | [`README.md`](../../README.md) | Emotional landing page describing the felt experience of Lucid. | Preserved as-is in voice; MVP docs link out from it without diluting the landing-page role. |
-| [`vision.md`](../vision.md) | Long-form vision: five roles (Journal, Therapist, Coach, Engine, Agent-Self), pillars, profile, frameworks, capture/understand/connect/grow loop, agent-self, shared profiles, future possibilities. | MVP docs translate the vision into implementation principles and select a single steel-thread loop plus the Engine module, deferring most platform-scale features. |
+| [`vision.md`](../vision.md) | Long-form vision: five roles (Journal, Therapist, Coach, Engine, Agent-Self), pillars, profile, frameworks, capture/understand/connect/grow loop, agent-self, aperture sharing (per-recipient depth rings, professional exports, ingest), shared profiles, future possibilities. | MVP docs translate the vision into implementation principles and select a single steel-thread loop plus the Engine module, deferring most platform-scale features. |
 | [`technical-spec.md`](../technical-spec.md) | Reference architecture: agent set, consolidation cycles, historical reprocessing, adaptive evolution, commands, skills, three-layer data model, SQLite schema, memory graph, bootstrapping. | MVP docs reduce this to a smaller set of agents and a Markdown/JSON data model, with explicit migration paths back to the full spec. |
 | [`.gitignore`](../../.gitignore) | Repo hygiene baseline. | MVP docs do not require new ignored paths; runtime data lives outside the repo at `~/.lucid/`. |
 
