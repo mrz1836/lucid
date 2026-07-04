@@ -791,8 +791,9 @@ before implementation begins.
   ([`product-principles.md`](product-principles.md) §6).
 * **The design is canonical:** [`../frameworks.md`](../frameworks.md)
   — definition files as shareable specs under
-  [`../frameworks/`](../frameworks/stoicism.md) (four reference
-  definitions shipped), stack consent in the Charter + `lucid.json`
+  [`../frameworks/`](../frameworks/stoicism.md) (six reference
+  definitions shipped, including two book-scoped lenses and the
+  composite-lens mechanism), stack consent in the Charter + `lucid.json`
   (`framework_stack[]`, `framework_consents{}`), the router seam
   (`framework: <id> | null` on `reflection.propose`), one labeled
   lens per output, the vocabulary-licensing mechanism with

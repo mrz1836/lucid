@@ -65,6 +65,7 @@ version: 1
 name: Stoicism
 lineage: "Epictetus, Marcus Aurelius, Seneca; modern: Hadot, Irvine"
 licenses: []          # blocklist patterns this lens unlocks — §6
+composes: []          # parent lens ids, for composite lenses — §4
 ---
 ```
 
@@ -133,16 +134,39 @@ Binding rules:
 interpretive vocabulary* it thinks in. "I don't need comfort, I need
 a plan" changes mode; "give me the Stoic read" changes lens.
 
-## 4. One lens per output, labeled
+## 4. One lens per message; any number per invocation
 
-* **Exactly one lens frames any single output.** Layering — the
-  vision's NVC→IFS→Stoicism→Watts walk — is sequential invocations,
-  one labeled message per lens, never a blended voice. This keeps
+* **Exactly one lens frames any single message.** This keeps
   attribution clean (P-2 depends on it), keeps traditions honest, and
-  prevents mush.
+  prevents mush. It does not mean one lens at a time in any wider
+  sense — the next two mechanisms are how "more than one" works:
+* **Multi-lens invocation.** One interpret call may walk several
+  lenses — the vision's Interpret table
+  ([`vision.md`](vision.md) §6) made invocable: `/lens nvc,ifs,stoicism
+  <entry>` (or `/lens stack` for the whole stack) returns one labeled
+  message per lens, in order, over the same material. Layering —
+  NVC to find the need, IFS to find the part, Stoicism to find the
+  cut, Watts to hold it lightly — is exactly this: a walk, not a
+  blend.
+* **Composite lenses — "your own combination" as a first-class
+  definition.** The vision promises users can combine frameworks into
+  their own lens; the sanctioned form is a definition file like any
+  other, with `composes:` naming its parents (e.g. `composes: [nvc,
+  ifs]`) and its own vocabulary, questions, and reframe shapes doing
+  the actual blending — authored, versioned, and consented **as
+  itself**. A composite counts as exactly one lens everywhere: one
+  Charter paragraph, one label, one `provenance.framework` entry, one
+  arm in P-2. Binding rule: **licenses never inherit** — a composite
+  unlocks nothing its own `licenses:` list does not explicitly
+  re-declare, because consent must see what it buys.
+* **Proposals stay single-lens.** `reflection.propose` frames under
+  exactly one lens (composite included) per proposal; the multi-lens
+  walk is the interpret surface's job, where the user asked for
+  perspectives rather than a pattern.
 * **Labeling is mandatory.** Every lens-framed output names its lens
-  inline (*"Through the Stoic lens: …"*) so the user always knows
-  which glasses are on. The unlabeled trusted-advisor voice
+  inline (*"Through the Stoic lens: …"*; a composite by its own
+  name) so the user always knows which glasses are on. The unlabeled
+  trusted-advisor voice
   ([`mvp/product-principles.md`](mvp/product-principles.md) §6)
   remains the baseline and the default.
 * **The resonance question survives every lens.** A lens-framed
@@ -159,9 +183,10 @@ a plan" changes mode; "give me the Stoic read" changes lens.
   under its pre-registration). Structuring and Intake are **never**
   lens-aware — the scribe and the extractor stay neutral (§0).
 * **The interpret surface** — a user-invoked, post-MVP command
-  (working name `/lens <id> [<entry>|last]`): read one entry (or the
-  current situation) through a named lens, one message, labeled. This
-  is the vision's Interpret table ([`vision.md`](vision.md) §6) made
+  (working name `/lens <id>[,<id>…] [<entry>|last]`, plus `/lens
+  stack`): read one entry (or the current situation) through one or
+  several named lenses — one labeled message per lens (§4). This is
+  the vision's Interpret table ([`vision.md`](vision.md) §6) made
   invocable — and the home of trials (§3). Read-only; writes nothing;
   proposals stay `/checkin`'s job.
 * **Recall framing** — `/reflect` may surface an insight in the lens
@@ -242,18 +267,33 @@ user explicitly chose (attachment theory cannot speak without saying
 Shipped as reference implementations of the schema —
 [`frameworks/stoicism.md`](frameworks/stoicism.md),
 [`frameworks/nvc.md`](frameworks/nvc.md),
-[`frameworks/ifs.md`](frameworks/ifs.md), and
+[`frameworks/ifs.md`](frameworks/ifs.md),
 [`frameworks/attachment-theory.md`](frameworks/attachment-theory.md)
-(the licensing exemplar). The wider set the vision names — Gottman,
-CBT, ACT, Taoism, Kabbalah, Christianity, Watts — are authorable by
-the same schema, each a doc diff. A tradition Lucid has never heard of
-is authorable the same way; that is the point of definitions being
-specs.
+(the licensing exemplar),
+[`frameworks/eight-dates.md`](frameworks/eight-dates.md), and
+[`frameworks/four-agreements.md`](frameworks/four-agreements.md).
+
+**A lens does not have to be a whole tradition.** Eight Dates and the
+Four Agreements are **book-scoped lenses** — one book's practice,
+honestly bounded: the schema doesn't care how wide a lens is, only
+that the lineage line says how far it reaches and the Boundaries
+section says what it must never do. A single essay, a single practice,
+or a single sentence a user lives by is authorable the same way.
+
+The wider set the vision names — the full Gottman method, CBT, ACT,
+Taoism, Kabbalah, Christianity, Watts — are authorable by the same
+schema, each a doc diff; so are **composite lenses** (§4), which is
+how a user's personal blend becomes a citable, consentable thing. A
+tradition Lucid has never heard of is authorable the same way; that
+is the point of definitions being specs.
 
 ## 9. Defaults
 
-One lens per output, labeled · baseline voice is lens-null ·
-stack guidance ≤ 3 active lenses · joining the stack at calibration or
+One lens per message, labeled; any number per invocation (§4) ·
+proposals single-lens · composites count as one lens everywhere;
+licenses never inherit · baseline voice is lens-null ·
+stack guidance ≤ 3 active lenses (a composite is one) · joining the
+stack at calibration or
 quarterly review only (P8); leaving at any time · trials via the
 interpret surface with a recorded first-use consent · certainty
 patterns unlicensable, always · `provenance.framework` recorded on
