@@ -109,6 +109,6 @@ The initial four fall straight out of the ninety-day simulation study
 | Id | Protocol | Question | Status |
 |----|----------|----------|--------|
 | P-1 | [Bell placement](P-1-bell-placement.md) | Does moving the Bell reduce misses and backfills? | **Runnable now** — v1 for fixed schedules; v2 (the roster-profile variant, same file) for rotating ones, requiring schedule profiles ([`../engine.md`](../engine.md) §2). |
-| P-2 | [Lens rotation](P-2-lens-rotation.md) | Which interpretive lens produces proposals the user accepts *and acts on*? | **Blocked** — on the frameworks layer ([`../mvp/agent-contracts.md`](../mvp/agent-contracts.md) §Framework, deferred). The acted-on instrumentation — insight rules ([`../mvp/data-model.md`](../mvp/data-model.md)) — is specced. |
+| P-2 | [Lens rotation](P-2-lens-rotation.md) | Which interpretive lens produces proposals the user accepts *and acts on*? | **Blocked** — on the frameworks layer *shipping*; its design is canonical ([`../frameworks.md`](../frameworks.md)) and the acted-on instrumentation — insight rules ([`../mvp/data-model.md`](../mvp/data-model.md)) — is specced. |
 | P-3 | [Correlate confirmation](P-3-correlate-confirmation.md) | Does an exploratory correlate survive pre-registration? | **Blocked** — on MVP phase 12 (enrichers + exports) and the post-MVP correlates projection with its coverage floor ([`../observations.md`](../observations.md) §7). |
 | P-4 | [Floor titration](P-4-floor-titration.md) | Is a smaller floor better? | **Runnable now.** |

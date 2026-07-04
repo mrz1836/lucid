@@ -61,7 +61,7 @@ Write plainly, in your own voice, one sitting, imperfect. Version it. Date it. K
 1. **Identity:** "I am becoming the kind of person who…" — five to ten lines.
 2. **One year:** a specific evening, one year from today — where you are, what your body can do, what's within reach, who's around.
 3. **Five years:** the same scene, five years out.
-4. **The lenses, yours:** one paragraph on each framework in your stack — what it actually means to *you*, not to its author.
+4. **The lenses, yours:** one paragraph on each framework in your stack — what it actually means to *you*, not to its author. Each paragraph is that lens's standing consent ([`frameworks.md`](frameworks.md) §3): it may frame reflections in its vocabulary once the layer ships. Your paragraph outranks the definition file wherever they differ; keep the stack small (≤ 3); leaving is never gated.
 5. **Non-negotiables:** the three to five things that stay true even in the worst week.
 6. **The stake:** what a breach costs — concrete, mildly painful, mechanically executable (engine §4) — written while strong. On a breach you execute it yourself within the stake execution window (default 72 hours, engine §8) and confirm to the witness, who verifies with one line. Choose a beneficiary who is not your witness — the person verifying a payment must not be its recipient.
 7. **Forever unmeasured:** outcomes the system may serve with rooms and readiness but must never metricize (architecture P4). Naming them here is what protects them.

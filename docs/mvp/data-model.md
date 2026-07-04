@@ -376,6 +376,7 @@ provenance:
   raw_entry_ids: [raw_2026_05_05_19_42, raw_2026_05_03_21_10]
   processed_artifact_id: raw_2026_05_05_19_42
   reflection_prompt_version: reflection-2026.05.0
+  framework: null                     # lens id + version once the frameworks layer ships; null = baseline voice
   user_response_kind: nuanced         # accepted | nuanced
   user_response_text: |
     Mostly yes. I'd say it's not always groups — it's more when
@@ -416,6 +417,7 @@ test an idea once and back off if it isn't picked up immediately.
 | `provenance.raw_entry_ids[]` | yes | Every raw entry the proposal referenced. |
 | `provenance.processed_artifact_id` | yes | The processed artifact whose Reflection produced the proposal. |
 | `provenance.reflection_prompt_version` | yes | Which Reflection prompt produced the proposal. |
+| `provenance.framework` | yes (nullable) | Which interpretation lens framed the proposal (`<id> v<version>`, e.g. `stoicism v1`), or `null` for the baseline voice. Always `null` in the MVP — the field exists now so lens-framed insights are attributable the day the frameworks layer ships ([`../frameworks.md`](../frameworks.md) §5). |
 | `provenance.user_response_kind` | yes | `accepted` or `nuanced`. |
 | `provenance.user_response_text` | yes | Verbatim user response. |
 | `status_history[]` | yes | Append-only log of state transitions. |

@@ -229,8 +229,11 @@ context-slice gate).
 Every Mirror-thread non-goal stands — no mobile/web/desktop
 app, no SQLite/graph/consolidation, no Therapist surface, no
 Agent-Self or send path beyond the three pre-committed templates, no
-frameworks layer, no shared profiles, no cloud, no multi-pattern
-proposals, no production data in the repo — with these amendments:
+frameworks layer (designed in [`../frameworks.md`](../frameworks.md);
+ships post-MVP — in the MVP the blocklist stands whole and Reflection
+never frames in named-framework terms), no shared profiles, no cloud,
+no multi-pattern proposals, no production data in the repo — with
+these amendments:
 
 * **Amended:** "No Coach surface" becomes: no goal trees, no progress
   celebration, no conversational accountability voice. The Engine's

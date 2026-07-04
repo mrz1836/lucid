@@ -192,6 +192,15 @@ The regex is matched case-insensitively and against word boundaries.
 Implementations may compile each line separately (so a hit reports
 which rule matched) but the union of these patterns is the contract.
 
+**Forward note — framework licensing (post-MVP).** The frameworks
+layer ([`../frameworks.md`](../frameworks.md) §6) defines a narrow
+mechanism by which a consented lens may license specific noun-phrase
+patterns above (attachment theory cannot speak without saying
+"attachment"), under three simultaneous conditions and with the
+certainty patterns (`you always/never`, `clearly/obviously`, the
+diagnose/suffering forms) permanently unlicensable. **In the MVP the
+blocklist stands whole** — no framework exists, so no license does.
+
 ### Bundling rules: 90% user-authored, with examples
 
 [`agent-contracts.md`](agent-contracts.md) §1 requires Intake's

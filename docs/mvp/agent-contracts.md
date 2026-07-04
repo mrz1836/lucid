@@ -783,18 +783,28 @@ before implementation begins.
   "your goal is …" framing. Reflection only proposes patterns; it
   never proposes actions.
 
-### Framework (deferred)
+### Framework (deferred — design complete)
 
 * **Why deferred.** Selectable frameworks (Stoicism, IFS, NVC, ...)
-  are an extension point in [`architecture.md`](architecture.md), not
-  an MVP requirement. The MVP uses Lucid's single implicit voice
+  ship only once Reflection/Safety are hardened in live use. The MVP
+  uses Lucid's single implicit voice
   ([`product-principles.md`](product-principles.md) §6).
-* **Pre-conditions.** Per-framework definition files under
-  `~/projects/lucid/agents/frameworks/`, a router seam for selecting
-  a framework, and an explicit consent prompt before a framework
-  reframes any user content.
+* **The design is canonical:** [`../frameworks.md`](../frameworks.md)
+  — definition files as shareable specs under
+  [`../frameworks/`](../frameworks/stoicism.md) (four reference
+  definitions shipped), stack consent in the Charter + `lucid.json`
+  (`framework_stack[]`, `framework_consents{}`), the router seam
+  (`framework: <id> | null` on `reflection.propose`), one labeled
+  lens per output, the vocabulary-licensing mechanism with
+  unlicensable certainty patterns, and `provenance.framework` on
+  lens-framed insights.
+* **Pre-conditions to ship.** A live, hardened Reflection/Safety
+  pipeline; the Safety/Consent license check implemented (stack +
+  label + hypothesis-frame, frameworks.md §6); the contract diff on
+  this page turning this stub into a full six-section contract.
 * **Forbidden until then.** Reflection never frames a proposal in
-  named-framework terms.
+  named-framework terms, and no license unlocks any blocklist pattern
+  — in the MVP the blocklist stands whole.
 
 ### Consolidation (deferred / replaced)
 

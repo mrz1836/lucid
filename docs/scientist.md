@@ -266,10 +266,11 @@ The initial four:
   v2 variant runs the same design over two definitions of a schedule
   profile, for rotating rosters ([`engine.md`](engine.md) §2).
 * **[P-2 — Lens rotation](protocols/P-2-lens-rotation.md)** —
-  *blocked* on the frameworks layer; its acted-on measure — insight
-  rules and their kept/lapsed record
-  ([`mvp/data-model.md`](mvp/data-model.md) §"Validated insights") —
-  is now specced. Which interpretive lens produces proposals the user
+  *blocked* on the frameworks layer shipping (the design is canonical:
+  [`frameworks.md`](frameworks.md), four reference definitions
+  shipped); its acted-on measure — insight rules and their kept/lapsed
+  record ([`mvp/data-model.md`](mvp/data-model.md) §"Validated
+  insights") — is specced. Which interpretive lens produces proposals the user
   accepts *and acts on* — honestly framed as preference exploration
   at current insight rates.
 * **[P-3 — Correlate confirmation](protocols/P-3-correlate-confirmation.md)**

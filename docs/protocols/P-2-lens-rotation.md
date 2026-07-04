@@ -1,6 +1,8 @@
 # P-2 — Lens rotation (v1)
 
-**Status:** Blocked — on the frameworks layer (see Prerequisites).
+**Status:** Blocked — on the frameworks layer *shipping*; its design
+is canonical ([`../frameworks.md`](../frameworks.md)) and lens
+attribution is ready (`provenance.framework` — see Prerequisites).
 The acted-on instrumentation — insight rules and their kept/lapsed
 record — is now specced
 ([`../mvp/data-model.md`](../mvp/data-model.md) §"Validated
@@ -112,10 +114,13 @@ cannot attribute — and does not need to.
 
 ## Prerequisites
 
-* **The frameworks layer** — deferred per agent-contracts.md
-  §Framework (deferred): per-framework definition files, a router
-  seam for selecting one, and the reframing-consent prompt. Until it
-  exists there are no lenses to rotate.
+* **The frameworks layer, shipped** — the design is canonical
+  ([`../frameworks.md`](../frameworks.md): definition files, the
+  router seam, stack consent, lens labeling, `provenance.framework`)
+  and four reference definitions exist, but the layer runs post-MVP;
+  until it is live there are no lenses to rotate. Arms must be lenses
+  from the user's consented stack (frameworks.md §3) — a trial lens
+  is not an arm.
 * **Acted-on instrumentation** — **shipped**: insight rules with
   their kept/lapsed `rule_history[]`
   ([`../mvp/data-model.md`](../mvp/data-model.md) §"Validated

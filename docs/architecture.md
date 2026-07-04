@@ -4,7 +4,7 @@
 
 **Provenance.** This document merges two halves conceived independently for the same idea: Lucid (2025 — the inner-life system) and a behavioral engine (July 2026, formerly codenamed WAKE), unified over a single event substrate and consent model. Along the way the design has kept its vocabulary collision-free — the self-sustaining portfolio status was renamed twice ("Engine" → "Flywheel" when the Engine subsystem arrived, then → **Anchor** when the `go-flywheel` dependency entered the stack, ADR-0004), the "Mirror" voice mode became **Echo**, and the "Green" domain marker became **Steady** — generalized every spec for any user (personal data lives only in per-user calibration, never in specs), restored mechanisms dropped between design drafts (the runtime priority order, the AI-dependency boundary, the excavation practice, the dispatch definition), and stays aligned with the buildable MVP in [`mvp/scope.md`](mvp/scope.md).
 
-**Related documents:** [`vision.md`](vision.md) (product vision), [`technical-spec.md`](technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/observations.md`](observations.md) (observation & enrichment layer), [`docs/scientist.md`](scientist.md) (the self-experimentation & learning layer), [`docs/calibration.md`](calibration.md) (the calibration guide — per-user setup, `lucid init` in the packaged app), [`docs/mvp/`](mvp/README.md) and [`mvp/scope.md`](mvp/scope.md) (the first buildable slice). A user's own calibration lives in `personal/calibration.md`, which is excluded from any shared history (§5).
+**Related documents:** [`vision.md`](vision.md) (product vision), [`technical-spec.md`](technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/observations.md`](observations.md) (observation & enrichment layer), [`docs/scientist.md`](scientist.md) (the self-experimentation & learning layer), [`docs/frameworks.md`](frameworks.md) (the interpretation-lens layer), [`docs/calibration.md`](calibration.md) (the calibration guide — per-user setup, `lucid init` in the packaged app), [`docs/mvp/`](mvp/README.md) and [`mvp/scope.md`](mvp/scope.md) (the first buildable slice). A user's own calibration lives in `personal/calibration.md`, which is excluded from any shared history (§5).
 
 ## 1. Overview
 
@@ -110,7 +110,7 @@ Four interaction modes: **Coach** (goals, accountability, next actions), **Mento
 
 ## 7. Frameworks
 
-Interpretation is pluggable. The user defines a default stack in their Charter and may layer additional lenses per-situation or per-season: IFS, NVC, Stoicism, Gottman, CBT, ACT, Taoism, attachment theory, and others. Frameworks shape how the Mirror asks and interprets; no framework overrides the resonance gate or the sanctuary rule (P3).
+Interpretation is pluggable. The user defines a default stack in their Charter and may layer additional lenses per-situation or per-season: IFS, NVC, Stoicism, Gottman, CBT, ACT, Taoism, attachment theory, and others. Frameworks shape how the Mirror asks and interprets; no framework overrides the resonance gate or the sanctuary rule (P3). The full contract — definition files as shareable specs, stack consent, one labeled lens per output, the vocabulary-licensing mechanism, and the lens-neutral record — is [`docs/frameworks.md`](frameworks.md); the layer ships post-MVP, before the aperture translation layer.
 
 ## 8. Phased roadmap
 
