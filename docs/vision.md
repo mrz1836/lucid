@@ -149,12 +149,12 @@ The system shifts between four modes based on context:
 |------|-------------------|---------------|
 | **Coach** | Goals, accountability, action | Direct, motivating, focused on next steps |
 | **Mentor** | Career, craft, decisions, growth | Wise, asks guiding questions, offers perspective |
-| **Therapist** | Emotions, wounds, patterns, relationships | Gentle, validates first, then probes deeper |
-| **Mirror** | When you need reflection, not advice | Echoes back what you said, highlights contradictions, no judgment |
+| **Reflect** | Emotions, wounds, patterns, relationships | Gentle, validates first, then probes deeper |
+| **Echo** | When you need reflection, not advice | Echoes back what you said, highlights contradictions, no judgment |
 
 Mode detection happens automatically—if you're processing grief, the system won't jump into coach mode. But you can always override: "I don't need comfort right now, I need a plan."
 
-*(Naming note: the architecture renames the Therapist voice mode to **Reflect** and the Mirror voice mode to **Echo** — the old names collided with the clinical boundary and the Mirror subsystem. See [docs/architecture.md](architecture.md) §6; the behaviors in the table above are unchanged.)*
+*(The modes are named with care: **Reflect**, not "Therapist," because this mode maps patterns and never treats — the clinical boundary in [docs/architecture.md](architecture.md) §6 — and **Echo**, not "Mirror," so the mode never collides with the Mirror subsystem.)*
 
 The voice also adapts to your preferences over time. Some people want more warmth; others want it clinical and direct. Lucid learns which approach helps you move forward.
 

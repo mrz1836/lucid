@@ -8,13 +8,12 @@ cross-user learning channels. This document contains no instance data;
 which protocols a user enables lives in their calibration
 ([`calibration.md`](calibration.md)).
 
-**Provenance.** Designed from the ninety-day simulation study's
-methodologist analysis
-([`research/2026-07-03-ninety-day-simulation.md`](research/2026-07-03-ninety-day-simulation.md)
-§9). The motivation is empirical: every simulated persona ran feral
-experiments anyway — untooled self-experimentation happens wherever
-tooled science is impossible. Tooled science can be governed; feral
-science cannot.
+**Why this layer exists.** People run experiments on themselves
+either way — untooled self-experimentation happens wherever tooled
+science is impossible. Tooled science can be governed; feral science
+cannot. (Grounding:
+[`research/2026-07-03-ninety-day-simulation.md`](research/2026-07-03-ninety-day-simulation.md)
+§9.)
 
 ## 0. The governing rule
 
@@ -327,8 +326,9 @@ question containing no personal data, filed against the shared genome:
 `{doc + section, the question, why the spec is ambiguous or silent,
 (optional, flagged) what this instance chose meanwhile}`. A gap report
 carries no measurements, no dates, no arms — only the discovery that
-the spec has a hole. The ninety-day simulation study itself is the
-founding example of the genre.
+the spec has a hole.
+([`research/2026-07-03-ninety-day-simulation.md`](research/2026-07-03-ninety-day-simulation.md)
+is an artifact of exactly this genre.)
 
 Lucid-the-project gets smarter; Lucid-the-instance stays sovereign,
 because every boundary crossing is a human act on a reviewed artifact.

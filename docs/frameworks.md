@@ -10,15 +10,15 @@ own vocabulary without ever becoming a diagnostic engine. This
 document contains no instance data; which lenses a user runs lives in
 their Charter and calibration.
 
-**Provenance.** The vision has promised this layer from the first page
-— "the system adapts to your worldview, not the other way around"
-([`vision.md`](vision.md) §4) — and the MVP deliberately deferred it
-behind a hardened Reflection/Safety pipeline
-([`mvp/agent-contracts.md`](mvp/agent-contracts.md) §Framework). This
-specification fills that seam. It is also the remaining prerequisite
-for protocol [P-2](protocols/P-2-lens-rotation.md) and the future
-aperture translation layer ([`vision.md`](vision.md) §7 — the therapy
-packet rendered in the therapist's own modality).
+**Position.** This layer is the vision's core promise made
+mechanical — "the system adapts to your worldview, not the other way
+around" ([`vision.md`](vision.md) §4). It ships post-MVP, behind a
+hardened Reflection/Safety pipeline
+([`mvp/agent-contracts.md`](mvp/agent-contracts.md) §Framework), and
+it is the prerequisite for protocol
+[P-2](protocols/P-2-lens-rotation.md) and the future aperture
+translation layer ([`vision.md`](vision.md) §7 — the therapy packet
+rendered in the therapist's own modality).
 
 ## 0. The governing rule
 

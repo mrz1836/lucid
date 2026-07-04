@@ -8,17 +8,6 @@ enrichers that annotate them, and the projections that make them
 useful. This document contains no instance data; which kinds a user
 enables lives in their calibration.
 
-**Design notes (from adversarial review).** Corrections are reference
-events rather than in-place edits (an in-place `corrections[]` field
-would be unimplementable under append-only JSONL); the `refs` contract
-is explicit; the micro-log grammar carries per-kind head rules, the
-`@` backdating token, dictation tolerance, and defaults for bare
-forms; `intervention` is a first-class kind and the pain payload
-carries clinically load-bearing optional fields; enricher rules
-require keyless endpoints, IP disclosure, coordinate quantization, and
-as-of location semantics; the clinician packet is windowed, headed,
-and notes-off-by-default; curiosity has a backoff rule.
-
 ## 0. The governing corollary
 
 **Observations are inventory, never obligation.** This layer extends

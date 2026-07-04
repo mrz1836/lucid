@@ -103,8 +103,8 @@ version.
 
 ## Index
 
-The initial four fall straight out of the ninety-day simulation study
-([`../research/2026-07-03-ninety-day-simulation.md`](../research/2026-07-03-ninety-day-simulation.md) §9).
+The initial four. (Grounding:
+[`../research/2026-07-03-ninety-day-simulation.md`](../research/2026-07-03-ninety-day-simulation.md) §9.)
 
 | Id | Protocol | Question | Status |
 |----|----------|----------|--------|

@@ -2,8 +2,6 @@
 
 **Date:** 2026-07-03 · **Status:** Canonical — a living concept, evolving with the project
 
-**Provenance.** This document merges two halves conceived independently for the same idea: Lucid (2025 — the inner-life system) and a behavioral engine (July 2026, formerly codenamed WAKE), unified over a single event substrate and consent model. Along the way the design has kept its vocabulary collision-free — the self-sustaining portfolio status was renamed twice ("Engine" → "Flywheel" when the Engine subsystem arrived, then → **Anchor** when the `go-flywheel` dependency entered the stack, ADR-0004), the "Mirror" voice mode became **Echo**, and the "Green" domain marker became **Steady** — generalized every spec for any user (personal data lives only in per-user calibration, never in specs), restored mechanisms dropped between design drafts (the runtime priority order, the AI-dependency boundary, the excavation practice, the dispatch definition), and stays aligned with the buildable MVP in [`mvp/scope.md`](mvp/scope.md).
-
 **Related documents:** [`vision.md`](vision.md) (product vision), [`technical-spec.md`](technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/observations.md`](observations.md) (observation & enrichment layer), [`docs/scientist.md`](scientist.md) (the self-experimentation & learning layer), [`docs/frameworks.md`](frameworks.md) (the interpretation-lens layer), [`docs/calibration.md`](calibration.md) (the calibration guide — per-user setup, `lucid init` in the packaged app), [`docs/mvp/`](mvp/README.md) and [`mvp/scope.md`](mvp/scope.md) (the first buildable slice). A user's own calibration lives in `personal/calibration.md`, which is excluded from any shared history (§5).
 
 ## 1. Overview
@@ -30,7 +28,7 @@ The central architectural claim: reflection tools fail without a behavior layer,
 
 **P8 — Governed change.** The Charter is amended only at scheduled reviews, with recorded reasons. Runtime parameters change at most once per weekly review. Anything may change; nothing changes silently.
 
-**P9 — The runtime never depends on AI.** The Engine's daily surface (bell, chain, close-out) is self-serve and completable with no model in the loop; AI's sanctioned roles are analysis at review cadence and automation of the escalation tripwire — never daily check-ins, never motivation, never being where the data lives. The Mirror's conversational reflection is offered and slotless, never load-bearing for the chain. If every model is unavailable, the system still runs; only its insight cadence degrades. (This is the reconciliation between the concept document's guided daily check-in and the engine's independence requirement: capture is a two-minute act, conversation is optional.)
+**P9 — The runtime never depends on AI.** The Engine's daily surface (bell, chain, close-out) is self-serve and completable with no model in the loop; AI's sanctioned roles are analysis at review cadence and automation of the escalation tripwire — never daily check-ins, never motivation, never being where the data lives. The Mirror's conversational reflection is offered and slotless, never load-bearing for the chain. If every model is unavailable, the system still runs; only its insight cadence degrades. Capture is a two-minute act; conversation is optional — the guided daily check-in ([`vision.md`](vision.md) §6) is always offered, never load-bearing.
 
 **P10 — Priority order: practice > record > analysis.** Fixed and non-negotiable. If tooling breaks, a plain text message to oneself counts as the record and is backfilled later. Losing a night of data is recoverable; losing the practice is the actual incident. Analysis exists to serve the record; the record exists to serve the practice; never the reverse.
 
@@ -106,7 +104,7 @@ An **off-limits registry** lets the user mark topics as sensitive or excluded fr
 
 ## 6. Voice modes
 
-Four interaction modes: **Coach** (goals, accountability, next actions), **Mentor** (decisions, craft, perspective), **Reflect** (emotions, patterns, relationships — validates before probing), and **Echo** (pure reflection: echoes, surfaces contradictions, withholds advice; formerly "Mirror," renamed to avoid collision with the Mirror subsystem). Mode selection is automatic from context with explicit user override always available. Boundary: Reflect mode is pattern cartography, not clinical treatment; for wound-level work the system's role is to support professional care by supplying longitudinal context, exactly as capacity data supports medical providers.
+Four interaction modes: **Coach** (goals, accountability, next actions), **Mentor** (decisions, craft, perspective), **Reflect** (emotions, patterns, relationships — validates before probing), and **Echo** (pure reflection: echoes, surfaces contradictions, withholds advice — named Echo rather than Mirror so the mode never collides with the Mirror subsystem). Mode selection is automatic from context with explicit user override always available. Boundary: Reflect mode is pattern cartography, not clinical treatment; for wound-level work the system's role is to support professional care by supplying longitudinal context, exactly as capacity data supports medical providers.
 
 ## 7. Frameworks
 
@@ -124,4 +122,4 @@ Interpretation is pluggable. The user defines a default stack in their Charter a
 
 **Phase 3 — Agent-Self.** Outbound drafting and follow-through, activated once Profile and relational-map depth support drafting in the user's true voice.
 
-**Phase 4 — Shared Profiles.** Relational bridges per the concept document. Far horizon; requires Phase 3 maturity and a counterparty.
+**Phase 4 — Shared Profiles.** Relational bridges per [`vision.md`](vision.md) §"Shared Profiles": a standing, bidirectional aperture between two consenting records. Far horizon; requires Phase 3 maturity and a counterparty.

@@ -81,7 +81,7 @@ Name, channel they actually see, briefing date, confirmation.
 
 ## The comprehension pass **(required for Day 0)**
 
-Configuration is not comprehension: the simulation's users white-knuckled weeks they could have declared, because the relief valves were configured but never learned. Before Day 0 closes, do two things.
+Configuration is not comprehension: a relief valve that is configured but never learned gets discovered mid-crisis, or never — people white-knuckle weeks they could simply have declared. Before Day 0 closes, do two things.
 
 **Read the exact words.** Open [`mvp/engine-module.md`](mvp/engine-module.md) §"Consent amendment" and read, verbatim, the four texts that can arrive without warning: the L1, the L2, their storm variants, and the heartbeat. Consent granted in advance (architecture P5) means knowing precisely what you consented to — and the morning one of these lands, you will recognize a form letter you already read while strong, not a stranger's judgment. The escalations say so themselves: the L1, the L2, and both storm variants each end "— the form letter, pre-committed at Day 0." (The heartbeat carries no sign-off; it reports status and doesn't sting.)
 
@@ -97,7 +97,7 @@ Then put the **baseline-week Yellow rehearsal** on the calendar (engine §2): on
 
 ## The household brief *(optional — recommended if you share a home)*
 
-The witness gets a contract; the person you live with gets a bell going off at 21:30 and no explanation. The simulation's ugliest social moment was a partner discovering the system by ambush. One paragraph, in your own words, covering:
+The witness gets a contract; the person you live with gets a bell going off at 21:30 and no explanation — and the worst way for them to learn what it is, is by ambush. One paragraph, in your own words, covering:
 
 * **What they'll notice:** a bell at a fixed hour, two quiet minutes at night, occasionally a morning message on my own channel.
 * **What it is:** a practice ledger — it defends a small routine and keeps an honest record of whether I did it.
