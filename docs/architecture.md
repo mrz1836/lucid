@@ -4,7 +4,7 @@
 
 **Provenance.** This document merges two halves conceived independently for the same idea: Lucid (2025 — the inner-life system) and a behavioral engine (July 2026, formerly codenamed WAKE), unified over a single event substrate and consent model. Along the way the design has kept its vocabulary collision-free — the self-sustaining portfolio status was renamed twice ("Engine" → "Flywheel" when the Engine subsystem arrived, then → **Anchor** when the `go-flywheel` dependency entered the stack, ADR-0004), the "Mirror" voice mode became **Echo**, and the "Green" domain marker became **Steady** — generalized every spec for any user (personal data lives only in per-user calibration, never in specs), restored mechanisms dropped between design drafts (the runtime priority order, the AI-dependency boundary, the excavation practice, the dispatch definition), and stays aligned with the buildable MVP in [`mvp/scope.md`](mvp/scope.md).
 
-**Related documents:** [`vision.md`](vision.md) (product vision), [`technical-spec.md`](technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/observations.md`](observations.md) (observation & enrichment layer), [`docs/calibration.md`](calibration.md) (the calibration guide — per-user setup, `lucid init` in the packaged app), [`docs/mvp/`](mvp/README.md) and [`mvp/scope.md`](mvp/scope.md) (the first buildable slice). A user's own calibration lives in `personal/calibration.md`, which is excluded from any shared history (§5).
+**Related documents:** [`vision.md`](vision.md) (product vision), [`technical-spec.md`](technical-spec.md) (reference implementation architecture), [`docs/engine.md`](engine.md) (behavioral engine specification), [`docs/observations.md`](observations.md) (observation & enrichment layer), [`docs/scientist.md`](scientist.md) (the self-experimentation & learning layer), [`docs/calibration.md`](calibration.md) (the calibration guide — per-user setup, `lucid init` in the packaged app), [`docs/mvp/`](mvp/README.md) and [`mvp/scope.md`](mvp/scope.md) (the first buildable slice). A user's own calibration lives in `personal/calibration.md`, which is excluded from any shared history (§5).
 
 ## 1. Overview
 
@@ -72,6 +72,12 @@ extension axes, and only these:
 4. **A new projection** — a new way to view, join, question, or export
    what is already recorded.
 
+The Scientist ([`scientist.md`](scientist.md)) is the worked example:
+an entire self-experimentation layer assembled from one registry
+(`experiments/`), two event kinds (`hypothesis`, `verdict`), and
+deterministic projections, riding cadences that already exist — no
+new subsystem.
+
 What is *never* an extension: changing the envelope, mutating past
 events, adding a subsystem beyond those already named in §3
 (Agent-Self, Charter, and Witness are base design activated by
@@ -88,9 +94,9 @@ them never has to be migrated, re-consented, or re-understood.
 
 ## 5. Consent and privacy model
 
-The **resonance gate** is the lifecycle for all inferences: proposed → presented with supporting evidence and the question "does this resonate?" → accepted, edited, or rejected → merged into the Profile only on acceptance, with rejections retained as events. The system never asserts a pattern; it offers one.
+The **resonance gate** is the lifecycle for all inferences: proposed → presented with supporting evidence and the question "does this resonate?" → accepted, edited, or rejected → merged into the Profile only on acceptance, with rejections retained as events. The system never asserts a pattern; it offers one. An accepted insight may carry a **rule** — one line of user-stated intent derived from it, recorded as testimony. Rules take no streaks, scores, or reminders; they are revisited at gate cadence ("still standing?" — kept and lapsed are both first-class answers), and they earn teeth only by becoming an Engine commitment through a Gate. Insight-to-action is the Mirror's honest measure, and it is measured at review cadence, never surfaced daily (P4).
 
-An **off-limits registry** lets the user mark topics as sensitive or excluded from inference entirely. The Profile is exportable and wipeable; the Ledger beneath it is not — facts persist, labels belong to the user. The Witness visibility contract (§3) is enforced at the projection layer: witness-facing views are computed from Engine events only — no observation, enrichment, or Mirror content is ever witness-visible.
+An **off-limits registry** lets the user mark topics as sensitive or excluded from inference entirely — including people: an off-limits person is redacted from every inference input at slice-build time, fail closed, while the record beneath persists (facts persist, labels belong to the user). The Profile is exportable and wipeable; the Ledger beneath it is not — facts persist, labels belong to the user. The Witness visibility contract (§3) is enforced at the projection layer: witness-facing views are computed from Engine events only — no observation, enrichment, or Mirror content is ever witness-visible.
 
 **Enricher consent.** Sources that fetch external context (weather, daylight — [`observations.md`](observations.md) §5) are opt-in per source, with what each transmits declared in the instance configuration. Outbound minimalism is binding: coordinates and dates may leave; content and identifiers never do. Location is stated by the user, never harvested from a device; device integrations are a future, separately-consented chapter.
 

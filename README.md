@@ -55,6 +55,7 @@ Three doors, depending on who you are:
 - [Engine specification](docs/engine.md) — chains, bells, floors, operating modes, telemetry, and the accountability ladder.
 - [Observation layer](docs/observations.md) — body signals, intake, mood, context, and memory fragments on one frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation.
 - [Calibration](docs/calibration.md) — aim the system at your own life; specs are shared, calibration is yours. (Private data lives in `personal/`, which never enters shared history.)
+- [The Scientist](docs/scientist.md) — pre-registered self-experiments at Retro/Gate cadence; verdict cards and gap reports — how the design learns while the data never leaves.
 - [Technical specification](docs/technical-spec.md) — the reference architecture for the full system.
 - [MVP docs](docs/mvp/README.md) — the first buildable slice: the unified nightly loop (close-out → capture → structure → one possible pattern → validation → weekly recall).
 - [MVP scope spec](docs/mvp/scope.md) — the build-ready contract for that slice.

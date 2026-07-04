@@ -82,6 +82,7 @@ The cross-cutting principles below bind all three tables.
 | R-7 | `insights_window` is empty for the past 7 days | Router substitutes the two most recent insights regardless of age and adds a `/log` prompt. | "Quiet week — nothing landed as a validated insight in the last seven days. Want me to surface the two most recent ones from before that?" | None until the user responds. | User confirms or declines. |
 | R-8 | LLM returns malformed `ordered_insights` | Retry once. If still malformed, fall back to surfacing each insight verbatim ("Earlier you saved: '<canonical statement>'. Still resonating?"). | Verbatim insights, no novel framing. | Same as the happy path on response. | (none — the verbatim path is itself the recovery) |
 | R-9 | All validated insights have already been confirmed/softened/retired this week | Treat the user response (if any) as idempotent — `status_history` accepts duplicate confirms within a week. | "I noticed I've already heard from you on these this week — anything you want to revisit?" | (potential append to `status_history` if the user re-confirms) | (none — graceful) |
+| R-15 | A rule question gets an answer that maps to none of kept / lapsed / retire | Record nothing on the rule; the insight-status part of the response is processed independently; no re-prompt. | (none — the conversation simply moves on) | No `rule_history[]` append. | The rule resurfaces at the next recall as usual. |
 
 ### Reflection — `answer_grounded` (`/ask`)
 
@@ -93,7 +94,15 @@ The cross-cutting principles below bind all three tables.
 | R-13 | Output cites an id not in the supplied slice | Validation fires; retry once with the slice ids restated in the prompt. If still invalid, Safety/Consent blocks the answer (see Safety section below). | "I held that response — let me ask differently." | None. | User retries `/ask`. |
 | R-14 | Output contains advice / recommendation / therapeutic framing | Safety/Consent blocks. | Same as R-13. | None. | Same. |
 
-### Safety / Consent
+### `/person` (deterministic view — no agent, no LLM)
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| P-1 | `/person <name>` matches no `people/` record (by `display_name` or `aka[]`) | Return the empty state; never guess. | "No one by that name yet — people appear here as you mention them." | None (read-only). | User checks spelling or mentions the person in an entry. |
+| P-2 | `<name>` matches more than one person record | List the candidates by display name and first-seen date; render nothing else. | "That matches more than one person — which did you mean: <list>?" | None. | User re-runs with a disambiguated name. |
+| P-3 | The matched person is named in the off-limits registry | Render the view with a standing header note; inference-derived material is absent by construction (the person was redacted from every agent slice, so no insight or proposal references them). | "<name> is off-limits to inference — what follows is your raw record only: mentions and dates, nothing derived." | None. | (none — this is designed behavior, not a failure) |
+
+
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
 |---|---------|-----------------|----------------------|------------------|----------|

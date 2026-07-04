@@ -208,7 +208,8 @@ diff only in `produced_at`; no `person_key` is `null` on disk.
   pass/rewrite/block decisions).
 * Storage adapter has `write_insight` (with provenance),
   `append_rejected_proposal`, `append_unanswered_proposal`,
-  `update_insight_status`.
+  `update_insight_status`, `set_insight_rule`,
+  `update_insight_rule_status`.
 
 ### Test cases
 
@@ -223,6 +224,9 @@ diff only in `produced_at`; no `person_key` is `null` on disk.
 | 5.7 | A `/checkin` with `bootstrap_mode: true` | Reflection.propose is **not** invoked; capture-only ack. |
 | 5.8 | Same as 5.1 but the user exits without answering | No insight written; `processed/<id>.json` `unanswered_proposals[]` appended with `{shape_tag, proposed_at}`; no re-prompt in the same session; the `shape_tag` is suppressed in the next window with the same mechanics as a rejected one. |
 | 5.9 | Three consecutive proposals go unanswered (across sessions) | The router pauses proposals for 14 days: subsequent `/checkin`s still capture and structure, `reflection.propose` is not invoked, and no message mentions the pause; an answered proposal (accepted / nuanced / rejected) resets the counter (`lucid.json` `proposal_pause`, [`agent-contracts.md`](agent-contracts.md) §3). |
+| 5.10 | User accepts a proposal, then answers the rule prompt with one line | The fixed rule prompt appears exactly once, after the insight ack; the answer lands verbatim as `rule` with a `stated` entry in `rule_history[]`; no further prompt for that insight, ever. |
+| 5.11 | User accepts a proposal, then skips (or ignores) the rule prompt | Insight written normally; `rule: null`; the prompt is never re-asked for that insight; no copy comments on the skip. |
+| 5.12 | The recent window contains an artifact mentioning an off-limits person | The router's slice-build redacts that person's `people[]` entries from every agent-bound copy; Reflection's output references them nowhere; the on-disk artifact is untouched ([`agent-contracts.md`](agent-contracts.md) cross-cutting rules). |
 
 ### Verification commands
 
@@ -274,6 +278,8 @@ phrase-blocklist regex returns no hits in any prompt file.
 | 6.3 | `/reflect` with zero insights anywhere | Per §E-3: "Nothing validated yet — try `/checkin` first." No reflection record written. |
 | 6.4 | `/reflect` invoked twice in the same ISO week | The second invocation appends to the same `reflection_<YYYY>_w<WW>.md` change log; does not duplicate the body summary. |
 | 6.5 | LLM produces malformed `ordered_insights` | Per §R-8: verbatim insights surfaced with no novel framing. |
+| 6.6 | `/reflect` surfaces an insight carrying a rule; user answers "lapsed" | The surface question includes the rule verbatim; the response appends `{kind: lapsed}` to `rule_history[]`; the ack is judgment-free (grep the copy for score/streak/shame terms — zero hits); a later "kept" appends normally. |
+| 6.7 | `/reflect gate` over a store with 12 accepted insights, 5 ruled | All 12 surface (cap 50); the deterministic panel numbers follow the recall pass (accepted / rules stated / rules standing match a hand count); a dominance line appears only when one person's entry share exceeds `person_dominance_threshold`, in hypothesis language; no proposal is generated; no new insight ids appear. |
 
 ### Verification commands
 

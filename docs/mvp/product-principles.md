@@ -112,6 +112,12 @@ pattern as knowledge.
   All three are first-class outcomes; rejection is data, not failure.
 * Validated insights carry provenance: which raw entry, which processed
   artifact, which agent prompt version, what the user said.
+* An accepted insight may carry a **rule** — one line of user-stated
+  intent, attached via a fixed prompt asked once per insight, ever.
+  Rules are testimony, not goals: no streaks, no scores, no reminders;
+  they resurface only at recall, where *kept* and *lapsed* are both
+  first-class, judgment-free answers. Insight-to-action is measured at
+  gate cadence only ([`agent-contracts.md`](agent-contracts.md) §3).
 
 This principle is what keeps the MVP from collapsing into a confident
 diagnostic engine.
@@ -303,7 +309,7 @@ Each principle above has a concrete check:
 
 | Principle | Verification |
 |-----------|--------------|
-| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`scope.md`](scope.md) §4: the Mirror five, the Engine five, and the observation micro-logs plus the `/packet clinician` export. |
+| One steel thread | Grep MVP docs for alternate flows; the only commands documented as MVP-required are the three families in [`scope.md`](scope.md) §4: the Mirror six, the Engine seven, and the observation micro-logs plus the `/packet clinician` export. |
 | Local-first | Grep for cloud-sync, telemetry, or upload language in MVP docs; should not appear except as named non-goals, the chat-transport caveat in [`local-runtime.md`](local-runtime.md), or the consented enricher-fetch class in §7 / [`observations-module.md`](observations-module.md). |
 | Hypotheses, not diagnoses | Grep MVP docs for diagnostic phrases ("you are", "clearly", "diagnos", "guarantee"); each hit must be a non-goal call-out. |
 | Approval before action | Grep for "send automatically", "auto-send", or similar; should appear only as forbidden patterns. |

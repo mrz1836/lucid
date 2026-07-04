@@ -46,6 +46,8 @@ These rules trace directly to
 ├── engine/                 # Engine tree — schemas owned by engine-module.md
 │   ├── chain.json
 │   ├── witness.json
+│   ├── storm.json
+│   ├── profile.json
 │   ├── days/2026/07/day_2026_07_02.json
 │   └── status.json
 ├── observations/           # frozen-envelope events — owned by observations-module.md
@@ -154,6 +156,7 @@ The single global config file. Tiny, hand-editable, agent-readable.
   "ask_insights_cap": 50,
   "ask_reflections_cap": 12,
   "proposal_pause": {"unanswered_threshold": 3, "pause_days": 14},
+  "person_dominance_threshold": 0.5,
   "agent_versions": {
     "intake": "intake-2026.05.0",
     "structuring": "structuring-2026.05.0",
@@ -178,6 +181,11 @@ The single global config file. Tiny, hand-editable, agent-readable.
   `unanswered_threshold` consecutive unanswered proposals, the router
   stops invoking `reflection.propose` for `pause_days` days (see
   [`agent-contracts.md`](agent-contracts.md) §3 "Proposal pause").
+* `person_dominance_threshold` is the share of window entries
+  mentioning one person above which `/reflect gate` and `/person`
+  surface a dominance line — deterministic router copy, hypothesis
+  language, gate cadence only (see
+  [`agent-contracts.md`](agent-contracts.md) §3 "Gate recall").
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt
@@ -380,6 +388,10 @@ status_history:
 last_confirmed_at: 2026-05-09T20:11:02-04:00
 last_softened_at: null
 retired_at: null
+rule: "When I catch myself folding mid-sentence, finish the sentence."
+rule_history:
+  - at: 2026-05-05T19:44:20-04:00
+    kind: stated
 ---
 
 # Insight
@@ -410,6 +422,8 @@ test an idea once and back off if it isn't picked up immediately.
 | `last_confirmed_at` | no | Updated when `/reflect` confirms the insight still fits. |
 | `last_softened_at` | no | Updated when `/reflect` softens the insight. |
 | `retired_at` | no | Set when the user retires the insight via `/reflect`. |
+| `rule` | no | One line of user-stated intent, verbatim, attached at validation via the fixed rule prompt (asked once per insight, ever — skipping leaves `null` forever unless the user volunteers one later at recall). Testimony, not obligation: no streaks, no scores, no reminders (architecture §5). |
+| `rule_history[]` | with `rule` | Append-only: `stated`, then `kept` / `lapsed` (both first-class, judgment-free) / `retired`, each stamped, from `/reflect` responses. Insight-to-action conversion and rule survival are computed from these at gate cadence only — never on a daily surface (P4). |
 
 ### Insight provenance and rejected proposals
 
@@ -590,7 +604,10 @@ number of files:
 | Validation — accepted/nuanced | `processed/<id>.json` | `insights/<iid>.md` |
 | Validation — rejected | — | append `rejected_proposals[]` to `processed/<id>.json` |
 | Validation — unanswered | — | append `unanswered_proposals[]` to `processed/<id>.json` |
-| Recall (`/reflect`) | `insights/*.md` filtered by week | `reflections/<rid>.md` (append) |
+| Validation — rule stated | — | set `rule` + append `rule_history[]` on `insights/<iid>.md` |
+| Recall (`/reflect`) | `insights/*.md` filtered by week | `reflections/<rid>.md` (append), `rule_history[]` appends on response |
+| Gate recall (`/reflect gate`) | `insights/*.md` (all accepted, cap 50) + `processed/*.json` people counts (deterministic, router-side) | `reflections/<rid>.md` (append), `rule_history[]` appends |
+| Person view (`/person <name>`) | `people/<key>.json` + `processed/*.json` + `insights/*.md` (deterministic join, no LLM) | — (read-only) |
 
 No SQL. No graph queries. Everything is a small named read or write
 against the storage adapter.
@@ -611,7 +628,7 @@ The mapping below is the contract.
 | `processed/<id>.json` `themes[]` | `themes` | One row per theme, joined to `entries` via `entry_id`. |
 | `processed/<id>.json` `people[]` | `entities` + `person_entries` | `entities` for the canonical person; `person_entries` for the join. |
 | `processed/<id>.json` `rejected_proposals[]` and `unanswered_proposals[]` | `reprocessing_queue` (with a "rejected proposal" status) **and** a small per-artifact log table that survives migration. | Rejection rationale and unanswered-shape entries stay addressable so Reflection can avoid re-proposing the same shape; the two arrays remain distinct because silence is not rejection. |
-| `insights/<iid>.md` | `insights` + `memories` | `memories` carries the four dimensions from `technical-spec.md` (salience, type, confidence, activation). MVP-migrated rows default to `confidence='validated'`, `activation='active'`, `salience='unscored'`, `type='insight'` until the adaptive-evolution loop lands and starts assigning real salience. |
+| `insights/<iid>.md` | `insights` + `memories` | `memories` carries the four dimensions from `technical-spec.md` (salience, type, confidence, activation). MVP-migrated rows default to `confidence='validated'`, `activation='active'`, `salience='unscored'`, `type='insight'` until the adaptive-evolution loop lands and starts assigning real salience. `rule` and `rule_history[]` migrate as a column plus a small history table, preserving the kept/lapsed record. |
 | `people/<key>.json` | `people` (+ `relationships` once relational profile lands) | `aka[]` becomes a related table or JSON column. |
 | `sessions/<sid>.json` | `sessions` (a new table the spec implies but does not enumerate) | Session is a new first-class concept the MVP introduces; SQLite gets the same table. |
 | `sessions/channel_*.md` | A small `channels` table or kept as a file even after migration. | Channel memory is small enough that staying as a file post-migration is fine. |
@@ -646,7 +663,10 @@ backup format. This keeps
   and they are individual files, not a single document.
 * **Not a goals or progress tracker.** No `goals/`, `progress/`, or
   framework-state directories. Coach surface is deferred per
-  [`product-principles.md`](product-principles.md) §1.
+  [`product-principles.md`](product-principles.md) §1. Insight rules
+  are not goals: recorded testimony revisited at gate cadence, never
+  tracked daily, never celebrated, never reminded — a rule that
+  deserves teeth becomes an Engine commitment through a Gate.
 * **Not a backup spec.** The user is responsible for backing up
   `~/.lucid/` (especially `~/.lucid/raw/`). The docs name this as a
   responsibility; the MVP does not implement automated backup.

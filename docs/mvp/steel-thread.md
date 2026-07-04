@@ -164,6 +164,18 @@ All three are first-class.
   traceability.
 * Status: `accepted` with a `nuanced_from_proposal: true` flag.
 
+**The rule prompt** (accepted and nuanced paths only). After the
+insight is saved, the router asks the fixed prompt, once per insight,
+ever: *"Want to attach a rule — one line, what you'll try? Skipping is
+fine."* An answer is recorded verbatim as the insight's `rule`
+([`data-model.md`](data-model.md) §"Validated insights"); a skip or
+silence leaves `rule: null` and the prompt never returns for that
+insight. A rule is testimony, not a goal: nothing tracks it, nothing
+scores it, nothing reminds about it — it resurfaces only at recall,
+where *kept* and *lapsed* are both first-class, judgment-free answers.
+A rule that deserves teeth becomes an Engine commitment through a
+Gate; the Mirror never grows any.
+
 **Rejected** — the user says the pattern does not fit.
 
 * No insight record is created.
@@ -198,8 +210,12 @@ required for the MVP).
 
 * Lists validated insights from the past week, in the voice from
   `product-principles.md`.
-* For each insight, asks: *"Still resonating? Anything change?"*
-* User responses can: confirm, soften, retire, or split an insight. Each
+* For each insight, asks: *"Still resonating? Anything change?"* For
+  insights carrying a rule, the question includes it: *"You attached:
+  '<rule>'. Still standing — kept, lapsed, or retire it?"* Kept and
+  lapsed are both first-class; a lapse is data, never a scolding.
+* User responses can: confirm, soften, retire, or split an insight —
+  and, for ruled insights, mark the rule kept, lapsed, or retired. Each
   is a separate insight record update with provenance, never a silent
   rewrite.
 * If there are no validated insights from the past week, `/reflect`
@@ -210,12 +226,28 @@ required for the MVP).
   you want to look for a pattern together."* This is recall-side
   router copy, not a proposal.
 
+**The gate variant.** `/reflect gate`, run by the user at gate or
+quarterly cadence, is the same read-and-ask pass over **every**
+accepted insight (capped at 50) instead of the past week — the place
+accepted insights get consumed instead of merely stored. After the
+recall pass the router appends the deterministic **panel numbers** as
+fixed copy: insights accepted this window, rules stated, rules
+standing — plus, when one person's share of window entries crosses the
+dominance threshold ([`data-model.md`](data-model.md)
+`person_dominance_threshold`), a single hypothesis-framed line:
+*"<name> appears in N% of entries this window, up from M% — worth a
+look, or expected?"* These numbers exist at gate cadence only: never
+on `/status`, never daily, never witness-visible
+([`agent-contracts.md`](agent-contracts.md) §3 "Gate recall").
+
 **Hard rules:**
 
 * `/reflect` is read-and-ask, not generate-new. It does not propose new
   patterns. New proposals come from Reflection on fresh entries, not
-  from the recall command.
+  from the recall command. The gate variant included.
 * `/reflect` never sends a notification, only responds when invoked.
+* Panel numbers and dominance lines are router-computed, deterministic,
+  and hypothesis-framed — data the user pulled, never a verdict.
 
 ### Stage 6 — Ask (grounded Q&A)
 

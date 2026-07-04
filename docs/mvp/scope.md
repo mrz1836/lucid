@@ -91,9 +91,10 @@ Engine loop wraps around it nightly.
                naming the floor · 2 consecutive → L2 to witness
                (dead-man: fires on ABSENCE of a day record)
 
-        anytime:  /log  /checkin  /mode  /status  /ask  +  micro-logs
+        anytime:  /log  /checkin  /mode  /status  /storm  /profile
+                  /ask  /person  +  micro-logs
                   (/pain /ate /drank /bm /mood /slept /obs /day)
-        weekly:   /reflect
+        weekly:   /reflect        gates/quarterly:  /reflect gate
 ```
 
 **Hard caps the loop enforces** (mirrored as gates in
@@ -111,6 +112,9 @@ Engine loop wraps around it nightly.
   op; no LLM in any Engine or observation path.
 * L2 payload contains zero bytes of journal, capacity, or Profile data.
 * Mode declarations are fixed at the bell; no retroactive amendment.
+* Storm entry requires witness confirmation (or a pre-named ambush
+  window), is never retroactive, and a storm miss is never a stake
+  event ([`../engine.md`](../engine.md) §4).
 
 ## 4. Required commands
 
@@ -129,9 +133,12 @@ observation commands in
 | `/closeout skip` | Record an honest miss (does not suppress escalation). | `engine/days/` |
 | `/closeout backfill [yesterday\|<YYYY-MM-DD>] [<compact form>]` | Create or correct the record for a recent past day (default: the most recent logical day without a completed record; window 7 days) — the chain ran but went unrecorded. Same compact form as `/closeout`; derived state recomputes over folded records; never unsends an already-fired L1/L2. | `engine/days/` (`backfilled: true` record or appended `corrections[]`), `raw/` (journal line), rebuilt `engine/status.json` |
 | `/mode <green\|yellow\|red>` | Declare today's mode; rejected after bell time. | `engine/days/` |
+| `/storm <clause-label\|unwritten>` / `/storm end` | Declare (or end) a storm — the pre-committed incapacity state: witness-confirmed within 72h (ambush windows enter automatically), bounded (14 days, one renewal), never retroactive. While standing: undeclared days default to Red, L1/L2 use fixed storm variants, misses spend no budget, and the stake is stayed ([`engine-module.md`](engine-module.md)). | `engine/storm.json` (append-only history), rebuilt `engine/status.json` |
+| `/profile <name>` | Switch to a named clock profile (Bell, tripwire hour, rollover move together); defined at a Retro, effective from the next logical day — never the current one. | `engine/profile.json` (append-only history) |
 | `/status` | Read-only ambient state: streak, mode-relative adherence co-presented with the floor-day ratio and raw days-accounted (the honest-number pairing), budget burn, days to next gate; surfaces `stake_owed` and "witness lapsed — L2 disarmed" state ([`engine-module.md`](engine-module.md)). | None |
-| `/reflect` | Weekly recall of validated insights; "still resonating?". Never proposes new patterns. | `reflections/` |
+| `/reflect [gate]` | Weekly recall of validated insights; "still resonating?" — including whether attached rules still stand (kept/lapsed, judgment-free). The gate variant, at gate/quarterly cadence, recalls every accepted insight (cap 50) and appends the deterministic panel numbers + any person-dominance line ([`agent-contracts.md`](agent-contracts.md) §3). Never proposes new patterns. | `reflections/`, `rule_history[]` appends on `insights/` |
 | `/ask <q>` | Read-only grounded Q&A over validated insights + reflections, with citations. | None |
+| `/person <name>` | Read-only deterministic join, no LLM: the person record, mention counts over time, accepted insights that cite entries mentioning them, dominance share. Off-limits persons render raw record only ([`error-states.md`](error-states.md) §P-3). | None |
 | `/bootstrap` | Historical-entry mode: explicit `occurred_at`, proposals suppressed until `/bootstrap done`. | as `/log`/`/checkin` |
 | `/pain` `/ate` `/drank` `/bm` `/mood` `/obs <kind>` | Observation micro-logs — one line, deterministic, sub-second, no LLM. All alias one router intent. | `observations/` (+ `registries/` on match) |
 | `/obs where <place>` | Sticky stated location (feeds enrichers; never device-derived). | `observations/`, `registries/places/` |
@@ -139,7 +146,7 @@ observation commands in
 | `/packet clinician [@<date>\|all]` | Render the clinician packet projection; post only its path. Window: since the last packet export (first-ever: trailing 90 days); `@<date>` overrides the window start, `all` exports everything. | `projections/` (packet + one line appended to `projections/exports.log`) |
 
 Commands beyond this list are out of scope for the MVP. Three
-families, one router: the Mirror five, the Engine five, the
+families, one router: the Mirror six, the Engine seven, the
 observation micro-logs plus the packet export (phases 11–12).
 
 ## 5. Required storage layout
@@ -161,8 +168,10 @@ unchanged), [`engine-module.md`](engine-module.md)
 ├── sessions/                # session metadata + channel memory
 ├── reflections/             # weekly reflection records (.md)
 ├── engine/                  # ENGINE TREE — the only tree the Engine module touches
-│   ├── chain.json           # chain config (hand-edited at Retros only)
+│   ├── chain.json           # chain config incl. clock profiles (hand-edited at Retros only)
 │   ├── witness.json         # witness contract + consent record
+│   ├── storm.json           # storm clauses, ambush windows, append-only history
+│   ├── profile.json         # active clock profile + append-only switch history
 │   ├── days/                # one record per logical day (append-only per day)
 │   └── status.json          # derived streak/adherence projection (rebuildable)
 ├── observations/            # frozen-envelope events, JSONL per logical day
@@ -173,8 +182,11 @@ unchanged), [`engine-module.md`](engine-module.md)
 
 All the data-model mutability and naming rules stand. New binding rules:
 `engine/days/` is append-only per day-id (`corrections[]`, never
-rewrite); `status.json` must be byte-reproducible from `days/` +
-`chain.json`; `capacity` and `limiter_tag` exist only in the engine
+rewrite); `storm.json` and `profile.json` histories are append-only,
+and storm clause labels are opaque — the clause text lives only in the
+Charter; `status.json` must be byte-reproducible from `days/` +
+`chain.json` + the storm and profile histories; `capacity` and
+`limiter_tag` exist only in the engine
 tree; `chain_start` is stamped once, on the first completed close-out.
 Observation rules: the event envelope is frozen; JSONL lines are never
 rewritten (corrections are new events via `refs.corrects`); registries
@@ -223,7 +235,10 @@ proposals, no production data in the repo — with these amendments:
 * **Amended:** "No Coach surface" becomes: no goal trees, no progress
   celebration, no conversational accountability voice. The Engine's
   committed-practice record and escalation **are** in scope; they are
-  not Coach — they have no voice at all.
+  not Coach — they have no voice at all. Insight rules are not Coach
+  either: recorded testimony revisited at recall, never tracked,
+  celebrated, or reminded ([`agent-contracts.md`](agent-contracts.md)
+  §3).
 * **Amended:** "No autonomous notifications" becomes: none except the
   three pre-committed template sends (bell, L1, L2), each behind a
   recorded consent flag, none containing Mirror content.
@@ -242,6 +257,10 @@ proposals, no production data in the repo — with these amendments:
   projections are data for the user and their care team.
 * **Added:** No agent reads observations or registries in the MVP;
   correlation and excavation surfaces are post-MVP contract diffs.
+* **Added:** No Scientist tooling — the experiment lifecycle
+  ([`../scientist.md`](../scientist.md)) is a manual practice at
+  Retro/Gate cadence in this phase; its registry and event kinds ride
+  the frozen envelope; no new commands.
 
 ## 8. Success metrics
 
@@ -268,6 +287,10 @@ user's host. These are evaluable, not aspirational.
 | S-16 | Micro-logs are frictionless and judgment-free: sub-second ack, valid frozen envelope, correct logical-day attribution across the 04:00 boundary, and no evaluative language in any ack template. | Latency sample; envelope validator; boundary fixture; grep ack templates for streak/score/praise terms. |
 | S-17 | Enrichment is provably minimal: every logged outbound query contains only coordinates and dates; enricher events are source-attributed and idempotent. | Grep the enricher's query log; rerun fixture. |
 | S-18 | The clinician packet renders capacity/mode + pain series + med record with zero journal content by default. | Generate against fixtures; grep output for body text. |
+| S-19 | The storm protocol stays the stake and keeps contact. | Fixtures: standing storm + two consecutive misses ⇒ exactly one L2 storm variant, `escalation_state: l2_fired`, zero budget spend, and no `stake_owed` ever; a declaration unconfirmed at 72h lapses; entry never annotates a day before its declaration; expiry at 14 days without renewal; consecutive-miss count resets at exit. |
+| S-20 | Profiles move Bell, tripwire, and rollover together, effective from the next logical day. | Fixture: switch to a `nights` profile (rollover 12:00) after today's bell ⇒ tonight runs on the old clocks; next day an 11:00 close-out attributes to the new profile's previous logical day; the `/mode` deadline follows the active profile's bell. |
+| S-21 | Rules are sanctuary: attached once, revisited only at recall, never tracked. | Fixtures: the rule prompt appears exactly once per accepted insight and never after a skip; grep every rule/recall/panel template for streak, score, praise, and shame terms — zero hits; `kept` and `lapsed` acks are byte-identical in tone (no celebratory or corrective variant exists); nothing rule-related appears on `/status` or any daily surface. |
+| S-22 | `/person` and the gate panel are deterministic and off-limits-safe. | Fixtures: `/person` output is byte-identical across repeated runs on the same store; an off-limits person renders raw-record-only with the §P-3 header; the dominance line appears only above `person_dominance_threshold` and only in `/reflect gate` and `/person` — grep `/status` and daily-surface templates for dominance terms: zero hits. |
 
 ## 9. Build phases
 
@@ -276,12 +299,15 @@ structuring, insight validation, `/reflect`, `/ask`) — see
 [`acceptance-criteria.md`](acceptance-criteria.md).
 The modules add:
 
-8. **Engine scaffold + `/closeout`.** `engine/` tree, chain.json,
-   day records, rollover math, journal line into `raw/`.
+8. **Engine scaffold + `/closeout`.** `engine/` tree, chain.json
+   (incl. clock profiles), day records, rollover math and `/profile`
+   switching, journal line into `raw/`.
 9. **Derived status + `/mode` + `/status`.** Deterministic
-   `status.json`, mode-relative adherence, budget burn.
-10. **Tripwire.** Scheduled job, bell prompt, L1/L2 templates,
-    witness confirmation flow, dead-man semantics.
+   `status.json`, mode-relative adherence, budget burn, storm-aware
+   scoring (undeclared storm days score against Red).
+10. **Tripwire + `/storm`.** Scheduled job, bell prompt, L1/L2
+    templates and their storm variants, storm declaration/confirmation
+    flow, witness confirmation flow, dead-man semantics.
 11. **Micro-logs + registries + `/day`.** The observation envelope,
     deterministic parsers, registry keys, the joined day view.
 12. **Enrichment + exports.** Sticky location, one enricher

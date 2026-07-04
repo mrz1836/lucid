@@ -55,6 +55,13 @@ future agent unless a contract explicitly overrides them.
 * **Synthetic-only fixtures.** Tests, examples, and prompts in the
   repo reference synthetic content only
   ([`product-principles.md`](product-principles.md) §9).
+* **Off-limits redaction at slice-build.** The off-limits registry may
+  name a person (architecture §5). At slice-build time the router
+  removes matching `people[]` entries from every artifact copy handed
+  to any agent — fail closed, same gate as the denylist below; the
+  on-disk record is untouched (facts persist, labels belong to the
+  user). An off-limits person is thereby invisible to all inference:
+  Reflection cannot propose about someone it cannot see.
 * **The sanctuary boundary is bidirectional.** No agent may read
   `~/.lucid/engine/`, `~/.lucid/observations/`, `~/.lucid/registries/`,
   or any projection derived from them — the router's context-slice
@@ -294,8 +301,10 @@ to its slice; none of them reads raw entries.
   single hypothesis-framed pattern proposal, an honest "no pattern
   yet" message, or a soft contradiction.
 * **`reflection.surface_for_recall`** (used by `/reflect`) — surface
-  validated insights from the past week and ask whether they still
-  fit. Never proposes new patterns.
+  validated insights from the past week — or, in the gate variant
+  (`/reflect gate`), every accepted insight — and ask whether they
+  still fit, including whether each attached rule still stands. Never
+  proposes new patterns.
 * **`reflection.answer_grounded`** (used by `/ask`) — answer the
   user's free-form question by quoting or paraphrasing the supplied
   validated insights and weekly reflections only. Never proposes new
@@ -347,15 +356,46 @@ proposal (accepted, nuanced, or rejected) resets the counter. Defaults
 live in `lucid.json`:
 `"proposal_pause": {"unanswered_threshold": 3, "pause_days": 14}`.
 
+**Rules (insight → intent).** After an accepted or nuanced validation,
+the router — not an agent — asks the fixed rule prompt, once per
+insight, ever: *"Want to attach a rule — one line, what you'll try?
+Skipping is fine."* The answer is recorded verbatim via
+`storage.set_insight_rule` (`rule` + a `stated` entry in
+`rule_history[]` — [`data-model.md`](data-model.md) §"Validated
+insights"); silence or skip leaves `rule: null` and the prompt never
+returns for that insight. Rules are testimony, not obligation: no
+agent tracks them, no surface scores them, no send mentions them —
+they resurface only at recall, where **kept** and **lapsed** are both
+first-class, judgment-free answers appended via
+`storage.update_insight_rule_status`.
+
 For per-week recall (`/reflect`):
 
 ```text
 {
   "command": "reflection.surface_for_recall",
-  "insights_window": [ { ...validated insights from past 7d... } ],
+  "recall_scope": "week",
+  "insights_window": [ { ...validated insights from past 7d, rule included... } ],
   "agent_versions": { "reflection": "reflection-2026.05.0" }
 }
 ```
+
+**Gate recall (`/reflect gate`).** The same sub-mode with
+`recall_scope: "gate"`, invoked by the user at gate or quarterly
+cadence: the router widens `insights_window` to every `status:
+accepted` insight (capped at the 50 most recent, the `/ask` cap) so
+accepted insights are consumed somewhere other than the week they were
+born. For ruled insights the surface question includes the rule
+(*"You attached: '<rule>'. Still standing — kept, lapsed, or retire
+it?"*). The router — deterministically, not the agent — appends the
+**panel numbers** as fixed copy after the recall pass: insights
+accepted this gate window, rules stated, rules standing (computed from
+`rule_history[]`), and, when any person's share of window entries
+exceeds `person_dominance_threshold` (`lucid.json`, default 0.5), one
+dominance line in hypothesis language (*"<display name> appears in
+N% of entries this window, up from M% — worth a look, or expected?"*).
+Panel numbers and dominance lines appear at gate cadence only — never
+on `/status`, never daily, never witness-visible (P4, P3).
 
 For free-form Q&A (`/ask`):
 
@@ -481,6 +521,14 @@ in, or any external system.
   `unanswered_shape_tags` for the same window. Silence is not
   rejection, but a shape the user let pass is not re-proposed while it
   sits in the window.
+* Proposing a pattern about an off-limits person. The slice-build
+  redaction (cross-cutting rules) makes this structurally unreachable —
+  Reflection cannot see who it cannot mention — but it is named here so
+  a partial redaction failure is a contract violation, not a judgment
+  call.
+* Tracking, scoring, or reminding about insight rules. Rules surface at
+  recall and nowhere else; `kept` and `lapsed` are recorded without
+  comment.
 * Diagnostic, prescriptive, or labeling language. The Safety/Consent
   agent will block or rewrite such output, but Reflection should not
   produce it in the first place.
@@ -801,6 +849,8 @@ that knows the order. Spelled out, the per-session sequence is:
   ├── (await user response)
   └── on accepted/nuanced:
         storage.write_insight(...)           with provenance
+        (router asks the fixed rule prompt, once per insight — see §3;
+         on answer: storage.set_insight_rule(...); on skip: nothing)
       on rejected:
         storage.append_rejected_proposal(...)
       on no answer:
@@ -824,15 +874,20 @@ or delivered outside a `/checkin` session.
 `/reflect` is read-and-ask only:
 
 ```
-/reflect
+/reflect [gate]
   ├── storage.read_insights(window=7d)       → list
+  │    (gate variant: status=accepted, cap=50 — see §3 "Gate recall")
   ├── (router handles empty case → most recent 2 + /log prompt,
   │    + the /checkin pointer line when unprocessed entries
   │      have accumulated — see §3)
   ├── Reflection.surface_for_recall(list)    → ordered_insights
   ├── Safety.evaluate(each surface_text)     → outbound messages
+  ├── (gate variant only: router appends the deterministic panel
+  │    numbers + any dominance line — fixed copy, not agent output)
   └── on each user response:
         storage.update_insight_status(...)
+        storage.update_insight_rule_status(...)  (kept | lapsed | retired,
+                                                  ruled insights only)
         storage.write_reflection(...)        (append-only per ISO week)
 ```
 

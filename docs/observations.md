@@ -131,9 +131,11 @@ Envelope semantics, binding:
   decades before its `recorded_at`.
 * **`source`** is `microlog`, `checkin`, `closeout`, `excavation`,
   `extraction` (a structuring-pass proposal the user accepted through
-  the resonance gate — the accepting event referenced in `refs`), or
-  `enricher:<name>` — provenance for every event, so machine-added
-  context is always distinguishable from human testimony.
+  the resonance gate — the accepting event referenced in `refs`),
+  `experiment` (a pre-registered hypothesis or verdict event —
+  [`scientist.md`](scientist.md) §3), or `enricher:<name>` —
+  provenance for every event, so machine-added context is always
+  distinguishable from human testimony.
 
 ## 3. Observation kinds (initial vocabulary)
 
@@ -156,6 +158,8 @@ payload accepts `note?` (the grammar routes trailing text there).
 | `context.location` | `place_ref`, `note?` | **Sticky**: "I'm in Lisbon" holds until the next one. Stated by the user, never harvested from a device. **Sensitive by default**: excluded from every export and packet unless explicitly included per export; the off-limits registry applies to it as a kind; and stated plainly — sticky locations form a permanent trail on a non-wipeable ledger, so choose your coarseness accordingly (a city is plenty). |
 | `context.day` | per-enricher, one event per enricher per day | Written by enrichers only (§5). `occurred_at` = the logical date at local noon, precision `approximate`. |
 | `memory` | `text`, `certainty` (vivid/hazy/reconstructed), `era_ref?`, `note?` | See §8. |
+| `hypothesis` | `statement`, `arms[]` (each `{id, config}`), `primary_measure`, `decision_rule`, `stop_rules[]`, `planned_blocks`, `note?` | A pre-registered self-experiment, written at a Retro before data; `refs.experiment` names the registry record. Full specification: [`scientist.md`](scientist.md) §3. |
+| `verdict` | `verdict` (adopt/null/underpowered/invalidated/stopped), `adopted_arm?`, `effect_summary`, `blocks_counted`, `blocks_censored`, `coverage`, `note?` | Computed by deterministic script per the pre-registered decision rule; delivered at a Gate. Full specification: [`scientist.md`](scientist.md) §3. |
 
 Adding a kind is a one-row diff to this table plus a payload schema —
 no envelope change, no new subsystem.
@@ -413,6 +417,13 @@ history semantics in §1), referenced from events via `refs`.
   its narrative — what the linked events say happened — reviewed at
   gate or quarterly cadence (P4). Threads are how "get better at X"
   lives in the system without becoming a metric that kills X.
+* **Experiments** (`experiment_<slug>`): a pre-registered
+  self-experiment, following the threads pattern — name, protocol id
+  and version, arms, status with history
+  (registered/running/frozen/closed) in the append-only
+  `status_history[]`, linked hypothesis and verdict event ids, and the
+  forbidden-domain check record. Lifecycle, guardrails, and defaults
+  live in [`scientist.md`](scientist.md).
 * **Places** (`place_<slug>`): stated locations; optionally lat/lon
   (added once, by the user) so enrichers can work.
 * **Eras** (`era_<slug>`): named life chapters with date ranges

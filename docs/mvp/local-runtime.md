@@ -136,7 +136,7 @@ the cloud, not in any backup the user has not deliberately set up.
 ├── people/                      # lightweight people references (JSON)
 ├── sessions/                    # thread/session metadata (JSON)
 ├── reflections/                 # weekly reflection records (Markdown)
-├── engine/                      # chain config, day records, witness, status
+├── engine/                      # chain config + profiles, day records, witness, storm, status
 ├── observations/                # frozen-envelope events (JSONL) + config
 ├── registries/                  # injuries, threads, places, eras
 ├── projections/                 # rebuildable views/exports

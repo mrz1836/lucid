@@ -48,11 +48,13 @@ The engine is aimed at *your* measured profile, not the average participant in a
 
 **Opportunity habits** (slotless, tallied, never quota'd): trigger → act. One or two at most.
 
+**Schedule profiles** (only if your schedule rotates — engine §2): one named clock set per recurring schedule, each moving Bell time, tripwire hour, and rollover together (e.g., `default` and `nights`). Define them here and at Retros only; switch with `/profile` as the roster changes, effective the next logical day. A shift worker without profiles is lending the system a schedule they don't have.
+
 ## Portfolio snapshot
 
 Sort your full lists — every project, hobby, aspiration, obligation — into: **Anchor** (self-sustaining, untouched), **Active** (the one Chain, for now), **Bench** (available for spontaneous play, untracked forever, guilt formally revoked), **Parked** (dormant, with a standing quarterly Hearing), plus domains marked **Steady** (stable, monitored, unmanaged). The sort itself is timeboxed: one sitting, imperfect, amendable at any Retro.
 
-## The Charter **(required for Day 0 — at least section 6)**
+## The Charter **(required for Day 0 — at least sections 6 and 8)**
 
 Write plainly, in your own voice, one sitting, imperfect. Version it. Date it. Keep it as `personal/charter.md` — same privacy rule as this file; amendments append with reasons at quarterly reviews only (architecture P8).
 
@@ -63,8 +65,9 @@ Write plainly, in your own voice, one sitting, imperfect. Version it. Date it. K
 5. **Non-negotiables:** the three to five things that stay true even in the worst week.
 6. **The stake:** what a breach costs — concrete, mildly painful, mechanically executable (engine §4) — written while strong. On a breach you execute it yourself within the stake execution window (default 72 hours, engine §8) and confirm to the witness, who verifies with one line. Choose a beneficiary who is not your witness — the person verifying a payment must not be its recipient.
 7. **Forever unmeasured:** outcomes the system may serve with rooms and readiness but must never metricize (architecture P4). Naming them here is what protects them.
+8. **Storm clauses & ambush windows** *(required for Day 0 — may be empty; must be chosen)*: the conditions under which the machine must treat non-performance as circumstance, written while strong, in your own words — the bereavement, the hospitalization, the injury that makes the chain unsafe — plus the calendar dates you already know are ambushes (the anniversary, the season that takes you under). The witness confirms storm declarations against exactly this text (engine §4); a clause you never wrote is a fine you'll eventually pay. Give each clause a short label — the label is all the Engine ever stores.
 
-Show the witness sections 5 **and 6** — they hold you to the non-negotiables and they hold the stake.
+Show the witness sections 5, 6 **and 8** — they hold you to the non-negotiables, they hold the stake, and they confirm your storms against what you wrote while strong.
 
 ## Witness arrangement **(required for Day 0)**
 
@@ -72,21 +75,53 @@ Name, channel they actually see, briefing date, confirmation.
 
 **Choosing one.** Someone who will actually ask once, without drama — the job is a question, not a lecture. Not the stake's beneficiary (Charter §6): the person verifying a payment must not be its recipient. Mutual witnessing is permitted, with one caution: keep the two contracts formally separate, each with its own brief and its own stake.
 
-**The brief** is one paragraph: what they'll see (streak, mode, escalation state — never content), when they'll hear from the system (the L2 dead-man message after two consecutive misses, plus the monthly heartbeat — engine §4), and their three jobs — when L2 fires, ask about it, once; when a stake executes, confirm with one line that it happened; hold the written stake. One more line, consented now so it arrives expected rather than surveillant: if an L2 goes unanswered and total silence persists for 7 days, they are licensed — as a human, outside the system, in their own words, without Lucid framing — to reach out once more. Record that they've seen the stake.
+**The brief** is one paragraph: what they'll see (streak, mode, escalation state, storm state — never content), when they'll hear from the system (the L2 dead-man message after two consecutive misses, plus the monthly heartbeat — engine §4), and their four jobs — when L2 fires, ask about it, once; when a storm is declared, confirm or decline it with one line against the Charter clauses they've seen (§8 above); when a stake executes, confirm with one line that it happened; hold the written stake. One more line, consented now so it arrives expected rather than surveillant: if an L2 goes unanswered and total silence persists for 7 days, they are licensed — as a human, outside the system, in their own words, without Lucid framing — to reach out once more. Record that they've seen the stake.
 
 **Keeping it live.** Re-brief quarterly, folded into the stake review: one message reconfirming the contract, recorded. A witness may resign at any time; on resignation or sustained unreachability, L2 disarms and the ladder runs L1-only until a replacement completes this full arrangement from the top — briefing, stake shown, confirmation, channel scoping (engine §4).
 
+## The comprehension pass **(required for Day 0)**
+
+Configuration is not comprehension: the simulation's users white-knuckled weeks they could have declared, because the relief valves were configured but never learned. Before Day 0 closes, do two things.
+
+**Read the exact words.** Open [`mvp/engine-module.md`](mvp/engine-module.md) §"Consent amendment" and read, verbatim, the four texts that can arrive without warning: the L1, the L2, their storm variants, and the heartbeat. Consent granted in advance (architecture P5) means knowing precisely what you consented to — and the morning one of these lands, you will recognize a form letter you already read while strong, not a stranger's judgment. The escalations say so themselves: the L1, the L2, and both storm variants each end "— the form letter, pre-committed at Day 0." (The heartbeat carries no sign-off; it reports status and doesn't sting.)
+
+**Walk the five relief valves, once, out loud or on paper:**
+
+1. **Floors** — the minimum that still counts, for every Link. The worst day costs one sentence.
+2. **Modes** — declare Yellow or Red *before the Bell* on the days that are already smaller than Green. A declared floor day scores 100%.
+3. **The budget** — isolated misses are spend, not failure (default 4 per 30 days). A miss followed by a completed night is the system working.
+4. **Backfill** — the chain ran but went unrecorded? `/closeout backfill` within 7 days; derived state recomputes; nothing is owed.
+5. **The storm** — for the collapse that outlasts a day: declare it, your witness confirms it, the stake stays while contact continues (engine §4). Your clauses are Charter §8; you wrote them above.
+
+Then put the **baseline-week Yellow rehearsal** on the calendar (engine §2): one deliberate Yellow declaration in week 1, on a day of your choosing — a drill, so the first real hard day finds the lever already warm.
+
+## The household brief *(optional — recommended if you share a home)*
+
+The witness gets a contract; the person you live with gets a bell going off at 21:30 and no explanation. The simulation's ugliest social moment was a partner discovering the system by ambush. One paragraph, in your own words, covering:
+
+* **What they'll notice:** a bell at a fixed hour, two quiet minutes at night, occasionally a morning message on my own channel.
+* **What it is:** a practice ledger — it defends a small routine and keeps an honest record of whether I did it.
+* **What it is not:** it doesn't record you, listen to the room, or assign me homework about you.
+* **Privacy runs both ways:** what I write is private, including from the witness. And if you'd rather not appear in it at all, there is a switch for exactly that — say the word and the system goes blind to you while my own record stays intact (the off-limits registry; architecture §5).
+* **You can ask me anything.** The system's contracts bound the system, not you.
+
+This is a conversation template, not a send — nothing here creates a message path, and the brief is yours to give, in person, before the first bell rings in a shared room.
+
 ## Off-limits registry **(required for Day 0 — may be empty, must be chosen)**
 
-Topics excluded from inference or marked sensitive (architecture §5).
+Topics excluded from inference or marked sensitive (architecture §5). A topic may be a person: name them here and the Mirror stops inferring about them entirely — no proposals, no dominance lines, redacted from every agent slice — while the record beneath still remembers (`/person` renders their raw mentions only).
 
 ## Observations configuration
 
 Which observation kinds are on ([engine of record: `observations.md`](observations.md) §3 — pain, symptom, intake, elimination, mood, sleep, med, measurement), with a one-line reason each — enable what you'll actually use; kinds are free to add later. **Injury inventory:** every current and historical injury or chronic condition as a registry seed (name, onset — approximate is fine, status), at whatever resolution you choose. **Threads:** the handful of inner and outer things you're working on, each as an intent statement — no metrics, no deadlines; their progress is narrative, reviewed quarterly. **Enrichers:** which external sources are on (weather, daylight, calendar-frame), your sticky starting location (a city is enough), and the standing reminder that each source's `sends` field is a contract. **Curiosity budget:** how many micro-questions per day you'll tolerate (default 1; 0 is valid).
 
+## Experiments
+
+Optional. Whether the Scientist ([`scientist.md`](scientist.md)) is enabled — off by default, and never before Gate 1 regardless. **Forbidden domains:** name the load-bearing supports no experiment may ever touch — recovery infrastructure, grief practices, anything that is foundation rather than variable. This list is what the Scientist's "must not run" check ([`scientist.md`](scientist.md) §5) reads against, so an empty list is a choice, not an oversight. **Ambush windows:** named in the Charter (§8 above) — an open experiment freezes across them, and frozen blocks are censored, never counted.
+
 ## Scheduled
 
-Ledger location · first weekly Retro (calendar slot) · first quarterly Hearing (date) · known travel with its Away Mode configuration (which Links compress, what the Floor becomes, which capture surface substitutes) · Gate 1/2/3 candidate Links (each wrapped in a Anchor identity where possible; each fitting the footprint cap).
+Ledger location · first weekly Retro (calendar slot) · first quarterly Hearing (date) · known travel with its Away Mode configuration (which Links compress, what the Floor becomes, which capture surface substitutes) · known ambush windows with their dates (Charter §8 — these enter the storm state automatically, engine §4) · Gate 1/2/3 candidate Links (each wrapped in a Anchor identity where possible; each fitting the footprint cap).
 
 ## Intake corpus
 
