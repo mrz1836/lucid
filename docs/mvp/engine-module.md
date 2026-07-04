@@ -8,11 +8,10 @@ capture surface** — one act feeds both subsystems.
 
 It follows the same conventions as the rest of this doc set: module
 charters, named storage ops, binding schemas, per-phase acceptance
-criteria. Where this page and an older MVP doc disagree about *scope*
-(the old docs predate the Engine), this page and
-[`scope.md`](scope.md) win; where they
+criteria. Where this page and another MVP doc disagree about *scope*,
+this page and [`scope.md`](scope.md) win; where they
 disagree about *conventions* (naming, mutability, adapter discipline),
-the older docs win.
+the Mirror-thread docs win.
 
 ## Why the Engine is in the MVP
 

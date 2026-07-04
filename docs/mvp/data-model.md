@@ -632,7 +632,7 @@ The mapping below is the contract.
 | `processed/<id>.json` `rejected_proposals[]` and `unanswered_proposals[]` | `reprocessing_queue` (with a "rejected proposal" status) **and** a small per-artifact log table that survives migration. | Rejection rationale and unanswered-shape entries stay addressable so Reflection can avoid re-proposing the same shape; the two arrays remain distinct because silence is not rejection. |
 | `insights/<iid>.md` | `insights` + `memories` | `memories` carries the four dimensions from `technical-spec.md` (salience, type, confidence, activation). MVP-migrated rows default to `confidence='validated'`, `activation='active'`, `salience='unscored'`, `type='insight'` until the adaptive-evolution loop lands and starts assigning real salience. `rule` and `rule_history[]` migrate as a column plus a small history table, preserving the kept/lapsed record. |
 | `people/<key>.json` | `people` (+ `relationships` once relational profile lands) | `aka[]` becomes a related table or JSON column. |
-| `sessions/<sid>.json` | `sessions` (a new table the spec implies but does not enumerate) | Session is a new first-class concept the MVP introduces; SQLite gets the same table. |
+| `sessions/<sid>.json` | `sessions` | Direct map — the audit trail for capture and the source of Reflection's `recent_window` ([`../technical-spec.md`](../technical-spec.md) §"Database Schema"). |
 | `sessions/channel_*.md` | A small `channels` table or kept as a file even after migration. | Channel memory is small enough that staying as a file post-migration is fine. |
 | `reflections/*.md` | `reflections` | Direct map. |
 

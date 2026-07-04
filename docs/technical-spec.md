@@ -1,92 +1,81 @@
 # Lucid — Technical Specification
 
-*Reference document for building the system. See [vision.md](vision.md) for the vision.*
-
----
-
-## Addendum — the behavioral Engine and the Ledger
-
-This spec predates the Mirror + Engine merge in
-[docs/architecture.md](architecture.md). Everything below remains
-the reference design for the **Mirror** half (agents, consolidation,
-memory graph, historical reprocessing). Three reconciliations apply on
-top of it:
-
-1. **The Engine is a new, agent-free module.** The behavioral engine
-   ([docs/engine.md](engine.md)) is deterministic by design —
-   close-out capture, streak arithmetic, template escalation — and is
-   deliberately *not* an agent in the table below (architecture P9: the
-   runtime never depends on AI). Its conceptual schema additions:
-   `chains` (config, versioned at retros), `day_records` (per logical
-   day: link states, declared mode, capacity, floor/miss flags),
-   `escalations` (L1/L2 events with dead-man provenance), `witnesses`
-   (contract + consent record). Engine tables are readable by
-   witness-facing projections only in topline form; no agent reads them
-   (architecture P3).
-2. **The raw stream is the Ledger.** What this spec calls the Raw layer
-   and the Engine's event log are one append-only, bitemporal store
-   (`recorded_at` / `occurred_at` — already specified below). Engine
-   events and Mirror captures are peers in it; every derived layer
-   (Processed, Knowledge, streaks, balance views) is a rebuildable
-   projection over it (architecture P2).
-3. **The Coach agent narrows.** Accountability for committed practices
-   moved to the Engine (with real enforcement mechanics the Coach was
-   never allowed to have). The Coach agent retains goals, progress
-   narrative, and suggestion duties — voice and encouragement, never
-   teeth.
-
-4. **The observation layer is a new, agent-free capture family.**
-   Structured body/context events (pain, intake, elimination, mood,
-   sleep, measurements, memory fragments) live in a frozen event
-   envelope with registries for long-lived referents (injuries,
-   threads, places, eras — generalizing the `people` pattern) and
-   deterministic enrichers (weather, daylight) appending context —
-   [docs/observations.md](observations.md). Conceptual schema
-   additions: `observations` (envelope columns + JSON payload),
-   `registries`, `enrichment_log`. Projections (series, episodes,
-   correlates, clinician packet) are computed views; correlation
-   findings route through the resonance gate like any inference.
-
-The Consolidation Agent's "dream state" and the adaptive-evolution
-loop remain deferred until after the MVP in
-[mvp/scope.md](mvp/scope.md); the Engine's weekly Retro is
-the human-run precursor of both.
+*The reference implementation architecture for the full system. The
+canonical design is [architecture.md](architecture.md) — the Mirror
+and the Engine over one user-owned Ledger, under ten principles — and
+the first buildable slice is [mvp/scope.md](mvp/scope.md). This
+document describes the destination they point at: the agent
+architecture, the deterministic modules beside it, the memory model,
+and the data layer. See [vision.md](vision.md) for the vision.*
 
 ---
 
 ## Agent Architecture
 
-The app is powered by a modular set of **framework-agnostic agents**:
+The Mirror is powered by a modular set of **framework-agnostic
+agents**:
 
 | Agent | Purpose |
 |-------|---------|
 | **Intake Agent** | Captures daily check-ins, quick thoughts, any user input |
 | **Structuring Agent** | Extracts entities, themes, connections from raw entries |
-| **People Agent** | Detects new people, prompts for profiles, maintains relational map |
-| **Therapist Agent** | Identifies emotional patterns, fears, wounds, growth edges |
-| **Coach Agent** | Tracks goals, suggests actions, celebrates progress |
-| **Framework Agent** | Applies philosophical frameworks to any entry or insight |
+| **People Agent** | Detects new people, prompts for profiles, maintains the relational map |
+| **Therapist Agent** | Identifies emotional patterns, fears, wounds, growth edges — cartography, never treatment |
+| **Coach Agent** | Tracks goals, suggests actions, celebrates progress — voice and encouragement, never teeth: accountability for committed practices belongs to the Engine ([engine.md](engine.md)) |
+| **Framework Agent** | Applies the user's consented interpretation lenses ([frameworks.md](frameworks.md)) to any entry or insight |
 | **Reflection Agent** | Generates daily/weekly/monthly/yearly summaries |
 | **Consolidation Agent** | Strengthens memory connections, surfaces patterns, maintains the memory graph |
+| **Safety/Consent Agent** | The last gate on every agent-authored outbound message: enforces hypothesis language, the phrase blocklist, and the no-external-action rule |
 
-> **MVP delta** (see [`docs/mvp/architecture.md`](mvp/architecture.md)
+> **MVP subset** (see [`docs/mvp/architecture.md`](mvp/architecture.md)
 > §"Mapping `technical-spec.md` agents to MVP modules"):
-> the MVP ships **Intake**, **Structuring**, **Reflection**, and a new
-> **Safety/Consent** agent (added because the long-term spec assumes a
-> Therapist surface that the MVP does not). **People** is reduced to an
-> extractive deterministic routine (no profile prompts, no relational
-> map). **Therapist**, **Coach**, **Framework**, and **Consolidation**
-> are deferred; their seams are named in
+> the MVP ships **Intake**, **Structuring**, **Reflection**, and
+> **Safety/Consent**. **People** is reduced to an extractive
+> deterministic routine (no profile prompts, no relational map).
+> **Therapist**, **Coach**, **Framework**, and **Consolidation** are
+> deferred; their seams are named in
 > [`docs/mvp/agent-contracts.md`](mvp/agent-contracts.md)
 > §"Optional / deferred contracts".
 
 **Framework-agnostic architecture:**
-* The **Framework Agent** is a translation layer that applies any active framework
-* Other agents produce raw insights; Framework Agent interprets them through your chosen lenses
-* Adding a new framework = adding a framework definition, not changing agent code
-* You can have multiple frameworks active simultaneously
+* The **Framework Agent** is a translation layer applying the user's
+  consented lenses per [frameworks.md](frameworks.md): definitions
+  are shareable specs, so adding a framework means adding a
+  definition file, never changing agent code
+* One labeled lens per message; multi-lens walks and composite
+  lenses per frameworks.md §4
+* Every other agent produces lens-neutral material — the record
+  itself is lens-neutral forever
 
 Each agent is replaceable, extensible, and customizable. This makes Lucid **a platform**, not a static tool.
+
+---
+
+## The Deterministic Modules
+
+Beside the agents sit modules that are deliberately **agent-free**
+(architecture P9: the runtime never depends on AI). They share the
+agents' storage adapter and router but contain no reasoning step —
+if every model is down, they still run.
+
+* **The Engine** ([engine.md](engine.md)) — close-out capture, streak
+  arithmetic, template escalation, the storm protocol, clock
+  profiles. Its records are readable by witness-facing projections in
+  topline form only, and no agent reads them (architecture P3):
+  enforcement and reflective content never touch.
+* **The observation layer** ([observations.md](observations.md)) —
+  structured body/context events (pain, intake, elimination, mood,
+  sleep, measurements, memory fragments) on a frozen event envelope;
+  registries for long-lived referents (injuries, threads, places,
+  eras — generalizing the `people` pattern); deterministic enrichers
+  (weather, daylight) appending the world's half of each day.
+  Projections — series, episodes, correlates, the clinician packet —
+  are computed views, and correlation findings route through the
+  resonance gate like any inference.
+* **The Scientist** ([scientist.md](scientist.md)) — pre-registered
+  self-experiments as a lifecycle over existing parts: one registry,
+  two event kinds, deterministic verdict scripts at Retro/Gate
+  cadence. Not a subsystem; a practice with a notebook.
 
 ---
 
@@ -101,6 +90,10 @@ The Consolidation Agent runs periodically in the background—a kind of "dream s
 | **Monthly** | Comprehensive review: evaluate salience scores, promote repeated patterns to higher salience, archive low-activation ephemeral data, generate a "state of mind" summary |
 
 This mimics how human memory works—consolidation during rest strengthens important memories and lets unimportant ones fade. The difference is Lucid can surface what it finds: "I noticed this week's frustration with your boss echoes a pattern from three months ago. Worth exploring?"
+
+The consolidation cascade and the adaptive-evolution loop (below) sit
+beyond the MVP ([mvp/scope.md](mvp/scope.md)); until they land, the
+weekly `/reflect` and the Engine's Retro are their human-run form.
 
 ---
 
@@ -157,25 +150,38 @@ The system starts conservative—every proposed adaptation requires your explici
 | **Moderate** | Minor tweaks auto-apply; major changes need approval |
 | **Autonomous** | System adapts freely; surfaces changes for review |
 
-You control this setting. The system might suggest: "I've proposed 10 adaptations and you approved all of them. Want to let me handle small adjustments automatically?"
-
-Everything is reversible. You can see exactly how your experience has evolved over time, and revert any change that doesn't work.
+Whatever the level, every adaptation is recorded with a reason and is
+reversible — nothing changes silently (architecture P8). You can see
+exactly how your experience has evolved over time, and revert any
+change that doesn't work.
 
 ---
 
 ## User Commands
 
-| Command | What it triggers |
-|---------|------------------|
-| `/checkin` | Daily structured check-in flow |
-| `/log` | Quick thought capture |
-| `/reflect` | Guided reflection session |
-| `/goals` | View/manage goals |
-| `/progress` | See progress across pillars and goals |
-| `/profile` | View/edit your psychological profile |
-| `/people` | View/explore relational map |
-| `/ask` | Ask the system a question about yourself |
-| `/bootstrap` | Enter bootstrapping mode to teach Lucid about your life history |
+One router, three command families
+([mvp/scope.md](mvp/scope.md) §4 is the shipped subset; this is the
+full surface):
+
+| Family | Command | What it triggers | Status |
+|--------|---------|------------------|--------|
+| Mirror | `/log` | Quick thought capture | MVP |
+| Mirror | `/checkin` | Guided check-in flow → one possible pattern | MVP |
+| Mirror | `/reflect [gate]` | Weekly recall of validated insights; the gate variant recalls everything and appends the panel numbers | MVP |
+| Mirror | `/ask` | Grounded Q&A over validated insights, with citations | MVP |
+| Mirror | `/person <name>` | Deterministic person view: mentions over time, cited insights, dominance share — grows into the relational-map explorer | MVP |
+| Mirror | `/bootstrap` | Teach Lucid your life history; proposals suppressed until `/bootstrap done` | MVP |
+| Mirror | `/lens <id>[,…]` | Read an entry through one or several consented lenses ([frameworks.md](frameworks.md) §5) | Post-MVP |
+| Mirror | `/me` | The psychological Profile view: fears, loops, values, growth edges — every element resonance-gated | Post-MVP |
+| Mirror | `/goals` · `/progress` | Coach surfaces: goal trees, progress across pillars | Post-MVP |
+| Engine | `/closeout` (`skip`, `backfill`) | The two-minute nightly close-out; honest misses; corrections | MVP |
+| Engine | `/mode` | Declare today's Green/Yellow/Red before the bell | MVP |
+| Engine | `/status` | Ambient state: streak, honest-number pairing, budget, gates | MVP |
+| Engine | `/storm` | The pre-committed incapacity state, witness-confirmed | MVP |
+| Engine | `/profile <name>` | Switch clock profiles (Bell, tripwire, rollover move together) | MVP |
+| Observations | `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs` | One-line micro-logs on the frozen envelope | MVP |
+| Observations | `/day [date]` | One logical day, joined across everything | MVP |
+| Observations | `/packet clinician` | Render the clinician packet; review before release | MVP |
 
 ---
 
@@ -191,7 +197,7 @@ Agents invoke shared skills for common operations:
 | `match_patterns` | Find similar past entries |
 | `calculate_progress` | Determine goal progress (supports nested hierarchy) |
 | `generate_insight` | Create an insight from patterns |
-| `apply_framework` | Interpret through a specific framework |
+| `apply_framework` | Interpret through a consented lens ([frameworks.md](frameworks.md)) |
 | `query_history` | Search past entries with filters |
 | `prompt_person_profile` | Generate prompts to enrich a newly detected person |
 | `link_to_goals` | Connect entries/insights to relevant goals |
@@ -208,7 +214,7 @@ Agents invoke shared skills for common operations:
 
 | Layer | What It Contains |
 |-------|------------------|
-| **Raw (Stream)** | Everything you input, exactly as you gave it. Timestamped, unmodified, immutable. This is the ground truth—never altered. |
+| **Raw — the Ledger** | Everything captured, exactly as given: Mirror entries, Engine day records, observations — peers in one append-only, bitemporal store. Timestamped, unmodified, immutable. This is the ground truth—never altered. |
 | **Processed** | Entities extracted by agents: people, places, events, emotions, themes, connections. Can be re-processed as agents improve. |
 | **Knowledge** | Your psychological profile, relational map, goal state, framework preferences. This layer grows and changes over time. |
 
@@ -216,6 +222,8 @@ Agents invoke shared skills for common operations:
 * Raw is permanent — never lose the original input
 * Processed is rebuildable — can re-extract if agents improve
 * Knowledge is mutable — your understanding of yourself changes
+* Every derived layer — Processed, Knowledge, streaks, balance views —
+  is a rebuildable projection over the Ledger (architecture P2)
 * User can see all layers — transparency about what the system "thinks"
 * User can correct any layer — the system learns from corrections
 
@@ -286,9 +294,15 @@ This enables powerful traversal: "Show me everything connected to my fear of rej
 
 ## Database Schema (SQLite)
 
-**Conceptual schema:**
+**Conceptual schema.** The MVP ships this as plain files
+([mvp/data-model.md](mvp/data-model.md)); the tables below are the
+migration target — the storage adapter's named ops stay the same,
+their implementation moves.
+
+Mirror:
 
 * `entries` — raw stream (immutable), includes: recorded_at (when entered), occurred_at (when happened), occurred_at_end (for ranges), temporal_precision (exact/approximate/range)
+* `sessions` — one row per chat thread / capture session: the audit trail for capture and the source of Reflection's `recent_window`
 * `entities` — extracted people, places, events
 * `emotions` — emotional data points
 * `themes` — recurring patterns
@@ -299,26 +313,31 @@ This enables powerful traversal: "Show me everything connected to my fear of rej
 * `people` — first-class person entities
 * `person_entries` — links between people and entries mentioning them
 * `relationships` — your relationship to each person, dynamic state
-* `frameworks` — available frameworks and their definitions
-* `user_frameworks` — which frameworks user has active
-* `insights` — generated insights
+* `frameworks` — lens definitions ([frameworks.md](frameworks.md) — shipped as spec files, indexed here)
+* `user_frameworks` — the consented stack: which lenses are active, consent timestamps
+* `insights` — validated insights, with rules and lens provenance
 * `reflections` — generated reflection documents
 * `memories` — multi-dimensional memory store with salience, confidence, activation scores
 * `memory_connections` — graph edges between memories (type, strength)
 * `adaptations` — learned system behaviors and their evolution history
 * `reprocessing_queue` — historical entries awaiting cascade processing, tracks scope and status
 
-> **MVP delta:** the MVP also introduces a first-class `sessions`
-> table (one row per chat thread / capture session). It is not in the
-> list above because the long-term spec absorbed sessions into the
-> consolidation cascade; the MVP needs sessions explicitly because
-> they are the audit trail for capture and the source of
-> `recent_window` for Reflection. Schema and migration mapping in
-> [`docs/mvp/data-model.md`](mvp/data-model.md)
-> §"Sessions and channel memory" and §"SQLite migration path".
+Engine (deterministic; no agent reads these — architecture P3):
+
+* `chains` — chain config including clock profiles, versioned at Retros
+* `day_records` — per logical day: link states, declared mode, capacity, floor/miss/storm flags, corrections
+* `escalations` — L1/L2 events with dead-man provenance
+* `witnesses` — contract, consent record, lifecycle history
+* `storms` — clauses, ambush windows, declaration/confirmation history
+
+Observations:
+
+* `observations` — the frozen event envelope + per-kind JSON payload
+* `registries` — long-lived referents: injuries, threads, places, eras, experiments
+* `enrichment_log` — the outbound audit trail for enricher fetches
 
 **Principles:**
-* SQLite for MVP (simple, local, portable)
+* SQLite for the packaged app (simple, local, portable); plain files first
 * Schema designed to evolve (migrations supported)
 * Full export capability (your data is yours)
 * Encryption at rest for sensitive data
@@ -341,13 +360,16 @@ Features unlock as you participate:
 
 | Milestone | Unlocks |
 |-----------|---------|
-| First 3 daily check-ins | Weekly reflection summaries |
-| 7 consecutive days of input | Pattern detection activated |
+| First 3 check-ins | Weekly reflection summaries |
+| A first week of entries | Pattern detection activated |
 | First month of entries | Monthly deep-dive report |
 | 10 validated insights | "Shadow work" suggestions |
 | 3 months of data | Yearly narrative begins compiling |
 
-Features aren't hidden to frustrate—they're gated because **they require data to be meaningful.**
+Features aren't hidden to frustrate—they're gated because **they
+require data to be meaningful.** Milestones count volume, never
+consecutiveness: streaks belong to the Engine, and only ever for
+committed acts (architecture P3).
 
 ---
 

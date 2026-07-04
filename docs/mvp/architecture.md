@@ -300,7 +300,7 @@ extend what an agent sees.
 ## Mapping `technical-spec.md` agents to MVP modules
 
 The reference architecture in
-[`technical-spec.md`](../technical-spec.md) lists eight agents and a
+[`technical-spec.md`](../technical-spec.md) lists nine agents and a
 rich skill set. The MVP keeps the names, reduces the surface, and
 records the seams.
 
@@ -314,7 +314,7 @@ records the seams.
 | Framework Agent | (none) | Deferred. Implicit voice instead of selectable frameworks. |
 | Reflection Agent | Reflection (agent contracts §3) | Required now, with a hard one-pattern-per-session cap. |
 | Consolidation Agent | Manual `/reflect` + optional weekly cron | Reduced. The "nightly/weekly/monthly" cascade in the spec collapses to a single weekly recall in the MVP. |
-| (added) Safety/Consent | Safety/Consent gate (agent contracts §3) | Required now even though it is not in the original spec, because it is the only thing standing between the system and a confident diagnostic engine. |
+| Safety/Consent Agent | Safety/Consent gate (agent contracts §3) | Required now — it is the only thing standing between the system and a confident diagnostic engine. |
 
 The reference skill list in `technical-spec.md` (`extract_emotions`,
 `extract_people`, `extract_themes`, `match_patterns`, etc.) is also
