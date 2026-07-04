@@ -44,30 +44,63 @@ Three doors. Each list is in reading order — every doc assumes the ones above 
 
 ### Understand it
 
-| | |
-|---|---|
-| [**Vision**](docs/vision.md) | The long-form product vision: the five roles Lucid plays, and sharing the record — the right truth, at the right depth, for the right person. |
-| [**Architecture**](docs/architecture.md) | The whole design in ~150 lines: the Mirror (understanding) and the Engine (behavior) over one user-owned Ledger, and the ten principles that govern both. |
-| [**Engine**](docs/engine.md) | The half with teeth: chains, bells, floors, modes, storms, telemetry, and the accountability ladder. |
-| [**Observations**](docs/observations.md) | The body's biographer: one-line logs on a frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation. |
-| [**Frameworks**](docs/frameworks.md) | Interpretation lenses — Stoicism, NVC, IFS, attachment theory, Eight Dates, the Four Agreements, or any tradition, book, or blend you author. Your worldview is sovereign; the record stays lens-neutral forever. |
-| [**The Scientist**](docs/scientist.md) | Pre-registered self-experiments at Retro/Gate cadence — and how the design learns across users while the data never leaves. |
+<table>
+  <tr>
+    <td width="180" valign="top"><a href="docs/vision.md"><b>Vision</b></a></td>
+    <td>The long-form product vision: the five roles Lucid plays, and sharing the record — the right truth, at the right depth, for the right person.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/architecture.md"><b>Architecture</b></a></td>
+    <td>The whole design in ~150 lines: the Mirror (understanding) and the Engine (behavior) over one user-owned Ledger, and the ten principles that govern both.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/engine.md"><b>Engine</b></a></td>
+    <td>The half with teeth: chains, bells, floors, modes, storms, telemetry, and the accountability ladder.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/observations.md"><b>Observations</b></a></td>
+    <td>The body's biographer: one-line logs on a frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/frameworks.md"><b>Frameworks</b></a></td>
+    <td>Interpretation lenses — Stoicism, NVC, IFS, attachment theory, Eight Dates, the Four Agreements, or any tradition, book, or blend you author. Your worldview is sovereign; the record stays lens-neutral forever.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/scientist.md"><b>The Scientist</b></a></td>
+    <td>Pre-registered self-experiments at Retro/Gate cadence — and how the design learns across users while the data never leaves.</td>
+  </tr>
+</table>
 
 <br>
 
 ### Live it — tonight, no software
 
-| | |
-|---|---|
-| [**Calibration**](docs/calibration.md) | The one doc you fill in: copy it to `personal/calibration.md` (private, never enters shared history) and answer its questions. Set the bell, stage the environment — five minutes and Phase 0 is running; the rest of Day 0 is one weekend. |
+<table>
+  <tr>
+    <td width="180" valign="top"><a href="docs/calibration.md"><b>Calibration</b></a></td>
+    <td>The one doc you fill in: copy it to <code>personal/calibration.md</code> (private, never enters shared history) and answer its questions. Set the bell, stage the environment — five minutes and Phase 0 is running; the rest of Day 0 is one weekend.</td>
+  </tr>
+</table>
 
 <br>
 
 ### Build it
 
-| | |
-|---|---|
-| [**MVP scope**](docs/mvp/scope.md) | One page, build-ready: the contract for the first steel thread — the unified nightly loop. |
-| [**MVP doc set**](docs/mvp/README.md) | The build order: agent contracts, data model, error states, and per-phase acceptance criteria — "done" means the checks pass. |
-| [**Technical spec**](docs/technical-spec.md) | The reference architecture for the full system beyond the MVP. |
-| [**Decision records**](docs/adr/README.md) | Why the build goes this way: Go core with a CLI-first surface, plain files with SQLite as a later index, chat harness as thin sugar. Nothing locks before the loop earns it. |
+<table>
+  <tr>
+    <td width="180" valign="top"><a href="docs/mvp/scope.md"><b>MVP scope</b></a></td>
+    <td>One page, build-ready: the contract for the first steel thread — the unified nightly loop.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/mvp/README.md"><b>MVP doc set</b></a></td>
+    <td>The build order: agent contracts, data model, error states, and per-phase acceptance criteria — "done" means the checks pass.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/technical-spec.md"><b>Technical spec</b></a></td>
+    <td>The reference architecture for the full system beyond the MVP.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/adr/README.md"><b>Decision records</b></a></td>
+    <td>Why the build goes this way: Go core with a CLI-first surface, plain files with SQLite as a later index, chat harness as thin sugar. Nothing locks before the loop earns it.</td>
+  </tr>
+</table>
