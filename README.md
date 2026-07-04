@@ -63,13 +63,6 @@ The first entry is one line. The bell rings at 9:30.
     <td width="180" valign="top"><a href="docs/scientist.md"><b>The Scientist</b></a></td>
     <td>Pre-registered self-experiments at Retro/Gate cadence — and how the design learns across users while the data never leaves.</td>
   </tr>
-</table>
-
-<br>
-
-### Live it — tonight, no software
-
-<table>
   <tr>
     <td width="180" valign="top"><a href="docs/calibration.md"><b>Calibration</b></a></td>
     <td>The one doc you fill in: copy it to <code>personal/calibration.md</code> (private, never enters shared history) and answer its questions. Set the bell, stage the environment — five minutes and Phase 0 is running; the rest of Day 0 is one weekend.</td>
