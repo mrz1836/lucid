@@ -36,28 +36,38 @@ The first entry is one line. The bell rings at 9:30.
 
 <br>
 
-## Where to start
+## The manual
 
-Three doors, depending on who you are:
-
-- **You want to understand it.** Read [docs/architecture.md](docs/architecture.md) first (the whole design in ~150 lines), then [vision.md](docs/vision.md) for the felt version, then [docs/engine.md](docs/engine.md) for the mechanics.
-- **You want to build it.** Read [docs/mvp/scope.md](docs/mvp/scope.md) (one page, build-ready), then [docs/mvp/README.md](docs/mvp/README.md), then follow the phase order — the acceptance criteria tell you when each phase is done.
-- **You want to start living this — tonight, no software.** Copy [docs/calibration.md](docs/calibration.md) to `personal/calibration.md` and answer its questions. Set the bell, stage the environment — five minutes, and Phase 0 is running. The rest of Day 0 is one weekend, and the checklist is in the guide.
-
-
+Three doors. Each list is in reading order — every doc assumes the ones above it.
 
 <br>
 
-## Read more
+### Understand it
 
-- [Vision](docs/vision.md) — the long-form product vision and the roles Lucid plays.
-- [System architecture](docs/architecture.md) — the canonical merge: the Mirror (understanding) and the Engine (behavior) over one user-owned Ledger, and the ten principles that govern both.
-- [Engine specification](docs/engine.md) — chains, bells, floors, operating modes, telemetry, and the accountability ladder.
-- [Observation layer](docs/observations.md) — body signals, intake, mood, context, and memory fragments on one frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation.
-- [Calibration](docs/calibration.md) — aim the system at your own life; specs are shared, calibration is yours. (Private data lives in `personal/`, which never enters shared history.)
-- [The Scientist](docs/scientist.md) — pre-registered self-experiments at Retro/Gate cadence; verdict cards and gap reports — how the design learns while the data never leaves.
-- [The Frameworks layer](docs/frameworks.md) — interpretation lenses (Stoicism, NVC, IFS, attachment theory, Eight Dates, the Four Agreements — or any tradition, book, or personal blend you author): definitions as shareable specs, one labeled lens per message with multi-lens walks and composites, the record lens-neutral forever. The system adapts to your worldview, never the reverse.
-- [Technical specification](docs/technical-spec.md) — the reference architecture for the full system.
-- [MVP docs](docs/mvp/README.md) — the first buildable slice: the unified nightly loop (close-out → capture → structure → one possible pattern → validation → weekly recall).
-- [MVP scope spec](docs/mvp/scope.md) — the build-ready contract for that slice.
-- [Decision records](docs/adr/README.md) — why the build goes the way it does: Go core with a CLI-first surface, plain files with SQLite as a later index, chat harness as thin sugar. Nothing locks before the loop earns it.
+| | |
+|---|---|
+| [**Vision**](docs/vision.md) | The long-form product vision: the five roles Lucid plays, and sharing the record — the right truth, at the right depth, for the right person. |
+| [**Architecture**](docs/architecture.md) | The whole design in ~150 lines: the Mirror (understanding) and the Engine (behavior) over one user-owned Ledger, and the ten principles that govern both. |
+| [**Engine**](docs/engine.md) | The half with teeth: chains, bells, floors, modes, storms, telemetry, and the accountability ladder. |
+| [**Observations**](docs/observations.md) | The body's biographer: one-line logs on a frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation. |
+| [**Frameworks**](docs/frameworks.md) | Interpretation lenses — Stoicism, NVC, IFS, attachment theory, Eight Dates, the Four Agreements, or any tradition, book, or blend you author. Your worldview is sovereign; the record stays lens-neutral forever. |
+| [**The Scientist**](docs/scientist.md) | Pre-registered self-experiments at Retro/Gate cadence — and how the design learns across users while the data never leaves. |
+
+<br>
+
+### Live it — tonight, no software
+
+| | |
+|---|---|
+| [**Calibration**](docs/calibration.md) | The one doc you fill in: copy it to `personal/calibration.md` (private, never enters shared history) and answer its questions. Set the bell, stage the environment — five minutes and Phase 0 is running; the rest of Day 0 is one weekend. |
+
+<br>
+
+### Build it
+
+| | |
+|---|---|
+| [**MVP scope**](docs/mvp/scope.md) | One page, build-ready: the contract for the first steel thread — the unified nightly loop. |
+| [**MVP doc set**](docs/mvp/README.md) | The build order: agent contracts, data model, error states, and per-phase acceptance criteria — "done" means the checks pass. |
+| [**Technical spec**](docs/technical-spec.md) | The reference architecture for the full system beyond the MVP. |
+| [**Decision records**](docs/adr/README.md) | Why the build goes this way: Go core with a CLI-first surface, plain files with SQLite as a later index, chat harness as thin sugar. Nothing locks before the loop earns it. |
