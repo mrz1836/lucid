@@ -36,12 +36,6 @@ The first entry is one line. The bell rings at 9:30.
 
 <br>
 
-## The manual
-
-Three doors. Each list is in reading order — every doc assumes the ones above it.
-
-<br>
-
 ### Understand it
 
 <table>
