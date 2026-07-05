@@ -174,6 +174,7 @@ should execute this sequence.
 | [`error-states.md`](error-states.md) | Unified table of every failure mode: per-agent, storage, transport, empty-state. Each row names trigger, behavior, user message, disk side effect, recovery. |
 | [`acceptance-criteria.md`](acceptance-criteria.md) | Per-phase pass/fail checklist for build phases 1–7 (phases 8–10 carry theirs in [`engine-module.md`](engine-module.md), 11–12 in [`observations-module.md`](observations-module.md)). Concrete test cases, verification commands, definition of done. |
 | [`claude-code-workflow.md`](claude-code-workflow.md) | How a coding agent should build Lucid: docs-first planning, small commits, deterministic scripts, bounded subagents. |
+| [`build-plan.md`](build-plan.md) | Ordered build-out: repo bootstrap from the house template (ADR-0007, incl. `lucid upgrade`), Engine-first phase sequencing per `scope.md` §9's dependency note, then Mirror, observations, skill surface, and supervised ops. |
 | [`scope.md`](scope.md) | Final concise scope spec synthesized from the docs. |
 
 Several files in this list are added in later phases. Until then, broken
