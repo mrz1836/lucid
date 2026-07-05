@@ -45,12 +45,8 @@ func newStubCmd(spec stubSpec) *cobra.Command {
 
 // The feature spine. Behavior for each lands in its build stage; the
 // verbs exist now so the command tree matches the documented set and
-// no undocumented verb ever appears (ADR-0007 hard rule). `init` is
-// real as of Stage 1 — its command lives in init.go.
-
-func newLogCmd() *cobra.Command {
-	return newStubCmd(stubSpec{name: "log", short: "Capture an immutable raw entry", stage: "Stage 1"})
-}
+// no undocumented verb ever appears (ADR-0007 hard rule). `init` is real
+// as of Stage 1 (init.go); `log` as of Stage 1 (log.go).
 
 func newCloseoutCmd() *cobra.Command {
 	return newStubCmd(stubSpec{name: "closeout", short: "Record the day's committed practice", stage: "Stage 2"})

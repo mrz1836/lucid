@@ -57,11 +57,11 @@ func TestVersion_RejectsArgs(t *testing.T) {
 }
 
 func TestStub_HumanReturnsNotImplemented(t *testing.T) {
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "log", "hello")
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green")
 	require.ErrorIs(t, err, errNotImplemented)
 	assert.Empty(t, out)
 	assert.Contains(t, errOut, "not implemented yet")
-	assert.Contains(t, errOut, "Stage 1")
+	assert.Contains(t, errOut, "Stage 2")
 }
 
 func TestStub_MachineReadableEmitsJSON(t *testing.T) {

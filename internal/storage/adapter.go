@@ -28,6 +28,17 @@ const keepFile = ".keep"
 // configFile is the lucid.json basename at the Ledger root.
 const configFile = "lucid.json"
 
+// Fixed Ledger subtree names and id prefixes. The layout is stable
+// (data-model.md §"Top-level layout"); these match the documented
+// defaults the scaffold writes, so capture and read resolve the same
+// paths without threading the config through every op.
+const (
+	rawDirName      = "raw"
+	sessionsDirName = "sessions"
+	rawIDPrefix     = "raw_"
+	sessionIDPrefix = "session_"
+)
+
 // Adapter owns all access to a single ~/.lucid/ home. Construct it with
 // [New] (an explicit home, used by tests) or [Open] (the resolved
 // default). Nothing outside this package should hold the home path.
