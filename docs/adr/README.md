@@ -15,3 +15,7 @@ new one; records are append-only, like everything else here
 | [0002](0002-storage.md) | Storage: plain files first, SQLite as a projection later | Accepted |
 | [0003](0003-runtime-surface.md) | Runtime surface: one core binary, thin surfaces | Accepted |
 | [0004](0004-core-dependencies.md) | Core dependencies: `go-flywheel` (job runtime) and `go-foundation` (base layer) | Accepted |
+| [0005](0005-secrets-management.md) | Secrets: `hush` vault with spawn-time injection, never plaintext | Accepted |
+| [0006](0006-model-access.md) | Model access: OAuth'd vendor CLIs and local models, never API keys | Accepted |
+| [0007](0007-cli-conventions.md) | CLI conventions: the house style (`hush`, `go-broadcast`, `atlas`) | Accepted |
+| [0008](0008-harness-skill.md) | Harness integration: one managed `lucid` skill | Accepted |
