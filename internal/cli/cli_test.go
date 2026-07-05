@@ -76,9 +76,9 @@ func TestStub_MachineReadableEmitsJSON(t *testing.T) {
 }
 
 func TestStub_NonMachineReadableIgnoresJSON(t *testing.T) {
-	// `closeout` is not a script-facing command; --json must not turn
+	// `mode` is not a script-facing command; --json must not turn
 	// it into a JSON no-op that looks successful.
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "--json")
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--json")
 	require.ErrorIs(t, err, errNotImplemented)
 	assert.Empty(t, out)
 	assert.Contains(t, errOut, "not implemented yet")

@@ -48,10 +48,6 @@ func newStubCmd(spec stubSpec) *cobra.Command {
 // no undocumented verb ever appears (ADR-0007 hard rule). `init` is real
 // as of Stage 1 (init.go); `log` as of Stage 1 (log.go).
 
-func newCloseoutCmd() *cobra.Command {
-	return newStubCmd(stubSpec{name: "closeout", short: "Record the day's committed practice", stage: "Stage 2"})
-}
-
 func newModeCmd() *cobra.Command {
 	return newStubCmd(stubSpec{name: "mode", short: "Declare today's Engine mode (green|yellow|red)", stage: "Stage 2"})
 }

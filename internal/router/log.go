@@ -50,7 +50,7 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	source := orDefault(req.Source, sourceDefault)
+	source := orDefaultSource(req.Source)
 
 	res, err := r.store.WriteRaw(storage.RawEntry{
 		RecordedAt:          now,
@@ -70,7 +70,7 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 		ID:            res.SessionID,
 		StartedAt:     now,
 		EndedAt:       now,
-		Harness:       orDefault(req.Harness, sourceDefault),
+		Harness:       orDefaultSource(req.Harness),
 		ChannelID:     req.ChannelID,
 		ThreadID:      req.ThreadID,
 		Command:       commandLog,
@@ -99,10 +99,12 @@ func logAck(rawID string, emptyBody bool) string {
 	return fmt.Sprintf("Saved as `%s`.", rawID)
 }
 
-// orDefault returns v, or def when v is empty.
-func orDefault(v, def string) string {
+// orDefaultSource returns v, or the local CLI source when v is empty. It
+// backs the source/harness defaulting shared by the capture commands so a
+// bare CLI call still produces a well-formed entry.
+func orDefaultSource(v string) string {
 	if v == "" {
-		return def
+		return sourceDefault
 	}
 	return v
 }
