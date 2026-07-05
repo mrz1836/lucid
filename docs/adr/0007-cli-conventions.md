@@ -24,13 +24,26 @@ this build is explicitly meant to mature.
   ADR-0003 (`lucid init|log|closeout|mode|status|day|validate|export`)
   as the spine; subcommands map one-to-one onto router intents, never
   onto module internals.
-* **Repo layout:** `cmd/lucid/` entrypoint, `internal/` for
-  everything not contractually public, `docs/` and `examples/` per
-  the sibling repos.
+* **Repo bootstrap by copy, not derivation:** the scaffolding is
+  copied wholesale from a reference binary repo (`hush` or `atlas`)
+  and adapted by rename — `.github/` workflows and CI, `.goreleaser.yml`,
+  the `.mage.yaml`/magefiles task surface, lint and codecov configs,
+  `.editorconfig`/`.gitattributes`, LICENSE. Layout follows the same
+  source: `cmd/lucid/` entrypoint, `internal/` for everything not
+  contractually public, `docs/` and `examples/`.
 * **Build/test/release:** magex targets matching the sibling repos
   (ADR-0001's "one Makefile" realizes as the house `.mage.yaml`
   task surface), goreleaser for cross-platform artifacts, coverage
   and CI conventions carried over unchanged.
+* **`lucid upgrade`, cloned from the house self-upgrade:** the exact
+  pattern `hush upgrade` and `atlas upgrade` implement — latest
+  GitHub release resolved via the `gh` CLI with REST fallback, the
+  platform tarball verified against published SHA-256 checksums,
+  then swapped in place atomically (copy → `.new` → rename) so a
+  running scheduler is never corrupted mid-execution; `--check`,
+  `--force`, `--channel`, and the `UPDATE_CHANNEL` convention
+  (stable | beta | edge) carry over. This adds one verb to the
+  ADR-0003 command spine, recorded here.
 * **Output discipline:** human-first output by default; a
   machine-readable mode on the commands scripts need (`status`,
   `day`, `export`, `validate`), so automation never scrapes prose.
@@ -42,7 +55,12 @@ this build is explicitly meant to mature.
 Contributor onboarding equals "any `mrz1836` repo." The scheduler,
 storage, and secrets decisions (ADR-0002/0004/0005) slot into this
 layout without adaptation. Deviations from the house style require a
-superseding ADR, not a quiet exception. One guard inherited from the
+superseding ADR, not a quiet exception. On a supervised host,
+`upgrade` is invoked through the managed-upgrade flow and honors the
+drain window — never between bell and close-out — and the
+post-upgrade health check is a tripwire self-check: an upgrade that
+costs a night of the practice is a failed upgrade regardless of what
+shipped (P10). One guard inherited from the
 hard rules: the CLI adds no commands beyond the documented set —
 new verbs land in the docs (scope, module specs) before they land in
 cobra.
