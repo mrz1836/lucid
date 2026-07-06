@@ -70,26 +70,6 @@ func TestVersion_RejectsArgs(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestStub_HumanReturnsNotImplemented(t *testing.T) {
-	// `validate` is still a stub (Stage 5); `export` became real in this phase.
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "validate")
-	require.ErrorIs(t, err, errNotImplemented)
-	assert.Empty(t, out)
-	assert.Contains(t, errOut, "not implemented yet")
-	assert.Contains(t, errOut, "Stage 5")
-}
-
-func TestStub_MachineReadableEmitsJSON(t *testing.T) {
-	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate", "--json")
-	require.ErrorIs(t, err, errNotImplemented)
-
-	var payload map[string]string
-	require.NoError(t, json.Unmarshal([]byte(out), &payload))
-	assert.Equal(t, "validate", payload["command"])
-	assert.Equal(t, "not_implemented", payload["status"])
-	assert.Equal(t, "Stage 5", payload["stage"])
-}
-
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
 	want := []string{"init", "log", "closeout", "mode", "status", "obs", "day", "validate", "export", "version", "upgrade"}
@@ -104,7 +84,7 @@ func TestSpine_AllVerbsRegistered(t *testing.T) {
 
 func TestExitCodeForError(t *testing.T) {
 	assert.Equal(t, ExitOK, exitCodeForError(nil))
-	assert.Equal(t, ExitErr, exitCodeForError(errNotImplemented))
+	assert.Equal(t, ExitErr, exitCodeForError(errValidationFailed))
 	assert.Equal(t, ExitErr, exitCodeForError(errors.New("boom")))
 	assert.Equal(t, ExitUsage, exitCodeForError(errors.New("unknown flag: --nope")))
 	assert.Equal(t, ExitUsage, exitCodeForError(errors.New("unknown command \"nope\" for \"lucid\"")))

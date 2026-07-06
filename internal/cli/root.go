@@ -25,12 +25,6 @@ const (
 	ExitUsage = 2
 )
 
-// errNotImplemented is returned by the stub feature commands whose
-// behavior arrives in a later build stage. It is a distinct sentinel
-// so tests (and callers) can tell "not built yet" apart from a real
-// failure.
-var errNotImplemented = errors.New("lucid: command not implemented in this build")
-
 // errModeNotAccepted is returned when `lucid mode` declined the declaration
 // (an invalid mode name, or a declaration made after the bell). The fixed
 // user copy is already printed; this sentinel just maps to a non-zero exit so
@@ -62,7 +56,7 @@ func Execute(ctx context.Context, bi BuildInfo) int {
 
 // exitCodeForError maps a returned error to a process exit code.
 // Flag/usage errors from cobra map to [ExitUsage]; everything else
-// (including [errNotImplemented]) maps to [ExitErr].
+// (a runtime failure, or a breached `validate` gate) maps to [ExitErr].
 func exitCodeForError(err error) int {
 	if err == nil {
 		return ExitOK
