@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -124,6 +126,28 @@ func (a *Adapter) WriteProcessed(art ProcessedArtifact) error {
 		return fmt.Errorf("storage: write processed %q: %w", art.ID, err)
 	}
 	return nil
+}
+
+// ListProcessedIDs returns the ids of every processed artifact on disk,
+// sorted (the id sort is chronological, since ids encode minute precision).
+// The router builds Reflection's recent window on top of it.
+func (a *Adapter) ListProcessedIDs() ([]string, error) {
+	entries, err := os.ReadDir(a.processedDir())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("storage: scan processed dir: %w", err)
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != processedExt {
+			continue
+		}
+		ids = append(ids, strings.TrimSuffix(e.Name(), processedExt))
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 // ReadProcessed loads the processed artifact with the given id.
