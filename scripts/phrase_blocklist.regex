@@ -1,0 +1,24 @@
+# Lucid phrase blocklist -- compiled source of truth.
+# Mirrors docs/mvp/product-principles.md section 6. The Safety/Consent agent
+# compiles the same patterns in Go; lucid validate and the acceptance greps
+# read this file directly:
+#   grep -niE -f scripts/phrase_blocklist.regex <files>
+# Every AGENT-AUTHORED candidate outbound message that matches must be
+# rewritten or blocked. Verbatim user-authored text quoted back and the
+# deterministic template output of the Engine and observation modules are
+# exempt. Comment lines carry no regex metacharacters so grep -f treats the
+# whole file as a clean pattern list; the Go loader skips lines beginning #.
+# Diagnostic and labeling
+\byou (always|never)\b
+\byou ('?re|have) (an? )?(anxious|avoidant|secure|disorganized)\b
+\b(anxious|avoidant|secure|disorganized) (attach\w*|tendenc\w*|style|type|behavior)\b
+\b(clearly|obviously)\b
+\b(i (diagnos\w*|am diagnosing)|you'?re suffering from)\b
+\b(attachment style|trauma response|narcissist|borderline)\b
+# Performance over presence
+(!{2,}|\bOMG\b|\bYay!|\byasss?\b)
+# Autonomous external action
+\b(send|dm|email|post|schedule|call|notify|webhook|publish|tweet)\b
+\b(auto[- ]?send|send automatically)\b
+# Coaching and advising
+\byou should\b|\byou ought to\b|\bwhat you need to do is\b

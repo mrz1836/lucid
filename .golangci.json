@@ -1,0 +1,312 @@
+{
+    "formatters": {
+        "enable": [
+            "gofmt",
+            "gofumpt"
+        ],
+        "exclusions": {
+            "generated": "lax",
+            "paths": [
+                ".*\\.my\\.go$",
+                "lib/bad.go",
+                ".make",
+                ".vscode",
+                "dist",
+                "third_party$",
+                "builtin$"
+            ]
+        },
+        "settings": {
+            "gci": {
+                "sections": [
+                    "standard",
+                    "default",
+                    "prefix(github.com/mrz1836/lucid)"
+                ]
+            },
+            "gofmt": {
+                "simplify": true
+            },
+            "gofumpt": {
+                "extra-rules": false
+            },
+            "goimports": {
+                "local-prefixes": [
+                    "github.com/mrz1836/lucid"
+                ]
+            }
+        }
+    },
+    "issues": {
+        "uniq-by-line": true
+    },
+    "linters": {
+        "disable": [
+            "goconst",
+            "gocritic",
+            "godot",
+            "gocyclo",
+            "wsl_v5"
+        ],
+        "enable": [
+            "arangolint",
+            "asasalint",
+            "asciicheck",
+            "bidichk",
+            "bodyclose",
+            "containedctx",
+            "copyloopvar",
+            "dogsled",
+            "durationcheck",
+            "embeddedstructfieldcheck",
+            "errcheck",
+            "errchkjson",
+            "errname",
+            "errorlint",
+            "exhaustive",
+            "forbidigo",
+            "funcorder",
+            "gocheckcompilerdirectives",
+            "gochecknoglobals",
+            "gochecknoinits",
+            "gochecksumtype",
+            "gocognit",
+            "godox",
+            "goheader",
+            "gomoddirectives",
+            "gosec",
+            "gosmopolitan",
+            "govet",
+            "inamedparam",
+            "ineffassign",
+            "loggercheck",
+            "makezero",
+            "mirror",
+            "misspell",
+            "musttag",
+            "nakedret",
+            "nestif",
+            "nilerr",
+            "nilnesserr",
+            "nilnil",
+            "noctx",
+            "nolintlint",
+            "nosprintfhostport",
+            "prealloc",
+            "predeclared",
+            "protogetter",
+            "reassign",
+            "recvcheck",
+            "revive",
+            "rowserrcheck",
+            "spancheck",
+            "sqlclosecheck",
+            "staticcheck",
+            "testifylint",
+            "unconvert",
+            "unparam",
+            "unused",
+            "wastedassign",
+            "zerologlint"
+        ],
+        "exclusions": {
+            "generated": "lax",
+            "rules": [
+                {
+                    "path": "_test\\.go",
+                    "linters": [
+                        "gosec"
+                    ]
+                }
+            ]
+        },
+        "settings": {
+            "dogsled": {
+                "max-blank-identifiers": 2
+            },
+            "dupl": {
+                "threshold": 100
+            },
+            "exhaustive": {
+                "default-signifies-exhaustive": false
+            },
+            "funcorder": {
+                "constructor-after-struct": true
+            },
+            "funlen": {
+                "lines": 60,
+                "statements": 40
+            },
+            "gocognit": {
+                "min-complexity": 20
+            },
+            "goconst": {
+                "min-len": 3,
+                "min-occurrences": 10
+            },
+            "gocyclo": {
+                "min-complexity": 10
+            },
+            "godox": {
+                "keywords": [
+                    "NOTE",
+                    "OPTIMIZE",
+                    "HACK",
+                    "ATTN",
+                    "ATTENTION"
+                ]
+            },
+            "govet": {
+                "enable": [
+                    "atomicalign",
+                    "shadow"
+                ],
+                "settings": {
+                    "printf": {
+                        "funcs": [
+                            "(github.com/golangci/golangci-lint/pkg/logutils.Log).Infof",
+                            "(github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf",
+                            "(github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf",
+                            "(github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf"
+                        ]
+                    }
+                }
+            },
+            "lll": {
+                "line-length": 120,
+                "tab-width": 1
+            },
+            "misspell": {
+                "ignore-rules": [
+                    "bsv",
+                    "bitcoin"
+                ],
+                "locale": "US"
+            },
+            "nakedret": {
+                "max-func-lines": 30
+            },
+            "nestif": {
+                "min-complexity": 4
+            },
+            "nolintlint": {
+                "allow-unused": false,
+                "require-explanation": true,
+                "require-specific": true
+            },
+            "prealloc": {
+                "for-loops": false,
+                "range-loops": true,
+                "simple": true
+            },
+            "revive": {
+                "confidence": 0.8,
+                "enable-all-rules": false,
+                "ignore-generated-header": false,
+                "rules": [
+                    {
+                        "name": "context-as-argument",
+                        "severity": "error"
+                    },
+                    {
+                        "arguments": [
+                            "checkPrivateReceivers",
+                            "sayRepetitiveInsteadOfStutters"
+                        ],
+                        "name": "exported",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "error-return",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "error-naming",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "error-strings",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "receiver-naming",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "increment-decrement",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "indent-error-flow",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "superfluous-else",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "unreachable-code",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "redefines-builtin-id",
+                        "severity": "warning"
+                    },
+                    {
+                        "exclude": [
+                            "**/deps/deps.go"
+                        ],
+                        "name": "blank-imports",
+                        "severity": "warning"
+                    },
+                    {
+                        "name": "unused-parameter",
+                        "severity": "warning"
+                    }
+                ],
+                "severity": "warning"
+            },
+            "unparam": {
+                "check-exported": false
+            },
+            "wsl": {
+                "allow-assign-and-call": true,
+                "allow-cuddle-declarations": true,
+                "allow-multiline-assign": true,
+                "strict-append": true
+            }
+        }
+    },
+    "output": {
+        "formats": {
+            "text": {
+                "path": "stdout",
+                "print-issued-lines": true,
+                "print-linter-name": true
+            }
+        }
+    },
+    "run": {
+        "allow-parallel-runners": true,
+        "build-tags": [
+            "mage"
+        ],
+        "concurrency": 8,
+        "issues-exit-code": 1,
+        "tests": true
+    },
+    "severity": {
+        "default": "warning",
+        "rules": [
+            {
+                "linters": [
+                    "dupl",
+                    "misspell",
+                    "makezero"
+                ],
+                "severity": "info"
+            }
+        ]
+    },
+    "version": "2"
+}

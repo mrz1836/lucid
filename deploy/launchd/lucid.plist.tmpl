@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  lucid.plist.tmpl — launchd job that supervises the standalone lucid
+  scheduler as a sibling of the chat-harness gateway (ADR-0004, ADR-0005;
+  build-plan.md Stage 6).
+
+  This launchd job does NOT run lucid directly. It runs `hush supervise`,
+  which reads the companion supervise config (deploy/hush/supervise.tmpl),
+  injects the harness token into the child's environment at spawn time, and
+  then execs the lucid scheduler. The lucid binary stays credential-dumb: it
+  reads the token from its environment and holds no keychain of its own
+  (ADR-0005). A dead or locked vault costs a send, never the chain (P10).
+
+  This file is a Go text/template. Render it with the deploy package
+  (deploy.RenderLaunchd) or substitute the fields by hand; the rendered
+  result is what launchd loads. Do not commit a substituted copy carrying a
+  real token — no token ever appears here; the token lives only in hush.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{ .Label }}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .HushProgram }}</string>
+    <string>supervise</string>
+    <string>--config</string>
+    <string>{{ .SuperviseConfig }}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <{{ if .RunAtLoad }}true{{ else }}false{{ end }}/>
+  <key>KeepAlive</key>
+  <{{ if .KeepAlive }}true{{ else }}false{{ end }}/>
+  <key>StandardOutPath</key>
+  <string>{{ .StdoutPath }}</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .StderrPath }}</string>
+</dict>
+</plist>

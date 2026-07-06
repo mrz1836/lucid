@@ -5,6 +5,14 @@
 *.so
 *.dylib
 
+# Compiled lucid binary (magex/goreleaser build output)
+/cmd/lucid/lucid
+/lucid
+/bin/
+
+# magex task-runner cache
+.mage-cache/
+
 # Test binary, build with `go test -c`
 *.test
 

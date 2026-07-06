@@ -1,0 +1,77 @@
+# supervise.tmpl — hush supervise config for the standalone lucid scheduler
+#
+# Schema reference: the hush house template
+#   (deploy/examples/supervisors/example-daemon.toml in the hush repo).
+# Full field docs:  hush docs/CONFIG-SCHEMA.md#supervisor-config
+#
+# WHAT THIS FILE IS
+#   The per-daemon supervisor config `hush supervise` reads to run the lucid
+#   scheduler (bell + morning tripwire + monthly heartbeat + enrichment,
+#   ADR-0004) as a gateway sibling. hush fetches the named secrets from the
+#   vault and injects them into the child's environment at spawn time
+#   (ADR-0005); lucid reads the harness token from that environment and
+#   implements no secret store of its own.
+#
+# WHAT THIS FILE IS NOT
+#   It carries no secret VALUE — only the NAME of the secret (in `scope`).
+#   Nothing secret is ever committed to the lucid repo (ADR-0005, S-7).
+#
+# This file is a Go text/template. Render it with the deploy package
+# (deploy.RenderSupervise) or substitute the fields by hand, then place the
+# result at ~/.hush/supervisors/<name>.toml before `hush supervise --config`.
+
+name                      = "{{ .Name }}"
+reason                    = "{{ .Reason }}"
+server_url                = "{{ .ServerURL }}"
+client_machine_index      = {{ .ClientMachineIndex }}
+session_type              = "supervisor"
+requested_ttl             = "{{ .RequestedTTL }}"
+refresh_window            = "{{ .RefreshWindow }}"
+cache_secrets_for_restart = true
+cache_grace_ttl           = "60m"
+status_socket             = "{{ .StatusSocket }}"
+pid_file                  = "{{ .PidFile }}"
+log_level                 = "info"
+
+# The exact secret names this daemon may fetch — the chat-harness token that
+# delivers the bell, tripwire, and witness sends is the only entry the MVP
+# needs (ADR-0005: model access requires no stored secret, ADR-0006).
+scope = [
+{{- range .Scope }}
+  "{{ . }}",
+{{- end }}
+]
+
+[child]
+# The lucid scheduler invocation. Element [0] must be the absolute path of
+# the installed lucid binary (the ACL-bound binary, hush AC-6). The scheduler
+# reads its job definitions (bell/tripwire/heartbeat/enrichment marks) from
+# ~/.lucid/engine/chain.json — the runtime is swappable, the contract is not
+# (ADR-0004).
+command = [
+{{- range .ChildCommand }}
+  "{{ . }}",
+{{- end }}
+]
+working_dir     = "{{ .WorkingDir }}"
+# Non-secret env inherited by the child. The harness token is NOT listed here
+# — it flows through `scope` above and is injected by hush at spawn.
+env_passthrough = [
+{{- range .EnvPassthrough }}
+  "{{ . }}",
+{{- end }}
+]
+restart_on_clean_exit = true
+restart_on_exit_78    = false
+
+[discord]
+daemon_label = "{{ .DaemonLabel }}"
+
+# Per-secret pre-injection validator names. The harness token is a plain
+# access credential, not a model key, so no vendor validator applies; the
+# staleness contract is carried by exit 78 (restart_on_exit_78 = false).
+[validators]
+
+[watchdog]
+enabled  = true
+patterns = ["401 Unauthorized", "invalid token", "Unauthorized"]
