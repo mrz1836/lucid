@@ -47,11 +47,8 @@ func newStubCmd(spec stubSpec) *cobra.Command {
 // verbs exist now so the command tree matches the documented set and
 // no undocumented verb ever appears (ADR-0007 hard rule). `init` is real
 // as of Stage 1 (init.go); `log` as of Stage 1 (log.go); `closeout`,
-// `mode`, and `status` as of Stage 2 (closeout.go, mode.go, status.go).
-
-func newDayCmd() *cobra.Command {
-	return newStubCmd(stubSpec{name: "day", short: "Show a day's joined record", stage: "Stage 4", machineReadable: true})
-}
+// `mode`, and `status` as of Stage 2 (closeout.go, mode.go, status.go);
+// `obs` and `day` as of Stage 4 (obs.go, day.go).
 
 func newValidateCmd() *cobra.Command {
 	return newStubCmd(stubSpec{name: "validate", short: "Validate the Ledger and boundary invariants", stage: "Stage 5", machineReadable: true})

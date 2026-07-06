@@ -71,7 +71,8 @@ func TestVersion_RejectsArgs(t *testing.T) {
 }
 
 func TestStub_HumanReturnsNotImplemented(t *testing.T) {
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "day")
+	// `export` is still a stub (Stage 4); `day` became real in this phase.
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "export")
 	require.ErrorIs(t, err, errNotImplemented)
 	assert.Empty(t, out)
 	assert.Contains(t, errOut, "not implemented yet")
@@ -79,19 +80,19 @@ func TestStub_HumanReturnsNotImplemented(t *testing.T) {
 }
 
 func TestStub_MachineReadableEmitsJSON(t *testing.T) {
-	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "day", "--json")
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "export", "--json")
 	require.ErrorIs(t, err, errNotImplemented)
 
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal([]byte(out), &payload))
-	assert.Equal(t, "day", payload["command"])
+	assert.Equal(t, "export", payload["command"])
 	assert.Equal(t, "not_implemented", payload["status"])
 	assert.Equal(t, "Stage 4", payload["stage"])
 }
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	want := []string{"init", "log", "closeout", "mode", "status", "day", "validate", "export", "version", "upgrade"}
+	want := []string{"init", "log", "closeout", "mode", "status", "obs", "day", "validate", "export", "version", "upgrade"}
 	got := map[string]bool{}
 	for _, c := range root.Commands() {
 		got[c.Name()] = true

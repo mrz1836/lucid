@@ -98,6 +98,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newCloseoutCmd())
 	root.AddCommand(newModeCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newObsCmd())
 	root.AddCommand(newDayCmd())
 	root.AddCommand(newValidateCmd())
 	root.AddCommand(newExportCmd())
