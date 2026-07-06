@@ -129,7 +129,9 @@ func (r *Router) Validate(ctx context.Context, req ValidateRequest) (ValidateRes
 	prop := reflection.Propose(ctx, in, req.Provider)
 
 	switch prop.Outcome {
-	case reflection.OutcomeNoPattern:
+	case reflection.OutcomeNoPattern, reflection.OutcomeRecall:
+		// recall is a /reflect outcome; propose never yields it, so treat it as
+		// no_pattern for safety.
 		return ValidateResult{Outcome: reflection.OutcomeNoPattern, Message: prop.MessageText}, nil
 	case reflection.OutcomeSoftContradiction:
 		return r.surfaceSoftContradiction(ctx, prop, req)

@@ -163,6 +163,8 @@ func validReply(reply proposalReply, in ProposeInput) bool {
 		return validProposal(reply, in)
 	case OutcomeSoftContradiction:
 		return validSoftContradiction(reply, in)
+	case OutcomeRecall:
+		return false // recall is a /reflect outcome, never a propose reply
 	default:
 		return false
 	}
@@ -244,7 +246,7 @@ func fromReply(reply proposalReply) ProposeResult {
 			MessageText:        reply.MessageText,
 			SupportingEntryIDs: reply.SupportingEntryIDs,
 		}
-	case OutcomeNoPattern:
+	case OutcomeNoPattern, OutcomeRecall:
 		return noPattern(false)
 	default:
 		return noPattern(false)
