@@ -114,6 +114,31 @@ func (a *Adapter) ReadPerson(key string) (PersonRecord, bool, error) {
 	return rec.decode()
 }
 
+// ListPeopleKeys returns the person_key of every record on disk, sorted so the
+// result is deterministic regardless of directory-read order. It is the read
+// primitive the deterministic /person join builds on: the router loads each
+// record to match a queried name against display_name / aka[] (error-states.md
+// §P-1/§P-2). A missing people/ tree is not an error — it means no one has been
+// mentioned yet.
+func (a *Adapter) ListPeopleKeys() ([]string, error) {
+	entries, err := os.ReadDir(a.peopleDir())
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("storage: scan people dir: %w", err)
+	}
+	var keys []string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != personExt {
+			continue
+		}
+		keys = append(keys, strings.TrimSuffix(e.Name(), personExt))
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
 // UpdatePerson is the deterministic People routine (agent-contracts.md
 // §"People (extractive)"; treated as part of the storage adapter for the
 // MVP). It resolves the mention to a stable slug via the wordlist and the

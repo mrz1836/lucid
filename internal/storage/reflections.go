@@ -166,6 +166,54 @@ func (a *Adapter) ReadInsightsWindow(since time.Time, limit int) ([]Insight, err
 	return out, nil
 }
 
+// lastStatusAt returns the timestamp of an insight's most recent status_history
+// transition — the recency key /ask orders the insights slice by
+// (agent-contracts.md §3 answer_grounded: "capped at the 50 most recent by
+// status_history[].at of the last accept/confirm"). A validated insight always
+// carries at least the initial accepted entry, so the fallback to created_at is
+// defensive only.
+func lastStatusAt(ins Insight) time.Time {
+	if n := len(ins.StatusHistory); n > 0 {
+		return ins.StatusHistory[n-1].At
+	}
+	return ins.CreatedAt
+}
+
+// ReadAcceptedInsights returns accepted insights ordered most-recent-first by
+// the timestamp of their last status_history transition, capped at limit
+// (limit <= 0 means no cap). It is the insights-slice primitive `/ask` builds
+// on (agent-contracts.md §3). Ties on the transition timestamp break by id
+// descending so the ordering — and therefore any output computed from it — is
+// byte-stable across repeated runs (S-6, S-22). Retired insights are excluded.
+func (a *Adapter) ReadAcceptedInsights(limit int) ([]Insight, error) {
+	ids, err := a.ListInsightIDs()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Insight, 0, len(ids))
+	for _, id := range ids {
+		ins, err := a.ReadInsight(id)
+		if err != nil {
+			return nil, err
+		}
+		if ins.Status != InsightStatusAccepted {
+			continue
+		}
+		out = append(out, ins)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		ai, aj := lastStatusAt(out[i]), lastStatusAt(out[j])
+		if !ai.Equal(aj) {
+			return ai.After(aj)
+		}
+		return out[i].ID > out[j].ID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // ReflectionSurfaced is one line of a reflection record's insights_surfaced[]:
 // which insight was surfaced and how the user answered (data-model.md §"Weekly
 // reflections"). response_kind is confirmed | softened | retired | unanswered.
@@ -488,6 +536,33 @@ func (a *Adapter) ListReflectionIDs() ([]string, error) {
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+// ReadReflections returns the most recent weekly reflection records, newest
+// ISO-week first, capped at limit (limit <= 0 means no cap). The
+// `reflection_YYYY_wWW` id sorts chronologically (zero-padded week), so the
+// last ids are the most recent weeks. It is the reflections-slice primitive
+// `/ask` builds on (agent-contracts.md §3 answer_grounded: reflections capped
+// at the 12 most recent ISO-week records).
+func (a *Adapter) ReadReflections(limit int) ([]Reflection, error) {
+	ids, err := a.ListReflectionIDs()
+	if err != nil {
+		return nil, err
+	}
+	// ids are chronological ascending; take the newest `limit` from the tail.
+	if limit > 0 && len(ids) > limit {
+		ids = ids[len(ids)-limit:]
+	}
+	out := make([]Reflection, 0, len(ids))
+	// Emit newest first so the slice the router hands the agent is recency-ordered.
+	for i := len(ids) - 1; i >= 0; i-- {
+		rec, err := a.ReadReflection(ids[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
 }
 
 // LatestReflectionCreatedAt returns the created_at of the most recent
