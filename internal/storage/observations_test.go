@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrz1836/lucid/internal/engine"
-	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/observations"
 )
 
 var loc = time.FixedZone("EDT", -4*3600) //nolint:gochecknoglobals // deterministic test-fixture zone

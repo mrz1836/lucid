@@ -127,12 +127,14 @@ func (c Config) Clip() (Config, []string) {
 	if out.RecentWindow > ceiling {
 		warnings = append(warnings, fmt.Sprintf(
 			"recent_window %d exceeds recent_window_max %d — clipped to %d",
-			out.RecentWindow, ceiling, ceiling))
+			out.RecentWindow, ceiling, ceiling,
+		))
 		out.RecentWindow = ceiling
 	}
 	if out.RecentWindow < 1 {
 		warnings = append(warnings, fmt.Sprintf(
-			"recent_window %d below minimum — clipped to 1", out.RecentWindow))
+			"recent_window %d below minimum — clipped to 1", out.RecentWindow,
+		))
 		out.RecentWindow = 1
 	}
 

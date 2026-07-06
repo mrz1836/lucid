@@ -29,7 +29,8 @@ func rec(date, mode string, completed, missed, floor, storm bool) DayRecord {
 func completedDay(date, mode string) DayRecord { return rec(date, mode, true, false, false, false) }
 func floorDay(date, mode string) DayRecord     { return rec(date, mode, true, false, true, false) }
 func missedDay(date string) DayRecord          { return rec(date, ModeGreen, false, true, false, false) }
-func stormMissDay(date string) DayRecord       { return rec(date, ModeRed, false, true, false, true) }
+
+func stormMissDay(date string) DayRecord { return rec(date, ModeRed, false, true, false, true) }
 
 func defChain() ChainConfig { return DefaultChain() }
 

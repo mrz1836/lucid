@@ -33,14 +33,16 @@ func Bell(label string) string {
 // floor named.
 func L1(floor string) string {
 	return withSignOff(fmt.Sprintf(
-		"last night was a miss. Never miss twice — tonight is a must. The floor: %s.", floor))
+		"last night was a miss. Never miss twice — tonight is a must. The floor: %s.", floor,
+	))
 }
 
 // L1Storm renders the storm variant of L1 (engine-module.md §Consent
 // amendment, verbatim): contact continues, coercion pauses.
 func L1Storm(floor string) string {
 	return withSignOff(fmt.Sprintf(
-		"last night was a miss — storm standing, nothing is owed. If tonight allows it, the floor: %s.", floor))
+		"last night was a miss — storm standing, nothing is owed. If tonight allows it, the floor: %s.", floor,
+	))
 }
 
 // L2 renders the witness escalation after two consecutive misses
@@ -48,14 +50,16 @@ func L1Storm(floor string) string {
 // state only — never journal content, capacity values, or any Mirror data.
 func L2(streak int, mode string) string {
 	return withSignOff(fmt.Sprintf(
-		"two missed nights. Streak: %d. Declared mode: %s. Storm: none.", streak, mode))
+		"two missed nights. Streak: %d. Declared mode: %s. Storm: none.", streak, mode,
+	))
 }
 
 // L2Storm renders the storm variant of L2 (engine-module.md §Consent
 // amendment, verbatim): the stake is stayed; the ask-once still applies.
 func L2Storm(confirmedDate string) string {
 	return withSignOff(fmt.Sprintf(
-		"two missed nights — storm standing (confirmed %s). The stake is stayed; the ask-once still applies.", confirmedDate))
+		"two missed nights — storm standing (confirmed %s). The stake is stayed; the ask-once still applies.", confirmedDate,
+	))
 }
 
 // L2Blocked renders the user-channel note when the L2 stage is reached but the
@@ -84,7 +88,8 @@ func Heartbeat(escalationState string, streak int) string {
 		return fmt.Sprintf("monthly status: all clear — %d-day streak, no open escalation.", streak)
 	}
 	return fmt.Sprintf(
-		"monthly status: %d-day streak; an escalation fired this month and remains open — you have already seen it.", streak)
+		"monthly status: %d-day streak; an escalation fired this month and remains open — you have already seen it.", streak,
+	)
 }
 
 // StormLapse renders the user-channel note when a storm declaration goes

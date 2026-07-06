@@ -26,7 +26,8 @@ import (
 func askAnswer(id string) provider.Exchange {
 	return provider.Exchange{Content: fmt.Sprintf(
 		`{"outcome":"answer","answer_text":"Based on %s, you tend to go quiet.","citations":[{"kind":"insight","id":%q}]}`,
-		id, id)}
+		id, id,
+	)}
 }
 
 // hashTree returns a stable digest of every file under home, so a test can
@@ -117,7 +118,8 @@ func TestAsk_7_4_Advice_SafetyBlocks(t *testing.T) {
 	id := seedInsight(t, a, reflectWeekNow().Add(-2*24*time.Hour), "I go quiet in groups.")
 
 	advice := fmt.Sprintf(
-		`{"outcome":"answer","answer_text":"You should journal more about this.","citations":[{"kind":"insight","id":%q}]}`, id)
+		`{"outcome":"answer","answer_text":"You should journal more about this.","citations":[{"kind":"insight","id":%q}]}`, id,
+	)
 	p := &provider.Fake{Script: []provider.Exchange{{Content: advice}}}
 	res, err := r.Ask(context.Background(), AskRequest{Question: "what do I do?", Provider: p})
 	require.NoError(t, err)

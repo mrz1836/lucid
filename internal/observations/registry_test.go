@@ -4,9 +4,10 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/mrz1836/lucid/data"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/data"
 )
 
 var registryKeyRE = regexp.MustCompile(`^(injury|thread|place|era)_[a-z]-[a-z]+(-\d+)?$`)

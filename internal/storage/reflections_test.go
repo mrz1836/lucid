@@ -340,7 +340,8 @@ func TestWriteReflection_AppendReadsCorruptErrors(t *testing.T) {
 	require.NoError(t, os.MkdirAll(a.reflectionsDir(), 0o700))
 	require.NoError(t, os.WriteFile(a.reflectionsDir()+"/reflection_2026_w19.md", []byte("bad"), 0o600))
 	_, err := a.WriteReflection(reflectionSeed(
-		time.Date(2026, time.May, 9, 20, 0, 0, 0, time.UTC), nil, nil, "s"))
+		time.Date(2026, time.May, 9, 20, 0, 0, 0, time.UTC), nil, nil, "s",
+	))
 	require.Error(t, err)
 }
 

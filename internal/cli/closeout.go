@@ -139,7 +139,8 @@ func parseCompactArgs(r *router.Router, args []string) (links map[string]string,
 	joined := strings.TrimSpace(strings.Join(args, " "))
 	if joined == "" {
 		return nil, 0, "", "", fmt.Errorf(
-			"lucid closeout: supply the compact form, e.g. `closeout dfx 3/wrist <journal line>`")
+			"lucid closeout: supply the compact form, e.g. `closeout dfx 3/wrist <journal line>`",
+		)
 	}
 	chain, err := r.Chain()
 	if err != nil {

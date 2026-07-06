@@ -595,7 +595,7 @@ func splitTimeRange(body string) (a, b string, isRange bool) {
 }
 
 // atTime returns day at the hour/minute of hm.
-func atTime(day time.Time, hm time.Time) time.Time {
+func atTime(day, hm time.Time) time.Time {
 	return time.Date(day.Year(), day.Month(), day.Day(), hm.Hour(), hm.Minute(), 0, 0, day.Location())
 }
 

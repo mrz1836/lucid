@@ -63,7 +63,8 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	})
 	if err != nil {
 		return LogResult{}, fmt.Errorf(
-			"could not write the raw entry (out of disk space or permission denied?); nothing was saved: %w", err)
+			"could not write the raw entry (out of disk space or permission denied?); nothing was saved: %w", err,
+		)
 	}
 
 	if _, err := r.store.WriteSession(storage.Session{

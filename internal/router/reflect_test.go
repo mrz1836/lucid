@@ -503,7 +503,8 @@ func TestReflect_GateResonanceBlockedFallsBackVerbatim(t *testing.T) {
 	now := reflectWeekNow()
 	id := seedInsight(t, a, now.Add(-24*time.Hour), "I test an idea once and back off.")
 	advice := provider.Exchange{Content: fmt.Sprintf(
-		`{"outcome":"recall","ordered_insights":[{"id":%q,"surface_text":"you should journal daily about this"}]}`, id)}
+		`{"outcome":"recall","ordered_insights":[{"id":%q,"surface_text":"you should journal daily about this"}]}`, id,
+	)}
 	resp := &scriptRecall{def: RecallResponse{Status: storage.RecallConfirmed}}
 
 	_, err := r.Reflect(context.Background(), ReflectRequest{

@@ -20,7 +20,8 @@ func oneInsight() []InsightView {
 func answerExchange(id string) provider.Exchange {
 	return provider.Exchange{Content: fmt.Sprintf(
 		`{"outcome":"answer","answer_text":"Based on what you validated, %s.","citations":[{"kind":"insight","id":%q}]}`,
-		"you tend to go quiet", id)}
+		"you tend to go quiet", id,
+	)}
 }
 
 // TestAnswer_EmptySlice_NoLLM is acceptance case 7.2 / §R-10: an empty store

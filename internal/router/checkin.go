@@ -118,7 +118,8 @@ func (r *Router) writeCheckin(req CheckinRequest, res intake.Result, ack func(st
 	})
 	if err != nil {
 		return CheckinResult{}, fmt.Errorf(
-			"checkin: could not write the raw entry (out of disk space or permission denied?); nothing was saved: %w", err)
+			"checkin: could not write the raw entry (out of disk space or permission denied?); nothing was saved: %w", err,
+		)
 	}
 
 	if _, err := r.store.WriteSession(storage.Session{

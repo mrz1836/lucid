@@ -129,7 +129,8 @@ func GuidedPrompts(chain ChainConfig) []string {
 	for _, l := range chain.Links {
 		prompts = append(prompts, fmt.Sprintf("%s — done / floor / skipped?", l.Name))
 	}
-	prompts = append(prompts,
+	prompts = append(
+		prompts,
 		"Capacity (1–5) and an optional one-word limiter?",
 		"One journal line?",
 	)

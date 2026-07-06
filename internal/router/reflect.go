@@ -354,7 +354,8 @@ func (r *Router) gatePanel(window []storage.Insight) ([]string, error) {
 		}
 	}
 	lines := []string{fmt.Sprintf(
-		"Gate panel — %d accepted this window, %d rules stated, %d rules standing.", len(window), stated, standing)}
+		"Gate panel — %d accepted this window, %d rules stated, %d rules standing.", len(window), stated, standing,
+	)}
 
 	dominance, err := r.dominanceLine()
 	if err != nil {
