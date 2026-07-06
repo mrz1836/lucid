@@ -154,13 +154,25 @@ type Status struct {
 // already-folded day records, the chain config (for the SLO budget and gate
 // marks), the storm history, the stamped chain_start, the active profile,
 // and the location the logical dates are interpreted in.
+//
+// Escalation, StakeOwed, and WitnessLapsed are the fields the derived status
+// carries but does not compute from the day records alone. Escalation and
+// StakeOwed are tripwire-owned (engine-module.md §tripwire: the morning job
+// sets escalation_state / stake_owed) and are threaded in so a rebuild
+// preserves them rather than resetting the ladder; WitnessLapsed derives from
+// witness.json (a stored input), surfaced so /status can say "witness lapsed —
+// L2 disarmed". They default to "no open escalation" so every existing caller
+// that omits them keeps the pre-tripwire behavior.
 type StatusInput struct {
-	Records    []DayRecord
-	Chain      ChainConfig
-	Storm      StormHistory
-	ChainStart *string
-	Profile    string
-	Loc        *time.Location
+	Records       []DayRecord
+	Chain         ChainConfig
+	Storm         StormHistory
+	ChainStart    *string
+	Profile       string
+	Escalation    string
+	StakeOwed     bool
+	WitnessLapsed bool
+	Loc           *time.Location
 }
 
 // BuildStatus computes the derived status (engine-module.md §status.json). It
@@ -179,6 +191,10 @@ func BuildStatus(in StatusInput) Status {
 	streaks := ComputeStreaks(records, loc)
 
 	budget := in.Chain.SLO.IsolatedMissBudgetPer30d
+	escalation := in.Escalation
+	if escalation == "" {
+		escalation = EscalationNone
+	}
 	st := Status{
 		CurrentStreak:    streaks.Current,
 		LongestStreak:    streaks.Longest,
@@ -187,8 +203,10 @@ func BuildStatus(in StatusInput) Status {
 		Adherence7d:      Window{Length: 7},
 		Adherence30d:     Window{Length: 30},
 		ErrorBudget:      ErrorBudget{Budget: budget, Remaining: budget},
-		EscalationState:  EscalationNone,
+		EscalationState:  escalation,
 		StormState:       StormNone,
+		StakeOwed:        in.StakeOwed,
+		WitnessLapsed:    in.WitnessLapsed,
 		ActiveProfile:    orDefaultProfile(in.Profile),
 	}
 

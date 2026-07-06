@@ -272,11 +272,47 @@ func (a *Adapter) AppendProfileEvent(sw engine.ProfileSwitch) error {
 }
 
 // RebuildEngineStatus recomputes engine/status.json from the folded day
-// records plus chain, profile, and storm state (engine-module.md §status.json,
-// derived and rebuildable). It stamps chain_start exactly once — on the
-// first completed close-out — and never changes it thereafter. loc is the
-// location the logical dates are interpreted in (the host's own zone).
+// records plus chain, profile, storm, and witness state (engine-module.md
+// §status.json, derived and rebuildable). It stamps chain_start exactly once —
+// on the first completed close-out — and never changes it thereafter.
+//
+// escalation_state and stake_owed are tripwire-owned (engine-module.md §The
+// tripwire), so a plain rebuild — the close-out / mode / status path —
+// preserves whatever the last tripwire run set rather than clearing the
+// ladder; the tripwire changes them through [Adapter.SetEngineEscalation]. A
+// missing or corrupt status.json preserves nothing (the ladder reads as clear
+// from scratch), which keeps the delete-and-rebuild determinism intact for the
+// day-derived fields. loc is the location logical dates are interpreted in.
 func (a *Adapter) RebuildEngineStatus(loc *time.Location) (engine.Status, error) {
+	prior, err := a.ReadEngineStatus()
+	if err != nil {
+		prior = engine.Status{} // missing/corrupt ⇒ clear ladder, rebuild from days/
+	}
+	escalation := prior.EscalationState
+	if escalation == "" {
+		escalation = engine.EscalationNone
+	}
+	return a.buildAndWriteStatus(loc, escalation, prior.StakeOwed)
+}
+
+// SetEngineEscalation rebuilds status.json with an explicit escalation_state
+// and stake_owed — the tripwire's persistence path (engine-module.md §The
+// tripwire "sets escalation_state"). Every other status field is recomputed
+// from the day records, so a backfill that landed before the run still folds
+// the streak and budget correctly on the same write.
+func (a *Adapter) SetEngineEscalation(loc *time.Location, escalation string, stakeOwed bool) (engine.Status, error) {
+	if escalation == "" {
+		escalation = engine.EscalationNone
+	}
+	return a.buildAndWriteStatus(loc, escalation, stakeOwed)
+}
+
+// buildAndWriteStatus is the shared fold: it stamps chain_start once, derives
+// witness_lapsed from witness.json, folds the day records with the given
+// tripwire-owned escalation/stake, and writes status.json. Splitting it out
+// keeps the plain-rebuild and the tripwire-set paths byte-identical apart from
+// the two fields the tripwire owns.
+func (a *Adapter) buildAndWriteStatus(loc *time.Location, escalation string, stakeOwed bool) (engine.Status, error) {
 	chain, err := a.ReadChainConfig()
 	if err != nil {
 		return engine.Status{}, err
@@ -305,13 +341,20 @@ func (a *Adapter) RebuildEngineStatus(loc *time.Location) (engine.Status, error)
 		return engine.Status{}, err
 	}
 
+	// A missing witness.json is not fatal here — an unprovisioned witness is
+	// simply "not lapsed"; the tripwire's own reads own the L2 gating.
+	witness, _ := a.ReadWitnessContract()
+
 	status := engine.BuildStatus(engine.StatusInput{
-		Records:    records,
-		Chain:      chain,
-		Storm:      storm,
-		ChainStart: chain.ChainStart,
-		Profile:    profile.Active,
-		Loc:        loc,
+		Records:       records,
+		Chain:         chain,
+		Storm:         storm,
+		ChainStart:    chain.ChainStart,
+		Profile:       profile.Active,
+		Escalation:    escalation,
+		StakeOwed:     stakeOwed,
+		WitnessLapsed: witness.IsLapsed(),
+		Loc:           loc,
 	})
 	content, err := marshalJSON(status)
 	if err != nil {
