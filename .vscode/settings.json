@@ -80,7 +80,7 @@
             "-.mage-cache"
         ],
         "formatting.gofumpt": true,
-        "formatting.local": "github.com/mrz1836/atlas",
+        "formatting.local": "github.com/mrz1836/go-broadcast",
         "symbolMatcher": "fastfuzzy",
         "symbolStyle": "full",
         "ui.completion.completeFunctionCalls": true,
