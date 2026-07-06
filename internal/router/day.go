@@ -45,7 +45,55 @@ func (r *Router) DayView(dateArg string, now time.Time) (DayViewResult, error) {
 		lines := []string{fmt.Sprintf("No record for %s.", date)}
 		return DayViewResult{Date: date, Empty: true, View: view, Lines: lines}, nil
 	}
-	return DayViewResult{Date: date, View: view, Lines: dayLines(date, view)}, nil
+	lines := dayLines(date, view)
+	if note, err := r.noLocationNote(date, view); err != nil {
+		return DayViewResult{}, err
+	} else if note != "" {
+		lines = append(lines, note)
+	}
+	return DayViewResult{Date: date, View: view, Lines: lines}, nil
+}
+
+// noLocationNote returns the one-time "no location on file" note for a day
+// (observations-module.md §Error states: "Enricher config lacks coordinates →
+// skip that enricher; /day shows 'no location on file' once"). It fires only
+// when the weather enricher is enabled, the day carries no weather event, and
+// no location was on file on or before the day — so the user learns why weather
+// is absent without any push.
+func (r *Router) noLocationNote(date string, view storage.DayView) (string, error) {
+	cfg, err := r.store.ReadObservationsConfig()
+	if err != nil {
+		return "", err
+	}
+	weatherOn := false
+	for _, e := range cfg.Enrichers {
+		if e.Name == observations.EnricherWeather && e.Enabled {
+			weatherOn = true
+		}
+	}
+	if !weatherOn || dayHasWeather(view) {
+		return "", nil
+	}
+	onFile, err := r.store.LocationOnFile(date)
+	if err != nil {
+		return "", err
+	}
+	if onFile {
+		return "", nil
+	}
+	return "weather: no location on file", nil
+}
+
+// dayHasWeather reports whether the day view already carries a weather
+// enricher event (so the note is suppressed once weather is present).
+func dayHasWeather(view storage.DayView) bool {
+	src := observations.EnricherSource(observations.EnricherWeather)
+	for _, e := range view.Obs.Events {
+		if e.Kind == observations.KindContextDay && e.Source == src {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveDayArg maps the optional `/day` argument to a logical date: empty is

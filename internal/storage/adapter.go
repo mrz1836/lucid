@@ -44,6 +44,10 @@ const (
 // default). Nothing outside this package should hold the home path.
 type Adapter struct {
 	home string
+	// enrichFetch is the outbound transport for the enrichment job's single
+	// audited network op. It is nil in production (a default https getter is
+	// used) and injected by tests so no real socket ever opens.
+	enrichFetch EnrichmentFetcher
 }
 
 // New returns an adapter rooted at an explicit home directory. Tests

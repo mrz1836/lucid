@@ -86,14 +86,42 @@ func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 		return CaptureResult{}, fmt.Errorf("could not log the observation; nothing was saved: %w", err)
 	}
 
+	ack, err := r.captureAckWithPointer(ev.Kind, ev.ID, parsed.Partial, now)
+	if err != nil {
+		return CaptureResult{}, err
+	}
 	return CaptureResult{
 		EventID:     ev.ID,
 		Kind:        ev.Kind,
 		LogicalDate: ev.LogicalDate,
 		Partial:     parsed.Partial,
 		PlaceKey:    placeKey,
-		Ack:         captureAck(ev.Kind, ev.ID, parsed.Partial),
+		Ack:         ack,
 	}, nil
+}
+
+// packetPointerLine is the deterministic discovery template (observations.md
+// §7): the ack for /obs intervention may append it at most once per 30 days —
+// a pointer, never a question, never a standalone ping.
+const packetPointerLine = "A clinician packet for appointments is available: /packet clinician."
+
+// captureAckWithPointer builds the inventory ack and, for an intervention
+// capture, appends the clinician-packet discovery pointer when the ephemeral
+// backoff (once per 30 days) allows. The pointer decision is the only place a
+// capture ack varies by kind, and it is still inventory — no evaluation.
+func (r *Router) captureAckWithPointer(kind, id string, partial bool, now time.Time) (string, error) {
+	ack := captureAck(kind, id, partial)
+	if kind != observations.KindIntervention {
+		return ack, nil
+	}
+	show, err := r.store.ShouldShowPacketPointer(now)
+	if err != nil {
+		return "", err
+	}
+	if show {
+		ack += " " + packetPointerLine
+	}
+	return ack, nil
 }
 
 // resolvePlace turns a sticky-location capture into a place registry entry and

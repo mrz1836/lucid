@@ -71,23 +71,23 @@ func TestVersion_RejectsArgs(t *testing.T) {
 }
 
 func TestStub_HumanReturnsNotImplemented(t *testing.T) {
-	// `export` is still a stub (Stage 4); `day` became real in this phase.
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "export")
+	// `validate` is still a stub (Stage 5); `export` became real in this phase.
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "validate")
 	require.ErrorIs(t, err, errNotImplemented)
 	assert.Empty(t, out)
 	assert.Contains(t, errOut, "not implemented yet")
-	assert.Contains(t, errOut, "Stage 4")
+	assert.Contains(t, errOut, "Stage 5")
 }
 
 func TestStub_MachineReadableEmitsJSON(t *testing.T) {
-	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "export", "--json")
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate", "--json")
 	require.ErrorIs(t, err, errNotImplemented)
 
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal([]byte(out), &payload))
-	assert.Equal(t, "export", payload["command"])
+	assert.Equal(t, "validate", payload["command"])
 	assert.Equal(t, "not_implemented", payload["status"])
-	assert.Equal(t, "Stage 4", payload["stage"])
+	assert.Equal(t, "Stage 5", payload["stage"])
 }
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {

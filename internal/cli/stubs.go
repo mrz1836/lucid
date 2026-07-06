@@ -53,7 +53,3 @@ func newStubCmd(spec stubSpec) *cobra.Command {
 func newValidateCmd() *cobra.Command {
 	return newStubCmd(stubSpec{name: "validate", short: "Validate the Ledger and boundary invariants", stage: "Stage 5", machineReadable: true})
 }
-
-func newExportCmd() *cobra.Command {
-	return newStubCmd(stubSpec{name: "export", short: "Export a series or clinician packet", stage: "Stage 4", machineReadable: true})
-}
