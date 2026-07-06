@@ -119,7 +119,7 @@ A single structured payload:
     "Annoyed, a little embarrassed."
   ],
   "bundled_text": "<concatenated raw entry body, in the user's words>",
-  "stop_reason": "satisfied"            
+  "stop_reason": "satisfied"
 }
 ```
 
