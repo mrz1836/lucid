@@ -10,6 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/scheduler"
+	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/mrz1836/lucid/internal/upgrade"
 )
 
@@ -34,6 +37,7 @@ const (
 	upgradeFlagCheck   = "check"
 	upgradeFlagForce   = "force"
 	upgradeFlagChannel = "channel"
+	upgradeFlagManaged = "managed"
 )
 
 // newUpgradeCmd wires `lucid upgrade` — the house self-upgrade cloned
@@ -79,11 +83,13 @@ the morning close-out (ADR-0007, P10).`,
 			check, _ := cmd.Flags().GetBool(upgradeFlagCheck)
 			force, _ := cmd.Flags().GetBool(upgradeFlagForce)
 			channelFlag, _ := cmd.Flags().GetString(upgradeFlagChannel)
+			managed, _ := cmd.Flags().GetBool(upgradeFlagManaged)
 			asJSON, _ := cmd.Flags().GetBool(jsonFlag)
 			return runUpgrade(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), upgradeOptions{
 				check:          check,
 				force:          force,
 				channelFlag:    channelFlag,
+				managed:        managed,
 				asJSON:         asJSON,
 				currentVersion: bi.Version,
 			})
@@ -92,6 +98,7 @@ the morning close-out (ADR-0007, P10).`,
 	cmd.Flags().Bool(upgradeFlagCheck, false, "Check for an available upgrade without downloading or installing")
 	cmd.Flags().Bool(upgradeFlagForce, false, "Reinstall the latest release even when already current")
 	cmd.Flags().String(upgradeFlagChannel, "", "Release channel: stable | beta | edge (overrides UPDATE_CHANNEL)")
+	cmd.Flags().Bool(upgradeFlagManaged, false, "Managed upgrade: honor the drain window (never between bell and close-out) and run a post-upgrade tripwire self-check")
 	return cmd
 }
 
@@ -101,6 +108,7 @@ type upgradeOptions struct {
 	check          bool
 	force          bool
 	channelFlag    string
+	managed        bool
 	asJSON         bool
 	currentVersion string
 }
@@ -134,12 +142,72 @@ func runUpgrade(ctx context.Context, stdout, stderr io.Writer, opts upgradeOptio
 		return renderCheckInfo(stdout, info, opts.asJSON)
 	}
 
+	if opts.managed {
+		return runManagedUpgrade(ctx, stdout, stderr, cfg)
+	}
+
 	if err := upgrade.Install(ctx, cfg); err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucid: upgrade: %s\n", formatUpgradeErr(err))
 		return err
 	}
 	return nil
 }
+
+// runManagedUpgrade drives the supervised-host managed-upgrade flow
+// (ADR-0007): resolve the active chain profile's drain window (bell →
+// close-out), refuse an upgrade inside it, and — after a successful install —
+// run the tripwire self-check as the post-upgrade health gate. The Ledger's
+// engine tree supplies the clocks; a scheduler built over the same home
+// provides the self-check. It writes nothing to the Ledger.
+func runManagedUpgrade(ctx context.Context, stdout, stderr io.Writer, cfg upgrade.Config) error {
+	store, err := storage.Open()
+	if err != nil {
+		return fmt.Errorf("lucid: upgrade: resolve home: %w", err)
+	}
+	if scaffErr := store.ScaffoldEngine(); scaffErr != nil {
+		return fmt.Errorf("lucid: upgrade: prepare engine tree: %w", scaffErr)
+	}
+	chain, err := store.ReadChainConfig()
+	if err != nil {
+		return fmt.Errorf("lucid: upgrade: read chain: %w", err)
+	}
+	profileState, err := store.ReadProfileState()
+	if err != nil {
+		return fmt.Errorf("lucid: upgrade: read profile: %w", err)
+	}
+
+	now := clockNow()
+	profile := engine.GoverningProfile(now, profileState.History, now.Location())
+	clocks, err := chain.ClocksFor(profile)
+	if err != nil {
+		return fmt.Errorf("lucid: upgrade: resolve drain window: %w", err)
+	}
+	window := upgrade.DrainWindow{BellMin: clocks.BellMin, CloseoutMin: clocks.RolloverMin}
+
+	sc := scheduler.New(store, selfCheckNotifier{})
+	outcome, err := upgrade.RunManaged(ctx, upgrade.ManagedConfig{
+		Now:         now,
+		Window:      window,
+		Upgrade:     func(c context.Context) error { return upgrade.Install(c, cfg) },
+		HealthCheck: func() error { return sc.SelfCheck(now) },
+		Stdout:      stdout,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "lucid: upgrade: %s\n", formatUpgradeErr(err))
+		return err
+	}
+	_ = outcome // narration already written to stdout by RunManaged
+	return nil
+}
+
+// selfCheckNotifier is the no-op notifier used to build a scheduler purely for
+// its read-only [scheduler.Scheduler.SelfCheck] — the managed-upgrade health
+// check. A self-check delivers nothing, so Send is never called; it exists
+// only to satisfy the [scheduler.Notifier] interface.
+type selfCheckNotifier struct{}
+
+// Send is never called — a self-check delivers nothing — and always succeeds.
+func (selfCheckNotifier) Send(_, _ string) error { return nil }
 
 // lookupEnvString returns the value of the named env var (empty when
 // unset). Wrapping os.LookupEnv lets resolveChannel stay a pure

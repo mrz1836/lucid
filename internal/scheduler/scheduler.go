@@ -87,6 +87,21 @@ func (sc *Scheduler) RunBell() (SentMessage, error) {
 	return SentMessage{Channel: engine.ChannelUser, Kind: engine.SendBell, Text: text}, nil
 }
 
+// tripwireContext is the resolved Ledger state one tripwire run reasons over —
+// the read path shared by [Scheduler.RunTripwire], which acts on the decision,
+// and [Scheduler.SelfCheck], which discards it. Gathering it is the whole IO
+// surface of a run; everything downstream is the pure [engine] decision.
+type tripwireContext struct {
+	loc             *time.Location
+	chain           engine.ChainConfig
+	storm           engine.StormHistory
+	witness         engine.WitnessContract
+	tw              storage.TripwireState
+	records         []engine.DayRecord
+	reference       time.Time
+	firstRunOfMonth bool
+}
+
 // RunTripwire runs the morning dead-man for yesterday's logical day
 // (engine-module.md §The tripwire). It reads the Ledger, evaluates the pure
 // [engine.EvaluateTripwire] decision, appends any storm bookkeeping, delivers
@@ -94,64 +109,18 @@ func (sc *Scheduler) RunBell() (SentMessage, error) {
 // unreachable), persists the escalation_state, and records the run so the
 // monthly heartbeat fires once per calendar month.
 func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
-	loc := now.Location()
-	if err := sc.store.ScaffoldEngine(); err != nil {
-		return Report{}, fmt.Errorf("scheduler: prepare engine tree: %w", err)
-	}
-
-	chain, err := sc.store.ReadChainConfig()
-	if err != nil {
-		return Report{}, err
-	}
-	profileState, err := sc.store.ReadProfileState()
-	if err != nil {
-		return Report{}, err
-	}
-	storm, err := sc.store.ReadStormState()
-	if err != nil {
-		return Report{}, err
-	}
-	witness, err := sc.store.ReadWitnessContract()
-	if err != nil {
-		return Report{}, err
-	}
-	tw, err := sc.store.ReadTripwireState()
-	if err != nil {
-		return Report{}, err
-	}
-	records, err := sc.store.ReadEngineDays()
+	tc, err := sc.gatherTripwire(now)
 	if err != nil {
 		return Report{}, err
 	}
 
-	// Yesterday's logical day, under the profile governing now's wall date.
-	profileName := engine.GoverningProfile(now, profileState.History, loc)
-	clocks, err := chain.ClocksFor(profileName)
-	if err != nil {
-		return Report{}, err
-	}
-	reference := engine.AddDays(clocks.BaseLogicalDate(now), -1)
-
-	curMonth := now.Format("2006-01")
-	firstRunOfMonth := tw.LastHeartbeatMonth != curMonth
-
-	dec := engine.EvaluateTripwire(engine.TripwireInput{
-		Now:             now,
-		Loc:             loc,
-		Reference:       reference,
-		Chain:           chain,
-		Storm:           storm,
-		Witness:         witness,
-		Records:         recordsByDate(records),
-		Streak:          engine.ComputeStreaks(records, loc).Current,
-		FirstRunOfMonth: firstRunOfMonth,
-	})
+	dec := evaluate(now, tc)
 
 	if err := sc.store.AppendStormEvents(dec.StormEvents...); err != nil {
 		return Report{}, err
 	}
 
-	rep := Report{Reference: engine.DateString(reference), Escalation: dec.EscalationState, StormEvents: dec.StormEvents}
+	rep := Report{Reference: engine.DateString(tc.reference), Escalation: dec.EscalationState, StormEvents: dec.StormEvents}
 	for _, s := range dec.Sends {
 		msg, sendErr := sc.emit(s)
 		if sendErr != nil {
@@ -163,18 +132,103 @@ func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 	// stake_owed is not accrued in the MVP tripwire (a breach's stake-window
 	// bookkeeping is a /status surface); under a storm it is never owed. Pass
 	// false so a storm L2 never produces stake_owed.
-	if _, err := sc.store.SetEngineEscalation(loc, dec.EscalationState, false); err != nil {
+	if _, err := sc.store.SetEngineEscalation(tc.loc, dec.EscalationState, false); err != nil {
 		return rep, err
 	}
 
-	tw.LastRunDate = engine.DateString(engine.DateOf(now.In(loc)))
-	if firstRunOfMonth {
-		tw.LastHeartbeatMonth = curMonth
+	tc.tw.LastRunDate = engine.DateString(engine.DateOf(now.In(tc.loc)))
+	if tc.firstRunOfMonth {
+		tc.tw.LastHeartbeatMonth = now.Format("2006-01")
 	}
-	if err := sc.store.WriteTripwireState(tw); err != nil {
+	if err := sc.store.WriteTripwireState(tc.tw); err != nil {
 		return rep, err
 	}
 	return rep, nil
+}
+
+// SelfCheck is the post-upgrade tripwire self-check (ADR-0007: on a supervised
+// host the managed-upgrade health check IS a tripwire self-check). It walks the
+// exact read-and-evaluate path [Scheduler.RunTripwire] would for `now` but
+// delivers nothing and persists nothing — a dry run. A nil return proves the
+// scheduler could still fire next morning after a supervised restart or an
+// upgrade; any read/parse failure surfaces as the health-check error that fails
+// the upgrade (P10: an upgrade that would cost a night is a failed upgrade).
+func (sc *Scheduler) SelfCheck(now time.Time) error {
+	tc, err := sc.gatherTripwire(now)
+	if err != nil {
+		return fmt.Errorf("scheduler: tripwire self-check: %w", err)
+	}
+	// Exercise the full pure decision path; discard it — a self-check sends
+	// nothing and writes nothing.
+	_ = evaluate(now, tc)
+	return nil
+}
+
+// gatherTripwire scaffolds the engine tree and reads everything a morning
+// tripwire run needs for `now`: chain/profile/storm/witness/tripwire state and
+// the folded day records, plus the reference (yesterday's) logical day under
+// the profile governing now's wall date and whether this is the month's first
+// run. It reads only; it delivers and persists nothing.
+func (sc *Scheduler) gatherTripwire(now time.Time) (tripwireContext, error) {
+	loc := now.Location()
+	if err := sc.store.ScaffoldEngine(); err != nil {
+		return tripwireContext{}, fmt.Errorf("scheduler: prepare engine tree: %w", err)
+	}
+	chain, err := sc.store.ReadChainConfig()
+	if err != nil {
+		return tripwireContext{}, err
+	}
+	profileState, err := sc.store.ReadProfileState()
+	if err != nil {
+		return tripwireContext{}, err
+	}
+	storm, err := sc.store.ReadStormState()
+	if err != nil {
+		return tripwireContext{}, err
+	}
+	witness, err := sc.store.ReadWitnessContract()
+	if err != nil {
+		return tripwireContext{}, err
+	}
+	tw, err := sc.store.ReadTripwireState()
+	if err != nil {
+		return tripwireContext{}, err
+	}
+	records, err := sc.store.ReadEngineDays()
+	if err != nil {
+		return tripwireContext{}, err
+	}
+
+	// Yesterday's logical day, under the profile governing now's wall date.
+	profileName := engine.GoverningProfile(now, profileState.History, loc)
+	clocks, err := chain.ClocksFor(profileName)
+	if err != nil {
+		return tripwireContext{}, err
+	}
+	reference := engine.AddDays(clocks.BaseLogicalDate(now), -1)
+
+	return tripwireContext{
+		loc: loc, chain: chain, storm: storm, witness: witness, tw: tw,
+		records: records, reference: reference,
+		firstRunOfMonth: tw.LastHeartbeatMonth != now.Format("2006-01"),
+	}, nil
+}
+
+// evaluate runs the pure dead-man decision over a gathered context. Both the
+// live run and the self-check share it so the self-check exercises the exact
+// path the morning tripwire would.
+func evaluate(now time.Time, tc tripwireContext) engine.TripwireDecision {
+	return engine.EvaluateTripwire(engine.TripwireInput{
+		Now:             now,
+		Loc:             tc.loc,
+		Reference:       tc.reference,
+		Chain:           tc.chain,
+		Storm:           tc.storm,
+		Witness:         tc.witness,
+		Records:         recordsByDate(tc.records),
+		Streak:          engine.ComputeStreaks(tc.records, tc.loc).Current,
+		FirstRunOfMonth: tc.firstRunOfMonth,
+	})
 }
 
 // emit renders and delivers one send. An L2 whose witness channel is
