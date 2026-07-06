@@ -167,6 +167,26 @@ func (a *Adapter) ReadRaw(id string) (RawDocument, error) {
 	return RawDocument{ID: id, Fields: fields, Body: strings.TrimSpace(string(body))}, nil
 }
 
+// entryHeading is the fixed Markdown section header renderRawDoc writes
+// above every raw body. It is presentation, not content.
+const entryHeading = "# Entry"
+
+// EntryText returns the user's entry prose with the fixed "# Entry" heading
+// stripped — the content a downstream reader (e.g. Structuring) actually
+// wants. A body that is only the heading (an empty capture) yields the empty
+// string, so callers can detect an empty entry without knowing the raw
+// document's Markdown scaffolding.
+func (d RawDocument) EntryText() string {
+	body := strings.TrimSpace(d.Body)
+	if body == entryHeading {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(body, entryHeading+"\n"); ok {
+		return strings.TrimSpace(rest)
+	}
+	return body
+}
+
 // validate reports the first structural problem with a raw entry before
 // it is written. It guards the required frontmatter fields the writer
 // cannot invent.
