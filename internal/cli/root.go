@@ -31,6 +31,12 @@ const (
 // failure.
 var errNotImplemented = errors.New("lucid: command not implemented in this build")
 
+// errModeNotAccepted is returned when `lucid mode` declined the declaration
+// (an invalid mode name, or a declaration made after the bell). The fixed
+// user copy is already printed; this sentinel just maps to a non-zero exit so
+// a script never reads a rejected declaration as success.
+var errModeNotAccepted = errors.New("lucid: mode declaration not accepted")
+
 // BuildInfo carries the build metadata injected into cmd/lucid/main.go
 // via ldflags. It is threaded through the command tree so `version`
 // and `upgrade` report the running build without a mutable package

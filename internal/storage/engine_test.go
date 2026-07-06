@@ -237,6 +237,114 @@ func TestRebuildEngineStatus_ByteReproducible(t *testing.T) {
 	assert.Equal(t, 2, got.CurrentStreak)
 }
 
+// missedRecord builds a missed (non-storm) day record.
+func missedRecord(date string) engine.DayRecord {
+	d, _ := time.Parse("2006-01-02", date)
+	return engine.DayRecord{
+		DayID:       engine.DayID(d),
+		LogicalDate: date,
+		Mode:        engine.ModeGreen,
+		Missed:      true,
+		Links:       map[string]string{},
+		Profile:     engine.DefaultProfile,
+		Corrections: []engine.Correction{},
+	}
+}
+
+func TestReadStormState_DefaultStub(t *testing.T) {
+	a := newEngineAdapter(t)
+	storm, err := a.ReadStormState()
+	require.NoError(t, err)
+	assert.Empty(t, storm.History)
+	assert.Equal(t, 14, storm.DurationDays)
+}
+
+func TestReadStormState_MalformedJSON(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, os.WriteFile(a.stormPath(), []byte("{bad"), 0o600))
+	_, err := a.ReadStormState()
+	assert.ErrorContains(t, err, "parse")
+}
+
+func TestReadStormState_MissingErrors(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid"))
+	_, err := a.ReadStormState()
+	assert.Error(t, err)
+}
+
+func TestReadStormState_ParsesConfirmedHistory(t *testing.T) {
+	a := newEngineAdapter(t)
+	content, err := marshalJSON(engine.StormHistory{
+		DurationDays: 14,
+		History: []engine.StormEvent{
+			{At: "2026-07-14T09:40:00Z", Event: engine.StormConfirmed, By: "J.", Through: "2026-07-28"},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(a.stormPath(), content, 0o600))
+
+	storm, err := a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, storm.History, 1)
+	assert.Equal(t, engine.StormConfirmed, storm.History[0].Event)
+	assert.Equal(t, "2026-07-28", storm.History[0].Through)
+}
+
+// TestRebuildEngineStatus_FailsOnCorruptStorm: a malformed storm.json fails
+// the rebuild rather than silently dropping the storm state.
+func TestRebuildEngineStatus_FailsOnCorruptStorm(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, a.WriteEngineDay(completedRecord("2026-07-05", 3)))
+	require.NoError(t, os.WriteFile(a.stormPath(), []byte("{bad"), 0o600))
+	_, err := a.RebuildEngineStatus(time.UTC)
+	assert.Error(t, err)
+}
+
+// TestRebuildEngineStatus_ByteReproducibleEnriched drives the AC-5 byte-
+// reproducibility criterion across the enriched fields: a corrections-folded
+// completion, a plain miss, a storm miss, and a standing storm all fold into
+// status.json, and delete+rebuild reproduces every byte.
+func TestRebuildEngineStatus_ByteReproducibleEnriched(t *testing.T) {
+	a := newEngineAdapter(t)
+
+	// A day completed via a correction (fold is part of the criterion).
+	partial := completedRecord("2026-07-14", 2)
+	partial.Completed = false
+	require.NoError(t, a.WriteEngineDay(partial))
+	require.NoError(t, a.AppendEngineCorrection(partial.DayID, engine.Correction{
+		Fields: map[string]any{"completed": true, "capacity": 4},
+	}))
+	// A plain miss and a storm miss.
+	require.NoError(t, a.WriteEngineDay(missedRecord("2026-07-15")))
+	stormMiss := missedRecord("2026-07-20")
+	stormMiss.Storm = true
+	require.NoError(t, a.WriteEngineDay(stormMiss))
+
+	// A standing storm through a future date.
+	content, err := marshalJSON(engine.StormHistory{
+		DurationDays: 14,
+		History:      []engine.StormEvent{{Event: engine.StormConfirmed, Through: "2026-07-28"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(a.stormPath(), content, 0o600))
+
+	st, err := a.RebuildEngineStatus(time.UTC)
+	require.NoError(t, err)
+	assert.Equal(t, engine.StormStandingState, st.StormState)
+	require.NotNil(t, st.StormThrough)
+	assert.Equal(t, "2026-07-28", *st.StormThrough)
+	assert.Equal(t, 1, st.ErrorBudget.Burn, "the isolated plain miss burns 1; the storm miss burns nothing")
+
+	first, err := os.ReadFile(a.statusPath())
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(a.statusPath()))
+	_, err = a.RebuildEngineStatus(time.UTC)
+	require.NoError(t, err)
+	second, err := os.ReadFile(a.statusPath())
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(second))
+}
+
 func TestEngineDayShard(t *testing.T) {
 	y, m, err := engineDayShard("day_2026_07_05")
 	require.NoError(t, err)

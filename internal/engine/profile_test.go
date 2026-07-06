@@ -70,7 +70,7 @@ func TestWithSwitch_AppendsAndSetsActive(t *testing.T) {
 func TestBuildStatus(t *testing.T) {
 	start := "2026-07-03"
 	recs := []DayRecord{completed("2026-07-03"), completed("2026-07-04"), completed("2026-07-05")}
-	st := BuildStatus(recs, &start, "nights", time.UTC)
+	st := BuildStatus(StatusInput{Records: recs, Chain: DefaultChain(), ChainStart: &start, Profile: "nights", Loc: time.UTC})
 	assert.Equal(t, 3, st.CurrentStreak)
 	assert.Equal(t, 3, st.LongestStreak)
 	assert.Equal(t, &start, st.ChainStart)
@@ -80,5 +80,5 @@ func TestBuildStatus(t *testing.T) {
 	assert.Equal(t, "nights", st.ActiveProfile)
 
 	// Empty active profile defaults.
-	assert.Equal(t, DefaultProfile, BuildStatus(nil, nil, "", time.UTC).ActiveProfile)
+	assert.Equal(t, DefaultProfile, BuildStatus(StatusInput{Chain: DefaultChain(), Profile: ""}).ActiveProfile)
 }

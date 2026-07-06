@@ -46,15 +46,8 @@ func newStubCmd(spec stubSpec) *cobra.Command {
 // The feature spine. Behavior for each lands in its build stage; the
 // verbs exist now so the command tree matches the documented set and
 // no undocumented verb ever appears (ADR-0007 hard rule). `init` is real
-// as of Stage 1 (init.go); `log` as of Stage 1 (log.go).
-
-func newModeCmd() *cobra.Command {
-	return newStubCmd(stubSpec{name: "mode", short: "Declare today's Engine mode (green|yellow|red)", stage: "Stage 2"})
-}
-
-func newStatusCmd() *cobra.Command {
-	return newStubCmd(stubSpec{name: "status", short: "Show the derived Engine status", stage: "Stage 2", machineReadable: true})
-}
+// as of Stage 1 (init.go); `log` as of Stage 1 (log.go); `closeout`,
+// `mode`, and `status` as of Stage 2 (closeout.go, mode.go, status.go).
 
 func newDayCmd() *cobra.Command {
 	return newStubCmd(stubSpec{name: "day", short: "Show a day's joined record", stage: "Stage 4", machineReadable: true})

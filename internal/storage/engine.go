@@ -44,6 +44,7 @@ func (a *Adapter) engineDir() string { return filepath.Join(a.home, engineDirNam
 
 func (a *Adapter) chainPath() string   { return filepath.Join(a.engineDir(), chainFile) }
 func (a *Adapter) profilePath() string { return filepath.Join(a.engineDir(), profileFile) }
+func (a *Adapter) stormPath() string   { return filepath.Join(a.engineDir(), stormFile) }
 func (a *Adapter) statusPath() string  { return filepath.Join(a.engineDir(), engineStatusFile) }
 
 // ScaffoldEngine creates the engine/ tree and writes the default
@@ -240,6 +241,21 @@ func (a *Adapter) ReadProfileState() (engine.ProfileState, error) {
 	return s, nil
 }
 
+// ReadStormState reads storm.json (engine-module.md §storm.json). The
+// derived status reads it to decide whether a storm stands and through what
+// date; the tripwire phase (Phase 10) owns appending its history events.
+func (a *Adapter) ReadStormState() (engine.StormHistory, error) {
+	b, err := os.ReadFile(a.stormPath())
+	if err != nil {
+		return engine.StormHistory{}, fmt.Errorf("storage: read storm.json: %w", err)
+	}
+	var s engine.StormHistory
+	if err := json.Unmarshal(b, &s); err != nil {
+		return engine.StormHistory{}, fmt.Errorf("storage: parse storm.json: %w", err)
+	}
+	return s, nil
+}
+
 // AppendProfileEvent records a profile switch: it appends sw to the
 // history and updates the active profile (engine-module.md §profile.json,
 // append-only history).
@@ -256,7 +272,7 @@ func (a *Adapter) AppendProfileEvent(sw engine.ProfileSwitch) error {
 }
 
 // RebuildEngineStatus recomputes engine/status.json from the folded day
-// records plus chain and profile state (engine-module.md §status.json,
+// records plus chain, profile, and storm state (engine-module.md §status.json,
 // derived and rebuildable). It stamps chain_start exactly once — on the
 // first completed close-out — and never changes it thereafter. loc is the
 // location the logical dates are interpreted in (the host's own zone).
@@ -284,7 +300,19 @@ func (a *Adapter) RebuildEngineStatus(loc *time.Location) (engine.Status, error)
 		return engine.Status{}, err
 	}
 
-	status := engine.BuildStatus(records, chain.ChainStart, profile.Active, loc)
+	storm, err := a.ReadStormState()
+	if err != nil {
+		return engine.Status{}, err
+	}
+
+	status := engine.BuildStatus(engine.StatusInput{
+		Records:    records,
+		Chain:      chain,
+		Storm:      storm,
+		ChainStart: chain.ChainStart,
+		Profile:    profile.Active,
+		Loc:        loc,
+	})
 	content, err := marshalJSON(status)
 	if err != nil {
 		return engine.Status{}, err

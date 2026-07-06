@@ -5,12 +5,26 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestExecute_DispatchesOSArgs drives the real Execute entrypoint through
+// os.Args, covering the top-level dispatch + exit-code mapping.
+func TestExecute_DispatchesOSArgs(t *testing.T) {
+	prev := os.Args
+	t.Cleanup(func() { os.Args = prev })
+
+	os.Args = []string{"lucid", "version"}
+	assert.Equal(t, ExitOK, Execute(context.Background(), BuildInfo{Version: "dev"}))
+
+	os.Args = []string{"lucid", "does-not-exist"}
+	assert.Equal(t, ExitUsage, Execute(context.Background(), BuildInfo{Version: "dev"}))
+}
 
 // runRoot executes the full cobra tree with args, capturing stdout and
 // stderr. It returns the captured streams and the command error.
@@ -57,31 +71,22 @@ func TestVersion_RejectsArgs(t *testing.T) {
 }
 
 func TestStub_HumanReturnsNotImplemented(t *testing.T) {
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green")
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "day")
 	require.ErrorIs(t, err, errNotImplemented)
 	assert.Empty(t, out)
 	assert.Contains(t, errOut, "not implemented yet")
-	assert.Contains(t, errOut, "Stage 2")
+	assert.Contains(t, errOut, "Stage 4")
 }
 
 func TestStub_MachineReadableEmitsJSON(t *testing.T) {
-	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "status", "--json")
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "day", "--json")
 	require.ErrorIs(t, err, errNotImplemented)
 
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal([]byte(out), &payload))
-	assert.Equal(t, "status", payload["command"])
+	assert.Equal(t, "day", payload["command"])
 	assert.Equal(t, "not_implemented", payload["status"])
-	assert.Equal(t, "Stage 2", payload["stage"])
-}
-
-func TestStub_NonMachineReadableIgnoresJSON(t *testing.T) {
-	// `mode` is not a script-facing command; --json must not turn
-	// it into a JSON no-op that looks successful.
-	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--json")
-	require.ErrorIs(t, err, errNotImplemented)
-	assert.Empty(t, out)
-	assert.Contains(t, errOut, "not implemented yet")
+	assert.Equal(t, "Stage 4", payload["stage"])
 }
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
