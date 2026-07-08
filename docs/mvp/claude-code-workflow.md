@@ -159,7 +159,11 @@ reproducible, and usually wrong at the margins.
   never references private projects, identities, or paths outside
   `~/projects/lucid/` and `~/.lucid/`. Pattern list lives in
   [`product-principles.md`](product-principles.md) §10 and the
-  Phase 5 verification block.
+  Phase 5 verification block. The sweep scopes to authored product
+  content and skips tooling/infra trees (`.git`, `.idea`, `vendor`,
+  `node_modules`, `.github`, `.claude`, and the validate package's own
+  tree); `.github` is re-synced weekly from an upstream framework, so a
+  term that framework ships is not a Lucid leak.
 * **Phrase-blocklist grep.** The diagnostic-language list from
   [`product-principles.md`](product-principles.md) §6 is enforced by a
   grep script run against MVP docs and, once code exists, against

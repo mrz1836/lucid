@@ -349,7 +349,7 @@ Run after each phase lands.
 
 | Check | Command |
 |-------|---------|
-| Public-boundary grep | Forbidden-term sweep for private integration names and private repo paths returns nothing. Use an escaped pattern that does not match its own documentation, e.g. `grep -R "z[a]i\|Z[a]i\|~/projects/z[a]i" ~/projects/lucid`. |
+| Public-boundary grep | Forbidden-term sweep for private integration names and private repo paths returns nothing. `lucid validate` is authoritative and scopes to authored product content — it excludes tooling/infra trees (`.git`, `.idea`, `vendor`, `node_modules`, `.github`, `.claude`, and the validate package's own tree); `.github` is re-synced weekly from an upstream framework, so a term shipped by that framework is not a Lucid leak. A raw `grep -R "z[a]i\|Z[a]i\|~/projects/z[a]i" ~/projects/lucid` is illustrative but unscoped, so add `--exclude-dir={.git,.github,.claude,vendor,node_modules}` to match the tool. |
 | Diagnostic-language grep | `grep -niE -f scripts/phrase_blocklist.regex ~/projects/lucid/docs ~/projects/lucid/README.md` — every hit is inside a "phrase to avoid" or "non-goal" block. |
 | Link integrity | `python scripts/check_links.py docs/**/*.md README.md` — every relative link resolves. |
 | Synthetic-only fixtures | Manual review of any new transcript / fixture; no real names, dates, or identifiers. |
