@@ -8,15 +8,27 @@ import (
 	"strings"
 )
 
-// skipDirs are tree names never walked by a repo sweep: version control, the
-// build cache, vendored modules, and the validate package's own directory
-// (which necessarily holds the forbidden-pattern definitions and detection
-// fixtures — a linter does not lint itself).
+// skipDirs are tree names never walked by a repo sweep — the "ignore folders"
+// list for every walker-based check (public-boundary, links). Add a base name
+// (matches that directory anywhere) or a repo-relative path (matches one exact
+// tree) to exclude more. It covers four categories:
+//
+//   - version control and editor state (.git, .idea);
+//   - vendored/generated dependencies (vendor, node_modules);
+//   - tooling and infra that Lucid does not author as product content —
+//     .github (the CI framework, re-synced weekly from an upstream source, so
+//     an identity it ships is not a Lucid leak and any in-repo edit is
+//     transient) and .claude (local agent configuration);
+//   - the validate package's own directory, which necessarily holds the
+//     forbidden-pattern definitions and detection fixtures (a linter does not
+//     lint itself).
 //
 //nolint:gochecknoglobals // fixed, read-only skip set for the repo walker
 var skipDirs = map[string]bool{
 	".git":              true,
 	".idea":             true,
+	".github":           true,
+	".claude":           true,
 	"vendor":            true,
 	"node_modules":      true,
 	"internal/validate": true,

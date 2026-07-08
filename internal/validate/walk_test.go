@@ -16,6 +16,8 @@ func TestWalkTextFiles_VisitsAndSkips(t *testing.T) {
 	writeFile(t, root, "sub/b.md", "world\n")
 	writeFile(t, root, "bin.dat", "x\x00y\n")
 	writeFile(t, root, ".git/config", "should be skipped\n")
+	writeFile(t, root, ".github/env/load-env.sh", "should be skipped\n")
+	writeFile(t, root, ".claude/settings.json", "should be skipped\n")
 	writeFile(t, root, "internal/validate/self.txt", "should be skipped\n")
 
 	seen := map[string]bool{}
@@ -28,6 +30,8 @@ func TestWalkTextFiles_VisitsAndSkips(t *testing.T) {
 	assert.True(t, seen["sub/b.md"])
 	assert.False(t, seen["bin.dat"], "binary files are skipped")
 	assert.False(t, seen[".git/config"], ".git is skipped")
+	assert.False(t, seen[".github/env/load-env.sh"], ".github (upstream CI, re-synced) is skipped")
+	assert.False(t, seen[".claude/settings.json"], ".claude (local agent config) is skipped")
 	assert.False(t, seen["internal/validate/self.txt"], "the validate tree is skipped")
 }
 
@@ -63,6 +67,8 @@ func TestLooksBinary(t *testing.T) {
 // TestIsSkippedDir covers both the base-name and repo-relative skip rules.
 func TestIsSkippedDir(t *testing.T) {
 	assert.True(t, isSkippedDir(".git", ".git"))
+	assert.True(t, isSkippedDir(".github", ".github"))
+	assert.True(t, isSkippedDir(".claude", ".claude"))
 	assert.True(t, isSkippedDir("internal/validate", "validate"))
 	assert.False(t, isSkippedDir("internal/agents", "agents"))
 }

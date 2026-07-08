@@ -275,7 +275,7 @@ code, not just in prose.
 | **Approval-before-action gate** | No agent-initiated external send, schedule, or post is permitted. Any draft surfaces in-thread for explicit user approval; the only autonomous *messages* are the Engine's pre-committed templates, and the only autonomous *fetches* are consented enricher queries through `fetch_enrichment` — both module-owned, neither reachable by an agent. | At the router boundary. |
 | **Context-slice gate** | Agents may receive only the data the router authorized for that step (e.g. one raw entry, last N processed artifacts). The full history is never passed. | Around every LLM call. See "Mechanism" below. |
 | **Synthetic-only fixtures gate** | Tests, examples, and docs reference only synthetic content. | In `scripts/` and CI checks; see [`claude-code-workflow.md`](claude-code-workflow.md). |
-| **Public-boundary gate** | The Lucid repo never references private personal projects, identities, or operational paths beyond `~/projects/lucid/` and `~/.lucid/`. | A `grep` check in the verification phase. |
+| **Public-boundary gate** | The authored Lucid content never references private personal projects, identities, or operational paths beyond `~/projects/lucid/` and `~/.lucid/`. Tooling/infra trees (`.git`, `.idea`, `vendor`, `node_modules`, `.github`, `.claude`, and the validate package's own tree) are out of scope — `.github` is re-synced weekly from an upstream framework and is not authored here. | A `grep` check in the verification phase, scoped to authored content. |
 
 These gates are not optional polish. They are how the architecture
 keeps the loop honest under change.
