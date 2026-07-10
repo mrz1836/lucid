@@ -9,6 +9,10 @@ than this MVP. These docs narrow the surface area to one end-to-end loop a
 future implementer can build and run locally without making the harder
 long-term product decisions first.
 
+> **Just want to run it?** End-user usage docs — install, getting started, and
+> the full command reference — live in [`../usage/`](../usage/README.md); this
+> set is for *building* Lucid.
+
 > **Integration note (the unified nightly loop).** Since this set was written, the
 > system-level architecture in [`../architecture.md`](../architecture.md)
 > merged a behavioral **Engine** into Lucid as a first-class subsystem.
