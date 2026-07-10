@@ -17,8 +17,10 @@
 #   Nothing secret is ever committed to the lucid repo (ADR-0005, S-7).
 #
 # This file is a Go text/template. Render it with the deploy package
-# (deploy.RenderSupervise) or substitute the fields by hand, then place the
-# result at ~/.hush/supervisors/<name>.toml before `hush supervise --config`.
+# (deploy.RenderSupervise) or substitute the fields by hand, place the result at
+# ~/.hush/supervisors/<name>.toml, then run:
+#   hush supervise ~/.hush/supervisors/<name>.toml
+# The config path is a positional argument (there is no --config flag).
 
 name                      = "{{ .Name }}"
 reason                    = "{{ .Reason }}"
