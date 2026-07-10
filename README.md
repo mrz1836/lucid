@@ -71,6 +71,25 @@ The first entry is one line. The bell rings at 9:30.
 
 <br>
 
+### Use it
+
+<table>
+  <tr>
+    <td width="180" valign="top"><a href="docs/usage/install.md"><b>Install</b></a></td>
+    <td>Get the <code>lucid</code> binary (from source, <code>go install</code>, or a release), verify it, and scaffold the <code>~/.lucid/</code> Ledger.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/usage/getting-started.md"><b>Getting started</b></a></td>
+    <td>The mental model, the morning/evening daily rhythm, a first-week walkthrough, configuration, and data &amp; privacy.</td>
+  </tr>
+  <tr>
+    <td width="180" valign="top"><a href="docs/usage/commands.md"><b>Command reference</b></a></td>
+    <td>Every <code>lucid</code> CLI command and sub-form, plus the chat/harness slash commands — synopsis, flags, and examples.</td>
+  </tr>
+</table>
+
+<br>
+
 ### Build it
 
 <table>
