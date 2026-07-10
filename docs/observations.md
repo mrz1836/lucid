@@ -232,8 +232,15 @@ Reference set:
 | Enricher | Sends outbound | Writes |
 |----------|----------------|--------|
 | `weather` (e.g., Open-Meteo) | quantized lat/lon + date, nothing else | temp, precipitation, pressure, humidity for the as-of location |
-| `daylight` | quantized lat/lon + date | sunrise/sunset, day length |
+| `daylight` *(planned — post-MVP)* | quantized lat/lon + date | sunrise/sunset, day length |
 | `calendar-frame` | nothing (local computation) | weekday, ISO week, holiday flag |
+
+**MVP status.** The current build ships two enrichers: `weather` — the one
+networked source, **off by default** — and `calendar-frame`, pure-local compute
+that opens no socket. `daylight` is specified here but **planned**: it is not
+yet implemented, and lands post-MVP through the same audited adapter op. The
+reference set in code today is `weather` + `calendar-frame` (scope §9 keeps the
+MVP to "one enricher (weather)").
 
 Consent and mechanics, binding (extends architecture §5):
 

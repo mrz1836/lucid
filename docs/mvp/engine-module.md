@@ -129,7 +129,7 @@ superseded *only* for these three sends.
 |---------|------|--------|
 | `/closeout` | Deterministic guided close-out (see sequence below). No agents. | `engine/days/<day-id>.json`; one raw entry via `storage.write_raw` (`command: /closeout`); `sessions/<sid>.json`; rebuilt `engine/status.json` |
 | `/mode <green\|yellow\|red>` | Declare today's mode. Rejected after today's bell time (engine §2: fixed at the Bell; no retroactive amendment). | `engine/days/<day-id>.json` (mode field, append-style: first declaration wins after bell) |
-| `/status` | Read-only: current streak, rolling adherence vs declared mode — always co-presented with the floor-day ratio and raw days-accounted (the **honest-number pairing**, engine §3) — error-budget burn, days to next gate; plus `stake_owed` when a breach has outlived the stake execution window (engine §4), and "witness lapsed — L2 disarmed" while the witness contract is lapsed (see §`witness.json`). This is the MVP's **L0 ambient surface**. | None |
+| `/status` | Read-only: current streak, rolling adherence vs declared mode — always co-presented with the floor-day ratio and raw days-accounted (the **honest-number pairing**, engine §3) — error-budget burn, days to next gate; plus `stake_owed` when a breach has outlived the stake execution window (engine §4; **plumbed but reserved in the MVP** — see the tripwire's L3 note in step 5), and "witness lapsed — L2 disarmed" while the witness contract is lapsed (see §`witness.json`). This is the MVP's **L0 ambient surface**. | None |
 | `/closeout skip` | Records an explicit miss for the logical day (honest zero, distinct from silence — silence is what the dead-man tripwire detects). | `engine/days/<day-id>.json` with `missed: true` |
 | `/closeout backfill [yesterday\|<YYYY-MM-DD>] [<compact form>]` | Creates or corrects a record for a recent past day — the chain **ran** but went unrecorded (P10's text-to-self path, now with a command). Deterministic; accepts the same compact form as `/closeout`. See sequence below. | `engine/days/<day-id>.json` (created with `"backfilled": true`, or a `corrections[]` append); one raw entry via `storage.write_raw` (`command: /closeout backfill`); rebuilt `engine/status.json` |
 | `/storm <clause-label\|unwritten>` | Declare a storm citing a Charter clause label (registered in `storm.json`) or `unwritten` (engine §4). Stands only on witness confirmation within the confirmation window (72 hours); ambush windows enter automatically from their `storm.json` dates, no per-event confirmation. Ack while pending: `storm declared (<label>) — pending witness confirmation (72h).` Ack once standing: `storm standing through <date> (<label>) — undeclared days default to red; the stake is stayed; contact continues.` Renewal is the same command re-issued before expiry, once. | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
@@ -502,7 +502,12 @@ posts at the active profile's `bell_time`:
    execution window (default 72 hours) and confirms to the witness
    (engine §4); past the window, `/status` surfaces `stake_owed`, and
    gates cannot ratchet (simplify/hold only) while a stake is owed.
-   No new sends exist for any of this.
+   No new sends exist for any of this. **Because the MVP automates no
+   breach/L3 event, nothing sets `stake_owed` true in the MVP:** the
+   field and its `/status` line are plumbed but reserved, surfacing only
+   once L3 lands — the code passes it `false` on every tripwire run, and
+   the storm rule below already asserts a storm miss can never produce
+   it.
 
 **Storm behavior.** While a storm stands (`storm.json`, engine §4)
 the tripwire's *contact* is unchanged and its *consequences* pause:
