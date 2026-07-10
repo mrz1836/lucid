@@ -129,9 +129,10 @@ func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 		rep.Sends = append(rep.Sends, msg)
 	}
 
-	// stake_owed is not accrued in the MVP tripwire (a breach's stake-window
-	// bookkeeping is a /status surface); under a storm it is never owed. Pass
-	// false so a storm L2 never produces stake_owed.
+	// stake_owed is reserved for post-MVP L3: the MVP automates no breach/stake
+	// event, so no tripwire run ever sets it true (engine-module.md §tripwire
+	// step 5) — and under a storm it is never owed regardless. Pass false so the
+	// derived status carries the documented reserved-and-inert value.
 	if _, err := sc.store.SetEngineEscalation(tc.loc, dec.EscalationState, false); err != nil {
 		return rep, err
 	}
