@@ -121,6 +121,7 @@ The first entry is one line. The bell rings at 9:30.
 </table>
 
 <br/>
+<br/>
 
 **Lucid is a single Go binary with two cooperating subsystems over one shared,
 user-owned record. The Mirror captures the life stream and reflects it back —
@@ -136,6 +137,7 @@ Reflection tools fail without a behavior layer, and behavior tools fail without
 a reflection layer — Lucid is deliberately both, with a hard boundary between
 what each is allowed to do.
 
+<br/>
 <br/>
 
 ```
@@ -161,6 +163,7 @@ what each is allowed to do.
 ```
 
 <br/>
+<br/>
 
 ## 🚀 Installation
 
@@ -176,6 +179,8 @@ everything under a user-owned Ledger at `~/.lucid/`.
 > out. Commands and the `~/.lucid/` layout may change before 1.0. PRs are
 > welcome.
 
+<br/>
+
 ### Build from source (recommended while iterating)
 
 ```bash
@@ -187,11 +192,15 @@ go build -o lucid ./cmd/lucid
 
 Put the resulting binary on your `PATH`, e.g. `install -m 0755 lucid /usr/local/bin/lucid`.
 
+<br/>
+
 ### `go install`
 
 ```bash
 go install github.com/mrz1836/lucid/cmd/lucid@latest
 ```
+
+<br/>
 
 ### Scaffold the Ledger
 
@@ -202,6 +211,8 @@ lucid init           # creates ~/.lucid/ (dirs 0700, files 0600); idempotent
 You often don't even need it — most stateful commands self-scaffold on first
 use, so capture never blocks on setup. Override the location with
 `LUCID_HOME=/some/path`.
+
+<br/>
 
 ### Upgrade
 
