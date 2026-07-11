@@ -1,6 +1,7 @@
 package router
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -179,4 +180,87 @@ func TestLog_LatencyUnderOneSecond(t *testing.T) {
 func TestLog_AckStringsAreClean(t *testing.T) {
 	assert.Equal(t, "Saved as `raw_x`.", logAck("raw_x", false))
 	assert.Contains(t, logAck("raw_x", true), "empty")
+}
+
+// readSessionMap reads and decodes a session record file into a map so the
+// provenance assertions can read individual fields.
+func readSessionMap(t *testing.T, home, id string) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(home, "sessions", id+".json"))
+	require.NoError(t, err)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(b, &m))
+	return m
+}
+
+// TestLog_RecordsSourceAndNormalizesHarness covers the provenance accept
+// surface: a supplied Source lands verbatim-but-normalized on the raw entry,
+// and a supplied Harness is normalized (trimmed + lowercased) onto the
+// session record — proving the /log path no longer hardcodes cli.
+func TestLog_RecordsSourceAndNormalizesHarness(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+
+	res, err := r.Log(LogRequest{
+		Text:    "relayed capture",
+		Now:     fixedNow(),
+		Source:  "discord",
+		Harness: " Discord ",
+	})
+	require.NoError(t, err)
+
+	doc, err := a.ReadRaw(res.RawID)
+	require.NoError(t, err)
+	assert.Equal(t, "discord", doc.Fields["source"], "raw source records the supplied harness token")
+
+	sess := readSessionMap(t, home, res.SessionID)
+	assert.Equal(t, "discord", sess["harness"], "harness is normalized to a clean token")
+}
+
+// TestLog_RecordsAgentModelAndChannel covers the structured provenance cluster
+// (agent/model/channel_id/thread_id) landing on the session record from the
+// LogRequest context rather than always cli.
+func TestLog_RecordsAgentModelAndChannel(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+
+	res, err := r.Log(LogRequest{
+		Text:      "relayed by an assistant",
+		Now:       fixedNow(),
+		Agent:     "agent-x",
+		Model:     "model-y",
+		ChannelID: "channel-z",
+		ThreadID:  "thread-1",
+	})
+	require.NoError(t, err)
+
+	sess := readSessionMap(t, home, res.SessionID)
+	assert.Equal(t, "agent-x", sess["agent"])
+	assert.Equal(t, "model-y", sess["model"])
+	assert.Equal(t, "channel-z", sess["channel_id"])
+	assert.Equal(t, "thread-1", sess["thread_id"])
+}
+
+// TestLog_MalformedSourceWritesNothing proves an invalid source token is
+// rejected honestly (never coerced to cli) and leaves raw/ and sessions/
+// empty — the write is refused before anything lands (error-states.md §St-1).
+func TestLog_MalformedSourceWritesNothing(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+
+	_, err := r.Log(LogRequest{Text: "should not land", Now: fixedNow(), Source: "bad token!"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Equal(t, 0, countFiles(t, home, "raw"), "nothing written under raw/")
+	assert.Equal(t, 0, countFiles(t, home, "sessions"), "no dangling session")
+}
+
+// TestLog_MalformedHarnessWritesNothing proves a malformed harness token is
+// rejected before the raw entry is written, so no partial state remains even
+// though the harness only reaches the session record.
+func TestLog_MalformedHarnessWritesNothing(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+
+	_, err := r.Log(LogRequest{Text: "should not land", Now: fixedNow(), Harness: "bad harness!"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Equal(t, 0, countFiles(t, home, "raw"), "nothing written under raw/")
+	assert.Equal(t, 0, countFiles(t, home, "sessions"), "no dangling session")
 }
