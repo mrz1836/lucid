@@ -2,7 +2,7 @@
 
 # 🔮&nbsp;&nbsp;Lucid
 
-> **A local-first personal operating system — the Mirror that understands you and the Engine that keeps you moving, over one Ledger you own.**
+> **A local-first personal operating system <br> with the Mirror that understands you and the Engine that keeps you moving, over one Ledger you own.**
 
 <br/>
 
