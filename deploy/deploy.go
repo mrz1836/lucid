@@ -47,6 +47,11 @@ type LaunchdParams struct {
 	// a dead-man backstop, so a supervised install keeps it alive.
 	RunAtLoad bool
 	KeepAlive bool
+	// EnvironmentVariables are non-secret process env values launchd provides to
+	// `hush supervise`, which then passes selected names to the child via the
+	// supervise config's env_passthrough. Do not put tokens here; hush owns
+	// secret injection.
+	EnvironmentVariables map[string]string
 }
 
 // SuperviseParams fills hush/supervise.tmpl. Scope names the secret(s) hush
@@ -80,6 +85,12 @@ func DefaultLaunchdParams() LaunchdParams {
 		StderrPath:      "/usr/local/var/log/lucid.scheduler.err.log",
 		RunAtLoad:       true,
 		KeepAlive:       true,
+		EnvironmentVariables: map[string]string{
+			"LUCID_HOME":               "/usr/local/var/lucid",
+			"LUCID_SCHEDULER_DB":       "/usr/local/var/lucid/flywheel.db",
+			"LUCID_USER_CHANNEL_ID":    "replace-with-primary-channel-id",
+			"LUCID_WITNESS_CHANNEL_ID": "replace-with-witness-channel-id",
+		},
 	}
 }
 
@@ -185,6 +196,14 @@ func LintLaunchd(rendered string) error {
 	// A supervised scheduler runs hush, not lucid, directly (ADR-0005).
 	if !strings.Contains(rendered, "<string>supervise</string>") {
 		return fmt.Errorf("%w: launchd plist does not invoke `hush supervise`", ErrLint)
+	}
+	if strings.Contains(rendered, "<string>--config</string>") {
+		return fmt.Errorf("%w: launchd plist passes supervise config with --config; `hush supervise` expects it positionally", ErrLint)
+	}
+	for _, k := range []string{"LUCID_HOME", "LUCID_USER_CHANNEL_ID", "LUCID_WITNESS_CHANNEL_ID", "LUCID_SCHEDULER_DB"} {
+		if !strings.Contains(rendered, "<key>"+k+"</key>") {
+			return fmt.Errorf("%w: launchd plist missing environment variable %q", ErrLint, k)
+		}
 	}
 	return nil
 }

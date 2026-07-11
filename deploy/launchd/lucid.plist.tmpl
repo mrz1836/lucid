@@ -25,9 +25,13 @@
   <array>
     <string>{{ .HushProgram }}</string>
     <string>supervise</string>
-    <string>--config</string>
     <string>{{ .SuperviseConfig }}</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>{{ range $key, $value := .EnvironmentVariables }}
+    <key>{{ $key }}</key>
+    <string>{{ $value }}</string>{{ end }}
+  </dict>
   <key>RunAtLoad</key>
   <{{ if .RunAtLoad }}true{{ else }}false{{ end }}/>
   <key>KeepAlive</key>

@@ -26,6 +26,12 @@ func TestRenderLaunchd_Defaults(t *testing.T) {
 	assert.Contains(t, out, "<string>/usr/local/bin/hush</string>")
 	assert.Contains(t, out, "<string>supervise</string>")
 	assert.Contains(t, out, "<string>/usr/local/etc/lucid/supervise.toml</string>")
+	assert.NotContains(t, out, "<string>--config</string>", "hush supervise takes the config path positionally")
+	assert.Contains(t, out, "<key>EnvironmentVariables</key>")
+	assert.Contains(t, out, "<key>LUCID_HOME</key>")
+	assert.Contains(t, out, "<key>LUCID_USER_CHANNEL_ID</key>")
+	assert.Contains(t, out, "<key>LUCID_WITNESS_CHANNEL_ID</key>")
+	assert.Contains(t, out, "<key>LUCID_SCHEDULER_DB</key>")
 	assert.Contains(t, out, "<true/>", "RunAtLoad/KeepAlive true render as <true/>")
 	// A supervised install never names lucid in the launchd job — hush does.
 	assert.NotContains(t, out, "<string>lucid</string>")
