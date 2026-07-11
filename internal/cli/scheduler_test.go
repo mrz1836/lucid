@@ -7,13 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	flywheel "github.com/mrz1836/go-flywheel"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
-
-	"github.com/glebarez/sqlite"
 )
 
 // setSchedulerEnv injects the environment the daemon reads at startup so the
@@ -70,7 +69,7 @@ func TestSchedulerRun_MissingTokenErrors(t *testing.T) {
 }
 
 // TestSchedulerRun_CancelledContextReturnsPromptly is the graceful start/stop
-// smoke: an already-cancelled context must not hang the daemon loop — the whole
+// smoke: an already-canceled context must not hang the daemon loop — the whole
 // wiring (storage → notifier → schedrun) runs and returns quickly rather than
 // blocking on the node.
 func TestSchedulerRun_CancelledContextReturnsPromptly(t *testing.T) {
@@ -78,7 +77,7 @@ func TestSchedulerRun_CancelledContextReturnsPromptly(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "flywheel.db")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled before the run begins
+	cancel() // already canceled before the run begins
 
 	var stderr bytes.Buffer
 	done := make(chan error, 1)
@@ -89,12 +88,12 @@ func TestSchedulerRun_CancelledContextReturnsPromptly(t *testing.T) {
 		// Returned promptly — either a clean drain or a fast startup abort on
 		// the dead context; the assertion is only that it did not block.
 	case <-time.After(10 * time.Second):
-		t.Fatal("scheduler run did not return on an already-cancelled context")
+		t.Fatal("scheduler run did not return on an already-canceled context")
 	}
 }
 
 // TestSchedulerRun_ThroughTreeParsesDBFlag executes `scheduler run --db <path>`
-// through the real cobra tree with an already-cancelled context: it covers the
+// through the real cobra tree with an already-canceled context: it covers the
 // RunE closure (flag read + dispatch) and confirms the command returns promptly
 // rather than blocking on the daemon loop.
 func TestSchedulerRun_ThroughTreeParsesDBFlag(t *testing.T) {

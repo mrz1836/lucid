@@ -79,7 +79,7 @@ binary. The job store is disposable machinery kept outside the ~/.lucid Ledger
 }
 
 // runScheduler is the pure wiring the cobra layer delegates to: open storage,
-// build the env-injected notifier, install the signal-cancelled context, and
+// build the env-injected notifier, install the signal-canceled context, and
 // hand off to the flywheel driver. Every startup error is funneled through a
 // single "lucid: scheduler: <message>" stderr line (mirroring `upgrade`) before
 // being returned, so exitCodeForError still classifies it.
