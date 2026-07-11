@@ -131,6 +131,74 @@ lucid status
 lucid status --json
 ```
 
+### metrics
+
+```
+lucid metrics [--json]
+```
+
+Read-only **practice-quality** rollup — the honest numbers of the committed
+chain, computed by the Engine and never recomputed downstream: current and
+longest **streak**, **adherence** over a trailing 30-day window (co-presented
+with its honest co-numbers, never a bare percent), **misses** in that window
+against the isolated-miss budget, **error-budget** burn, and a **days-since**
+count for each recorded anchor (see [`anchor`](#anchor)). It writes nothing
+beyond the silent engine scaffold. `--json` emits the metrics projection:
+
+| Field | Meaning |
+|-------|---------|
+| `current_streak` / `longest_streak` | Chain streak, from the same fold `status` reports. |
+| `adherence` | The default 30-day window — `{length, adherence, completed, decided, floor_days, floor_day_ratio, days_accounted}`, the honest-number pairing, never a lone score. |
+| `misses_in_window` | Decided-but-not-completed days in the 30-day window. |
+| `error_budget` | `{budget, burn, remaining, exceeded}` against the isolated-miss budget. |
+| `gates[]` | One `{length, adherence}` per gate window (30, 60, 90) — every gate number, so the harness recomputes nothing. |
+| `anchors[]` | One `{label, date, days_since, note}` per recorded anchor, sorted by label. |
+| `ref` | The latest recorded logical day the windows anchor to, or `null` when no day is decided yet. |
+
+Days-since counts whole logical days from the anchor date, **anchor day = 0**
+(recorded today reads `0`, tomorrow `1`), incrementing at the chain's rollover
+boundary — not naive midnight. A read never breaches a gate, so `metrics` exits
+`0` on success.
+
+```sh
+lucid metrics
+lucid metrics --json
+```
+
+**`metrics` vs `stats`.** `metrics` reports **practice quality** — how the
+committed chain is going (streak, adherence, misses, days-since). Its sibling
+read-only `stats` command reports **Ledger volume** — how much has been recorded
+(raw-entry and observation counts per logical day). The two share **no** output
+field; both read the same rollover / logical-day basis, so their day boundaries
+can never disagree.
+
+### anchor
+
+```
+lucid anchor add <label> <date> [note...]
+```
+
+Record a dated **milestone anchor** — a "days since X" marker (a cessation, a
+gate cleared, any date you want a running day count from). The record is appended
+to a dedicated, append-only anchors store in the engine tree
+(`engine/anchors.json`); it is never hand-edited, deterministic, no model in the
+path. `<date>` is a civil `YYYY-MM-DD` and is freely **backdatable** — any past or
+future date is accepted. Re-recording the same `<label>` appends again and **the
+latest record wins**: a typo fix and a genuine reset are the same append-only
+operation, and days-since then counts from the newest. `[note...]` is optional
+trailing free text, joined with spaces. Human-first prose ack by default; `--json`
+emits the recorded anchor `{label, date, note, recorded_at}` (`recorded_at` is the
+append timestamp, local TZ). An empty label or an unparseable date is rejected
+(prints the fixed copy, exits `1`); missing arguments are a usage error (exit `2`).
+
+```sh
+lucid anchor add sobriety 2026-01-15
+lucid anchor add gate-30 2026-02-01 cleared the first gate
+lucid anchor add sobriety 2026-01-16    # correction — latest record wins
+```
+
+Read the running counts with [`metrics`](#metrics) (`anchors[]` → `days_since`).
+
 ### obs
 
 ```

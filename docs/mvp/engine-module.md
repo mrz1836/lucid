@@ -135,6 +135,8 @@ superseded *only* for these three sends.
 | `/storm <clause-label\|unwritten>` | Declare a storm citing a Charter clause label (registered in `storm.json`) or `unwritten` (engine §4). Stands only on witness confirmation within the confirmation window (72 hours); ambush windows enter automatically from their `storm.json` dates, no per-event confirmation. Ack while pending: `storm declared (<label>) — pending witness confirmation (72h).` Ack once standing: `storm standing through <date> (<label>) — undeclared days default to red; the stake is stayed; contact continues.` Renewal is the same command re-issued before expiry, once. | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
 | `/storm end` | End a standing storm early; expiry at the duration bound is otherwise automatic. Breach math resets at exit (engine §4). | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
 | `/profile <name>` | Switch to a named clock profile defined in `chain.json` (definitions change only at a Retro — engine §2). Sticky, recorded, **effective from the next logical day, never the current one**; the outgoing day completes under the clocks that started it. | `engine/profile.json` (append-only `history[]`) |
+| `metrics` (read; CLI `lucid metrics [--json]`) | Read-only **practice-quality** rollup: current/longest streak, 30-day adherence (co-presented with its honest co-numbers) **plus the 30/60/90 gate rollups in `--json`**, misses in window, error-budget burn, and a days-since count for each recorded anchor. Assembled from existing Engine folds (`ComputeStreaks`, the adherence/error-budget windows) — no new chain math; the only new arithmetic is the days-since day count. | None (silent scaffold only) |
+| `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` is a backdatable civil `YYYY-MM-DD`; **latest record per label wins**. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
 
 `/chain` (editing chain config in-channel) is deliberately **not** a
 command: parameters change at most once per weekly Retro (engine §5),
@@ -234,6 +236,7 @@ the window; the correction trail stays visible, and that transparency
 ├── witness.json             # witness contract + consent record
 ├── storm.json               # storm clauses, ambush windows, append-only history
 ├── profile.json             # active clock profile + append-only switch history
+├── anchors.json             # milestone anchors ("days since X") — append-only history
 ├── days/                    # one record per logical day (append-only per day)
 │   └── 2026/07/day_2026_07_02.json
 └── status.json              # derived projection — rebuildable, never hand-edited
@@ -243,7 +246,7 @@ New storage-adapter named ops: `write_engine_day`, `read_engine_day`,
 `read_engine_days(window)`, `rebuild_engine_status`,
 `read_engine_status`, `read_chain_config`, `read_witness_contract`,
 `read_storm_state`, `append_storm_event`, `read_profile_state`,
-`append_profile_event`.
+`append_profile_event`, `read_anchors`, `append_anchor`.
 Same discipline as [`architecture.md`](architecture.md) §4: only the
 adapter touches disk; `days/` is append-only per day-id (corrections
 append a `corrections[]` entry, never rewrite — the mode ledger is
@@ -388,6 +391,36 @@ tonight's bell cannot move tonight's clocks. Each day record stamps
 the profile that governed it; logical-day math for a given day uses
 that profile's rollover. Switch frequency is Tier-3 telemetry at the
 Retro.
+
+### `anchors.json`
+
+```json
+{
+  "version": 1,
+  "history": [
+    {"label": "sobriety", "date": "2026-01-15", "note": "",
+     "recorded_at": "2026-01-15T08:04:00-05:00"},
+    {"label": "gate-30", "date": "2026-02-01", "note": "cleared the first gate",
+     "recorded_at": "2026-02-01T21:12:00-05:00"}
+  ]
+}
+```
+
+A **milestone anchor** is a recorded date the Engine counts a running "days
+since" from — a cessation, a gate cleared, any date worth a running day count.
+The store is **append-only** and never hand-edited, the same discipline as
+`storm.json` and `profile.json`: `anchor add <label> <date> [note]` appends one
+`{label, date, note, recorded_at}` record to `history[]`. `date` is a civil
+`YYYY-MM-DD` and is backdatable (any past or future date). **Latest record per
+label wins**, folded at read time by append order (`recorded_at`), so a
+correction whose date is *earlier* than the original still supersedes it — a typo
+fix and a genuine reset are the same append-only operation. Days-since counts
+whole logical days from the folded anchor date, **anchor day = 0**, at the
+chain's rollover boundary; it is **surfaced by `metrics`, never stored** here. No
+capacity, journal, or Mirror data ever rides this file — it holds labels and
+dates only, the same discipline as the storm clause labels. Because the store
+lives in the engine tree (not a Mirror tree), it carries no schema-kind entry in
+the `validate` schema sweep.
 
 ### Day record — `engine/days/YYYY/MM/day_YYYY_MM_DD.json`
 

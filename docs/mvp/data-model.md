@@ -48,6 +48,7 @@ These rules trace directly to
 │   ├── witness.json
 │   ├── storm.json
 │   ├── profile.json
+│   ├── anchors.json
 │   ├── days/2026/07/day_2026_07_02.json
 │   └── status.json
 ├── observations/           # frozen-envelope events — owned by observations-module.md
