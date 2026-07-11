@@ -19,8 +19,8 @@ var ErrAnchorRejected = errors.New("anchor rejected")
 
 // AnchorAddRequest is one `lucid anchor add` intent: record a labeled civil-date
 // milestone the days-since metric counts from (engine-module.md §anchors.json).
-// Note is optional. Now is the record time — the wall clock when zero — and
-// stamps RecordedAt, which resolves latest-wins per label at read.
+// The free-text annotation is optional. Now is the record time — the wall clock
+// when zero — and stamps RecordedAt, which resolves latest-wins per label at read.
 type AnchorAddRequest struct {
 	Label string
 	Date  string

@@ -63,7 +63,7 @@ func TestBuildMetrics_DaysSinceAtRollover(t *testing.T) {
 // misses burn past the per-30d budget (default 4).
 func TestBuildMetrics_AdherenceAndBudgetOver(t *testing.T) {
 	loc := time.UTC
-	var recs []DayRecord
+	recs := make([]DayRecord, 0, 14)
 	// Five isolated (2-apart) misses inside the 30-day window ⇒ burn 5 > budget 4.
 	for _, d := range []string{"2026-04-01", "2026-04-03", "2026-04-05", "2026-04-07", "2026-04-09"} {
 		recs = append(recs, missedDay(d))
@@ -112,7 +112,7 @@ func TestBuildMetrics_AdherenceAndBudgetOver(t *testing.T) {
 // budget-many isolated misses spends the budget to zero but does not exceed it.
 func TestBuildMetrics_ErrorBudgetAtBudget(t *testing.T) {
 	loc := time.UTC
-	var recs []DayRecord
+	recs := make([]DayRecord, 0, 5)
 	for _, d := range []string{"2026-04-01", "2026-04-03", "2026-04-05", "2026-04-07"} {
 		recs = append(recs, missedDay(d)) // 4 isolated misses == budget
 	}
