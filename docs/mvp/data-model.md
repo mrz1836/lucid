@@ -238,7 +238,7 @@ folding.
 | `occurred_at` | yes | When it happened. Equal to `recorded_at` for "now" entries. |
 | `occurred_at_precision` | yes | `exact`, `approximate`, or `range`. Mirrors `technical-spec.md`. |
 | `occurred_at_end` | no | Only set when `precision: range`. |
-| `source` | yes | Harness identifier (`discord`, `cli`, future surfaces). |
+| `source` | yes | Harness identifier — a non-empty well-formed token, **normalized** on write (trimmed, lowercased, charset-restricted to `[a-z0-9._:-]`). Empty or malformed input is rejected with a clear error, never silently coerced or dropped. **No allowlist**: a recommended vocab (`cli`, `discord`, future surfaces) is documented but not enforced, so a new harness needs a passed token, not a code change. The relaying `agent`/`model` are **not** duplicated onto the (immutable) raw entry — a reader follows `session_id` to the session record's provenance cluster (`harness`/`channel_id`/`thread_id`/`agent`/`model`). |
 | `session_id` | yes | The session/thread this entry belongs to. |
 | `command` | yes | Which command produced it: `/log`, `/checkin`, `/bootstrap`, or `/closeout` (the nightly journal line — see [`engine-module.md`](engine-module.md)). |
 | `intake_questions` | no | Present for `/checkin`; the questions Intake actually asked. |
@@ -506,6 +506,8 @@ relational features have somewhere to grow into.
   "harness": "openclaw",
   "channel_id": "channel_lucid",
   "thread_id": "thread_2026_05_05_19_42",
+  "agent": "agent-x",
+  "model": "model-y",
   "command": "/checkin",
   "raw_entry_ids": ["raw_2026_05_05_19_42"],
   "processed_artifact_ids": ["raw_2026_05_05_19_42"],
@@ -519,6 +521,17 @@ relational features have somewhere to grow into.
   }
 }
 ```
+
+The `agent` and `model` fields are **optional** and additive: they name
+the assistant/agent and model that relayed the capture, when a harness
+supplies them, and are **absent for a plain terminal capture** (omitted
+entirely, not written empty). Together with `harness`, `channel_id`, and
+`thread_id` they form the record's provenance cluster — the queryable
+answer to "this capture came in through `<agent>` on `<model>` in
+`<channel_id>`", populated from real context where a harness supplies it
+rather than always `cli`. No bare `schema_version` is added to the record;
+readers tolerate missing fields, so a session written before these fields
+existed parses unchanged.
 
 Session records are the audit trail. Reading the most recent N
 sessions gives Reflection its `recent_window` slice without having to
