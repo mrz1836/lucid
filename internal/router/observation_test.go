@@ -38,7 +38,7 @@ func bootedObs(t *testing.T) *Router {
 
 func capture(t *testing.T, r *Router, tokens ...string) CaptureResult {
 	t.Helper()
-	res, err := r.Capture(CaptureRequest{Tokens: tokens, Now: nowEDT(), Source: "cli"})
+	res, err := r.Capture(CaptureRequest{Tokens: tokens, Now: nowEDT()})
 	require.NoError(t, err)
 	return res
 }
@@ -209,6 +209,93 @@ func toAnySlice(xs []string) []any {
 		out[i] = x
 	}
 	return out
+}
+
+// TestCapture_StampsProvenanceWhenSupplied: a harness capture stamps
+// payload.provenance with the NORMALIZED harness and the supplied agent/model/
+// channel, while the frozen envelope's source stays microlog and schema stays 1
+// (AC-3, AC-6, AC-9).
+func TestCapture_StampsProvenanceWhenSupplied(t *testing.T) {
+	r := bootedObs(t)
+	res, err := r.Capture(CaptureRequest{
+		Tokens:  []string{"pain", "6", "knee"},
+		Now:     nowEDT(),
+		Harness: "  Discord ", // normalized to "discord" via the shared grammar
+		Agent:   "agent-x",
+		Model:   "model-y",
+		Channel: "<channel>",
+	})
+	require.NoError(t, err)
+
+	ev := readBack(t, r, res)
+	require.NoError(t, ev.Validate())
+	// Frozen envelope is untouched — provenance is orthogonal to source/schema.
+	assert.Equal(t, observations.SourceMicrolog, ev.Source)
+	assert.Equal(t, observations.Schema, ev.Schema)
+
+	prov, ok := ev.Payload["provenance"].(map[string]any)
+	require.True(t, ok, "payload.provenance is present and a sub-object")
+	assert.Equal(t, "discord", prov["harness"], "harness is normalized through NormalizeSource")
+	assert.Equal(t, "agent-x", prov["agent"])
+	assert.Equal(t, "model-y", prov["model"])
+	assert.Equal(t, "<channel>", prov["channel"])
+}
+
+// TestCapture_ProvenancePartialFields: provenance carries only the supplied
+// keys — an agent-only capture stamps {agent} with no harness normalization and
+// no empty keys (AC-9).
+func TestCapture_ProvenancePartialFields(t *testing.T) {
+	r := bootedObs(t)
+	res, err := r.Capture(CaptureRequest{
+		Tokens: []string{"mood", "3", "steady"},
+		Now:    nowEDT(),
+		Agent:  "agent-x",
+	})
+	require.NoError(t, err)
+
+	ev := readBack(t, r, res)
+	prov, ok := ev.Payload["provenance"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "agent-x", prov["agent"])
+	assert.NotContains(t, prov, "harness")
+	assert.NotContains(t, prov, "model")
+	assert.NotContains(t, prov, "channel")
+}
+
+// TestCapture_BareCaptureOmitsProvenance: a capture with no harness provenance
+// omits the provenance key entirely, so the on-disk event marshals byte-
+// identically to the pre-change shape (AC-9 byte-stability).
+func TestCapture_BareCaptureOmitsProvenance(t *testing.T) {
+	r := bootedObs(t)
+	res := capture(t, r, "pain", "6", "knee")
+
+	ev := readBack(t, r, res)
+	_, hasProvenance := ev.Payload["provenance"]
+	assert.False(t, hasProvenance, "a bare capture writes no provenance key")
+
+	// Byte-stability: the marshaled line carries no provenance token at all.
+	line, err := ev.MarshalLine()
+	require.NoError(t, err)
+	assert.NotContains(t, string(line), "provenance")
+}
+
+// TestCapture_MalformedHarnessRejected: a malformed harness token is rejected
+// with a clear error and nothing is written — never silently coerced (AC-8/AC-9,
+// honest reject).
+func TestCapture_MalformedHarnessRejected(t *testing.T) {
+	r := bootedObs(t)
+	_, err := r.Capture(CaptureRequest{
+		Tokens:  []string{"pain", "6", "knee"},
+		Now:     nowEDT(),
+		Harness: "bad token!",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "harness")
+
+	// Nothing landed on disk for the day.
+	events, _, rerr := r.Store().ReadObservationsDay(observations.DateString(observations.DateOf(nowEDT())))
+	require.NoError(t, rerr)
+	assert.Empty(t, events, "a malformed harness leaves the day file empty")
 }
 
 // Guard: the storage adapter is the only writer — a capture leaves the day

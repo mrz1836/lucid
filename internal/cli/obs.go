@@ -24,7 +24,7 @@ import (
 // slashes, here they are the first token. Capture never blocks: an unparseable
 // head is kept verbatim on the partial path, and the ack is inventory only.
 func newObsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "obs [kind] [value...]",
 		Short: "Log a health/context observation (micro-log)",
 		Args:  cobra.ArbitraryArgs,
@@ -34,9 +34,12 @@ func newObsCmd() *cobra.Command {
 				return err
 			}
 			res, err := r.Capture(router.CaptureRequest{
-				Tokens: args,
-				Now:    time.Now(),
-				Source: sourceCLI,
+				Tokens:  args,
+				Now:     time.Now(),
+				Harness: obsHarness(cmd),
+				Agent:   flagOrEnv(cmd, flagAgent, envAgent, ""),
+				Model:   flagOrEnv(cmd, flagModel, envModel, ""),
+				Channel: flagOrEnv(cmd, flagChannel, envChannel, ""),
 			})
 			if err != nil {
 				return err
@@ -45,4 +48,19 @@ func newObsCmd() *cobra.Command {
 			return nil
 		},
 	}
+	registerProvenanceFlags(cmd)
+	return cmd
+}
+
+// obsHarness resolves the harness provenance token for `lucid obs`. The frozen
+// observation envelope has no separate source field (its source stays
+// microlog), so provenance.harness is the single relayer slot:
+// --harness/LUCID_HARNESS is the exact match, and --source/LUCID_SOURCE is
+// accepted as the cross-surface synonym — the same token becomes a raw entry's
+// source on `lucid log`, so a relay that sets one env attributes both commands
+// rather than silently dropping it. The empty default keeps a bare terminal
+// capture free of provenance (byte-stable). --thread has no home in the
+// observation envelope and is intentionally not consumed here.
+func obsHarness(cmd *cobra.Command) string {
+	return flagOrEnv(cmd, flagHarness, envHarness, flagOrEnv(cmd, flagSource, envSource, ""))
 }
