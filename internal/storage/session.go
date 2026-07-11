@@ -32,6 +32,13 @@ type Session struct {
 	// ChannelID and ThreadID locate the conversation.
 	ChannelID string
 	ThreadID  string
+	// Agent and Model name the assistant/agent and model that relayed the
+	// capture, when a harness supplies them. Both are optional and additive:
+	// they are empty (and omitted on disk) for a plain terminal capture. With
+	// Harness/ChannelID/ThreadID they form the record's provenance cluster
+	// (data-model.md §"Session record").
+	Agent string
+	Model string
 	// Command is the verb that opened the session.
 	Command string
 	// RawEntryIDs, ProcessedArtifactIDs, InsightIDs are the audit links.
@@ -53,6 +60,8 @@ type sessionRecord struct {
 	Harness               string               `json:"harness"`
 	ChannelID             string               `json:"channel_id"`
 	ThreadID              string               `json:"thread_id"`
+	Agent                 string               `json:"agent,omitempty"`
+	Model                 string               `json:"model,omitempty"`
 	Command               string               `json:"command"`
 	RawEntryIDs           []string             `json:"raw_entry_ids"`
 	ProcessedArtifactIDs  []string             `json:"processed_artifact_ids"`
@@ -130,6 +139,8 @@ func marshalSession(s Session) ([]byte, error) {
 		Harness:               s.Harness,
 		ChannelID:             s.ChannelID,
 		ThreadID:              s.ThreadID,
+		Agent:                 s.Agent,
+		Model:                 s.Model,
 		Command:               s.Command,
 		RawEntryIDs:           orEmpty(s.RawEntryIDs),
 		ProcessedArtifactIDs:  orEmpty(s.ProcessedArtifactIDs),

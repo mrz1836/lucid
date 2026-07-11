@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,75 @@ func TestWriteSession_EndedAtOmittedWhenZero(t *testing.T) {
 
 	m := readSessionJSON(t, home, "session_2026_07_05_18_41")
 	assert.Empty(t, m["ended_at"])
+}
+
+func TestWriteSession_RecordsAgentAndModel(t *testing.T) {
+	a, home := newRawAdapter(t)
+	s := syntheticSession(fixedTime(), "session_2026_07_05_18_41")
+	s.Agent = "agent-x"
+	s.Model = "model-y"
+	_, err := a.WriteSession(s)
+	require.NoError(t, err)
+
+	m := readSessionJSON(t, home, "session_2026_07_05_18_41")
+	assert.Equal(t, "agent-x", m["agent"])
+	assert.Equal(t, "model-y", m["model"])
+
+	// agent/model land immediately after thread_id, matching data-model.md.
+	raw, err := os.ReadFile(filepath.Join(home, "sessions", "session_2026_07_05_18_41.json"))
+	require.NoError(t, err)
+	text := string(raw)
+	assert.Less(t, indexOf(t, text, `"thread_id"`), indexOf(t, text, `"agent"`))
+	assert.Less(t, indexOf(t, text, `"agent"`), indexOf(t, text, `"model"`))
+	assert.Less(t, indexOf(t, text, `"model"`), indexOf(t, text, `"command"`))
+}
+
+func TestWriteSession_OmitsAgentAndModelWhenEmpty(t *testing.T) {
+	a, home := newRawAdapter(t)
+	// syntheticSession leaves Agent/Model empty — the plain terminal path.
+	_, err := a.WriteSession(syntheticSession(fixedTime(), "session_2026_07_05_18_41"))
+	require.NoError(t, err)
+
+	m := readSessionJSON(t, home, "session_2026_07_05_18_41")
+	_, hasAgent := m["agent"]
+	_, hasModel := m["model"]
+	assert.False(t, hasAgent, "omitempty drops agent for a plain terminal capture")
+	assert.False(t, hasModel, "omitempty drops model for a plain terminal capture")
+}
+
+// TestSessionRecord_LegacyJSONParses proves a session written before the
+// provenance fields existed (no agent/model keys, no schema_version) still
+// decodes cleanly — readers tolerate the missing fields.
+func TestSessionRecord_LegacyJSONParses(t *testing.T) {
+	legacy := `{
+  "id": "session_2026_07_05_18_41",
+  "started_at": "2026-07-05T18:41:00-04:00",
+  "ended_at": "",
+  "harness": "cli",
+  "channel_id": "cli",
+  "thread_id": "",
+  "command": "/log",
+  "raw_entry_ids": ["raw_2026_07_05_18_41"],
+  "processed_artifact_ids": [],
+  "insight_ids": [],
+  "rejected_proposal_count": 0,
+  "agent_versions": {"intake": "intake-2026.05.0"}
+}`
+	var rec sessionRecord
+	require.NoError(t, json.Unmarshal([]byte(legacy), &rec))
+	assert.Equal(t, "session_2026_07_05_18_41", rec.ID)
+	assert.Empty(t, rec.Agent, "missing agent zero-values cleanly")
+	assert.Empty(t, rec.Model, "missing model zero-values cleanly")
+	assert.Equal(t, "/log", rec.Command)
+}
+
+// indexOf returns the byte offset of substr in s, failing the test if it is
+// absent — a small helper so the field-order assertions read cleanly.
+func indexOf(t *testing.T, s, substr string) int {
+	t.Helper()
+	i := strings.Index(s, substr)
+	require.GreaterOrEqual(t, i, 0, "expected %q in session JSON", substr)
+	return i
 }
 
 // TestWriteSession_UnwritableDir covers the write-failure path: the
