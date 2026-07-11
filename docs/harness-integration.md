@@ -61,18 +61,29 @@ own, no human in the loop.
   model, and L2 stays content-free (streak / mode / storm only). These remain
   the *only* autonomous messages Lucid sends.
 
-## The backlog (C, D)
+## C — Works today: deterministic router CLI verbs
 
-Each item is already designed in the docs; none fights the architecture.
+The four deterministic router intents that previously had no CLI surface now ship
+as `lucid` subcommands, so a harness can drive them by shelling out — still with
+**no LLM provider and no secrets inside Lucid**:
 
-### C — Deterministic router intents with no CLI surface
+`storm` (declare / renew / end an incapacity storm) · `profile` (switch the clock
+profile) · `person` (deterministic person join, a pure read) · `bootstrap` (toggle
+historical-entry mode).
 
-- **State:** `/storm`, `/profile`, `/person`, `/bootstrap` are implemented as
-  router methods but have **no CLI verb**, so a harness can't drive them by
-  shelling out. No model needed. `/storm` (stays the stake during incapacity)
-  and `/profile` (switch clocks) are operationally important.
-- **Build:** add `lucid storm | profile | person | bootstrap` subcommands that
-  call the existing router methods. Deterministic, cheap, no provider.
+- **Build: done.** Each verb is a thin dispatch over the existing router method
+  (`Router.Storm` / `Profile` / `Person` / `Bootstrap`) — deterministic, cheap,
+  provider-free, and no new product logic. Full syntax, `--json` shapes, and the
+  exit-code contract: [`usage/commands.md`](usage/commands.md).
+- **Machine-drivable:** all four honor `--json` (storm
+  `{event,label,through,rejected}`, profile `{from,to,effective,rejected}`,
+  bootstrap `{bootstrap_mode}`, person its read view). `person` always exits `0`
+  (match / no-match / ambiguous / off-limits are read outcomes, never errors);
+  write-verb rejections exit `1`; usage errors exit `2`.
+
+## The backlog (D)
+
+Already designed in the docs; it does not fight the architecture.
 
 ### D — Agentic Mirror verbs (`/checkin`, `/reflect`, `/ask`)
 
@@ -105,8 +116,9 @@ reflection and writes files directly voids these guarantees.
    close-out + morning status over chat.
 2. **B — done.** Scheduler daemon + Discord-bot notifier → autonomous bell /
    tripwire / heartbeat, under `hush supervise`.
-3. **C.** CLI verbs for `storm` / `profile` / `person` / `bootstrap` (cheap,
-   deterministic).
+3. **C — done.** CLI verbs for `storm` / `profile` / `person` / `bootstrap` (cheap,
+   deterministic) → the harness drives every deterministic router intent by shelling
+   out.
 4. **D.** Provider adapter + serve/CLI surface for `checkin` / `reflect` / `ask`.
 
 After **D**, chat is purely transport — B has already closed the

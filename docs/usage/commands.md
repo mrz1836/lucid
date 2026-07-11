@@ -353,6 +353,99 @@ lucid scheduler run
 lucid scheduler run --db /var/lib/lucid/scheduler.db
 ```
 
+### storm
+
+```
+lucid storm <clause-label|unwritten|end> [--json]
+```
+
+Declare or end a **storm** — the pre-committed incapacity state
+([`../mvp/engine-module.md`](../mvp/engine-module.md) §Commands): witness-confirmed
+within 72h, bounded (14 days, one renewal), never retroactive. `lucid storm <label>`
+declares a fresh storm (pending witness confirmation) or renews a standing one
+(allowed once); `lucid storm end` ends a standing storm early. While a storm stands,
+misses spend no budget and the stake is stayed. Clause labels are opaque tokens
+registered in `storm.json` (the words live in the Charter) and may contain spaces —
+trailing arguments are joined, so `lucid storm wrist flare` is one label. Every
+accepted command appends to `storm.json` and rebuilds `status.json`. Deterministic,
+no model.
+
+A rejection — an unknown label, a second renewal, or `end` with no standing storm —
+is a no-op: it prints the fixed copy to stderr and exits `1`, writing nothing.
+`--json` emits `{event, label, through, rejected}` (`event` is `declared`, `renewed`,
+or `ended` on success; a rejection carries `rejected: true`).
+
+```sh
+lucid storm wrist-flare
+lucid storm unwritten
+lucid storm end
+lucid storm wrist-flare --json
+```
+
+### profile
+
+```
+lucid profile <name> [--json]
+```
+
+Switch to a named clock profile defined in `chain.json`
+([`../mvp/engine-module.md`](../mvp/engine-module.md) §Commands): `bell`, `tripwire`,
+and `rollover` move together. The switch is sticky, recorded in `profile.json`'s
+append-only history, and effective from the **next** logical day — never the current
+one, so a switch after tonight's bell cannot move tonight's clocks. Deterministic, no
+model. An undefined profile name is rejected with no disk effect: it prints the fixed
+copy to stderr and exits `1`. `--json` emits `{from, to, effective, rejected}`
+(`effective` is the logical day the switch takes hold).
+
+```sh
+lucid profile travel
+lucid profile default --json
+```
+
+### person
+
+```
+lucid person <name> [--json]
+```
+
+Deterministic person join ([`../mvp/data-model.md`](../mvp/data-model.md);
+[`../mvp/scope.md`](../mvp/scope.md) §4) over the people record, its mention counts,
+the accepted insights citing entries that mention them, and a dominance line. Pure
+**read** — it never calls a model and never writes, and the output is byte-stable
+across repeated runs on the same store (S-22). Names may contain spaces (trailing
+arguments are joined). It **always exits `0`**: a no-match (§P-1), several matches
+(§P-2, candidates listed), a single match, and an off-limits person (§P-3, raw record
+only — mentions and dates, nothing derived) are all read outcomes carried in the
+result, never errors. `--json` emits `{query, matched, multiple_matches,
+candidates:[{person_key, display_name, first_seen_at}], off_limits, person_key,
+text}`.
+
+```sh
+lucid person "Sam Rivera"
+lucid person Alex --json
+```
+
+### bootstrap
+
+```
+lucid bootstrap [done] [--json]
+```
+
+Toggle historical-entry mode ([`../mvp/scope.md`](../mvp/scope.md) §4): `lucid
+bootstrap` turns it **on** — while on, captures stamp `bootstrap:true` and pattern
+proposals are suppressed; `lucid bootstrap done` turns it **off** (no consolidation
+pass runs on exit). The persisted `lucid.json` `bootstrap_mode` is updated and the
+router's effective config follows it, so the next command reads the new mode without
+a reboot. Deterministic, no model. `done` is the only valid positional argument — any
+other (`lucid bootstrap foo`) is a usage error (exit `2`). `--json` emits
+`{bootstrap_mode}` (the resulting boolean).
+
+```sh
+lucid bootstrap
+lucid bootstrap done
+lucid bootstrap --json
+```
+
 > Cobra also provides two built-ins that aren't specific to Lucid: `lucid help
 > [command]` for help on any command, and `lucid completion <bash|zsh|fish|powershell>`
 > to generate a shell-completion script.
@@ -367,15 +460,17 @@ verbs (marked *provider-backed*) additionally need an LLM provider configured.
 
 ### Verbs with no CLI equivalent
 
+Only the three *provider-backed* Mirror verbs still have no CLI surface — they
+need an LLM provider and land behind a serve/CLI surface later (see
+[`../harness-integration.md`](../harness-integration.md) §D). The deterministic
+`/storm`, `/profile`, `/person`, and `/bootstrap` now shell to the CLI verbs above
+(listed under [Verbatim passthroughs](#verbatim-passthroughs)).
+
 | Command | Does |
 |---------|------|
 | `/checkin` | Guided capture — Intake asks 2–4 follow-up questions in a thread, bundles your (≥90%-authored) answers into one raw entry, then structures it and may offer **one** tentative pattern through the resonance gate. *Provider-backed.* |
 | `/reflect [gate]` | Weekly recall of validated insights ("still resonating?" — including whether attached rules still stand). The `gate` variant, at gate/quarterly cadence, recalls every accepted insight. Never proposes new patterns. *Provider-backed.* |
 | `/ask <question>` | Grounded, cited Q&A over your validated insights + reflections only — surfaces, not new patterns, never advice. *Provider-backed.* |
-| `/person <name>` | Deterministic person join (mentions, dominance line). No model. |
-| `/storm <clause-label\|unwritten>` · `/storm end` | Declare (or end) a storm — the pre-committed incapacity state: witness-confirmed within 72h, bounded (14 days, one renewal), never retroactive. While standing, misses spend no budget and the stake is stayed. |
-| `/profile <name>` | Switch to a named clock profile (bell, tripwire, rollover move together), effective from the next logical day. |
-| `/bootstrap` · `/bootstrap done` | Enter/exit historical-entry mode for capturing past, formative entries with explicit timestamps; pattern proposals are suppressed while it's on. |
 
 Observation shorthands `/pain`, `/ate`, `/drank`, `/bm`, `/mood`, `/slept` are
 aliases into the same intent as `lucid obs …`.
@@ -394,6 +489,10 @@ embellished, or celebrated):
 | `/status` | `lucid status` |
 | `/day [date]` | `lucid day [date]` |
 | `/packet clinician [@date\|all]` | `lucid export packet clinician …` (posts only the path) |
+| `/storm <label\|unwritten>` · `/storm end` | `lucid storm <label\|unwritten\|end>` |
+| `/profile <name>` | `lucid profile <name>` |
+| `/person <name>` | `lucid person <name>` |
+| `/bootstrap` · `/bootstrap done` | `lucid bootstrap [done]` |
 
 The scheduled sends — the bell, the morning tripwire (L1/L2), and the monthly
 witness heartbeat — are the scheduler's, not a command's: pre-committed

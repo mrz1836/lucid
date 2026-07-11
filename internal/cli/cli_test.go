@@ -72,7 +72,7 @@ func TestVersion_RejectsArgs(t *testing.T) {
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	want := []string{"init", "log", "closeout", "mode", "status", "obs", "day", "validate", "export", "version", "upgrade", "scheduler", "anchor", "metrics"}
+	want := []string{"init", "log", "closeout", "mode", "status", "obs", "day", "validate", "export", "version", "upgrade", "scheduler", "anchor", "metrics", "storm", "profile", "person", "bootstrap"}
 	got := map[string]bool{}
 	for _, c := range root.Commands() {
 		got[c.Name()] = true
@@ -95,6 +95,9 @@ func TestIsUsageError(t *testing.T) {
 	assert.False(t, isUsageError(errors.New("some runtime failure")))
 	assert.True(t, isUsageError(errors.New("required flag(s) \"x\" not set")))
 	assert.True(t, isUsageError(errors.New("flag needs an argument: --channel")))
+	// cobra positional-arg validator messages map to a usage error.
+	assert.True(t, isUsageError(errors.New("accepts 1 arg(s), received 0")))
+	assert.True(t, isUsageError(errors.New("requires at least 1 arg(s), only received 0")))
 }
 
 func TestUnknownCommand_IsUsageError(t *testing.T) {

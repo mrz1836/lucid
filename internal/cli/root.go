@@ -101,6 +101,10 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newSchedulerCmd())
 	root.AddCommand(newAnchorCmd())
 	root.AddCommand(newMetricsCmd())
+	root.AddCommand(newStormCmd())
+	root.AddCommand(newProfileCmd())
+	root.AddCommand(newPersonCmd())
+	root.AddCommand(newBootstrapCmd())
 
 	return root
 }
@@ -113,7 +117,12 @@ func isUsageError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "invalid argument", "flag needs an argument", "required flag"} {
+	// The "accepts" / "requires at least" fragments catch cobra's positional-arg
+	// validators (ExactArgs, MinimumNArgs, MaximumNArgs, RangeArgs), whose
+	// messages read "accepts N arg(s), received M" / "requires at least N
+	// arg(s), only received M" — a bare `lucid storm` is a usage error (exit 2),
+	// not a runtime failure.
+	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "invalid argument", "flag needs an argument", "required flag", "accepts", "requires at least"} {
 		if containsFold(msg, p) {
 			return true
 		}

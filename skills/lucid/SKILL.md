@@ -51,13 +51,13 @@ its output. Acknowledge *after* the binary persists, never before.
 | `/closeout skip` | honest miss | `lucid closeout skip` — **verbatim passthrough** |
 | `/closeout backfill [yesterday\|<date>] [<compact>]` | correct a recent day | `lucid closeout backfill …` — **verbatim passthrough** |
 | `/mode <green\|yellow\|red>` | declare today's mode | `lucid mode <…>` — **verbatim passthrough** |
-| `/storm <label\|unwritten>` / `/storm end` | declare/end a storm | router storm intent |
-| `/profile <name>` | switch clock profile | router profile intent |
+| `/storm <label\|unwritten>` / `/storm end` | declare/end a storm | `lucid storm <label\|unwritten\|end>` |
+| `/profile <name>` | switch clock profile | `lucid profile <name>` |
 | `/status` | read-only L0 surface | `lucid status` — **verbatim passthrough** |
 | `/reflect [gate]` | weekly recall (never proposes) | router recall intent (provider-backed) |
 | `/ask <question>` | grounded, cited Q&A | router grounded-answer intent (provider-backed) |
-| `/person <name>` | deterministic person join | router person intent (no model) |
-| `/bootstrap` / `/bootstrap done` | historical-entry mode | router bootstrap intent |
+| `/person <name>` | deterministic person join | `lucid person <name>` (no model) |
+| `/bootstrap` / `/bootstrap done` | historical-entry mode | `lucid bootstrap [done]` |
 | `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs <kind> …` | observation micro-log | `lucid obs <kind> …` |
 | `/obs where <place>` | sticky stated location | `lucid obs where <place>` |
 | `/day [date]` | read-only day view | `lucid day [date]` |
