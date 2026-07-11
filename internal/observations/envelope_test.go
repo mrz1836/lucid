@@ -46,6 +46,28 @@ func TestDeriveLogicalDate_RangeKeysOnStart(t *testing.T) {
 	assert.Equal(t, "2026-07-01", DeriveLogicalDate(occ, PrecisionRange, DefaultRolloverMin))
 }
 
+// TestLogicalBaseDate pins the time.Time companion to DeriveLogicalDate's
+// exact branch — the boundary the /day view and /closeout backfill resolve
+// "today"/"yesterday" through, so a pre-rollover call names the day just
+// lived rather than the fresh calendar date.
+func TestLogicalBaseDate(t *testing.T) {
+	tests := []struct {
+		name string
+		now  time.Time
+		want string
+	}{
+		{"before rollover → previous day", at(2026, 7, 11, 0, 52), "2026-07-10"},
+		{"just before rollover → previous day", at(2026, 7, 11, 3, 59), "2026-07-10"},
+		{"at rollover → own day", at(2026, 7, 11, 4, 0), "2026-07-11"},
+		{"after rollover → own day", at(2026, 7, 11, 14, 0), "2026-07-11"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, DateString(LogicalBaseDate(tc.now, DefaultRolloverMin)))
+		})
+	}
+}
+
 func TestEventID_AndParseSeq(t *testing.T) {
 	assert.Equal(t, "obs_2026_07_02_003", EventID("2026-07-02", 3))
 	assert.Equal(t, "obs_2026_07_02_1000", EventID("2026-07-02", 1000))

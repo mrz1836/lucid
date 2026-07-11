@@ -97,6 +97,40 @@ func TestBackfill_RestoresStreak(t *testing.T) {
 	assert.Equal(t, 3, status.CurrentStreak, "backfilling the gap restores the 3-day streak")
 }
 
+// TestBackfill_YesterdayBeforeRolloverResolvesLogicalDay is the regression for
+// a pre-rollover `/closeout backfill yesterday`: at 00:52 the logical day is
+// still the prior calendar date, so "yesterday" must resolve to the day before
+// *that* — the naive calendar yesterday would be the in-progress logical day
+// (span 0) and read as out-of-window. Mirrors the CI clock that caught it.
+func TestBackfill_YesterdayBeforeRolloverResolvesLogicalDay(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	now := atUTC(2026, 7, 11, 0, 52) // before the 04:00 rollover
+
+	res, err := r.Backfill(BackfillRequest{
+		Now: now, Yesterday: true, Links: compactLinks(), Journal: "the chain ran",
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Rejected, "yesterday is always inside the window")
+	assert.True(t, res.Created)
+	assert.Equal(t, "2026-07-09", res.LogicalDate)
+
+	rec := readDay(t, a, "day_2026_07_09")
+	assert.True(t, rec.Backfilled)
+}
+
+// TestBackfill_YesterdayAfterRolloverIsCalendarYesterday: after the rollover
+// the logical day is the current calendar date, so "yesterday" is the calendar
+// day before — the daytime path.
+func TestBackfill_YesterdayAfterRolloverIsCalendarYesterday(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+	res, err := r.Backfill(BackfillRequest{
+		Now: atUTC(2026, 7, 11, 14, 0), Yesterday: true, Links: compactLinks(), Journal: "ran",
+	})
+	require.NoError(t, err)
+	assert.False(t, res.Rejected)
+	assert.Equal(t, "2026-07-10", res.LogicalDate)
+}
+
 func TestBackfill_CorrectsPartial(t *testing.T) {
 	r, a, _ := newBootedRouter(t)
 	// A partial (not completed) record for 07-05.

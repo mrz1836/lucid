@@ -98,6 +98,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newExportCmd())
 	root.AddCommand(newVersionCmd(bi))
 	root.AddCommand(newUpgradeCmd(bi))
+	root.AddCommand(newSchedulerCmd())
 
 	return root
 }

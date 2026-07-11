@@ -76,11 +76,13 @@ over the practice that is already running manually.
 * Phase 9: deterministic `status.json`, `/mode`, `/status`,
   mode-relative adherence, storm-aware scoring.
 * Phase 10: the tripwire and bell as `go-flywheel` jobs
-  ([ADR-0004](../adr/0004-core-dependencies.md)), L1/L2 + storm
-  template variants, witness confirmation flow, dead-man semantics.
-  The harness bot token enters the `hush` vault
-  ([ADR-0005](../adr/0005-secrets-management.md)); templates post to
-  the dedicated channel.
+  ([ADR-0004](../adr/0004-core-dependencies.md)) — **shipped** as the
+  `lucid scheduler run` daemon plus a concrete Discord-bot
+  `scheduler.Notifier` — L1/L2 + storm template variants, witness
+  confirmation flow, dead-man semantics. The harness bot token enters
+  the `hush` vault ([ADR-0005](../adr/0005-secrets-management.md)),
+  injected as the generic `LUCID_HARNESS_TOKEN`; templates post to the
+  dedicated channel (`"user"`) and the witness channel (`"witness"`).
 
 **Done when:** engine-module phase 8–10 criteria pass; the interim
 reminder cron is retired; a synthetic silent day fires the tripwire
@@ -123,9 +125,10 @@ against its own `~/.lucid/`.
 
 ### Stage 6 — Supervised operations
 
-The service life: `hush supervise` runs the scheduler under launchd
-as a sibling of the gateway (fate-sharing is the failure mode the
-tripwire exists to avoid); upgrades flow through the managed pattern
+The service life: `hush supervise` runs the `lucid scheduler run`
+scheduler under launchd as a sibling of the gateway (fate-sharing is
+the failure mode the tripwire exists to avoid); upgrades flow through
+the managed pattern
 with the drain window (never between bell and close-out;
 post-upgrade health check = tripwire self-check); backups cover the
 ADR-0002 set.

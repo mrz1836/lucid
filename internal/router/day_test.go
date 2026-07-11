@@ -79,6 +79,26 @@ func TestDayView_EmptyDayHonestMessage(t *testing.T) {
 	assert.Equal(t, "No record for 2026-07-09.", res.Lines[0])
 }
 
+// TestDayView_TodayBeforeRolloverJoinsLogicalDay is the regression for a
+// pre-rollover `/day`: an observation logged at 00:52 files under the prior
+// logical day, so `/day` with no argument must resolve "today" to that same
+// logical day — the fresh calendar date would read as an empty new day.
+func TestDayView_TodayBeforeRolloverJoinsLogicalDay(t *testing.T) {
+	r := bootedObs(t)
+	require.NoError(t, r.Store().ScaffoldEngine())
+	now := time.Date(2026, 7, 11, 0, 52, 0, 0, edt) // before the 04:00 rollover
+
+	logged, err := r.Capture(CaptureRequest{Tokens: []string{"pain", "6", "knee"}, Now: now, Source: "cli"})
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-10", logged.LogicalDate, "a pre-rollover capture files under the prior logical day")
+
+	res, err := r.DayView("", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-10", res.Date)
+	assert.False(t, res.Empty)
+	assert.Contains(t, strings.Join(res.Lines, "\n"), "pain")
+}
+
 // TestDayView_ArgResolution: default is today, "yesterday" is the day before.
 func TestDayView_ArgResolution(t *testing.T) {
 	r := bootedObs(t)

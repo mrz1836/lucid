@@ -26,6 +26,12 @@ func TestRenderLaunchd_Defaults(t *testing.T) {
 	assert.Contains(t, out, "<string>/usr/local/bin/hush</string>")
 	assert.Contains(t, out, "<string>supervise</string>")
 	assert.Contains(t, out, "<string>/usr/local/etc/lucid/supervise.toml</string>")
+	assert.NotContains(t, out, "<string>--config</string>", "hush supervise takes the config path positionally")
+	assert.Contains(t, out, "<key>EnvironmentVariables</key>")
+	assert.Contains(t, out, "<key>LUCID_HOME</key>")
+	assert.Contains(t, out, "<key>LUCID_USER_CHANNEL_ID</key>")
+	assert.Contains(t, out, "<key>LUCID_WITNESS_CHANNEL_ID</key>")
+	assert.Contains(t, out, "<key>LUCID_SCHEDULER_DB</key>")
 	assert.Contains(t, out, "<true/>", "RunAtLoad/KeepAlive true render as <true/>")
 	// A supervised install never names lucid in the launchd job — hush does.
 	assert.NotContains(t, out, "<string>lucid</string>")
@@ -107,6 +113,35 @@ func TestRenderSupervise_Defaults(t *testing.T) {
 	assert.Contains(t, out, `"LUCID_HARNESS_TOKEN"`, "the token is named in scope")
 	assert.Contains(t, out, `"/usr/local/bin/lucid"`, "child command is an absolute path")
 	assert.Contains(t, out, `name                      = "lucid-scheduler"`)
+	require.NoError(t, LintSupervise(out))
+}
+
+// TestRenderSupervise_PassesChannelEnvThrough asserts the two non-secret
+// logical-channel IDs (and the optional job-store override) flow to the child
+// via env_passthrough — the notifier reads them from the injected environment —
+// while the only secret in scope stays the harness token. Env-var NAMES render;
+// no real ID or value appears (ADR-0005, S-7).
+func TestRenderSupervise_PassesChannelEnvThrough(t *testing.T) {
+	p := DefaultSuperviseParams()
+	assert.Contains(t, p.EnvPassthrough, "LUCID_USER_CHANNEL_ID")
+	assert.Contains(t, p.EnvPassthrough, "LUCID_WITNESS_CHANNEL_ID")
+	assert.Contains(t, p.EnvPassthrough, "LUCID_SCHEDULER_DB")
+	assert.Equal(t, []string{"LUCID_HARNESS_TOKEN"}, p.Scope, "the token is still the only secret in scope")
+
+	out, err := RenderSupervise(p)
+	require.NoError(t, err)
+
+	// The channel IDs render inside the env_passthrough block, never scope.
+	passthrough := out[strings.Index(out, "env_passthrough = ["):]
+	assert.Contains(t, passthrough, `"LUCID_USER_CHANNEL_ID"`)
+	assert.Contains(t, passthrough, `"LUCID_WITNESS_CHANNEL_ID"`)
+	assert.Contains(t, passthrough, `"LUCID_SCHEDULER_DB"`)
+
+	// The channel IDs are not secrets, so they never appear in the scope array.
+	scopeBlock := out[strings.Index(out, "scope = ["):strings.Index(out, "[child]")]
+	assert.NotContains(t, scopeBlock, "LUCID_USER_CHANNEL_ID")
+	assert.NotContains(t, scopeBlock, "LUCID_WITNESS_CHANNEL_ID")
+
 	require.NoError(t, LintSupervise(out))
 }
 

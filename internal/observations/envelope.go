@@ -164,14 +164,25 @@ func (e Event) normalized() Event {
 func DeriveLogicalDate(occurredAt time.Time, precision string, rolloverMin int) string {
 	switch precision {
 	case PrecisionExact:
-		base := DateOf(occurredAt)
-		if minutesOfDay(occurredAt) < rolloverMin {
-			return DateString(base.AddDate(0, 0, -1))
-		}
-		return DateString(base)
+		return DateString(LogicalBaseDate(occurredAt, rolloverMin))
 	default: // approximate and range both key on the plain calendar date
 		return DateString(DateOf(occurredAt))
 	}
+}
+
+// LogicalBaseDate truncates t to the civil midnight of its logical day under
+// the exact-precision rollover rule (observations.md §2): before rolloverMin
+// the moment belongs to the previous day, at or after it to t's own date. It
+// is the time.Time companion to DeriveLogicalDate's exact branch — the /day
+// view and /closeout backfill resolve "today"/"yesterday" through it so they
+// land on the same civil-day boundary events are filed under, never a naive
+// calendar date (which, before the rollover, names the day still in progress).
+func LogicalBaseDate(t time.Time, rolloverMin int) time.Time {
+	base := DateOf(t)
+	if minutesOfDay(t) < rolloverMin {
+		return base.AddDate(0, 0, -1)
+	}
+	return base
 }
 
 // EventID renders the event id for a logical date and sequence

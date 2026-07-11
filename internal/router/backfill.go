@@ -10,11 +10,16 @@ import (
 // BackfillRequest carries a `/closeout backfill` — the chain ran but went
 // unrecorded (engine-module.md §"/closeout backfill sequence"). Target is
 // nil for the default resolution (the most recent logical day without a
-// completed record); otherwise it names the day explicitly. The remaining
-// fields are the same compact-form inputs as a close-out.
+// completed record); otherwise it names the day explicitly. Yesterday asks
+// the router to resolve the target as the logical day before today (the
+// `yesterday` keyword) — computed here against the rollover boundary rather
+// than as a naive calendar date, which before the rollover would collide with
+// the in-progress day and read as out-of-window. The remaining fields are the
+// same compact-form inputs as a close-out.
 type BackfillRequest struct {
 	Now        time.Time
 	Target     *time.Time
+	Yesterday  bool
 	Links      map[string]string
 	Capacity   int
 	LimiterTag string
@@ -84,11 +89,15 @@ func (r *Router) Backfill(req BackfillRequest) (BackfillResult, error) {
 }
 
 // backfillTarget resolves the target day: the explicit target when given,
-// otherwise the default (most recent logical day without a completed
-// record within the window).
+// the logical day before today when the `yesterday` keyword was used, and
+// otherwise the default (most recent logical day without a completed record
+// within the window).
 func (r *Router) backfillTarget(req BackfillRequest, records []engine.DayRecord, today time.Time, window int) time.Time {
 	if req.Target != nil {
 		return engine.DateOf(*req.Target)
+	}
+	if req.Yesterday {
+		return engine.AddDays(today, -1)
 	}
 	return engine.ResolveBackfillTarget(records, today, window)
 }

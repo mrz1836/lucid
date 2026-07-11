@@ -72,7 +72,7 @@ func TestVersion_RejectsArgs(t *testing.T) {
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	want := []string{"init", "log", "closeout", "mode", "status", "obs", "day", "validate", "export", "version", "upgrade"}
+	want := []string{"init", "log", "closeout", "mode", "status", "obs", "day", "validate", "export", "version", "upgrade", "scheduler"}
 	got := map[string]bool{}
 	for _, c := range root.Commands() {
 		got[c.Name()] = true

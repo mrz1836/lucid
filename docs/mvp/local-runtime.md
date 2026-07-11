@@ -160,6 +160,16 @@ Two reasons this lives outside the repo:
    `projections/exports.log`: they are primary data that exists
    nowhere else.
 
+The standalone scheduler's durable job store (`flywheel.db`) is a
+third category — **disposable operational machinery, not testimony.**
+Per [ADR-0004](../adr/0004-core-dependencies.md) it holds only queue
+and run state, "disposable and reconstructable from config," so losing
+it loses no truth: the bell and tripwire jobs re-enqueue from
+`chain.json`. It is therefore no part of the record set or the backup
+set above, and lives **outside** the `~/.lucid/` Ledger (default under
+the OS user-config dir, overridable via `--db` / `LUCID_SCHEDULER_DB`).
+`~/.lucid/` stays the exclusive home of the record.
+
 ## The helper role
 
 Hand-editable Markdown and JSON under `~/.lucid/` are deliberate
