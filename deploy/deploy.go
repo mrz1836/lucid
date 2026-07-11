@@ -100,8 +100,16 @@ func DefaultSuperviseParams() SuperviseParams {
 		Scope:              []string{"LUCID_HARNESS_TOKEN"},
 		ChildCommand:       []string{"/usr/local/bin/lucid", "scheduler", "run"},
 		WorkingDir:         "/usr/local/var/lucid",
-		EnvPassthrough:     []string{"PATH", "HOME", "SHELL", "LUCID_HOME"},
-		DaemonLabel:        "Lucid Scheduler",
+		// Non-secret env the child inherits: the base process env plus the two
+		// logical-channel IDs the notifier resolves "user"/"witness" against and
+		// the optional job-store path override. These are env-var NAMES only —
+		// the real channel IDs and the harness token (scope, above) live in the
+		// vault, never in this repo (ADR-0005, S-7).
+		EnvPassthrough: []string{
+			"PATH", "HOME", "SHELL", "LUCID_HOME",
+			"LUCID_USER_CHANNEL_ID", "LUCID_WITNESS_CHANNEL_ID", "LUCID_SCHEDULER_DB",
+		},
+		DaemonLabel: "Lucid Scheduler",
 	}
 }
 

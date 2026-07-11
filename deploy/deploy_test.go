@@ -110,6 +110,35 @@ func TestRenderSupervise_Defaults(t *testing.T) {
 	require.NoError(t, LintSupervise(out))
 }
 
+// TestRenderSupervise_PassesChannelEnvThrough asserts the two non-secret
+// logical-channel IDs (and the optional job-store override) flow to the child
+// via env_passthrough — the notifier reads them from the injected environment —
+// while the only secret in scope stays the harness token. Env-var NAMES render;
+// no real ID or value appears (ADR-0005, S-7).
+func TestRenderSupervise_PassesChannelEnvThrough(t *testing.T) {
+	p := DefaultSuperviseParams()
+	assert.Contains(t, p.EnvPassthrough, "LUCID_USER_CHANNEL_ID")
+	assert.Contains(t, p.EnvPassthrough, "LUCID_WITNESS_CHANNEL_ID")
+	assert.Contains(t, p.EnvPassthrough, "LUCID_SCHEDULER_DB")
+	assert.Equal(t, []string{"LUCID_HARNESS_TOKEN"}, p.Scope, "the token is still the only secret in scope")
+
+	out, err := RenderSupervise(p)
+	require.NoError(t, err)
+
+	// The channel IDs render inside the env_passthrough block, never scope.
+	passthrough := out[strings.Index(out, "env_passthrough = ["):]
+	assert.Contains(t, passthrough, `"LUCID_USER_CHANNEL_ID"`)
+	assert.Contains(t, passthrough, `"LUCID_WITNESS_CHANNEL_ID"`)
+	assert.Contains(t, passthrough, `"LUCID_SCHEDULER_DB"`)
+
+	// The channel IDs are not secrets, so they never appear in the scope array.
+	scopeBlock := out[strings.Index(out, "scope = ["):strings.Index(out, "[child]")]
+	assert.NotContains(t, scopeBlock, "LUCID_USER_CHANNEL_ID")
+	assert.NotContains(t, scopeBlock, "LUCID_WITNESS_CHANNEL_ID")
+
+	require.NoError(t, LintSupervise(out))
+}
+
 // TestRenderSupervise_CarriesNoSecretValue is the S-7 property at the artifact
 // level: the rendered supervise config names a secret but carries no value —
 // no token-shaped material appears in the output.
