@@ -194,7 +194,10 @@ scripts").
 `/closeout backfill [yesterday|<YYYY-MM-DD>] [<compact form>]` records
 that the chain **ran** but went unrecorded — the phone-alarm night,
 the text-to-self (engine §2, P10), now with a command instead of a
-hand edit. Default target: the most recent logical day without a
+hand edit. The `yesterday` keyword resolves to the day before the
+current **logical** day (the rollover boundary of engine §1), so a
+pre-rollover backfill targets the day that just ended — never the one
+still in progress. Default target: the most recent logical day without a
 completed record. The window is `backfill_window_days` (`chain.json`,
 default 7); backfills beyond it are rejected (see §"Error states").
 If no day record exists for the target day, one is created with

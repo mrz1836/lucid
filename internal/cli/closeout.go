@@ -95,10 +95,21 @@ func runCloseout(cmd *cobra.Command, r *router.Router, req router.CloseoutReques
 // runBackfill parses an optional target then executes the backfill.
 func runBackfill(cmd *cobra.Command, r *router.Router, args []string) error {
 	var target *time.Time
+	var yesterday bool
 	if len(args) > 0 {
-		if t, ok := parseBackfillTarget(args[0]); ok {
-			target = t
+		switch args[0] {
+		case "yesterday":
+			// The router resolves "yesterday" against the logical day (the
+			// rollover boundary), so the CLI just forwards the intent — a naive
+			// calendar date computed here would collide with the in-progress day
+			// before the rollover and read as out-of-window.
+			yesterday = true
 			args = args[1:]
+		default:
+			if t, ok := parseBackfillDate(args[0]); ok {
+				target = t
+				args = args[1:]
+			}
 		}
 	}
 	links, capacity, tag, journal, err := parseCompactArgs(r, args)
@@ -106,8 +117,8 @@ func runBackfill(cmd *cobra.Command, r *router.Router, args []string) error {
 		return err
 	}
 	res, err := r.Backfill(router.BackfillRequest{
-		Now: time.Now(), Target: target, Links: links, Capacity: capacity, LimiterTag: tag,
-		Journal: journal, Source: sourceCLI, Harness: sourceCLI,
+		Now: time.Now(), Target: target, Yesterday: yesterday, Links: links, Capacity: capacity,
+		LimiterTag: tag, Journal: journal, Source: sourceCLI, Harness: sourceCLI,
 	})
 	if err != nil {
 		return err
@@ -116,16 +127,11 @@ func runBackfill(cmd *cobra.Command, r *router.Router, args []string) error {
 	return nil
 }
 
-// parseBackfillTarget resolves the optional target token: "yesterday" or a
-// YYYY-MM-DD date. Anything else is treated as the start of the compact
-// form (ok=false).
-func parseBackfillTarget(tok string) (*time.Time, bool) {
-	if tok == "yesterday" {
-		y := time.Now().AddDate(0, 0, -1)
-		return &y, true
-	}
-	// Parse an explicit backfill date in the host's own zone (data-model.md
-	// trusts the host clock) so it aligns with the "yesterday" branch.
+// parseBackfillDate resolves an explicit YYYY-MM-DD backfill target in the
+// host's own zone (data-model.md trusts the host clock). Anything else is
+// treated as the start of the compact form (ok=false); the "yesterday"
+// keyword is handled by the caller and resolved in the router.
+func parseBackfillDate(tok string) (*time.Time, bool) {
 	if d, err := time.ParseInLocation("2006-01-02", tok, time.Now().Location()); err == nil {
 		return &d, true
 	}

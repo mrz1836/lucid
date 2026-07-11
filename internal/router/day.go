@@ -97,14 +97,18 @@ func dayHasWeather(view storage.DayView) bool {
 }
 
 // resolveDayArg maps the optional `/day` argument to a logical date: empty is
-// today, "yesterday" is the day before, and anything else is taken as the
-// given YYYY-MM-DD (the storage read validates it).
+// today's logical day, "yesterday" is the logical day before, and anything
+// else is taken as the given YYYY-MM-DD (the storage read validates it). It
+// resolves "today"/"yesterday" on the rollover boundary — the same one events
+// file under — so a pre-rollover `/day` shows the day just lived, not an empty
+// new one.
 func resolveDayArg(arg string, now time.Time) string {
+	base := observations.LogicalBaseDate(now, observations.DefaultRolloverMin)
 	switch strings.TrimSpace(arg) {
 	case "":
-		return observations.DateString(observations.DateOf(now))
+		return observations.DateString(base)
 	case "yesterday":
-		return observations.DateString(observations.DateOf(now).AddDate(0, 0, -1))
+		return observations.DateString(base.AddDate(0, 0, -1))
 	default:
 		return strings.TrimSpace(arg)
 	}
