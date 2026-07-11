@@ -23,25 +23,37 @@ Lucid** (the binary writes only `~/.lucid/`):
 That is the full nightly close-out + morning status loop — the core of a
 morning/evening routine. Full syntax: [`usage/commands.md`](usage/commands.md).
 
-## The backlog (B, C, D)
+## B — Works today: autonomous sends (bell, L1/L2 tripwire, monthly heartbeat)
+
+The accountability half is now wired across the process boundary too — the bell,
+the morning tripwire (L1/L2), and the monthly witness heartbeat fire on their
+own, no human in the loop.
+
+- **Driver:** a `lucid scheduler run` daemon backed by a **go-flywheel** durable
+  job runtime (ADR-0004) registers the bell and the morning tripwire as
+  periodics on the chain's configured clocks (`bell_time`, `tripwire_time`; the
+  monthly heartbeat rides the tripwire run). The jobs are durable — a daemon
+  killed mid-evening still fires the missed tripwire next morning after a
+  supervised restart (bounded missed-fire catch-up). The path is deterministic
+  and **agent-free**: no model, exactly like the rest of the Engine.
+- **Notifier:** a concrete Discord-bot `scheduler.Notifier` resolves the logical
+  `"user"` / `"witness"` channels to real Discord channel IDs and posts the
+  pre-committed Engine templates via the bot REST API, reading its bot token from
+  the injected `LUCID_HARNESS_TOKEN` environment (ADR-0005 — the binary stays
+  credential-dumb; no real secret name lives in the repo). `"user"` routes to the
+  primary Lucid channel; `"witness"` routes to a dedicated witness channel.
+- **Deploy:** runs under `hush supervise` as a launchd sibling of the harness
+  gateway (Stage 6), with the managed-upgrade drain window (never between the
+  evening bell and the morning close-out) and the post-upgrade tripwire
+  self-check unchanged.
+- **Ceiling held:** the notifier sends **only** the pre-committed templates,
+  received already-rendered from the Engine — it composes nothing, imports no
+  model, and L2 stays content-free (streak / mode / storm only). These remain
+  the *only* autonomous messages Lucid sends.
+
+## The backlog (C, D)
 
 Each item is already designed in the docs; none fights the architecture.
-
-### B — Autonomous sends (bell, L1/L2 tripwire, monthly heartbeat) → chat
-
-- **State:** the scheduler logic is complete and correct (`internal/scheduler`),
-  but it has **no production driver** (called only from tests and the
-  managed-upgrade self-check) and **no concrete `Notifier`** (only the no-op
-  `selfCheckNotifier` in `internal/cli/upgrade.go`). `deploy/hush/supervise.tmpl`
-  already anticipates a standalone scheduler reading the harness token from a
-  vault-injected environment.
-- **Build:** a scheduler daemon entry point (a `lucid` scheduler subcommand, or a
-  `go-flywheel` job per ADR-0004) **+** a concrete `scheduler.Notifier` that
-  posts to the chat channel using the harness token (vaulted per ADR-0005). Run
-  it under `hush supervise` (Stage 6).
-- **Why it matters:** the accountability half — the bell and tripwire that make
-  the practice real rather than self-service. This is the only backlog item that
-  needs a secret inside Lucid (the channel-post token).
 
 ### C — Deterministic router intents with no CLI surface
 
@@ -79,12 +91,13 @@ reflection and writes files directly voids these guarantees.
 
 ## Suggested sequence
 
-1. **A — today.** Wire the harness to the deterministic verbs → full nightly
-   close-out + morning status over chat, immediately.
-2. **B.** Scheduler daemon + chat notifier → autonomous bell / tripwire /
-   heartbeat.
+1. **A — done.** The harness drives the deterministic verbs → full nightly
+   close-out + morning status over chat.
+2. **B — done.** Scheduler daemon + Discord-bot notifier → autonomous bell /
+   tripwire / heartbeat, under `hush supervise`.
 3. **C.** CLI verbs for `storm` / `profile` / `person` / `bootstrap` (cheap,
    deterministic).
 4. **D.** Provider adapter + serve/CLI surface for `checkin` / `reflect` / `ask`.
 
-After **B + D**, chat is purely transport.
+After **D**, chat is purely transport — B has already closed the
+autonomous-send half.

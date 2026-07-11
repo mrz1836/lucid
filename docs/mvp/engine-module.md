@@ -475,9 +475,14 @@ storms, and profile switches included.
 ## The tripwire (scheduled job)
 
 One scheduled job, morning-run at the active profile's
-`tripwire_time` (default 09:00), wired through the harness's native
-scheduler (cron) — the bell prompt, its evening sibling, likewise
-posts at the active profile's `bell_time`:
+`tripwire_time` (default 09:00) — the bell prompt, its evening
+sibling, likewise posts at the active profile's `bell_time`. In a
+**standalone install** this job runs on the **go-flywheel** durable
+scheduler ([ADR-0004](../adr/0004-core-dependencies.md)) — the `lucid
+scheduler run` daemon, which catches up a fire it missed while down on
+its next supervised start; under a chat harness the harness's native
+cron drives it instead. The runtime is swappable; the send semantics
+below are identical either way:
 
 1. Compute yesterday's logical day. If the **folded** day record
    (`corrections[]` applied) shows `completed: true` (or a

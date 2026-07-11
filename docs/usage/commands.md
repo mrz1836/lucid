@@ -256,6 +256,35 @@ lucid upgrade --channel beta
 UPDATE_CHANNEL=edge lucid upgrade
 ```
 
+### scheduler
+
+```
+lucid scheduler run [--db <path>]
+```
+
+Run the autonomous accountability daemon: a durable **go-flywheel**
+scheduler ([ADR-0004](../adr/0004-core-dependencies.md)) that fires the
+evening bell, the morning tripwire (the L1/L2 escalation ladder), and the
+monthly witness heartbeat on the active chain profile's clocks
+(`bell_time`, `tripwire_time`) — the only autonomous messages Lucid
+sends, each a pre-committed Engine template, never model-authored. The
+jobs are durable: a daemon killed mid-evening still fires the missed
+tripwire on its next supervised start (bounded missed-fire catch-up). The
+path is deterministic and agent-free — no LLM, ever. It is meant to run
+under `hush supervise` as a launchd sibling of the harness gateway,
+posting via a Discord bot whose token and target channel IDs are read
+from the injected environment (see
+[Environment variables](#environment-variables)).
+
+| Flag | Effect |
+|------|--------|
+| `--db <path>` | Path to the durable job store. Overrides `LUCID_SCHEDULER_DB`; defaults to a `flywheel.db` under the OS user-config dir, **outside** the `~/.lucid/` Ledger — disposable machinery, never the record (ADR-0004). |
+
+```sh
+lucid scheduler run
+lucid scheduler run --db /var/lib/lucid/scheduler.db
+```
+
 > Cobra also provides two built-ins that aren't specific to Lucid: `lucid help
 > [command]` for help on any command, and `lucid completion <bash|zsh|fish|powershell>`
 > to generate a shell-completion script.
@@ -309,3 +338,7 @@ templates, the only autonomous messages Lucid sends. See
 |----------|--------|
 | `LUCID_HOME` | Override the Ledger location (default `~/.lucid/`). |
 | `UPDATE_CHANNEL` | Default release channel for `lucid upgrade` (`stable` \| `beta` \| `edge`); `--channel` overrides it. |
+| `LUCID_HARNESS_TOKEN` | The chat-bot token `lucid scheduler run` posts with (a Discord bot token). Injected at spawn — vaulted in `hush` and never committed (ADR-0005); the binary reads it only from the environment. |
+| `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
+| `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2, monthly heartbeat). Injected, never committed. |
+| `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable job-store path; `--db` overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
