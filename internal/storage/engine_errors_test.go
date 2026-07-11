@@ -96,6 +96,16 @@ func TestAppendProfileEvent_WriteFails(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestAppendAnchor_WriteFails(t *testing.T) {
+	skipIfRoot(t)
+	a := newEngineAdapter(t)
+	require.NoError(t, os.Chmod(a.anchorsPath(), 0o400))
+	t.Cleanup(func() { _ = os.Chmod(a.anchorsPath(), 0o600) })
+
+	err := a.AppendAnchor(engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"})
+	assert.Error(t, err)
+}
+
 func TestRebuildEngineStatus_MissingChainErrors(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), ".lucid"))
 	_, err := a.RebuildEngineStatus(time.UTC)

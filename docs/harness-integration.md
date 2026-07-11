@@ -17,11 +17,21 @@ deterministic spine right now, with **no LLM provider and no secrets inside
 Lucid** (the binary writes only `~/.lucid/`):
 
 `log` · `closeout` (+ `skip` / `backfill` / `today`) · `mode` · `status` ·
-`obs` (+ enabled kinds) · `day` · `export` / `packet` · `validate` · `version` ·
-`upgrade`
+`obs` (+ enabled kinds) · `day` · `anchor add` · `metrics` · `export` / `packet` ·
+`validate` · `version` · `upgrade`
 
 That is the full nightly close-out + morning status loop — the core of a
 morning/evening routine. Full syntax: [`usage/commands.md`](usage/commands.md).
+
+**Deterministic metrics substrate.** `lucid metrics --json` is the read surface a
+harness consumes for the practice's honest numbers — current/longest streak,
+30-day adherence (with the 30/60/90 gate rollups), misses in window, and a
+days-since count for each recorded anchor. Every number comes from the Engine
+fold, so a harness (or a morning brief) renders them **without ever recomputing**
+— they can't drift or be softened downstream. The record verb that feeds it is
+`lucid anchor add <label> <date> [note]`, which appends a dated milestone to the
+append-only anchors store; both are deterministic and provider-free, exactly like
+the rest of the loop above.
 
 ## B — Works today: autonomous sends (bell, L1/L2 tripwire, monthly heartbeat)
 

@@ -364,3 +364,90 @@ func TestReadChainConfig_MissingErrors(t *testing.T) {
 	_, err = a.ReadEngineStatus()
 	require.Error(t, err)
 }
+
+func TestScaffoldEngine_WritesEmptyAnchors(t *testing.T) {
+	a := newEngineAdapter(t)
+	_, err := os.Stat(a.anchorsPath())
+	require.NoError(t, err)
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	assert.Equal(t, engine.AnchorVersion, log.Version)
+	assert.Empty(t, log.History)
+}
+
+func TestAppendAnchor_RoundTrips(t *testing.T) {
+	a := newEngineAdapter(t)
+	anchor := engine.Anchor{
+		Label:      "quit-x",
+		Date:       "2026-01-01",
+		Note:       "the last one",
+		RecordedAt: "2026-01-01T21:00:00Z",
+	}
+	require.NoError(t, a.AppendAnchor(anchor))
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	require.Len(t, log.History, 1)
+	assert.Equal(t, anchor, log.History[0])
+	assert.Equal(t, engine.AnchorVersion, log.Version)
+}
+
+func TestAppendAnchor_TwoForOneLabelBothPersist(t *testing.T) {
+	a := newEngineAdapter(t)
+	first := engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"}
+	second := engine.Anchor{Label: "quit-x", Date: "2025-12-15", RecordedAt: "2026-01-02T21:00:00Z"}
+	require.NoError(t, a.AppendAnchor(first))
+	require.NoError(t, a.AppendAnchor(second))
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	require.Len(t, log.History, 2, "append-only history keeps both records")
+
+	// Latest-wins folds to the most-recently-appended record for the label.
+	latest := engine.LatestAnchors(log)
+	require.Len(t, latest, 1)
+	assert.Equal(t, "2025-12-15", latest[0].Date)
+}
+
+func TestScaffoldEngine_IdempotentPreservesAnchors(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, a.AppendAnchor(engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"}))
+
+	// A second scaffold must not clobber the recorded anchor.
+	require.NoError(t, a.ScaffoldEngine())
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	require.Len(t, log.History, 1)
+	assert.Equal(t, "quit-x", log.History[0].Label)
+}
+
+func TestReadAnchors_MissingErrors(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid"))
+	_, err := a.ReadAnchors()
+	require.Error(t, err)
+}
+
+func TestReadAnchors_ParseError(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, os.WriteFile(a.anchorsPath(), []byte("{not json"), filePerm))
+	_, err := a.ReadAnchors()
+	require.Error(t, err)
+}
+
+func TestAppendAnchor_ReadFails(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid")) // never scaffolded ⇒ no anchors.json to read
+	err := a.AppendAnchor(engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"})
+	require.Error(t, err)
+}
+
+func TestAppendAnchor_DefaultsVersionWhenZero(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, os.WriteFile(a.anchorsPath(), []byte("{\n  \"version\": 0,\n  \"history\": []\n}\n"), filePerm))
+	require.NoError(t, a.AppendAnchor(engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"}))
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	assert.Equal(t, engine.AnchorVersion, log.Version, "a zero version is stamped to the current schema on append")
+	require.Len(t, log.History, 1)
+}

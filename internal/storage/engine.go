@@ -24,6 +24,7 @@ const (
 	witnessFile      = "witness.json"
 	stormFile        = "storm.json"
 	profileFile      = "profile.json"
+	anchorsFile      = "anchors.json"
 	engineStatusFile = "status.json"
 	engineDayExt     = ".json"
 	engineDayPrefix  = "day_"
@@ -45,14 +46,15 @@ func (a *Adapter) engineDir() string { return filepath.Join(a.home, engineDirNam
 func (a *Adapter) chainPath() string   { return filepath.Join(a.engineDir(), chainFile) }
 func (a *Adapter) profilePath() string { return filepath.Join(a.engineDir(), profileFile) }
 func (a *Adapter) stormPath() string   { return filepath.Join(a.engineDir(), stormFile) }
+func (a *Adapter) anchorsPath() string { return filepath.Join(a.engineDir(), anchorsFile) }
 func (a *Adapter) statusPath() string  { return filepath.Join(a.engineDir(), engineStatusFile) }
 
 // ScaffoldEngine creates the engine/ tree and writes the default
-// chain.json, witness.json, storm.json, and profile.json if missing
-// (engine-module.md §"Storage additions"). It is idempotent: existing
-// files are never overwritten, so a hand-edited chain.json survives a
-// re-scaffold. status.json is not written here — it is derived, produced
-// by the first RebuildEngineStatus.
+// chain.json, witness.json, storm.json, profile.json, and an empty
+// anchors.json if missing (engine-module.md §"Storage additions"). It is
+// idempotent: existing files are never overwritten, so a hand-edited
+// chain.json survives a re-scaffold. status.json is not written here — it is
+// derived, produced by the first RebuildEngineStatus.
 func (a *Adapter) ScaffoldEngine() error {
 	daysDir := filepath.Join(a.engineDir(), engineDaysDir)
 	if err := os.MkdirAll(daysDir, dirPerm); err != nil {
@@ -60,6 +62,10 @@ func (a *Adapter) ScaffoldEngine() error {
 	}
 
 	chainBytes, err := marshalJSON(engine.DefaultChain())
+	if err != nil {
+		return err
+	}
+	anchorsBytes, err := marshalJSON(engine.AnchorLog{Version: engine.AnchorVersion, History: []engine.Anchor{}})
 	if err != nil {
 		return err
 	}
@@ -71,6 +77,7 @@ func (a *Adapter) ScaffoldEngine() error {
 		{filepath.Join(a.engineDir(), witnessFile), []byte(witnessStub)},
 		{filepath.Join(a.engineDir(), stormFile), []byte(stormStub)},
 		{a.profilePath(), mustMarshalProfile(engine.DefaultProfileState())},
+		{a.anchorsPath(), anchorsBytes},
 	}
 	for _, f := range files {
 		if _, err := writeExcl(f.path, f.content); err != nil {
@@ -267,6 +274,46 @@ func (a *Adapter) AppendProfileEvent(sw engine.ProfileSwitch) error {
 	next := state.WithSwitch(sw)
 	if err := os.WriteFile(a.profilePath(), mustMarshalProfile(next), filePerm); err != nil {
 		return fmt.Errorf("storage: write profile.json: %w", err)
+	}
+	return nil
+}
+
+// ReadAnchors reads anchors.json (engine-module.md §anchors.json). A fresh
+// tree yields the scaffolded empty log; the full append-only history is
+// returned unfolded — latest-per-label is a read-time fold
+// ([engine.LatestAnchors]).
+func (a *Adapter) ReadAnchors() (engine.AnchorLog, error) {
+	b, err := os.ReadFile(a.anchorsPath())
+	if err != nil {
+		return engine.AnchorLog{}, fmt.Errorf("storage: read anchors.json: %w", err)
+	}
+	var log engine.AnchorLog
+	if err := json.Unmarshal(b, &log); err != nil {
+		return engine.AnchorLog{}, fmt.Errorf("storage: parse anchors.json: %w", err)
+	}
+	return log, nil
+}
+
+// AppendAnchor records one milestone by appending it to anchors.json's
+// history (engine-module.md §anchors.json, append-only; latest-per-label
+// wins at read). The body is never rewritten in place beyond the append —
+// mirroring [Adapter.AppendProfileEvent] — so a correction or a reset is a
+// new dated append, never an edit.
+func (a *Adapter) AppendAnchor(anchor engine.Anchor) error {
+	log, err := a.ReadAnchors()
+	if err != nil {
+		return err
+	}
+	if log.Version == 0 {
+		log.Version = engine.AnchorVersion
+	}
+	log.History = append(log.History, anchor)
+	content, err := marshalJSON(log)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(a.anchorsPath(), content, filePerm); err != nil {
+		return fmt.Errorf("storage: write anchors.json: %w", err)
 	}
 	return nil
 }
