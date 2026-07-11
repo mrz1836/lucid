@@ -352,7 +352,7 @@ hours never displace runtime execution
 
 | Source file | What it provides |
 |-------------|------------------|
-| [`../README.md`](../../README.md) | Emotional landing page. Preserved as-is. |
+| [`../README.md`](../../README.md) | Emotional landing page — the tease still leads — now wrapped in the standard project scaffolding (crown badges, navigation, install, command reference, docs index, security). |
 | [`../vision.md`](../vision.md) | Long-form product vision: the five roles, the aperture sharing model (§7), shared profiles. |
 | [`../architecture.md`](../architecture.md) | The system-level design: Mirror + Engine over one Ledger, ten principles, phased roadmap. **Where an older MVP page and the architecture disagree on scope, the architecture wins.** |
 | [`../engine.md`](../engine.md) | The behavioral engine specification (chains, modes, telemetry, accountability, governance). |
