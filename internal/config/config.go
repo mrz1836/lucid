@@ -37,28 +37,67 @@ type AgentVersions struct {
 	SafetyConsent string `json:"safety_consent"`
 }
 
+// KnownBackends are the provider backend names lucid.json accepts. A
+// single configured backend serves all four agent roles for this
+// pillar; the Codex CLI and any future backend register here without a
+// schema change (adr/0006-model-access.md §"Pinned invocation
+// contracts").
+var KnownBackends = map[string]bool{
+	"claude_cli": true,
+	"ollama":     true,
+}
+
+// ProviderRole reserves a per-role backend/model override in the
+// lucid.json provider block. ADR-0006 mandates that "which provider
+// backs which role is per-instance configuration"; the map is defined
+// and marshaled now but unused this pillar — one configured default
+// backend serves every role — so overrides drop in later without a
+// schema change (data-model.md §"lucid.json").
+type ProviderRole struct {
+	Backend string `json:"backend"`
+	Model   string `json:"model"`
+}
+
+// ProviderConfig selects the model backend for the agentic verbs
+// (/checkin, /reflect, /ask) — the config seam ADR-0006 requires.
+// Backend is a KnownBackends name (claude_cli or ollama); Model is that
+// backend's model; TimeoutSeconds bounds every call so a hung backend
+// degrades to a timeout rather than waiting forever; Endpoint is the
+// Ollama base URL (ignored by the Claude CLI backend). Roles reserves
+// per-role overrides (see ProviderRole). No model API key lives here,
+// or anywhere in lucid.json — auth is the vendor CLI's or the local
+// daemon's (data-model.md §"lucid.json").
+type ProviderConfig struct {
+	Backend        string                  `json:"backend"`
+	Model          string                  `json:"model"`
+	TimeoutSeconds int                     `json:"timeout_seconds"`
+	Endpoint       string                  `json:"endpoint"`
+	Roles          map[string]ProviderRole `json:"roles"`
+}
+
 // Config is the in-memory representation of lucid.json. Field order
 // matches the documented schema so a marshaled default file reads
 // identically to data-model.md §"lucid.json".
 type Config struct {
-	Version                  int           `json:"version"`
-	Home                     string        `json:"home"`
-	RawDir                   string        `json:"raw_dir"`
-	ProcessedDir             string        `json:"processed_dir"`
-	InsightsDir              string        `json:"insights_dir"`
-	PeopleDir                string        `json:"people_dir"`
-	SessionsDir              string        `json:"sessions_dir"`
-	ReflectionsDir           string        `json:"reflections_dir"`
-	WordlistPath             string        `json:"wordlist_path"`
-	RecentWindow             int           `json:"recent_window"`
-	RecentWindowMax          int           `json:"recent_window_max"`
-	IntakeMaxQuestions       int           `json:"intake_max_questions"`
-	AskInsightsCap           int           `json:"ask_insights_cap"`
-	AskReflectionsCap        int           `json:"ask_reflections_cap"`
-	ProposalPause            ProposalPause `json:"proposal_pause"`
-	PersonDominanceThreshold float64       `json:"person_dominance_threshold"`
-	AgentVersions            AgentVersions `json:"agent_versions"`
-	BootstrapMode            bool          `json:"bootstrap_mode"`
+	Version                  int            `json:"version"`
+	Home                     string         `json:"home"`
+	RawDir                   string         `json:"raw_dir"`
+	ProcessedDir             string         `json:"processed_dir"`
+	InsightsDir              string         `json:"insights_dir"`
+	PeopleDir                string         `json:"people_dir"`
+	SessionsDir              string         `json:"sessions_dir"`
+	ReflectionsDir           string         `json:"reflections_dir"`
+	WordlistPath             string         `json:"wordlist_path"`
+	RecentWindow             int            `json:"recent_window"`
+	RecentWindowMax          int            `json:"recent_window_max"`
+	IntakeMaxQuestions       int            `json:"intake_max_questions"`
+	AskInsightsCap           int            `json:"ask_insights_cap"`
+	AskReflectionsCap        int            `json:"ask_reflections_cap"`
+	ProposalPause            ProposalPause  `json:"proposal_pause"`
+	PersonDominanceThreshold float64        `json:"person_dominance_threshold"`
+	AgentVersions            AgentVersions  `json:"agent_versions"`
+	BootstrapMode            bool           `json:"bootstrap_mode"`
+	Provider                 ProviderConfig `json:"provider"`
 }
 
 // Default returns a fresh config carrying the documented default values
@@ -92,6 +131,13 @@ func Default() Config {
 			SafetyConsent: "safety-2026.05.0",
 		},
 		BootstrapMode: false,
+		Provider: ProviderConfig{
+			Backend:        "claude_cli",
+			Model:          "opus",
+			TimeoutSeconds: 120,
+			Endpoint:       "http://localhost:11434",
+			Roles:          map[string]ProviderRole{},
+		},
 	}
 }
 
@@ -170,6 +216,31 @@ func (c Config) Validate() error {
 	}
 	if c.AskReflectionsCap < 1 {
 		return fmt.Errorf("config: ask_reflections_cap must be >= 1, got %d", c.AskReflectionsCap)
+	}
+	if err := c.Provider.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validate reports whether the provider block is structurally usable: a
+// set backend must be a known name (KnownBackends) and the per-call
+// timeout must be at least one second so every model call is bounded.
+// Reserved per-role overrides are checked the same way when present,
+// even though they are unused this pillar. There is no clip rule — no
+// provider bound is documented as coercible — so an out-of-range value
+// is a hard error, not a silent pull-back.
+func (p ProviderConfig) validate() error {
+	if p.Backend != "" && !KnownBackends[p.Backend] {
+		return fmt.Errorf("config: provider.backend %q is not a known backend", p.Backend)
+	}
+	if p.TimeoutSeconds < 1 {
+		return fmt.Errorf("config: provider.timeout_seconds must be >= 1, got %d", p.TimeoutSeconds)
+	}
+	for role, override := range p.Roles {
+		if override.Backend != "" && !KnownBackends[override.Backend] {
+			return fmt.Errorf("config: provider.roles[%q].backend %q is not a known backend", role, override.Backend)
+		}
 	}
 	return nil
 }

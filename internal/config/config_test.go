@@ -91,8 +91,101 @@ func TestClip_ZeroCeilingFallsBackToDefaultMax(t *testing.T) {
 	assert.Equal(t, 14, out.RecentWindow)
 }
 
+// TestDefault_ProviderBlock pins the shipped provider defaults
+// (data-model.md §"lucid.json"; ADR-0006): the zero-setup Claude CLI
+// backend on model opus, a 120s call bound, the Ollama base URL, and an
+// empty reserved per-role map.
+func TestDefault_ProviderBlock(t *testing.T) {
+	p := Default().Provider
+	assert.Equal(t, "claude_cli", p.Backend)
+	assert.Equal(t, "opus", p.Model)
+	assert.Equal(t, 120, p.TimeoutSeconds)
+	assert.Equal(t, "http://localhost:11434", p.Endpoint)
+	assert.NotNil(t, p.Roles)
+	assert.Empty(t, p.Roles, "roles map is reserved but empty this pillar")
+}
+
+// TestProvider_MarshalsDocumentedShape asserts a marshaled default
+// config carries the provider block exactly as documented, including the
+// reserved roles map rendering as an empty object (not null).
+func TestProvider_MarshalsDocumentedShape(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+
+	var m struct {
+		Provider struct {
+			Backend        string         `json:"backend"`
+			Model          string         `json:"model"`
+			TimeoutSeconds int            `json:"timeout_seconds"`
+			Endpoint       string         `json:"endpoint"`
+			Roles          map[string]any `json:"roles"`
+		} `json:"provider"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.Equal(t, "claude_cli", m.Provider.Backend)
+	assert.Equal(t, "opus", m.Provider.Model)
+	assert.EqualValues(t, 120, m.Provider.TimeoutSeconds)
+	assert.Equal(t, "http://localhost:11434", m.Provider.Endpoint)
+	assert.NotNil(t, m.Provider.Roles, "roles marshals as {} not null")
+	assert.Empty(t, m.Provider.Roles)
+
+	// The reserved roles map serializes as an empty JSON object.
+	assert.Contains(t, string(b), `"roles": {}`)
+	// No API key leaks into the config, ever.
+	assert.NotContains(t, string(b), "api_key")
+	assert.NotContains(t, string(b), "apikey")
+}
+
+// TestProvider_RoundTripWithRoleOverride proves a hand-edited per-role
+// override survives a marshal/unmarshal cycle even though the router
+// does not consume it this pillar — the schema reserves it.
+func TestProvider_RoundTripWithRoleOverride(t *testing.T) {
+	c := Default()
+	c.Provider.Roles = map[string]ProviderRole{
+		"reflection": {Backend: "ollama", Model: "qwen2.5:14b"},
+	}
+	b, err := c.Marshal()
+	require.NoError(t, err)
+
+	got, err := Unmarshal(b)
+	require.NoError(t, err)
+	assert.Equal(t, c, got)
+	assert.Equal(t, "ollama", got.Provider.Roles["reflection"].Backend)
+	assert.Equal(t, "qwen2.5:14b", got.Provider.Roles["reflection"].Model)
+}
+
 func TestValidate_Good(t *testing.T) {
 	require.NoError(t, Default().Validate())
+}
+
+// TestValidate_ProviderFailures covers the provider block rules Validate
+// enforces: an unknown backend name (top-level or in a reserved role
+// override) and a non-positive per-call timeout are hard errors.
+func TestValidate_ProviderFailures(t *testing.T) {
+	tests := map[string]func(*Config){
+		"unknown backend":      func(c *Config) { c.Provider.Backend = "gpt5_cli" },
+		"zero timeout":         func(c *Config) { c.Provider.TimeoutSeconds = 0 },
+		"negative timeout":     func(c *Config) { c.Provider.TimeoutSeconds = -1 },
+		"unknown role backend": func(c *Config) { c.Provider.Roles = map[string]ProviderRole{"intake": {Backend: "nope"}} },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			mutate(&c)
+			assert.Error(t, c.Validate())
+		})
+	}
+}
+
+// TestValidate_ProviderKnownBackends confirms both shipped backends pass
+// validation, and that an empty backend is tolerated (the caller falls
+// back to the documented default rather than erroring at load).
+func TestValidate_ProviderKnownBackends(t *testing.T) {
+	for _, backend := range []string{"claude_cli", "ollama", ""} {
+		c := Default()
+		c.Provider.Backend = backend
+		assert.NoError(t, c.Validate(), "backend %q should validate", backend)
+	}
 }
 
 func TestValidate_Failures(t *testing.T) {
