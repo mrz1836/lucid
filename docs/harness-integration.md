@@ -3,8 +3,8 @@
 Lucid's core is one Go binary. A chat harness (a Discord bot, a terminal agent,
 etc.) drives it by invoking the same commands any surface uses — it never
 reimplements Lucid logic. This page records what is wired across the
-**process boundary** today and the backlog to reach a full "communicate only
-through chat" deployment.
+**process boundary**: with pillars A–D landed, the full "communicate only through
+chat" deployment is now reached.
 
 It complements [`mvp/local-runtime.md`](mvp/local-runtime.md) (the harness
 model) and [`mvp/build-plan.md`](mvp/build-plan.md) (Stages 5–6). Code pointers
@@ -81,23 +81,41 @@ historical-entry mode).
   (match / no-match / ambiguous / off-limits are read outcomes, never errors);
   write-verb rejections exit `1`; usage errors exit `2`.
 
-## The backlog (D)
+## D — Works today: the agentic Mirror verbs (`/checkin`, `/reflect`, `/ask`)
 
-Already designed in the docs; it does not fight the architecture.
+The Mirror's reflective half is now reachable end-to-end. The router methods
+(`Checkin` / `Structure` / `Validate` / `Reflect` / `Ask`) that were previously
+called **only from tests** now have both a concrete model provider behind them and
+an invocation surface in front of them — every agent-authored message still routed
+through the Safety/Consent gate.
 
-### D — Agentic Mirror verbs (`/checkin`, `/reflect`, `/ask`)
+- **Concrete provider (ADR-0006 — no API keys).** Two `provider.Provider` backends
+  ship behind a `lucid.json` **config seam** (the `provider` block — see
+  [`usage/commands.md`](usage/commands.md) and [`mvp/data-model.md`](mvp/data-model.md)):
+  - **Claude Code CLI** (`backend: "claude_cli"`, the zero-setup default) — a fresh
+    one-shot `claude -p --output-format json --model <model>` per call (default
+    `opus`), the JSON envelope's `.result` becoming the completion. On-host
+    subscription OAuth; nothing to pull.
+  - **Local Ollama** (`backend: "ollama"`, the full-sovereignty path) — a
+    non-streaming `POST /api/chat` to the local daemon (default `qwen2.5:14b`),
+    with **every call deadline-bounded** so the known binary-skew hang maps to
+    `ErrTimeout` rather than waiting forever; an unreachable daemon or an unpulled
+    model maps to `ErrUnavailable`.
 
-- **State:** the agent code is implemented and tested, but the router methods
-  (`Checkin` / `Reflect` / `Ask` / `Structure` / …) are called **only from
-  tests**; there is no CLI/serve/RPC surface exposing them, and **no concrete LLM
-  provider** (`internal/provider` is the interface + a test fake only).
-- **Build:** (a) a concrete `provider.Provider` — per ADR-0006, an OAuth'd vendor
-  CLI or a local model, **no API keys**; (b) an invocation surface. `/checkin` is
-  multi-turn (Intake asks 2–4 follow-ups via a `Responder`), so a small
-  `lucid serve` stdin/JSON protocol fits it better than a one-shot verb;
-  `/reflect` and `/ask` are one-shot and can be plain subcommands.
-- **Why it matters:** the Mirror's reflective conversation (capture → one
-  resonance-gated pattern → recall).
+  A single configured backend serves all four agent roles this pillar; the config
+  type reserves per-role backend/model overrides so ADR-0006's per-role mandate can
+  be exercised later without a contract change. The `provider.Fake` stays for tests
+  — no test requires live vendor auth.
+- **Invocation surface.** `/checkin` is multi-turn (Intake asks 2–4 follow-ups via
+  a `Responder`, then the resonance/rule gate needs a user yes/no), so it rides a
+  small **`lucid serve`** stdin/JSON line protocol that carries both the follow-ups
+  and the resonance/rule confirmation, orchestrating Checkin → Structure → Validate.
+  `/reflect [gate]` and `/ask <question>` are one-shot and ship as the plain
+  subcommands **`lucid reflect`** and **`lucid ask`**. Full syntax:
+  [`usage/commands.md`](usage/commands.md).
+- **Why it matters:** the Mirror's reflective conversation is real, not just
+  specified — capture → one resonance-gated pattern → recall, all through the router
+  and the Safety gate, with provenance.
 
 ## Boundary caution (non-negotiable)
 
@@ -119,7 +137,9 @@ reflection and writes files directly voids these guarantees.
 3. **C — done.** CLI verbs for `storm` / `profile` / `person` / `bootstrap` (cheap,
    deterministic) → the harness drives every deterministic router intent by shelling
    out.
-4. **D.** Provider adapter + serve/CLI surface for `checkin` / `reflect` / `ask`.
+4. **D — done.** Provider adapter (two backends behind the config seam) + the
+   serve/CLI surface for `checkin` / `reflect` / `ask`, every message through the
+   Safety gate.
 
-After **D**, chat is purely transport — B has already closed the
-autonomous-send half.
+With **D** landed, chat is purely transport — B already closed the autonomous-send
+half, so the harness now reimplements no Lucid logic at all.

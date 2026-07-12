@@ -306,6 +306,15 @@ thread and the last two are quality-of-life affordances.
 | `/ask <question>` | Read-only query against `~/.lucid/insights/` and `~/.lucid/reflections/`. Returns surfaces, not new patterns. | Diagnostic / navigation. |
 | `/bootstrap` | Enter a temporary mode for capturing past, formative entries with explicit historical timestamps. Pattern proposals are suppressed during bootstrap. Exit with `/bootstrap done`. | Optional. Mirrors the bootstrap mode in `technical-spec.md` at MVP fidelity. |
 
+The three agentic Mirror verbs (`/checkin`, `/reflect`, `/ask`) now reach the core
+through a shipped **CLI/serve surface** — `lucid serve` drives the multi-turn
+`/checkin` over a stdin/JSON protocol, and one-shot `lucid reflect` / `lucid ask`
+back the other two — so the harness shells out to them exactly as it does the
+deterministic verbs, still never bypassing the router or the Safety/Consent gate
+([`../harness-integration.md`](../harness-integration.md) §D). The model call lives
+**inside the binary** behind `provider.Provider` (ADR-0006, no API keys), never in
+the harness agent.
+
 Anything not on this list is post-MVP. New commands belong in
 [`claude-code-workflow.md`](claude-code-workflow.md) as "candidates,"
 not in the harness as silent additions. This protects

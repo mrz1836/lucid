@@ -8,6 +8,17 @@ without rereading the rest of the doc set.
 A contract here is binding. If a future change cannot be expressed as a
 diff against this page, it is a redesign, not a feature.
 
+> **Where these calls now run.** Each "one LLM call" below goes through the single
+> `provider.Provider` seam (ADR-0006), which now ships **two** concrete backends —
+> the Claude Code CLI and a local Ollama daemon — selected by the `lucid.json`
+> `provider` block, with the `provider.Fake` still standing in for tests. The
+> contracts are driven end-to-end by the shipped invocation surface: `lucid serve`
+> for the multi-turn `/checkin`, and one-shot `lucid reflect` / `lucid ask` — every
+> agent-authored message still passing the Safety/Consent gate
+> ([`../harness-integration.md`](../harness-integration.md) §D,
+> [`../usage/commands.md`](../usage/commands.md)). None of this changes an agent's
+> inputs, outputs, or allowed slice below.
+
 Every required-now contract has the same six sections:
 
 1. **Purpose** — the one-line job.

@@ -115,8 +115,34 @@ Confirm the writes appear under `~/.lucid/` (`raw/`, `engine/days/`,
 `observations/`). If a message returns "command not found," revisit step 2
 (`PATH`/`HOME`).
 
+## Live provider smoke (pillar D)
+
+> **Stub — the full runbook lands with Task 10 of the provider-adapter build
+> ([`../harness-integration.md`](../harness-integration.md) §D).** This section will
+> hold the **one-time manual live-smoke** that proves the two real model backends
+> complete the Mirror end-to-end. It is a **manual** check: **CI never runs it** —
+> ADR-0006 forbids any test requiring live vendor auth, so the automated end-to-end
+> runs entirely on the `provider.Fake`.
+
+Once filled, the smoke covers **both** backends by flipping the `lucid.json`
+`provider` block:
+
+- **Claude Code CLI** (`backend: "claude_cli"`, default) — precondition: `claude`
+  OAuth live.
+- **Local Ollama** (`backend: "ollama"`, `model: qwen2.5:14b`) — preconditions:
+  `ollama serve` running and the model pulled.
+
+For each backend it drives one `lucid serve` `/checkin` to a validated,
+resonance-gated insight, one `lucid ask`, and one `lucid reflect`, recording the
+session output (or an honest `ErrTimeout` / `ErrUnavailable` if a backend is down).
+Provider block + per-verb reference: [`commands.md`](commands.md); per-backend
+invocation contract: [`../adr/0006-model-access.md`](../adr/0006-model-access.md).
+
 ## Not covered here
 
-- **Autonomous bell/tripwire → chat** (pillar B) and the **agentic verbs**
-  `/checkin` · `/reflect` · `/ask` (pillar D) — both are builds, not wiring. See
+- **Autonomous bell/tripwire → chat** (pillar B) — a build, not wiring. See
   [`../harness-integration.md`](../harness-integration.md).
+- **The agentic verbs' build** (pillar D — the provider adapter and the
+  `serve` / `reflect` / `ask` surface) lives in the core, not the harness wiring; its
+  one-time live-smoke is the [Live provider smoke](#live-provider-smoke-pillar-d)
+  section above. See [`../harness-integration.md`](../harness-integration.md) §D.

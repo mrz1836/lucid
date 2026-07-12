@@ -446,6 +446,86 @@ lucid bootstrap done
 lucid bootstrap --json
 ```
 
+### serve
+
+```
+lucid serve [--json]
+```
+
+Run the **interactive `/checkin` flow** over a line-oriented stdin/JSON protocol —
+the one Mirror verb that is multi-turn (Intake asks 2–4 follow-ups, then the
+resonance gate needs a yes/no and any attached rule confirmed). A harness drives one
+session per connection: the server emits `{"type":"question"|"proposal"|"rule"|"ack"|
+"error", …}` frames and reads `{"type":"answer"|"resonance"|"rule_answer"|"control",
+…}` back, orchestrating Checkin → Structure → Validate to a resonance-gated insight
+with provenance. **Provider-backed** — it builds the model backend from the
+`lucid.json` `provider` block (see [Provider configuration](#provider-configuration-agentic-verbs))
+and routes every agent-authored message through the Safety/Consent gate. `/done` or
+`/cancel` control frames end a session.
+
+```sh
+lucid serve
+```
+
+### reflect
+
+```
+lucid reflect [gate] [--json]
+```
+
+Weekly **recall** of your validated insights ("still resonating?", and whether any
+attached rule still stands). The `gate` variant, at gate/quarterly cadence, recalls
+every accepted insight and appends the deterministic panel numbers. One-shot and
+read-mostly: it writes the ISO-week reflection record and appends rule-status
+responses, but **never proposes a new pattern**. Surfaces default to `unanswered`; an
+optional stdin/JSON batch of per-insight answers (confirm / soften / retire, plus
+kept / lapsed for ruled insights) is applied in one shot when supplied.
+**Provider-backed** (the `provider` block); every surfaced line passes the
+Safety/Consent gate.
+
+```sh
+lucid reflect
+lucid reflect gate --json
+```
+
+### ask
+
+```
+lucid ask <question...>
+```
+
+Grounded, cited **Q&A** over your validated insights and weekly reflections only —
+surfaces, never new patterns, never advice. Read-only: it writes nothing. Prints the
+answer with in-slice citations, the fixed calm fallback when the Safety gate holds an
+out-of-slice citation, or an "not enough validated material yet" message when the
+slice is empty. Trailing arguments are joined, so quoting the question is optional.
+**Provider-backed** (the `provider` block); the answer passes the Safety/Consent
+gate.
+
+```sh
+lucid ask "what tends to trip me up in group settings?"
+lucid ask what did I decide about mornings --json
+```
+
+### Provider configuration (agentic verbs)
+
+`serve`, `reflect`, and `ask` are the only **provider-backed** verbs — they need a
+model backend, configured by the `provider` block in `lucid.json` (ADR-0006, no API
+keys):
+
+| Field | Meaning |
+|-------|---------|
+| `backend` | `claude_cli` (default) — a fresh one-shot `claude -p --output-format json --model <model>`; on-host subscription OAuth, zero setup. Or `ollama` — a non-streaming `POST <endpoint>/api/chat` to the local daemon; needs `ollama serve` up and the model pulled. |
+| `model` | The backend's model. Default `opus` (Claude CLI); e.g. `qwen2.5:14b` (Ollama). |
+| `timeout_seconds` | Bounds **every** call, so a hung backend degrades to a timeout instead of waiting forever. Default `120`. |
+| `endpoint` | Ollama base URL (default `http://localhost:11434`); ignored by the Claude CLI backend. |
+| `roles` | Reserved per-role `{backend, model}` overrides. Empty by default — one configured backend serves all four agent roles for now. |
+
+An unreachable backend or a missing model surfaces as "no model reachable" rather
+than blocking the loop (the Engine and deterministic verbs never need a model). Full
+field table: [`../mvp/data-model.md`](../mvp/data-model.md) §`lucid.json`; per-backend
+invocation contract: [`../adr/0006-model-access.md`](../adr/0006-model-access.md).
+
 > Cobra also provides two built-ins that aren't specific to Lucid: `lucid help
 > [command]` for help on any command, and `lucid completion <bash|zsh|fish|powershell>`
 > to generate a shell-completion script.
@@ -458,13 +538,16 @@ binary does not expose them. The harness maps a message to a router intent and
 shells out to the same core — it invents no command of its own. The agentic
 verbs (marked *provider-backed*) additionally need an LLM provider configured.
 
-### Verbs with no CLI equivalent
+### The provider-backed Mirror verbs
 
-Only the three *provider-backed* Mirror verbs still have no CLI surface — they
-need an LLM provider and land behind a serve/CLI surface later (see
-[`../harness-integration.md`](../harness-integration.md) §D). The deterministic
-`/storm`, `/profile`, `/person`, and `/bootstrap` now shell to the CLI verbs above
-(listed under [Verbatim passthroughs](#verbatim-passthroughs)).
+The three *provider-backed* Mirror verbs now shell to a CLI/serve surface like every
+other verb (see [`../harness-integration.md`](../harness-integration.md) §D):
+`/checkin` drives [`lucid serve`](#serve) — its multi-turn thread rides the
+stdin/JSON protocol — while `/reflect [gate]` and `/ask` map one-shot to
+[`lucid reflect`](#reflect) and [`lucid ask`](#ask). They differ from the
+deterministic verbs only in needing a configured `provider` block (an LLM backend,
+ADR-0006). The deterministic `/storm`, `/profile`, `/person`, and `/bootstrap` shell
+to their CLI verbs above (listed under [Verbatim passthroughs](#verbatim-passthroughs)).
 
 | Command | Does |
 |---------|------|
