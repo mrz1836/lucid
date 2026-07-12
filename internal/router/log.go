@@ -16,10 +16,12 @@ const (
 )
 
 // LogRequest carries the inputs for one /log turn. Now, Source, Harness,
-// ChannelID, and ThreadID are supplied by the harness that received the
-// command; a zero Now defaults to the wall clock and an empty
+// ChannelID, ThreadID, Agent, and Model are supplied by the harness that
+// received the command; a zero Now defaults to the wall clock and an empty
 // Source/Harness defaults to the local CLI surface, so a bare CLI call
-// still produces a well-formed entry.
+// still produces a well-formed entry. A non-empty Source/Harness is
+// normalized through the shared harness-token grammar; Agent and Model are
+// optional provenance recorded on the session record when supplied.
 type LogRequest struct {
 	Text      string
 	Now       time.Time
@@ -27,6 +29,8 @@ type LogRequest struct {
 	Harness   string
 	ChannelID string
 	ThreadID  string
+	Agent     string
+	Model     string
 }
 
 // LogResult reports what a /log turn wrote and the acknowledgement to
@@ -50,7 +54,18 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	source := orDefaultSource(req.Source)
+
+	// Resolve the provenance tokens before writing anything: a malformed
+	// source/harness must leave nothing on disk (error-states.md §St-1), so
+	// both are validated up front, ahead of the raw write that lands first.
+	source, err := resolveSource(req.Source)
+	if err != nil {
+		return LogResult{}, fmt.Errorf("invalid source; nothing was saved: %w", err)
+	}
+	harness, err := resolveSource(req.Harness)
+	if err != nil {
+		return LogResult{}, fmt.Errorf("invalid harness; nothing was saved: %w", err)
+	}
 
 	res, err := r.store.WriteRaw(storage.RawEntry{
 		RecordedAt:          now,
@@ -71,9 +86,11 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 		ID:            res.SessionID,
 		StartedAt:     now,
 		EndedAt:       now,
-		Harness:       orDefaultSource(req.Harness),
+		Harness:       harness,
 		ChannelID:     req.ChannelID,
 		ThreadID:      req.ThreadID,
+		Agent:         req.Agent,
+		Model:         req.Model,
 		Command:       commandLog,
 		RawEntryIDs:   []string{res.RawID},
 		AgentVersions: r.cfg.AgentVersions,
@@ -108,4 +125,17 @@ func orDefaultSource(v string) string {
 		return sourceDefault
 	}
 	return v
+}
+
+// resolveSource resolves a /log source or harness token: an empty value takes
+// the local CLI default, and a non-empty value is normalized through the
+// shared harness-token grammar (storage.NormalizeSource) so a malformed token
+// is rejected honestly rather than silently coerced to cli. It backs both the
+// source and harness fields — the two "harness identifier" tokens — and
+// returns an error the caller surfaces before anything is written.
+func resolveSource(raw string) (string, error) {
+	if raw == "" {
+		return orDefaultSource(raw), nil
+	}
+	return storage.NormalizeSource(raw)
 }

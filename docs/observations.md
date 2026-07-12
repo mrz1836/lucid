@@ -125,6 +125,22 @@ Envelope semantics, binding:
   [`scientist.md`](scientist.md) §3), or `enricher:<name>` —
   provenance for every event, so machine-added context is always
   distinguishable from human testimony.
+* **Harness provenance rides in `payload.provenance`.** When a capture
+  arrives through a chat harness rather than a terminal, an **optional**
+  `payload.provenance` sub-object — `{harness?, agent?, model?, channel?}`,
+  every field optional — records who relayed it (for example
+  `{"harness": "discord", "agent": "agent-x", "model": "model-y",
+  "channel": "<channel>"}`). It lives in `payload` precisely because the
+  **envelope never changes** (`schema` stays `1`, no new top-level field)
+  and the `refs` contract is id-typed only — `payload` is the sanctioned
+  home for new needs. The event's own `source` field is **unchanged**
+  (`microlog`, `checkin`, …, `enricher:<name>`); `provenance` is
+  orthogonal to it, not a replacement. The harness token in
+  `payload.provenance.harness` is validated by the **same** normalization
+  rule as a raw entry's `source` — one grammar, not two (trimmed,
+  lowercased, charset-restricted). **Byte-stability:** a capture with no
+  harness provenance omits the `provenance` key entirely, so every
+  existing event is byte-unchanged.
 
 ## 3. Observation kinds (initial vocabulary)
 

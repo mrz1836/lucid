@@ -88,7 +88,7 @@ func TestDayView_TodayBeforeRolloverJoinsLogicalDay(t *testing.T) {
 	require.NoError(t, r.Store().ScaffoldEngine())
 	now := time.Date(2026, 7, 11, 0, 52, 0, 0, edt) // before the 04:00 rollover
 
-	logged, err := r.Capture(CaptureRequest{Tokens: []string{"pain", "6", "knee"}, Now: now, Source: "cli"})
+	logged, err := r.Capture(CaptureRequest{Tokens: []string{"pain", "6", "knee"}, Now: now})
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-10", logged.LogicalDate, "a pre-rollover capture files under the prior logical day")
 

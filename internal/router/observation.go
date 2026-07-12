@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // obsVerb is the generic capture prefix (`/obs <kind> …`); when the caller
@@ -16,10 +17,19 @@ const obsVerb = "obs"
 // Tokens is the whitespace-split argument list including the leading verb
 // (e.g. ["pain","6","knee"], ["obs","where","Lisbon"]); the router resolves
 // the kind and parses the rest deterministically — no LLM in the path.
+// Harness, Agent, Model, and Channel are optional harness provenance: when a
+// capture arrives through a chat harness rather than a terminal they are
+// stamped into the event's payload.provenance sub-object (observations.md §2),
+// leaving the frozen envelope's own source at microlog. A bare terminal
+// capture leaves them empty, so the event carries no provenance key and stays
+// byte-identical to a pre-provenance event.
 type CaptureRequest struct {
-	Tokens []string
-	Now    time.Time
-	Source string
+	Tokens  []string
+	Now     time.Time
+	Harness string
+	Agent   string
+	Model   string
+	Channel string
 }
 
 // CaptureResult reports what a capture wrote and the inventory-only ack.
@@ -68,6 +78,15 @@ func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 		return CaptureResult{Kind: kind, Rejected: true, Ack: observations.EnableHint(kind)}, nil
 	}
 
+	// Resolve harness provenance before any write: a malformed harness token
+	// must leave nothing on disk (observations.md §2 byte-stability + honest
+	// reject), so it is validated ahead of the place-registry write in
+	// resolvePlace and the event append.
+	provenance, err := buildProvenance(req)
+	if err != nil {
+		return CaptureResult{}, err
+	}
+
 	parsed := observations.ParseMicrolog(observations.ParseInput{
 		Kind:      kind,
 		Class:     class,
@@ -81,7 +100,7 @@ func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 		return CaptureResult{}, err
 	}
 
-	ev, err := r.store.AppendObservation(r.buildEvent(parsed, now))
+	ev, err := r.store.AppendObservation(r.buildEvent(parsed, now, provenance))
 	if err != nil {
 		return CaptureResult{}, fmt.Errorf("could not log the observation; nothing was saved: %w", err)
 	}
@@ -149,8 +168,10 @@ func (r *Router) resolvePlace(parsed *observations.ParseResult, now time.Time) (
 
 // buildEvent assembles the frozen envelope from a parse result, deriving the
 // logical day under the MVP default rollover so it joins the Engine's civil
-// day. The storage adapter assigns the id.
-func (r *Router) buildEvent(parsed observations.ParseResult, now time.Time) observations.Event {
+// day. The storage adapter assigns the id. Harness provenance, when supplied,
+// rides in payload.provenance — the envelope never grows a top-level field
+// (observations.md §2), and the event's own source stays microlog.
+func (r *Router) buildEvent(parsed observations.ParseResult, now time.Time, provenance map[string]any) observations.Event {
 	ev := observations.Event{
 		Schema:              observations.Schema,
 		Kind:                parsed.Kind,
@@ -167,7 +188,43 @@ func (r *Router) buildEvent(parsed observations.ParseResult, now time.Time) obse
 		end := parsed.OccurredEnd.Format(time.RFC3339)
 		ev.OccurredAtEnd = &end
 	}
+	// Stamp provenance only when the harness supplied any; a bare capture
+	// omits the key entirely so the on-disk event is byte-identical to a
+	// pre-provenance event (observations.md §2 byte-stability).
+	if len(provenance) > 0 {
+		ev.Payload["provenance"] = provenance
+	}
 	return ev
+}
+
+// buildProvenance assembles the optional payload.provenance sub-object from a
+// capture's harness provenance (observations.md §2 "{harness?, agent?, model?,
+// channel?}"). The harness token is validated through the shared
+// storage.NormalizeSource grammar — one grammar across raw entries and
+// observations, not two — so a malformed token is rejected honestly and the
+// caller writes nothing. Agent, model, and channel are opaque identifiers
+// recorded only when supplied. When no provenance is supplied it returns an
+// empty (non-nil) map, so buildEvent's len guard omits the provenance key
+// entirely and every existing event stays byte-identical.
+func buildProvenance(req CaptureRequest) (map[string]any, error) {
+	prov := map[string]any{}
+	if req.Harness != "" {
+		harness, err := storage.NormalizeSource(req.Harness)
+		if err != nil {
+			return prov, fmt.Errorf("invalid harness; nothing was saved: %w", err)
+		}
+		prov["harness"] = harness
+	}
+	if req.Agent != "" {
+		prov["agent"] = req.Agent
+	}
+	if req.Model != "" {
+		prov["model"] = req.Model
+	}
+	if req.Channel != "" {
+		prov["channel"] = req.Channel
+	}
+	return prov, nil
 }
 
 // captureAck builds the inventory ack: "logged" plus the id, nothing

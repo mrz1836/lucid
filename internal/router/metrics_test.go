@@ -131,7 +131,8 @@ func TestMetrics_FallsBackToDefaultClocks(t *testing.T) {
 	require.NoError(t, r.store.ScaffoldEngine())
 	require.NoError(t, os.WriteFile(
 		filepath.Join(home, "engine", "profile.json"),
-		[]byte(`{"active":"ghost","history":[]}`), 0o600))
+		[]byte(`{"active":"ghost","history":[]}`), 0o600,
+	))
 
 	_, err := r.AnchorAdd(AnchorAddRequest{Label: "quit-x", Date: "2026-07-01", Now: atUTC(2026, 7, 5, 22, 0)})
 	require.NoError(t, err)

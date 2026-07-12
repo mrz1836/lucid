@@ -34,6 +34,39 @@ func enableAllObsKinds(t *testing.T) string {
 	return home
 }
 
+// readObsEvents walks the observations tree under home and returns every
+// appended event, so a CLI capture test can assert what actually landed on
+// disk (including payload.provenance).
+func readObsEvents(t *testing.T, home string) []observations.Event {
+	t.Helper()
+	var events []observations.Event
+	err := filepath.WalkDir(filepath.Join(home, "observations"), func(p string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+			return nil
+		}
+		data, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			ev, uerr := observations.UnmarshalEventLine([]byte(line))
+			if uerr != nil {
+				return uerr
+			}
+			events = append(events, ev)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	return events
+}
+
 func TestObs_CLI_CapturesAndAcks(t *testing.T) {
 	home := enableAllObsKinds(t)
 
@@ -82,6 +115,88 @@ func TestObs_CLI_UnknownKindErrors(t *testing.T) {
 	enableAllObsKinds(t)
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "nonsense", "x")
 	require.Error(t, err, "an unknown observation kind is a runtime error")
+}
+
+// TestObs_CLI_SourceFlagStampsProvenance: --source/--agent/--model/--channel
+// flags land in payload.provenance with the harness normalized (AC-9).
+func TestObs_CLI_SourceFlagStampsProvenance(t *testing.T) {
+	home := enableAllObsKinds(t)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"obs", "--source", "Discord", "--agent", "agent-x",
+		"--model", "model-y", "--channel", "<channel>", "pain", "6", "knee")
+	require.NoError(t, err)
+
+	events := readObsEvents(t, home)
+	require.Len(t, events, 1)
+	prov, ok := events[0].Payload["provenance"].(map[string]any)
+	require.True(t, ok, "payload.provenance is stamped from the flags")
+	assert.Equal(t, "discord", prov["harness"], "harness normalized through the shared grammar")
+	assert.Equal(t, "agent-x", prov["agent"])
+	assert.Equal(t, "model-y", prov["model"])
+	assert.Equal(t, "<channel>", prov["channel"])
+}
+
+// TestObs_CLI_EnvFallbackStampsProvenance: LUCID_* env fills provenance when no
+// flag is set (flag > env > default) (AC-9).
+func TestObs_CLI_EnvFallbackStampsProvenance(t *testing.T) {
+	home := enableAllObsKinds(t)
+	t.Setenv("LUCID_SOURCE", "discord")
+	t.Setenv("LUCID_AGENT", "agent-x")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "pain", "6", "knee")
+	require.NoError(t, err)
+
+	events := readObsEvents(t, home)
+	require.Len(t, events, 1)
+	prov, ok := events[0].Payload["provenance"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "discord", prov["harness"])
+	assert.Equal(t, "agent-x", prov["agent"])
+}
+
+// TestObs_CLI_FlagBeatsEnvForProvenance: an explicit flag overrides the env
+// fallback (AC-9 precedence).
+func TestObs_CLI_FlagBeatsEnvForProvenance(t *testing.T) {
+	home := enableAllObsKinds(t)
+	t.Setenv("LUCID_SOURCE", "env-source")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "--source", "discord", "pain", "6")
+	require.NoError(t, err)
+
+	events := readObsEvents(t, home)
+	require.Len(t, events, 1)
+	prov, ok := events[0].Payload["provenance"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "discord", prov["harness"])
+}
+
+// TestObs_CLI_BareCaptureOmitsProvenance: a bare `lucid obs` writes no
+// provenance key, so the event is byte-identical to the pre-change shape (AC-9).
+func TestObs_CLI_BareCaptureOmitsProvenance(t *testing.T) {
+	home := enableAllObsKinds(t)
+	// Ensure no ambient LUCID_* provenance leaks into the bare path.
+	for _, env := range []string{"LUCID_SOURCE", "LUCID_HARNESS", "LUCID_AGENT", "LUCID_MODEL", "LUCID_CHANNEL", "LUCID_THREAD"} {
+		t.Setenv(env, "")
+	}
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "pain", "6", "knee")
+	require.NoError(t, err)
+
+	events := readObsEvents(t, home)
+	require.Len(t, events, 1)
+	_, has := events[0].Payload["provenance"]
+	assert.False(t, has, "a bare CLI obs writes no provenance key")
+}
+
+// TestObs_CLI_MalformedSourceRejected: a malformed source token errors and
+// leaves nothing on disk — never silently coerced (AC-8/AC-9).
+func TestObs_CLI_MalformedSourceRejected(t *testing.T) {
+	home := enableAllObsKinds(t)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "--source", "bad token!", "pain", "6", "knee")
+	require.Error(t, err)
+	assert.Empty(t, readObsEvents(t, home), "a malformed source leaves nothing on disk")
 }
 
 func TestDay_CLI_HumanAndJSON(t *testing.T) {
