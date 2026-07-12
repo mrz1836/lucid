@@ -9,6 +9,7 @@ import (
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/provider/claudecli"
 	"github.com/mrz1836/lucid/internal/provider/factory"
+	"github.com/mrz1836/lucid/internal/provider/ollama"
 )
 
 // agentRoles are the four roles a single default backend serves this pillar
@@ -23,6 +24,21 @@ func TestBuild_DefaultBuildsClaudeCLI(t *testing.T) {
 	require.NotNil(t, p)
 	_, ok := p.(*claudecli.Provider)
 	assert.True(t, ok, "default backend must be the Claude CLI provider, got %T", p)
+}
+
+// TestBuild_OllamaBackend: selecting the "ollama" backend constructs the local
+// Ollama provider from the endpoint + model, proving the second backend is
+// registered in the dispatch table.
+func TestBuild_OllamaBackend(t *testing.T) {
+	cfg := config.Default().Provider
+	cfg.Backend = "ollama"
+	cfg.Model = "qwen2.5:14b"
+
+	p, err := factory.Build(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, p)
+	_, ok := p.(*ollama.Provider)
+	assert.True(t, ok, "ollama backend must be the Ollama provider, got %T", p)
 }
 
 // TestBuild_UnknownBackendErrors: a backend name the table does not

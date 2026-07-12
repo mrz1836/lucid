@@ -21,6 +21,7 @@ import (
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/provider/claudecli"
+	"github.com/mrz1836/lucid/internal/provider/ollama"
 )
 
 // Build constructs the single default backend named by cfg.Backend. It is
@@ -39,9 +40,13 @@ func buildBackend(backend, model, endpoint string, timeout time.Duration) (provi
 	switch backend {
 	case "claude_cli":
 		return claudecli.New(model, claudecli.WithTimeout(timeout)), nil
-	// The "ollama" backend registers here in a later pillar phase; any name
-	// this table does not yet recognize is a clear, early construction error
-	// rather than a silent nil provider.
+	case "ollama":
+		// The local daemon backend: endpoint is the Ollama base URL (default
+		// http://localhost:11434) and every call is deadline-bounded against the
+		// binary-skew hang. The Codex CLI and any future backend register the
+		// same way; a name this table does not recognize is a clear, early
+		// construction error rather than a silent nil provider.
+		return ollama.New(endpoint, model, ollama.WithTimeout(timeout)), nil
 	default:
 		return nil, fmt.Errorf("factory: unknown provider backend %q", backend)
 	}
