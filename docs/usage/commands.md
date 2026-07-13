@@ -61,6 +61,40 @@ or `insights/`. Scaffolds on first use.
 lucid log "shower thought about the knee-and-weather thing"
 ```
 
+### attach
+
+```
+lucid attach <path> [--caption <text>] [--day @yesterday|@YYYY-MM-DD]
+```
+
+Attach a file to the Ledger: copy **any binary** — a photo, a scanned PDF, a
+handwritten page, an artifact — into the `~/.lucid/media/` store, hash it, and
+record it against a logical day. Deterministic and **agent-free**: no model runs
+in the write path — the copy, the sha256, and the metadata sidecar are mechanical
+(P3). Content is stored **opaquely** (no type gate, original extension
+preserved); video and audio stay out of scope by convention. The stored file is
+named `YYYY-MM-DD-<slug>.<ext>` and paired with a `<stored-filename>.json`
+metadata sidecar (see [`../mvp/data-model.md`](../mvp/data-model.md) §"Media
+attachments"). Attach also emits **one immutable `raw/` entry** referencing the
+media, so the attachment is discoverable by the day view and the Mirror.
+
+| Flag | Effect |
+|------|--------|
+| `--caption <text>` | Optional description, stored verbatim and used to derive the filename slug. Absent on the frictionless "drop it" path. |
+| `--day @yesterday` (or `@YYYY-MM-DD`) | Attribute the media to a prior logical day, reusing the same 04:00-rollover backdating as `obs`. Defaults to the current logical day. |
+
+Provenance over magic: the ack lands only *after* the write, naming the stored
+path, the sha256, the logical day, and the linked raw id. `--json` emits
+`{stored_path, sha256, day, raw_id, caption}`. Scaffolds the media store on first
+use.
+
+```sh
+lucid attach ~/Pictures/IMG_4823.jpg --caption "handwritten session notes, page 1"
+lucid attach ./scan.pdf --caption "clinic intake form"
+lucid attach ~/Pictures/whiteboard.png --day @yesterday
+lucid attach ./artifact.bin --json
+```
+
 ### closeout
 
 ```
@@ -233,9 +267,11 @@ lucid day [date|yesterday] [--json]
 ```
 
 Read-only joined view of one logical day: the Engine day record, the day's
-observations (plus any spanning range event), and the raw entry ids. Defaults to
-today; accepts `yesterday` or a `YYYY-MM-DD` date. Writes nothing. `--json`
-emits the assembled view.
+observations (plus any spanning range event), the raw entry ids, and any media
+attached to the day — surfaced as an inventory `Media:` line (stored path and
+caption only, never the body or a score). Defaults to today; accepts `yesterday`
+or a `YYYY-MM-DD` date. Writes nothing. `--json` emits the assembled view,
+including a `media` array.
 
 ```sh
 lucid day

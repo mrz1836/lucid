@@ -39,15 +39,16 @@ func registryDirNames() []string { return []string{"injuries", "threads", "place
 
 // DayView is the `/day` join across trees (observations.md §7): the folded
 // engine day record, the observation events for the logical day (plus range
-// events spanning it), and the raw entry ids recorded that day. A user-invoked
-// projection may join across trees — that is the user reading their own
-// ledger, not an agent reading it (the sanctuary boundary constrains agent
-// slices, not `/day`).
+// events spanning it), the raw entry ids recorded that day, and the media
+// attachments attributed to that logical day. A user-invoked projection may
+// join across trees — that is the user reading their own ledger, not an agent
+// reading it (the sanctuary boundary constrains agent slices, not `/day`).
 type DayView struct {
 	Date        string
 	EngineDay   *engine.DayRecord
 	Obs         observations.DayView
 	RawEntryIDs []string
+	Media       []MediaRecord
 }
 
 // rangeIndexEntry is one line of the rebuildable range index under
@@ -363,8 +364,10 @@ func (a *Adapter) UpdateRegistry(kind, key string, patch observations.RegistryPa
 
 // ReadDayView assembles the `/day` join for a logical date (observations.md
 // §7): the folded engine day record if present, the day's observation events
-// plus any range event spanning the day (from the range index), and the raw
-// entry ids recorded that day. loc interprets the civil dates.
+// plus any range event spanning the day (from the range index), the raw entry
+// ids recorded that day, and the media attachments attributed to the day
+// (data-model.md §"Media attachments"). loc interprets the civil dates. It is
+// a pure read — nothing is written.
 func (a *Adapter) ReadDayView(date string, loc *time.Location) (DayView, error) {
 	if loc == nil {
 		loc = time.UTC
@@ -393,6 +396,11 @@ func (a *Adapter) ReadDayView(date string, loc *time.Location) (DayView, error) 
 	if rec.RawEntryID != "" && !slices.Contains(view.RawEntryIDs, rec.RawEntryID) {
 		view.RawEntryIDs = append(view.RawEntryIDs, rec.RawEntryID)
 		slices.Sort(view.RawEntryIDs)
+	}
+
+	view.Media, err = a.ReadMediaForDay(date)
+	if err != nil {
+		return DayView{}, err
 	}
 	return view, nil
 }

@@ -41,7 +41,8 @@ func (r *Router) DayView(dateArg string, now time.Time) (DayViewResult, error) {
 		return DayViewResult{}, err
 	}
 
-	empty := view.EngineDay == nil && view.Obs.Empty() && len(view.RawEntryIDs) == 0
+	empty := view.EngineDay == nil && view.Obs.Empty() &&
+		len(view.RawEntryIDs) == 0 && len(view.Media) == 0
 	if empty {
 		lines := []string{fmt.Sprintf("No record for %s.", date)}
 		return DayViewResult{Date: date, Empty: true, View: view, Lines: lines}, nil
@@ -130,7 +131,24 @@ func dayLines(date string, view storage.DayView) []string {
 	if len(view.RawEntryIDs) > 0 {
 		lines = append(lines, "Entries: "+strings.Join(view.RawEntryIDs, ", "))
 	}
+	if len(view.Media) > 0 {
+		lines = append(lines, "Media:")
+		for _, m := range view.Media {
+			lines = append(lines, "  "+mediaLine(m))
+		}
+	}
 	return lines
+}
+
+// mediaLine renders one stored attachment as an inventory line: the stored
+// filename and its caption when present — never the referencing raw body,
+// never a score. It matches the day view's inventory-only voice: what was
+// attached, not a judgment of it.
+func mediaLine(rec storage.MediaRecord) string {
+	if strings.TrimSpace(rec.Caption) == "" {
+		return rec.ID
+	}
+	return rec.ID + " — " + rec.Caption
 }
 
 // engineDayLine renders the practice facts of a folded engine day record as

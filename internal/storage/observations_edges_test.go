@@ -50,6 +50,47 @@ func TestReadDayView_BadDateErrors(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestReadDayView_JoinsMediaForDay proves the day-view join surfaces media
+// attachments attributed to the logical day (AC-8) and only that day: a media
+// record filed under 2026-07-05 appears in that day's view and not the next
+// day's. The read stays pure — nothing is written.
+func TestReadDayView_JoinsMediaForDay(t *testing.T) {
+	a := newObsStore(t)
+	require.NoError(t, a.ScaffoldMedia())
+
+	content := []byte("\xff\xd8\xff opaque bytes")
+	rec, err := a.WriteMedia(syntheticMedia("clinic intake form", "scan.pdf", content))
+	require.NoError(t, err)
+
+	view, err := a.ReadDayView("2026-07-05", loc)
+	require.NoError(t, err)
+	require.Len(t, view.Media, 1, "the day view joins the day's media")
+	assert.Equal(t, rec.ID, view.Media[0].ID)
+	assert.Equal(t, "clinic intake form", view.Media[0].Caption)
+	assert.Equal(t, hashOf(content), view.Media[0].SHA256)
+	assert.Equal(t, rec.StoredPath, view.Media[0].StoredPath, "StoredPath resolves for the reader")
+
+	other, err := a.ReadDayView("2026-07-06", loc)
+	require.NoError(t, err)
+	assert.Empty(t, other.Media, "media stays on its own logical day")
+}
+
+// TestReadDayView_MediaReadErrorSurfaces proves a failing media read inside the
+// day-view join is surfaced, never swallowed: planting a file where the media
+// day shard directory would be makes the read fail with ENOTDIR.
+func TestReadDayView_MediaReadErrorSurfaces(t *testing.T) {
+	a := newObsStore(t)
+	require.NoError(t, a.ScaffoldMedia())
+
+	shard := filepath.Join(a.Home(), "media", "2026", "07")
+	require.NoError(t, os.MkdirAll(filepath.Dir(shard), 0o700))
+	require.NoError(t, os.WriteFile(shard, []byte("not a directory"), 0o600))
+
+	_, err := a.ReadDayView("2026-07-05", loc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "media")
+}
+
 func TestReadObservationsRange_BadBounds(t *testing.T) {
 	a := newObsStore(t)
 	_, err := a.ReadObservationsRange("bad", "2026-07-02")
