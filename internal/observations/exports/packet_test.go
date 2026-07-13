@@ -111,7 +111,10 @@ func TestExportsIsPure(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 	allowed := map[string]bool{
+		`"cmp"`:     true,
 		`"fmt"`:     true,
+		`"maps"`:    true,
+		`"slices"`:  true,
 		`"sort"`:    true,
 		`"strconv"`: true,
 		`"strings"`: true,

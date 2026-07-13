@@ -3,7 +3,8 @@ package observations
 import (
 	"crypto/sha256"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -168,7 +169,7 @@ func (r Registry) Apply(p RegistryPatch) Registry {
 	if p.DisplayName != "" && p.DisplayName != out.DisplayName {
 		out.DisplayName = p.DisplayName
 	}
-	if p.DisplayName != "" && !containsString(out.Aka, p.DisplayName) {
+	if p.DisplayName != "" && !slices.Contains(out.Aka, p.DisplayName) {
 		out.Aka = append(out.Aka, p.DisplayName)
 	}
 	if p.Status != "" {
@@ -229,16 +230,6 @@ func normalizeRegistryName(name string) string {
 	return b.String()
 }
 
-// containsString reports whether xs contains s.
-func containsString(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 // cloneAnyMap deep-copies a one-level map (nil stays a fresh empty map). The
 // values are scalars/strings from a patch, so a shallow value copy is safe.
 func cloneAnyMap(m map[string]any) map[string]any {
@@ -252,10 +243,5 @@ func cloneAnyMap(m map[string]any) map[string]any {
 // sortedKeys returns the keys of a map in sorted order — a small determinism
 // helper the day view uses when it must iterate a map.
 func sortedKeys(m map[string]any) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(m))
 }

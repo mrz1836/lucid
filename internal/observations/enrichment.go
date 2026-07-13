@@ -3,6 +3,7 @@ package observations
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -133,7 +134,7 @@ func validateEnricherParam(key, val string) error {
 		}
 	case "daily":
 		for _, f := range strings.Split(val, ",") {
-			if !containsString(openMeteoDailyFields, f) {
+			if !slices.Contains(openMeteoDailyFields, f) {
 				return fmt.Errorf("observations: enricher url requests unknown daily field %q", f)
 			}
 		}
@@ -262,10 +263,7 @@ func AsOfPlaceRef(locationEvents []Event, target string) (placeRef string, ok bo
 // per logical day" — the idempotency check the job runs before fetching).
 func AlreadyEnriched(dayEvents []Event, name string) bool {
 	src := EnricherSource(name)
-	for _, e := range dayEvents {
-		if e.Kind == KindContextDay && e.Source == src {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(dayEvents, func(e Event) bool {
+		return e.Kind == KindContextDay && e.Source == src
+	})
 }

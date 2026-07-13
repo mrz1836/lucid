@@ -1,8 +1,9 @@
 package observations
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -107,7 +108,7 @@ func eventLine(e Event, spanning bool) string {
 // monotonic seq, so id order is time order within a day).
 func SortEventsByID(events []Event) []Event {
 	out := append([]Event{}, events...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortStableFunc(out, func(a, b Event) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }
 

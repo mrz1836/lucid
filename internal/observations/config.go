@@ -3,6 +3,7 @@ package observations
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // ConfigVersion is the only observations/config.json schema version the MVP
@@ -68,12 +69,7 @@ func DefaultConfig() Config {
 // (observations.md §10: all kinds off until enabled). A capture of a disabled
 // kind is rejected with the enable hint, never silently stored.
 func (c Config) KindEnabled(kind string) bool {
-	for _, k := range c.KindsEnabled {
-		if k == kind {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.KindsEnabled, kind)
 }
 
 // EnableHint is the fixed rejection copy for a disabled kind (error-states:

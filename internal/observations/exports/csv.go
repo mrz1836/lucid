@@ -9,7 +9,8 @@
 package exports
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -63,7 +64,7 @@ func BuildSeriesRows(painEvents, moodEvents []observations.Event, capacityByDate
 	for _, r := range byDate {
 		rows = append(rows, *r)
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Date < rows[j].Date })
+	slices.SortFunc(rows, func(a, b SeriesRow) int { return cmp.Compare(a.Date, b.Date) })
 	return rows
 }
 

@@ -1,8 +1,10 @@
 package exports
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,11 +94,7 @@ func DeriveRegimen(medEvents []observations.Event) []RegimenLine {
 			byMed[k] = latest{ev: e, display: what}
 		}
 	}
-	keys := make([]string, 0, len(byMed))
-	for k := range byMed {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(byMed))
 
 	lines := make([]RegimenLine, 0, len(keys))
 	for _, k := range keys {
@@ -127,11 +125,7 @@ func CountEpisodes(painEvents []observations.Event, threshold, gapDays int) (int
 			}
 		}
 	}
-	dates := make([]string, 0, len(maxByDate))
-	for d := range maxByDate {
-		dates = append(dates, d)
-	}
-	sort.Strings(dates)
+	dates := slices.Sorted(maps.Keys(maxByDate))
 	if len(dates) == 0 {
 		return 0, nil
 	}
@@ -179,7 +173,7 @@ func BuildPacketDayRows(painEvents, medEvents, interventionEvents []observations
 	for _, r := range rows {
 		out = append(out, *r)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
+	slices.SortFunc(out, func(a, b PacketDayRow) int { return cmp.Compare(a.Date, b.Date) })
 	return out
 }
 
