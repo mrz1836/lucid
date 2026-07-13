@@ -199,7 +199,8 @@ func TestServe_CheckinToValidatedInsight(t *testing.T) {
 	}}
 	withServeProvider(t, fake)
 
-	stdin := clientLines(t,
+	stdin := clientLines(
+		t,
 		serveIn{Type: frameControl, Command: controlStart, Opening: "Rough dinner."},
 		serveIn{Type: frameAnswer, Text: "I pushed back and dropped it."},
 		serveIn{Type: frameAnswer, Text: "Annoyed and embarrassed."},
@@ -252,7 +253,8 @@ func TestServe_SafetyBlockWritesNothing(t *testing.T) {
 	}}
 	withServeProvider(t, fake)
 
-	stdin := clientLines(t,
+	stdin := clientLines(
+		t,
 		serveIn{Type: frameControl, Command: controlStart, Opening: "Rough dinner."},
 		serveIn{Type: frameAnswer, Text: "I pushed back and dropped it."},
 		serveIn{Type: frameAnswer, Text: "Annoyed and embarrassed."},
@@ -279,7 +281,8 @@ func TestServe_CancelWritesNothing(t *testing.T) {
 	fake := &provider.Fake{Script: []provider.Exchange{decideAsk("What happened?")}}
 	withServeProvider(t, fake)
 
-	stdin := clientLines(t,
+	stdin := clientLines(
+		t,
 		serveIn{Type: frameControl, Command: controlStart, Opening: "Rough dinner."},
 		serveIn{Type: frameAnswer, Control: controlCancel},
 	)
@@ -366,7 +369,8 @@ func TestServe_NuancedInsightUsesRefinement(t *testing.T) {
 	withServeProvider(t, &provider.Fake{Script: cleanProposalScript()})
 
 	refine := "Mostly yes — it's more when M. is in the room."
-	stdin := clientLines(t, append(checkinPrelude(),
+	stdin := clientLines(t, append(
+		checkinPrelude(),
 		serveIn{Type: frameResonance, Kind: string(router.RespNuanced), Text: refine},
 		serveIn{Type: frameRuleAnswer, Answered: false},
 	)...)
@@ -391,7 +395,8 @@ func TestServe_RejectedRecordsNoInsight(t *testing.T) {
 	withClock(t, serveInstant())
 	withServeProvider(t, &provider.Fake{Script: cleanProposalScript()})
 
-	stdin := clientLines(t, append(checkinPrelude(),
+	stdin := clientLines(t, append(
+		checkinPrelude(),
 		serveIn{Type: frameResonance, Kind: string(router.RespRejected), Text: "No — that doesn't fit."},
 	)...)
 

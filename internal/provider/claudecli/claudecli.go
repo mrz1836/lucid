@@ -94,7 +94,7 @@ func New(model string, opts ...Option) *Provider {
 // cmd.Output surfaces a non-zero exit as *exec.ExitError (carrying stderr),
 // which Complete maps to the transport sentinels.
 func defaultRunner(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is the fixed "claude" binary and args are constructed locally from the pinned invocation contract (ADR-0006)
 	if len(stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -140,12 +140,12 @@ func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return provider.Response{}, fmt.Errorf("claudecli: %w", ctxErr)
 		}
-		return provider.Response{}, fmt.Errorf("claudecli: spawn/exit failed: %v: %w", err, provider.ErrUnavailable)
+		return provider.Response{}, fmt.Errorf("claudecli: spawn/exit failed: %w: %w", err, provider.ErrUnavailable)
 	}
 
 	var env envelope
 	if jsonErr := json.Unmarshal(stdout, &env); jsonErr != nil {
-		return provider.Response{}, fmt.Errorf("claudecli: unparseable envelope: %v: %w", jsonErr, provider.ErrUnavailable)
+		return provider.Response{}, fmt.Errorf("claudecli: unparseable envelope: %w: %w", jsonErr, provider.ErrUnavailable)
 	}
 	if env.IsError {
 		return provider.Response{}, fmt.Errorf("claudecli: cli reported is_error: %w", provider.ErrUnavailable)

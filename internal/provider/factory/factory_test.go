@@ -14,7 +14,7 @@ import (
 
 // agentRoles are the four roles a single default backend serves this pillar
 // (agent-contracts.md); the per-role lookup must resolve every one of them.
-var agentRoles = []string{"intake", "structuring", "reflection", "safety"}
+var agentRoles = []string{"intake", "structuring", "reflection", "safety"} //nolint:gochecknoglobals // a fixed, read-only test-fixture role list
 
 // TestBuild_DefaultBuildsClaudeCLI: the shipped default provider block
 // (backend "claude_cli") constructs the Claude CLI backend.

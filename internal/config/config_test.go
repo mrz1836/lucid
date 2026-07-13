@@ -124,7 +124,7 @@ func TestProvider_MarshalsDocumentedShape(t *testing.T) {
 	require.NoError(t, json.Unmarshal(b, &m))
 	assert.Equal(t, "claude_cli", m.Provider.Backend)
 	assert.Equal(t, "opus", m.Provider.Model)
-	assert.EqualValues(t, 120, m.Provider.TimeoutSeconds)
+	assert.Equal(t, 120, m.Provider.TimeoutSeconds)
 	assert.Equal(t, "http://localhost:11434", m.Provider.Endpoint)
 	assert.NotNil(t, m.Provider.Roles, "roles marshals as {} not null")
 	assert.Empty(t, m.Provider.Roles)

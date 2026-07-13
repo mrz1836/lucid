@@ -42,7 +42,7 @@ type AgentVersions struct {
 // pillar; the Codex CLI and any future backend register here without a
 // schema change (adr/0006-model-access.md §"Pinned invocation
 // contracts").
-var KnownBackends = map[string]bool{
+var KnownBackends = map[string]bool{ //nolint:gochecknoglobals // a fixed, read-only set of accepted backend names (adr/0006-model-access.md)
 	"claude_cli": true,
 	"ollama":     true,
 }

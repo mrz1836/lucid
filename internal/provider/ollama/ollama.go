@@ -134,13 +134,13 @@ func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider
 		Stream:   false,
 	})
 	if err != nil {
-		return provider.Response{}, fmt.Errorf("ollama: marshal request: %v: %w", err, provider.ErrUnavailable)
+		return provider.Response{}, fmt.Errorf("ollama: marshal request: %w: %w", err, provider.ErrUnavailable)
 	}
 
 	url := strings.TrimRight(p.baseURL, "/") + chatPath
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return provider.Response{}, fmt.Errorf("ollama: build request: %v: %w", err, provider.ErrUnavailable)
+		return provider.Response{}, fmt.Errorf("ollama: build request: %w: %w", err, provider.ErrUnavailable)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -157,7 +157,7 @@ func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return provider.Response{}, fmt.Errorf("ollama: %w", ctxErr)
 		}
-		return provider.Response{}, fmt.Errorf("ollama: request failed: %v: %w", err, provider.ErrUnavailable)
+		return provider.Response{}, fmt.Errorf("ollama: request failed: %w: %w", err, provider.ErrUnavailable)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -169,7 +169,7 @@ func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider
 
 	var cr chatResponse
 	if decErr := json.NewDecoder(resp.Body).Decode(&cr); decErr != nil {
-		return provider.Response{}, fmt.Errorf("ollama: unparseable response: %v: %w", decErr, provider.ErrUnavailable)
+		return provider.Response{}, fmt.Errorf("ollama: unparseable response: %w: %w", decErr, provider.ErrUnavailable)
 	}
 	if cr.Message.Content == "" {
 		return provider.Response{}, fmt.Errorf("ollama: empty message content: %w", provider.ErrUnavailable)

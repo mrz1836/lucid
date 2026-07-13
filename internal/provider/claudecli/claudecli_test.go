@@ -78,7 +78,8 @@ func TestComplete_NoSystemOmitsFlag(t *testing.T) {
 // so the backend maps to ErrTimeout (the known Ollama/CLI hang class for
 // the CLI's own process).
 func TestComplete_TimeoutFromDeadline(t *testing.T) {
-	p := claudecli.New("opus",
+	p := claudecli.New(
+		"opus",
 		claudecli.WithTimeout(10*time.Millisecond),
 		claudecli.WithRunner(func(ctx context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			<-ctx.Done() // simulate a hung CLI killed by the deadline
@@ -105,7 +106,7 @@ func TestComplete_CanceledContext(t *testing.T) {
 
 	_, err := p.Complete(ctx, provider.Request{})
 	require.ErrorIs(t, err, context.Canceled)
-	assert.NotErrorIs(t, err, provider.ErrUnavailable)
+	require.NotErrorIs(t, err, provider.ErrUnavailable)
 	assert.NotErrorIs(t, err, provider.ErrTimeout)
 }
 

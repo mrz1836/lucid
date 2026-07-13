@@ -19,11 +19,23 @@ import (
 // chatReplyJSON is a well-formed non-streaming /api/chat success body carrying
 // the assistant message content.
 func chatReplyJSON(content string) string {
-	b, _ := json.Marshal(map[string]any{
-		"model":   "qwen2.5:14b",
-		"message": map[string]string{"role": "assistant", "content": content},
-		"done":    true,
+	type message struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	type reply struct {
+		Model   string  `json:"model"`
+		Message message `json:"message"`
+		Done    bool    `json:"done"`
+	}
+	b, err := json.Marshal(reply{
+		Model:   "qwen2.5:14b",
+		Message: message{Role: "assistant", Content: content},
+		Done:    true,
 	})
+	if err != nil {
+		panic(err) // unreachable: reply holds only string/bool fields
+	}
 	return string(b)
 }
 
@@ -151,7 +163,7 @@ func TestComplete_CanceledContext(t *testing.T) {
 	p := ollama.New(srv.URL, "qwen2.5:14b")
 	_, err := p.Complete(ctx, provider.Request{Intent: "intake.decide"})
 	require.ErrorIs(t, err, context.Canceled)
-	assert.NotErrorIs(t, err, provider.ErrUnavailable)
+	require.NotErrorIs(t, err, provider.ErrUnavailable)
 	assert.NotErrorIs(t, err, provider.ErrTimeout)
 }
 
