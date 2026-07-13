@@ -169,7 +169,7 @@ func (r *Router) closeoutRecord(chain engine.ChainConfig, req CloseoutRequest, l
 		Capacity:       req.Capacity,
 		LimiterTag:     req.LimiterTag,
 		RawEntryID:     rawID,
-		Mode:           req.Mode,
+		Mode:           engine.Mode(req.Mode),
 		ModeDeclaredAt: formatDeclared(req.ModeDeclaredAt),
 		Profile:        profile,
 		Partial:        req.Partial,

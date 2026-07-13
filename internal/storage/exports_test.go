@@ -26,7 +26,7 @@ func appendObs(t *testing.T, a *Adapter, kind, date string, payload map[string]a
 }
 
 // seedEngineDay writes a folded engine day record carrying capacity/mode.
-func seedEngineDay(t *testing.T, a *Adapter, date string, capacity int, mode string) {
+func seedEngineDay(t *testing.T, a *Adapter, date string, capacity int, mode engine.Mode) {
 	t.Helper()
 	d, _ := time.Parse("2006-01-02", date)
 	require.NoError(t, a.WriteEngineDay(engine.DayRecord{

@@ -165,7 +165,7 @@ func engineDayLine(rec engine.DayRecord) string {
 	}
 	parts := []string{fmt.Sprintf("Engine: %s", state)}
 	if rec.Mode != "" {
-		parts = append(parts, "mode "+rec.Mode)
+		parts = append(parts, "mode "+string(rec.Mode))
 	}
 	if rec.Capacity > 0 {
 		parts = append(parts, fmt.Sprintf("capacity %d", rec.Capacity))

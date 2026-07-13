@@ -4,7 +4,7 @@ import "time"
 
 // ValidMode reports whether m is a declarable Engine mode (engine-module.md
 // §2). Anything else is rejected before it can reach a day record.
-func ValidMode(m string) bool {
+func ValidMode(m Mode) bool {
 	switch m {
 	case ModeGreen, ModeYellow, ModeRed:
 		return true
@@ -37,7 +37,7 @@ func (c Clocks) ModeDay(now time.Time) time.Time { return c.baseLogicalDate(now)
 // the bell: it fixes the declared mode and its declaration time, leaving the
 // day undecided (neither completed nor missed) for the evening close-out to
 // fold in via corrections. mode must already be validated by [ValidMode].
-func BuildModeRecord(logicalDay time.Time, mode, declaredAt, profile string) DayRecord {
+func BuildModeRecord(logicalDay time.Time, mode Mode, declaredAt, profile string) DayRecord {
 	return DayRecord{
 		DayID:          DayID(logicalDay),
 		LogicalDate:    DateString(logicalDay),

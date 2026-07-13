@@ -37,7 +37,7 @@ type Send struct {
 	Storm           bool
 	Floor           string
 	Streak          int
-	Mode            string
+	Mode            Mode
 	ConfirmedDate   string
 	WitnessName     string
 	EscalationState EscalationState

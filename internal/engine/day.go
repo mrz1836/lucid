@@ -14,12 +14,17 @@ const (
 	StatusSkipped = "skipped"
 )
 
+// Mode is a declared Engine day mode (engine-module.md §2). A defined string
+// type so the compiler rejects an invalid or transposed mode; it marshals
+// byte-identically to its underlying string, so the day record is unchanged.
+type Mode string
+
 // Engine modes (engine-module.md §2). Green is the default when the day
 // was never explicitly declared; /mode (Phase 9) sets it at the bell.
 const (
-	ModeGreen  = "green"
-	ModeYellow = "yellow"
-	ModeRed    = "red"
+	ModeGreen  Mode = "green"
+	ModeYellow Mode = "yellow"
+	ModeRed    Mode = "red"
 )
 
 // Correction is one appended amendment to a day record (engine-module.md
@@ -40,7 +45,7 @@ type DayRecord struct {
 	DayID          string            `json:"day_id"`
 	LogicalDate    string            `json:"logical_date"`
 	RecordedAt     string            `json:"recorded_at"`
-	Mode           string            `json:"mode"`
+	Mode           Mode              `json:"mode"`
 	ModeDeclaredAt string            `json:"mode_declared_at"`
 	Links          map[string]string `json:"links"`
 	FloorDay       bool              `json:"floor_day"`

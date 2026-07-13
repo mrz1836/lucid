@@ -245,7 +245,7 @@ func (a *Adapter) engineFactsInWindow(inWindow func(string) bool) (map[string]ex
 	out := map[string]exports.EngineDayFacts{}
 	for _, r := range records {
 		if inWindow(r.LogicalDate) {
-			out[r.LogicalDate] = exports.EngineDayFacts{Capacity: r.Capacity, Mode: r.Mode}
+			out[r.LogicalDate] = exports.EngineDayFacts{Capacity: r.Capacity, Mode: string(r.Mode)}
 		}
 	}
 	return out, nil

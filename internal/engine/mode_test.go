@@ -8,10 +8,10 @@ import (
 )
 
 func TestValidMode(t *testing.T) {
-	for _, m := range []string{ModeGreen, ModeYellow, ModeRed} {
+	for _, m := range []Mode{ModeGreen, ModeYellow, ModeRed} {
 		assert.Truef(t, ValidMode(m), "%s should be valid", m)
 	}
-	for _, m := range []string{"", "purple", "Green", "amber"} {
+	for _, m := range []Mode{"", "purple", "Green", "amber"} {
 		assert.Falsef(t, ValidMode(m), "%q should be invalid", m)
 	}
 }

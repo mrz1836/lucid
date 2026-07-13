@@ -136,7 +136,7 @@ func (r *Router) applyBackfill(chain engine.ChainConfig, req BackfillRequest, ta
 		Capacity:   req.Capacity,
 		LimiterTag: req.LimiterTag,
 		RawEntryID: rawID,
-		Mode:       req.Mode,
+		Mode:       engine.Mode(req.Mode),
 		Profile:    engine.GoverningProfile(target, state.History, loc),
 		Backfilled: true,
 	})

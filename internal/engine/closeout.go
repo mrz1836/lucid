@@ -25,7 +25,7 @@ type CloseoutInput struct {
 	// RawEntryID is the id of the journal raw entry the router wrote.
 	RawEntryID string
 	// Mode is the declared mode; empty defaults to green.
-	Mode string
+	Mode Mode
 	// ModeDeclaredAt is when /mode declared it (empty when undeclared).
 	ModeDeclaredAt string
 	// Profile is the profile that governed the logical day.

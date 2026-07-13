@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mrz1836/lucid/internal/engine"
 )
 
 // newModeCmd wires `lucid mode <green|yellow|red>` (engine-module.md
@@ -21,7 +23,7 @@ func newModeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := r.Mode(args[0], clockNow())
+			res, err := r.Mode(engine.Mode(args[0]), clockNow())
 			if err != nil {
 				return err
 			}

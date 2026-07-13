@@ -15,7 +15,7 @@ const modeInvalidMsg = "Mode must be one of green, yellow, or red."
 // after the bell (no disk effect); Invalid marks an unknown mode name; when
 // neither is set the mode was declared (or already stood) for LogicalDate.
 type ModeResult struct {
-	Mode        string
+	Mode        engine.Mode
 	LogicalDate string
 	Rejected    bool
 	Invalid     bool
@@ -30,7 +30,7 @@ type ModeResult struct {
 // second `/mode` before the bell is an idempotent no-op. The mode is written
 // as the day record's immutable base; the evening close-out folds the
 // practice result in via corrections, never touching the declared mode.
-func (r *Router) Mode(mode string, now time.Time) (ModeResult, error) {
+func (r *Router) Mode(mode engine.Mode, now time.Time) (ModeResult, error) {
 	now = whenOr(now)
 	loc := now.Location()
 

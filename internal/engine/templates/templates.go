@@ -48,7 +48,7 @@ func L1Storm(floor string) string {
 // L2 renders the witness escalation after two consecutive misses
 // (engine-module.md §Consent amendment): streak, declared mode, and storm
 // state only — never journal content, capacity values, or any Mirror data.
-func L2(streak int, mode string) string {
+func L2(streak int, mode engine.Mode) string {
 	return withSignOff(fmt.Sprintf(
 		"two missed nights. Streak: %d. Declared mode: %s. Storm: none.", streak, mode,
 	))

@@ -11,7 +11,7 @@ import (
 
 // rec builds a day record for scoring tests with explicit outcome flags. The
 // link map only needs to reflect floor_day; completion/miss are set directly.
-func rec(date, mode string, completed, missed, floor, storm bool) DayRecord {
+func rec(date string, mode Mode, completed, missed, floor, storm bool) DayRecord {
 	d, _ := time.Parse(dateLayout, date)
 	return DayRecord{
 		DayID:       DayID(d),
@@ -26,9 +26,11 @@ func rec(date, mode string, completed, missed, floor, storm bool) DayRecord {
 	}
 }
 
-func completedDay(date, mode string) DayRecord { return rec(date, mode, true, false, false, false) }
-func floorDay(date, mode string) DayRecord     { return rec(date, mode, true, false, true, false) }
-func missedDay(date string) DayRecord          { return rec(date, ModeGreen, false, true, false, false) }
+func completedDay(date string, mode Mode) DayRecord {
+	return rec(date, mode, true, false, false, false)
+}
+func floorDay(date string, mode Mode) DayRecord { return rec(date, mode, true, false, true, false) }
+func missedDay(date string) DayRecord           { return rec(date, ModeGreen, false, true, false, false) }
 
 func stormMissDay(date string) DayRecord { return rec(date, ModeRed, false, true, false, true) }
 
@@ -53,7 +55,7 @@ func TestBuildStatus_YellowFloorDayScores1(t *testing.T) {
 // days all score 1.0 — the MVP has no Crux, so mode changes the floor, not
 // the score once the (mode-relative) completion is met.
 func TestBuildStatus_ScoresLinksOnly(t *testing.T) {
-	for _, mode := range []string{ModeGreen, ModeYellow, ModeRed} {
+	for _, mode := range []Mode{ModeGreen, ModeYellow, ModeRed} {
 		st := BuildStatus(StatusInput{
 			Records: []DayRecord{completedDay("2026-07-05", mode)},
 			Chain:   defChain(), Loc: time.UTC,
