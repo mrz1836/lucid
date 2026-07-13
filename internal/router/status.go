@@ -24,8 +24,8 @@ type StatusResult struct {
 // recovery path where a read triggers a write.
 func (r *Router) Status(now time.Time) (StatusResult, error) {
 	now = whenOr(now)
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return StatusResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return StatusResult{}, err
 	}
 
 	st, err := r.store.ReadEngineStatus()

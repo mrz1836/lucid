@@ -65,8 +65,8 @@ type CloseoutResult struct {
 func (r *Router) Closeout(req CloseoutRequest) (CloseoutResult, error) {
 	now := whenOr(req.Now)
 	loc := now.Location()
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return CloseoutResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return CloseoutResult{}, err
 	}
 	chain, err := r.store.ReadChainConfig()
 	if err != nil {

@@ -371,17 +371,17 @@ func decodeReflection(content []byte) (Reflection, error) {
 	if err = yaml.Unmarshal(front, &fm); err != nil {
 		return Reflection{}, fmt.Errorf("storage: decode reflection frontmatter: %w", err)
 	}
-	created, err := time.Parse(time.RFC3339, fm.CreatedAt)
+	created, err := parseRFC3339(fm.CreatedAt, "reflection created_at")
 	if err != nil {
-		return Reflection{}, fmt.Errorf("storage: reflection created_at: %w", err)
+		return Reflection{}, err
 	}
-	windowStart, err := time.Parse(time.RFC3339, fm.WindowStart)
+	windowStart, err := parseRFC3339(fm.WindowStart, "reflection window_start")
 	if err != nil {
-		return Reflection{}, fmt.Errorf("storage: reflection window_start: %w", err)
+		return Reflection{}, err
 	}
-	windowEnd, err := time.Parse(time.RFC3339, fm.WindowEnd)
+	windowEnd, err := parseRFC3339(fm.WindowEnd, "reflection window_end")
 	if err != nil {
-		return Reflection{}, fmt.Errorf("storage: reflection window_end: %w", err)
+		return Reflection{}, err
 	}
 	summary, changeLog := splitReflectionBody(string(body))
 	surfaced := make([]ReflectionSurfaced, 0, len(fm.InsightsSurfaced))

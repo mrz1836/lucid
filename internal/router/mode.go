@@ -37,8 +37,8 @@ func (r *Router) Mode(mode string, now time.Time) (ModeResult, error) {
 	if !engine.ValidMode(mode) {
 		return ModeResult{Invalid: true, Ack: modeInvalidMsg}, nil
 	}
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return ModeResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return ModeResult{}, err
 	}
 	chain, err := r.store.ReadChainConfig()
 	if err != nil {

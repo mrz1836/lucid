@@ -54,8 +54,8 @@ type BackfillResult struct {
 func (r *Router) Backfill(req BackfillRequest) (BackfillResult, error) {
 	now := whenOr(req.Now)
 	loc := now.Location()
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return BackfillResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return BackfillResult{}, err
 	}
 	chain, err := r.store.ReadChainConfig()
 	if err != nil {

@@ -1,6 +1,8 @@
 package router
 
 import (
+	"fmt"
+
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -47,4 +49,23 @@ func (r *Router) Boot() (warnings []string, err error) {
 	}
 	r.cfg = clipped
 	return warnings, nil
+}
+
+// prepareEngine scaffolds the engine tree idempotently, wrapping any failure
+// with the shared message every engine-touching verb reports. It centralizes
+// the wrap so the wording lives in exactly one place.
+func (r *Router) prepareEngine() error {
+	if err := r.store.ScaffoldEngine(); err != nil {
+		return fmt.Errorf("could not prepare the engine tree: %w", err)
+	}
+	return nil
+}
+
+// prepareObservations scaffolds the observations tree idempotently, wrapping
+// any failure with the shared message the capture and day verbs report.
+func (r *Router) prepareObservations() error {
+	if err := r.store.ScaffoldObservations(); err != nil {
+		return fmt.Errorf("could not prepare the observations tree: %w", err)
+	}
+	return nil
 }

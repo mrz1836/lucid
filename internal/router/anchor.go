@@ -52,8 +52,8 @@ func (r *Router) AnchorAdd(req AnchorAddRequest) (AnchorAddResult, error) {
 		return AnchorAddResult{}, anchorRejection(req.Label, req.Date)
 	}
 
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return AnchorAddResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return AnchorAddResult{}, err
 	}
 
 	anchor := engine.Anchor{

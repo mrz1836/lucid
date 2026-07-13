@@ -347,9 +347,9 @@ func renderInsight(in Insight) ([]byte, error) {
 
 // decode parses the on-disk frontmatter and body back into an Insight.
 func (fm insightFrontmatter) decode(body string) (Insight, error) {
-	created, err := time.Parse(time.RFC3339, fm.CreatedAt)
+	created, err := parseRFC3339(fm.CreatedAt, "insight created_at")
 	if err != nil {
-		return Insight{}, fmt.Errorf("storage: insight created_at: %w", err)
+		return Insight{}, err
 	}
 	statusHist, err := decodeTimedEvents(fm.StatusHistory)
 	if err != nil {
@@ -466,9 +466,9 @@ func decodeTimedEvents(in []timedEventYAML) ([]TimedEvent, error) {
 	}
 	out := make([]TimedEvent, 0, len(in))
 	for _, e := range in {
-		at, err := time.Parse(time.RFC3339, e.At)
+		at, err := parseRFC3339(e.At, fmt.Sprintf("insight history at %q", e.At))
 		if err != nil {
-			return nil, fmt.Errorf("storage: insight history at %q: %w", e.At, err)
+			return nil, err
 		}
 		out = append(out, TimedEvent{At: at, Kind: e.Kind})
 	}
@@ -485,15 +485,26 @@ func formatNullableTime(t *time.Time) *string {
 	return &s
 }
 
+// parseRFC3339 parses an RFC3339 timestamp, wrapping a failure with label so
+// the offending frontmatter field is named in the error. It is the shared
+// parse-and-wrap every record decoder used to hand-copy per timestamp field.
+func parseRFC3339(value, label string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("storage: %s: %w", label, err)
+	}
+	return t, nil
+}
+
 // parseOptionalTimePtr parses a nullable timestamp pointer back to a *time.Time
 // (nil / empty → nil).
 func parseOptionalTimePtr(s *string) (*time.Time, error) {
 	if s == nil || strings.TrimSpace(*s) == "" {
 		return nil, nil //nolint:nilnil // a null timestamp legitimately decodes to no value and no error
 	}
-	t, err := time.Parse(time.RFC3339, *s)
+	t, err := parseRFC3339(*s, fmt.Sprintf("insight optional time %q", *s))
 	if err != nil {
-		return nil, fmt.Errorf("storage: insight optional time %q: %w", *s, err)
+		return nil, err
 	}
 	return &t, nil
 }

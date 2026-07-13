@@ -27,8 +27,8 @@ type MetricsResult struct {
 func (r *Router) Metrics(now time.Time) (MetricsResult, error) {
 	now = whenOr(now)
 	loc := now.Location()
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return MetricsResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return MetricsResult{}, err
 	}
 
 	days, err := r.store.ReadEngineDays()

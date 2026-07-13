@@ -53,8 +53,8 @@ type CaptureResult struct {
 // inventory — "logged" plus the id, zero evaluative language (§0).
 func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 	now := whenOr(req.Now)
-	if err := r.store.ScaffoldObservations(); err != nil {
-		return CaptureResult{}, fmt.Errorf("could not prepare the observations tree: %w", err)
+	if err := r.prepareObservations(); err != nil {
+		return CaptureResult{}, err
 	}
 
 	tokens := req.Tokens

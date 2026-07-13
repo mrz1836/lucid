@@ -38,8 +38,8 @@ type StormResult struct {
 func (r *Router) Storm(arg string, now time.Time) (StormResult, error) {
 	now = whenOr(now)
 	loc := now.Location()
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return StormResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return StormResult{}, err
 	}
 	h, err := r.store.ReadStormState()
 	if err != nil {

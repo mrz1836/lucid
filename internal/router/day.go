@@ -28,11 +28,11 @@ type DayViewResult struct {
 func (r *Router) DayView(dateArg string, now time.Time) (DayViewResult, error) {
 	now = whenOr(now)
 	loc := now.Location()
-	if err := r.store.ScaffoldObservations(); err != nil {
-		return DayViewResult{}, fmt.Errorf("could not prepare the observations tree: %w", err)
+	if err := r.prepareObservations(); err != nil {
+		return DayViewResult{}, err
 	}
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return DayViewResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return DayViewResult{}, err
 	}
 
 	date := resolveDayArg(dateArg, now)

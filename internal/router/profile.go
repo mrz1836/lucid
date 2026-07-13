@@ -26,8 +26,8 @@ type ProfileResult struct {
 // disk effect (engine-module.md §Error states).
 func (r *Router) Profile(name string, now time.Time) (ProfileResult, error) {
 	now = whenOr(now)
-	if err := r.store.ScaffoldEngine(); err != nil {
-		return ProfileResult{}, fmt.Errorf("could not prepare the engine tree: %w", err)
+	if err := r.prepareEngine(); err != nil {
+		return ProfileResult{}, err
 	}
 	chain, err := r.store.ReadChainConfig()
 	if err != nil {

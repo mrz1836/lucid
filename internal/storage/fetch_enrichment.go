@@ -1,13 +1,9 @@
 package storage
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -331,30 +327,12 @@ func (a *Adapter) ShouldShowPacketPointer(now time.Time) (bool, error) {
 // readDiscoveryState loads the ephemeral discovery ask-state (a missing file is
 // the fresh zero value, not an error).
 func (a *Adapter) readDiscoveryState() (discoveryState, error) {
-	b, err := os.ReadFile(a.discoveryStatePath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return discoveryState{}, nil
-	}
-	if err != nil {
-		return discoveryState{}, fmt.Errorf("storage: read discovery state: %w", err)
-	}
-	var st discoveryState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return discoveryState{}, nil //nolint:nilerr // a corrupt ephemeral file resets, never blocks capture
-	}
-	return st, nil
+	return readJSONResilient[discoveryState](a.discoveryStatePath(), "discovery state")
 }
 
 // writeDiscoveryState persists the ephemeral discovery ask-state.
 func (a *Adapter) writeDiscoveryState(st discoveryState) error {
-	b, err := json.Marshal(st)
-	if err != nil {
-		return fmt.Errorf("storage: marshal discovery state: %w", err)
-	}
-	if err := os.WriteFile(a.discoveryStatePath(), b, filePerm); err != nil {
-		return fmt.Errorf("storage: write discovery state: %w", err)
-	}
-	return nil
+	return writeJSON(a.discoveryStatePath(), "discovery state", st)
 }
 
 // curiosityStatePath returns projections/.curiosity.json.
@@ -366,18 +344,7 @@ func (a *Adapter) curiosityStatePath() string {
 // corrupt file is the fresh zero value, never a capture-blocking error —
 // curiosity is skippable by design, observations.md §6).
 func (a *Adapter) ReadCuriosityState() (observations.CuriosityState, error) {
-	b, err := os.ReadFile(a.curiosityStatePath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return observations.CuriosityState{}, nil
-	}
-	if err != nil {
-		return observations.CuriosityState{}, fmt.Errorf("storage: read curiosity state: %w", err)
-	}
-	var st observations.CuriosityState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return observations.CuriosityState{}, nil //nolint:nilerr // a corrupt ephemeral file resets, never blocks
-	}
-	return st, nil
+	return readJSONResilient[observations.CuriosityState](a.curiosityStatePath(), "curiosity state")
 }
 
 // WriteCuriosityState persists the ephemeral curiosity ask-state under
@@ -386,12 +353,5 @@ func (a *Adapter) WriteCuriosityState(st observations.CuriosityState) error {
 	if err := a.ScaffoldObservations(); err != nil {
 		return err
 	}
-	b, err := json.Marshal(st)
-	if err != nil {
-		return fmt.Errorf("storage: marshal curiosity state: %w", err)
-	}
-	if err := os.WriteFile(a.curiosityStatePath(), b, filePerm); err != nil {
-		return fmt.Errorf("storage: write curiosity state: %w", err)
-	}
-	return nil
+	return writeJSON(a.curiosityStatePath(), "curiosity state", st)
 }

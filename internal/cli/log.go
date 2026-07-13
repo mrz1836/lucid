@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/router"
-	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // sourceCLI identifies the local command-line surface in raw entries and
@@ -52,20 +51,9 @@ func newLogCmd() *cobra.Command {
 		Short: "Capture an immutable raw entry",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := storage.Open()
-			if err != nil {
-				return fmt.Errorf("lucid log: resolve home: %w", err)
-			}
-			if _, err = store.Scaffold(); err != nil {
-				return fmt.Errorf("lucid log: %w", err)
-			}
-			r := router.New(store)
-			warnings, err := r.Boot()
+			r, err := bootedRouter(cmd)
 			if err != nil {
 				return fmt.Errorf("lucid log: %w", err)
-			}
-			for _, w := range warnings {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
 
 			res, err := r.Log(router.LogRequest{
