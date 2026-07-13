@@ -112,30 +112,9 @@ func EvaluateTripwire(in TripwireInput) TripwireDecision {
 	case !chainStarted(in.Chain.ChainStart, in.Reference, loc):
 		dec.EscalationState = EscalationNone
 	default:
-		mode := ModeGreen
-		if yHas && yRec.Mode != "" {
-			mode = yRec.Mode
-		}
-		if escalationRun(in.Records, in.Reference, in.Chain.ChainStart, loc) >= 2 {
-			dec.EscalationState = EscalationL2
-			if in.Witness.L2Armed() {
-				dec.Sends = append(dec.Sends, Send{
-					Channel: ChannelWitness, Kind: SendL2, Storm: stormOn,
-					Streak: in.Streak, Mode: mode, ConfirmedDate: StandingConfirmedDate(effStorm, loc),
-					WitnessName: in.Witness.WitnessName,
-				})
-				l2ToWitness = true
-			} else {
-				dec.Sends = append(dec.Sends, Send{
-					Channel: ChannelUser, Kind: SendL2Blocked, Storm: stormOn, WitnessName: in.Witness.WitnessName,
-				})
-			}
-		} else {
-			dec.EscalationState = EscalationL1
-			dec.Sends = append(dec.Sends, Send{
-				Channel: ChannelUser, Kind: SendL1, Storm: stormOn, Floor: survivalFloor(in.Chain),
-			})
-		}
+		var sends []Send
+		dec.EscalationState, sends, l2ToWitness = missEscalation(in, effStorm, stormOn, yRec, yHas, loc)
+		dec.Sends = append(dec.Sends, sends...)
 	}
 
 	if in.FirstRunOfMonth && in.Witness.IsConfirmed() && !in.Witness.IsLapsed() && !l2ToWitness {
@@ -144,6 +123,34 @@ func EvaluateTripwire(in TripwireInput) TripwireDecision {
 		})
 	}
 	return dec
+}
+
+// missEscalation builds the tripwire response to a missed reference day: L2 to
+// the confirmed witness (streak/mode/storm only) after two consecutive misses,
+// an L2-blocked note to the user when the witness is unarmed, or L1 to the user
+// on the first miss. It returns the resulting escalation state, the send(s) to
+// emit, and whether an L2 reached the witness (which suppresses the monthly
+// heartbeat). Splitting it out keeps EvaluateTripwire's dead-man switch flat.
+func missEscalation(in TripwireInput, effStorm StormHistory, stormOn bool, yRec DayRecord, yHas bool, loc *time.Location) (EscalationState, []Send, bool) {
+	if escalationRun(in.Records, in.Reference, in.Chain.ChainStart, loc) < 2 {
+		return EscalationL1, []Send{{
+			Channel: ChannelUser, Kind: SendL1, Storm: stormOn, Floor: survivalFloor(in.Chain),
+		}}, false
+	}
+	if !in.Witness.L2Armed() {
+		return EscalationL2, []Send{{
+			Channel: ChannelUser, Kind: SendL2Blocked, Storm: stormOn, WitnessName: in.Witness.WitnessName,
+		}}, false
+	}
+	mode := ModeGreen
+	if yHas && yRec.Mode != "" {
+		mode = yRec.Mode
+	}
+	return EscalationL2, []Send{{
+		Channel: ChannelWitness, Kind: SendL2, Storm: stormOn,
+		Streak: in.Streak, Mode: mode, ConfirmedDate: StandingConfirmedDate(effStorm, loc),
+		WitnessName: in.Witness.WitnessName,
+	}}, true
 }
 
 // chainStarted reports whether the chain had begun on or before the reference

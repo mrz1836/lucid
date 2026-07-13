@@ -165,39 +165,48 @@ func ParseMicrolog(in ParseInput) ParseResult {
 		return res
 	}
 	res.OccurredEnd = end
+	parseKindHead(&res, rest, in)
+	return res
+}
 
+// parseKindHead dispatches to the per-kind head parser for a micro-log whose
+// occurred_at, precision, tags, and range end are already resolved. Sleep is
+// handled ahead of this by ParseMicrolog (it rewrites occurred_at wholesale);
+// every other capturable kind fills its payload here, and an unknown-but-
+// capturable kind keeps the free text. Splitting the dispatch out keeps
+// ParseMicrolog's totality contract readable.
+func parseKindHead(res *ParseResult, rest []string, in ParseInput) {
 	switch in.Kind {
 	case KindPain:
-		parseScaleKind(&res, rest, in, "intensity", 0, 10, true, parsePainTail)
+		parseScaleKind(res, rest, in, "intensity", 0, 10, true, parsePainTail)
 	case KindMood:
-		parseScaleKind(&res, rest, in, "level", 1, 5, true, parseMoodTail)
+		parseScaleKind(res, rest, in, "level", 1, 5, true, parseMoodTail)
 	case KindElimination:
 		res.Payload["class"] = classOr(in.Class, "bm")
-		parseScaleKind(&res, rest, in, "bristol", 1, 7, false, nil)
+		parseScaleKind(res, rest, in, "bristol", 1, 7, false, nil)
 	case KindSymptom:
-		parseSymptom(&res, rest, in)
+		parseSymptom(res, rest, in)
 	case KindIntake:
-		parseIntake(&res, rest, in)
+		parseIntake(res, rest, in)
 	case KindMed:
-		parseMed(&res, rest)
+		parseMed(res, rest)
 	case KindIntervention:
-		setFree(&res, "what", rest)
+		setFree(res, "what", rest)
 	case KindMeasurement:
-		parseMeasurement(&res, rest)
+		parseMeasurement(res, rest)
 	case KindMemory:
-		parseMemory(&res, rest)
+		parseMemory(res, rest)
 	case KindLocation:
 		place := strings.TrimSpace(strings.Join(rest, " "))
 		if place == "" {
-			markPartial(&res, rest)
-			return res
+			markPartial(res, rest)
+			return
 		}
 		res.PlaceName = place
 	default:
 		// A capturable kind with no special head rule: keep the free text.
-		setFree(&res, "note", rest)
+		setFree(res, "note", rest)
 	}
-	return res
 }
 
 // scaleTail is a per-kind hook that fills the fields after a parsed scale

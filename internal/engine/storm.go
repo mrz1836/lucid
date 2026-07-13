@@ -165,16 +165,24 @@ func StormBookkeeping(h StormHistory, now time.Time, loc *time.Location) (events
 		}
 	}
 
-	// Only a *history-based* standing storm (a declared/confirmed/renewed one)
-	// suppresses an ambush entry — a bare window reads as standing in
-	// StormStanding for the /status surface, but the whole point of the entry
-	// is to materialize that window into history, so it must not block itself.
+	events = append(events, ambushEntries(h, today, nowStr, loc)...)
+	return events, lapsed
+}
+
+// ambushEntries materializes any ambush window that contains today into a
+// StormEntered event. Only a *history-based* standing storm
+// (declared/confirmed/renewed) suppresses an entry — a bare window reads as
+// standing in StormStanding for the /status surface, but the whole point of the
+// entry is to materialize that window into history, so it must not block
+// itself; an already-entered window is likewise skipped.
+func ambushEntries(h StormHistory, today time.Time, nowStr string, loc *time.Location) []StormEvent {
 	histStanding := false
 	if through, ok := standingThrough(h); ok {
 		if td, tok := dateInLoc(through, loc); tok && !today.After(DateOf(td)) {
 			histStanding = true
 		}
 	}
+	var events []StormEvent
 	for _, w := range h.Windows {
 		s, sok := dateInLoc(w.Start, loc)
 		e, eok := dateInLoc(w.End, loc)
@@ -186,7 +194,7 @@ func StormBookkeeping(h StormHistory, now time.Time, loc *time.Location) (events
 		}
 		events = append(events, StormEvent{At: nowStr, Event: StormEntered, Label: w.Label, Through: w.End})
 	}
-	return events, lapsed
+	return events
 }
 
 // WithEvents returns a copy of the history with events appended — the folded
