@@ -5,21 +5,32 @@ import (
 	"time"
 )
 
+// EscalationState is the tripwire ladder state carried in status.json
+// (engine-module.md §status.json). A defined string type so the compiler
+// rejects an invalid or transposed state; it marshals byte-identically to the
+// underlying string, so the on-disk form is unchanged.
+type EscalationState string
+
 // Escalation states carried in status.json (engine-module.md §status.json).
 // Phase 9 always reports EscalationNone; the tripwire (Phase 10) is the code
 // that drives l1_fired / l2_fired.
 const (
-	EscalationNone = "none"
-	EscalationL1   = "l1_fired"
-	EscalationL2   = "l2_fired"
+	EscalationNone EscalationState = "none"
+	EscalationL1   EscalationState = "l1_fired"
+	EscalationL2   EscalationState = "l2_fired"
 )
+
+// StormState is the storm field carried in status.json — a defined string type
+// for the same compile-time safety as [EscalationState], marshaling
+// byte-identically to its underlying string.
+type StormState string
 
 // Storm states carried in status.json. StormNone is the default; a standing
 // storm reports StormStandingState with its through date (engine-module.md
 // §status.json: "storm_state (none, or standing with its through date)").
 const (
-	StormNone          = "none"
-	StormStandingState = "standing"
+	StormNone          StormState = "none"
+	StormStandingState StormState = "standing"
 )
 
 // Storm history event kinds (engine-module.md §storm.json `history[]`). A
@@ -133,21 +144,21 @@ type ErrorBudget struct {
 // the same inputs (the determinism criterion). Field order is fixed for a
 // stable on-disk form.
 type Status struct {
-	CurrentStreak     int         `json:"current_streak"`
-	LongestStreak     int         `json:"longest_streak"`
-	ChainStart        *string     `json:"chain_start"`
-	RawDaysAccounted  int         `json:"raw_days_accounted"`
-	Adherence7d       Window      `json:"adherence_7d"`
-	Adherence30d      Window      `json:"adherence_30d"`
-	ErrorBudget       ErrorBudget `json:"error_budget"`
-	ConsecutiveMisses int         `json:"consecutive_misses"`
-	EscalationState   string      `json:"escalation_state"`
-	StormState        string      `json:"storm_state"`
-	StormThrough      *string     `json:"storm_through"`
-	StakeOwed         bool        `json:"stake_owed"`
-	WitnessLapsed     bool        `json:"witness_lapsed"`
-	ActiveProfile     string      `json:"active_profile"`
-	DaysToNextGate    *int        `json:"days_to_next_gate"`
+	CurrentStreak     int             `json:"current_streak"`
+	LongestStreak     int             `json:"longest_streak"`
+	ChainStart        *string         `json:"chain_start"`
+	RawDaysAccounted  int             `json:"raw_days_accounted"`
+	Adherence7d       Window          `json:"adherence_7d"`
+	Adherence30d      Window          `json:"adherence_30d"`
+	ErrorBudget       ErrorBudget     `json:"error_budget"`
+	ConsecutiveMisses int             `json:"consecutive_misses"`
+	EscalationState   EscalationState `json:"escalation_state"`
+	StormState        StormState      `json:"storm_state"`
+	StormThrough      *string         `json:"storm_through"`
+	StakeOwed         bool            `json:"stake_owed"`
+	WitnessLapsed     bool            `json:"witness_lapsed"`
+	ActiveProfile     string          `json:"active_profile"`
+	DaysToNextGate    *int            `json:"days_to_next_gate"`
 }
 
 // StatusInput is everything BuildStatus folds into the derived status: the
@@ -169,7 +180,7 @@ type StatusInput struct {
 	Storm         StormHistory
 	ChainStart    *string
 	Profile       string
-	Escalation    string
+	Escalation    EscalationState
 	StakeOwed     bool
 	WitnessLapsed bool
 	Loc           *time.Location

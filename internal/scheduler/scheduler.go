@@ -58,7 +58,7 @@ type SentMessage struct {
 type Report struct {
 	Reference   string
 	Sends       []SentMessage
-	Escalation  string
+	Escalation  engine.EscalationState
 	StormEvents []engine.StormEvent
 }
 

@@ -306,7 +306,7 @@ func (a *Adapter) RebuildEngineStatus(loc *time.Location) (engine.Status, error)
 // tripwire "sets escalation_state"). Every other status field is recomputed
 // from the day records, so a backfill that landed before the run still folds
 // the streak and budget correctly on the same write.
-func (a *Adapter) SetEngineEscalation(loc *time.Location, escalation string, stakeOwed bool) (engine.Status, error) {
+func (a *Adapter) SetEngineEscalation(loc *time.Location, escalation engine.EscalationState, stakeOwed bool) (engine.Status, error) {
 	if escalation == "" {
 		escalation = engine.EscalationNone
 	}
@@ -318,7 +318,7 @@ func (a *Adapter) SetEngineEscalation(loc *time.Location, escalation string, sta
 // tripwire-owned escalation/stake, and writes status.json. Splitting it out
 // keeps the plain-rebuild and the tripwire-set paths byte-identical apart from
 // the two fields the tripwire owns.
-func (a *Adapter) buildAndWriteStatus(loc *time.Location, escalation string, stakeOwed bool) (engine.Status, error) {
+func (a *Adapter) buildAndWriteStatus(loc *time.Location, escalation engine.EscalationState, stakeOwed bool) (engine.Status, error) {
 	chain, err := a.ReadChainConfig()
 	if err != nil {
 		return engine.Status{}, err

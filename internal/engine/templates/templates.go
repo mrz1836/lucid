@@ -83,7 +83,7 @@ func L2Unreachable(witness string) string {
 // Heartbeat renders the monthly present-state snapshot (engine-module.md
 // §Consent amendment) — one of two fixed templates selected by
 // escalation_state at send time. Never a month summary; no sign-off.
-func Heartbeat(escalationState string, streak int) string {
+func Heartbeat(escalationState engine.EscalationState, streak int) string {
 	if escalationState == engine.EscalationNone || escalationState == "" {
 		return fmt.Sprintf("monthly status: all clear — %d-day streak, no open escalation.", streak)
 	}

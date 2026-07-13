@@ -40,7 +40,7 @@ type Send struct {
 	Mode            string
 	ConfirmedDate   string
 	WitnessName     string
-	EscalationState string
+	EscalationState EscalationState
 }
 
 // TripwireInput is everything a morning tripwire run reasons over
@@ -67,7 +67,7 @@ type TripwireInput struct {
 // deterministic function of the stored Ledger state and the reference day.
 type TripwireDecision struct {
 	Sends           []Send
-	EscalationState string
+	EscalationState EscalationState
 	StormEvents     []StormEvent
 }
 
