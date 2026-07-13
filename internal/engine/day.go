@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -79,7 +79,7 @@ func ImmutableCorrectionFields(c Correction) []string {
 			bad = append(bad, k)
 		}
 	}
-	sort.Strings(bad)
+	slices.Sort(bad)
 	return bad
 }
 
@@ -212,7 +212,7 @@ func ComputeStreaks(records []DayRecord, loc *time.Location) Streaks {
 	if len(dates) == 0 {
 		return Streaks{}
 	}
-	sort.Slice(dates, func(i, j int) bool { return dates[i].Before(dates[j]) })
+	slices.SortFunc(dates, func(a, b time.Time) int { return a.Compare(b) })
 
 	longest, run := 1, 1
 	for i := 1; i < len(dates); i++ {
@@ -269,6 +269,6 @@ func EarliestCompletedDate(records []DayRecord, loc *time.Location) string {
 	if len(dates) == 0 {
 		return ""
 	}
-	sort.Slice(dates, func(i, j int) bool { return dates[i].Before(dates[j]) })
+	slices.SortFunc(dates, func(a, b time.Time) int { return a.Compare(b) })
 	return DateString(dates[0])
 }

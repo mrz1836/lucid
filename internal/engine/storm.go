@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -32,12 +33,7 @@ func ValidStormLabel(h StormHistory, label string) bool {
 	if label == StormUnwritten {
 		return true
 	}
-	for _, c := range h.Clauses {
-		if c == label {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(h.Clauses, label)
 }
 
 // DeclareStorm builds the `declared` event for `/storm <label>` (engine-module.md
@@ -235,12 +231,9 @@ func standingThrough(h StormHistory) (string, bool) {
 
 // windowEntered reports whether an `entered` event already exists for window w.
 func windowEntered(h StormHistory, w StormWindow) bool {
-	for _, e := range h.History {
-		if e.Event == StormEntered && e.Through == w.End && e.Label == w.Label {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(h.History, func(e StormEvent) bool {
+		return e.Event == StormEntered && e.Through == w.End && e.Label == w.Label
+	})
 }
 
 // stormStart resolves the lower-bound date the latest standing storm applies

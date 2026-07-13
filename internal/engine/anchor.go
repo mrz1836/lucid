@@ -1,8 +1,9 @@
 package engine
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -61,6 +62,6 @@ func LatestAnchors(log AnchorLog) []Anchor {
 	for _, a := range latest {
 		out = append(out, a)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+	slices.SortFunc(out, func(a, b Anchor) int { return cmp.Compare(a.Label, b.Label) })
 	return out
 }

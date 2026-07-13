@@ -1,7 +1,8 @@
 package engine
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"time"
 )
 
@@ -138,6 +139,6 @@ func anchorDaysSince(anchors []Anchor, logicalDay time.Time) []AnchorDaysSince {
 			DaysSince: DaysSince(d, logicalDay),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Label < out[j].Label })
+	slices.SortFunc(out, func(a, b AnchorDaysSince) int { return cmp.Compare(a.Label, b.Label) })
 	return out
 }

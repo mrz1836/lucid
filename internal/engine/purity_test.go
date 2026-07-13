@@ -24,7 +24,9 @@ func TestEngineIsPure_NoIONoLLM(t *testing.T) {
 	require.NoError(t, err)
 
 	allowed := map[string]bool{
+		`"cmp"`:     true,
 		`"fmt"`:     true,
+		`"slices"`:  true,
 		`"sort"`:    true,
 		`"strconv"`: true,
 		`"strings"`: true,
