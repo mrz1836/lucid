@@ -1,6 +1,8 @@
 package router
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -114,4 +116,102 @@ func TestDayView_ArgResolution(t *testing.T) {
 	explicit, err := r.DayView("2026-06-15", nowEDT())
 	require.NoError(t, err)
 	assert.Equal(t, "2026-06-15", explicit.Date)
+}
+
+// TestDayView_SurfacesAttachedMediaRoundTrip is the Phase 5 round-trip (AC-8,
+// AC-9): an image attached to today's logical day and a non-image (PDF)
+// backdated with @yesterday both surface in `/day` for their own logical day,
+// each stored file's sha256 recomputes-and-matches its sidecar, and each media
+// carries a referencing raw entry the Retro can find. The two attaches use
+// distinct minutes so each predicted raw id resolves to its own entry.
+func TestDayView_SurfacesAttachedMediaRoundTrip(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	// An image attached to today's logical day (2026-07-05).
+	img := []byte("\xff\xd8\xff synthetic jpeg bytes")
+	imgRes, err := r.Attach(AttachRequest{
+		Path:    writeTempFile(t, "before.jpg", img),
+		Caption: "day 0 before photo",
+		Now:     fixedNow(), // 2026-07-05 18:41
+	})
+	require.NoError(t, err)
+	require.Equal(t, "2026-07-05", imgRes.Day)
+
+	// A non-image (PDF) backdated to yesterday (2026-07-04), a distinct minute
+	// so its predicted raw id does not collide with the image's.
+	pdf := []byte("%PDF-1.7\n… scanned handwritten page …\n%%EOF")
+	pdfNow := time.Date(2026, time.July, 5, 19, 15, 0, 0, time.UTC)
+	pdfRes, err := r.Attach(AttachRequest{
+		Path:    writeTempFile(t, "page.pdf", pdf),
+		Caption: "handwritten page",
+		DayArg:  "@yesterday",
+		Now:     pdfNow,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "2026-07-04", pdfRes.Day)
+
+	// Today's view surfaces the image on its Media line and its referencing raw
+	// id in Entries (the raw entry is recorded on the same civil day).
+	today, err := r.DayView("2026-07-05", fixedNow())
+	require.NoError(t, err)
+	assert.False(t, today.Empty)
+	todayJoined := strings.Join(today.Lines, "\n")
+	assert.Contains(t, todayJoined, "Media:")
+	assert.Contains(t, todayJoined, filepath.Base(imgRes.StoredPath))
+	assert.Contains(t, todayJoined, "day 0 before photo")
+	assert.Contains(t, todayJoined, imgRes.RawID, "the referencing raw entry lists on the same day")
+	assertMediaRoundTrip(t, a, today.View, filepath.Base(imgRes.StoredPath), img)
+
+	// Yesterday's view is NOT empty even though its raw entry is filed under the
+	// next civil day: the media attribution alone makes the day real, and the
+	// PDF surfaces opaquely with its caption.
+	yd, err := r.DayView("2026-07-04", fixedNow())
+	require.NoError(t, err)
+	assert.False(t, yd.Empty, "a media-only backdated day is a real day, not 'No record'")
+	ydJoined := strings.Join(yd.Lines, "\n")
+	assert.Contains(t, ydJoined, filepath.Base(pdfRes.StoredPath))
+	assert.Contains(t, ydJoined, "handwritten page")
+	assert.NotContains(t, ydJoined, filepath.Base(imgRes.StoredPath), "the image stays on its own day")
+	assertMediaRoundTrip(t, a, yd.View, filepath.Base(pdfRes.StoredPath), pdf)
+
+	// The day view never leaks the raw entry body or an evaluative frame.
+	for _, banned := range []string{"score", "streak", "Media attachment media/"} {
+		assert.NotContains(t, todayJoined, banned)
+		assert.NotContains(t, ydJoined, banned)
+	}
+}
+
+// assertMediaRoundTrip proves one media record in a day view round-trips: the
+// view carries exactly one attachment named storedName, its sha256 recomputes
+// from the stored bytes, and its linked raw entry exists and references the
+// stored media (AC-9 "each has a referencing raw entry").
+func assertMediaRoundTrip(t *testing.T, a *storage.Adapter, view storage.DayView, storedName string, content []byte) {
+	t.Helper()
+	require.Len(t, view.Media, 1, "the day carries its one attachment for --json consumers")
+	rec := view.Media[0]
+	assert.Equal(t, storedName, rec.ID)
+
+	// sha256 recomputes from the stored bytes and matches the sidecar.
+	assert.Equal(t, sha256Hex(content), rec.SHA256, "sidecar sha matches the input")
+	stored, err := os.ReadFile(rec.StoredPath)
+	require.NoError(t, err)
+	assert.Equal(t, sha256Hex(stored), rec.SHA256, "recomputed sha of the stored file matches")
+
+	// The referencing raw entry exists and points back at the stored media.
+	require.NotEmpty(t, rec.RawEntryID, "media links to a raw entry")
+	doc, err := a.ReadRaw(rec.RawEntryID)
+	require.NoError(t, err)
+	assert.Contains(t, doc.EntryText(), rec.ID, "the linked raw entry references the stored media")
+}
+
+// TestMediaLine covers the inventory-line render for a stored attachment: the
+// bare filename when there is no caption, and `id — caption` when there is.
+func TestMediaLine(t *testing.T) {
+	assert.Equal(t, "2026-07-05-artifact.bin",
+		mediaLine(storage.MediaRecord{ID: "2026-07-05-artifact.bin"}))
+	assert.Equal(t, "2026-07-05-before.jpg — day 0 photo",
+		mediaLine(storage.MediaRecord{ID: "2026-07-05-before.jpg", Caption: "day 0 photo"}))
+	// Whitespace-only caption reads as absent (no dangling dash).
+	assert.Equal(t, "2026-07-05-x.png",
+		mediaLine(storage.MediaRecord{ID: "2026-07-05-x.png", Caption: "   "}))
 }
