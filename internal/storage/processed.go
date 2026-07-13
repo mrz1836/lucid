@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -146,7 +146,7 @@ func (a *Adapter) ListProcessedIDs() ([]string, error) {
 		}
 		ids = append(ids, strings.TrimSuffix(e.Name(), processedExt))
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids, nil
 }
 

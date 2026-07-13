@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -516,6 +516,6 @@ func (a *Adapter) ListInsightIDs() ([]string, error) {
 		}
 		ids = append(ids, strings.TrimSuffix(e.Name(), insightExt))
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids, nil
 }

@@ -2,12 +2,13 @@ package storage
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -159,7 +160,7 @@ func (a *Adapter) ReadInsightsWindow(since time.Time, limit int) ([]Insight, err
 		}
 		out = append(out, ins)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	slices.SortStableFunc(out, func(a, b Insight) int { return b.CreatedAt.Compare(a.CreatedAt) })
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
@@ -201,12 +202,11 @@ func (a *Adapter) ReadAcceptedInsights(limit int) ([]Insight, error) {
 		}
 		out = append(out, ins)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		ai, aj := lastStatusAt(out[i]), lastStatusAt(out[j])
-		if !ai.Equal(aj) {
-			return ai.After(aj)
+	slices.SortStableFunc(out, func(a, b Insight) int {
+		if c := lastStatusAt(b).Compare(lastStatusAt(a)); c != 0 {
+			return c
 		}
-		return out[i].ID > out[j].ID
+		return cmp.Compare(b.ID, a.ID)
 	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
@@ -534,7 +534,7 @@ func (a *Adapter) ListReflectionIDs() ([]string, error) {
 		}
 		ids = append(ids, strings.TrimSuffix(e.Name(), reflectionExt))
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids, nil
 }
 

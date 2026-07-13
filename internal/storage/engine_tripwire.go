@@ -1,10 +1,7 @@
 package storage
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -27,15 +24,7 @@ func (a *Adapter) tripwirePath() string { return filepath.Join(a.engineDir(), tr
 // fresh scaffold stub round-trips to a zero-identity, unconfirmed contract, so
 // a never-provisioned witness reads as "not confirmed, not lapsed".
 func (a *Adapter) ReadWitnessContract() (engine.WitnessContract, error) {
-	b, err := os.ReadFile(a.witnessPath())
-	if err != nil {
-		return engine.WitnessContract{}, fmt.Errorf("storage: read witness.json: %w", err)
-	}
-	var w engine.WitnessContract
-	if err := json.Unmarshal(b, &w); err != nil {
-		return engine.WitnessContract{}, fmt.Errorf("storage: parse witness.json: %w", err)
-	}
-	return w, nil
+	return readJSON[engine.WitnessContract](a.witnessPath(), "witness.json")
 }
 
 // WriteWitnessContract writes witness.json. It is used by the witness
@@ -93,18 +82,8 @@ type TripwireState struct {
 // error — a fresh Ledger has simply never run the tripwire — so it yields the
 // zero state (which makes the next run the first of its month).
 func (a *Adapter) ReadTripwireState() (TripwireState, error) {
-	b, err := os.ReadFile(a.tripwirePath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return TripwireState{}, nil
-	}
-	if err != nil {
-		return TripwireState{}, fmt.Errorf("storage: read tripwire.json: %w", err)
-	}
-	var s TripwireState
-	if err := json.Unmarshal(b, &s); err != nil {
-		return TripwireState{}, fmt.Errorf("storage: parse tripwire.json: %w", err)
-	}
-	return s, nil
+	s, _, err := readJSONOptional[TripwireState](a.tripwirePath(), "tripwire.json")
+	return s, err
 }
 
 // WriteTripwireState writes engine/tripwire.json, creating the engine tree if

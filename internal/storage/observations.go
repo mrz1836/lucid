@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -9,7 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -285,18 +286,7 @@ func (a *Adapter) ReadRegistry(kind, key string) (observations.Registry, bool, e
 	if err != nil {
 		return observations.Registry{}, false, err
 	}
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path under the registries tree
-	if errors.Is(err, fs.ErrNotExist) {
-		return observations.Registry{}, false, nil
-	}
-	if err != nil {
-		return observations.Registry{}, false, fmt.Errorf("storage: read registry %q: %w", key, err)
-	}
-	var rec observations.Registry
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return observations.Registry{}, false, fmt.Errorf("storage: parse registry %q: %w", key, err)
-	}
-	return rec, true, nil
+	return readJSONOptional[observations.Registry](path, fmt.Sprintf("registry %q", key))
 }
 
 // ReadRegistryKind reads every record of one registry kind, sorted by key.
@@ -326,7 +316,7 @@ func (a *Adapter) ReadRegistryKind(kind string) ([]observations.Registry, error)
 			out = append(out, rec)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	slices.SortFunc(out, func(a, b observations.Registry) int { return cmp.Compare(a.Key, b.Key) })
 	return out, nil
 }
 
@@ -400,9 +390,9 @@ func (a *Adapter) ReadDayView(date string, loc *time.Location) (DayView, error) 
 	if err != nil {
 		return DayView{}, err
 	}
-	if rec.RawEntryID != "" && !containsStr(view.RawEntryIDs, rec.RawEntryID) {
+	if rec.RawEntryID != "" && !slices.Contains(view.RawEntryIDs, rec.RawEntryID) {
 		view.RawEntryIDs = append(view.RawEntryIDs, rec.RawEntryID)
-		sort.Strings(view.RawEntryIDs)
+		slices.Sort(view.RawEntryIDs)
 	}
 	return view, nil
 }
@@ -517,7 +507,7 @@ func (a *Adapter) rawIDsForDate(date string) ([]string, error) {
 			out = append(out, id)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out, nil
 }
 
@@ -603,14 +593,4 @@ func mustDate(date string, loc *time.Location) time.Time {
 		return d
 	}
 	return time.Time{}
-}
-
-// containsStr reports whether xs contains s.
-func containsStr(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

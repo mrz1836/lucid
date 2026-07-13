@@ -130,7 +130,7 @@ func TestWriteRaw_ThreeSameSecondAppendsCounter(t *testing.T) {
 	a, _ := newRawAdapter(t)
 	now := fixedTime()
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_, err := a.WriteRaw(syntheticRaw(now, "n"))
 		require.NoError(t, err)
 	}

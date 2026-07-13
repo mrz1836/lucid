@@ -1,13 +1,14 @@
 package storage
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,22 +117,12 @@ func (a *Adapter) WriteEngineDay(rec engine.DayRecord) error {
 // ReadEngineDay reads one day record by id, unfolded (corrections still
 // pending). It returns (record, found, error): a missing record is not an
 // error — the caller decides whether that means "create fresh".
-func (a *Adapter) ReadEngineDay(dayID string) (rec engine.DayRecord, found bool, err error) {
+func (a *Adapter) ReadEngineDay(dayID string) (engine.DayRecord, bool, error) {
 	path, err := a.engineDayPath(dayID)
 	if err != nil {
 		return engine.DayRecord{}, false, err
 	}
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path from a validated day id
-	if errors.Is(err, fs.ErrNotExist) {
-		return engine.DayRecord{}, false, nil
-	}
-	if err != nil {
-		return engine.DayRecord{}, false, fmt.Errorf("storage: read engine day %q: %w", dayID, err)
-	}
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return engine.DayRecord{}, false, fmt.Errorf("storage: parse engine day %q: %w", dayID, err)
-	}
-	return rec, true, nil
+	return readJSONOptional[engine.DayRecord](path, fmt.Sprintf("engine day %q", dayID))
 }
 
 // ReadEngineDayFolded reads one day record and applies its corrections,
@@ -205,21 +196,13 @@ func (a *Adapter) ReadEngineDays() ([]engine.DayRecord, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].LogicalDate < records[j].LogicalDate })
+	slices.SortFunc(records, func(a, b engine.DayRecord) int { return cmp.Compare(a.LogicalDate, b.LogicalDate) })
 	return records, nil
 }
 
 // ReadChainConfig reads chain.json.
 func (a *Adapter) ReadChainConfig() (engine.ChainConfig, error) {
-	b, err := os.ReadFile(a.chainPath())
-	if err != nil {
-		return engine.ChainConfig{}, fmt.Errorf("storage: read chain.json: %w", err)
-	}
-	var c engine.ChainConfig
-	if err := json.Unmarshal(b, &c); err != nil {
-		return engine.ChainConfig{}, fmt.Errorf("storage: parse chain.json: %w", err)
-	}
-	return c, nil
+	return readJSON[engine.ChainConfig](a.chainPath(), "chain.json")
 }
 
 // WriteChainConfig writes chain.json. It is used to stamp chain_start on
@@ -237,30 +220,14 @@ func (a *Adapter) WriteChainConfig(c engine.ChainConfig) error {
 
 // ReadProfileState reads profile.json.
 func (a *Adapter) ReadProfileState() (engine.ProfileState, error) {
-	b, err := os.ReadFile(a.profilePath())
-	if err != nil {
-		return engine.ProfileState{}, fmt.Errorf("storage: read profile.json: %w", err)
-	}
-	var s engine.ProfileState
-	if err := json.Unmarshal(b, &s); err != nil {
-		return engine.ProfileState{}, fmt.Errorf("storage: parse profile.json: %w", err)
-	}
-	return s, nil
+	return readJSON[engine.ProfileState](a.profilePath(), "profile.json")
 }
 
 // ReadStormState reads storm.json (engine-module.md §storm.json). The
 // derived status reads it to decide whether a storm stands and through what
 // date; the tripwire phase (Phase 10) owns appending its history events.
 func (a *Adapter) ReadStormState() (engine.StormHistory, error) {
-	b, err := os.ReadFile(a.stormPath())
-	if err != nil {
-		return engine.StormHistory{}, fmt.Errorf("storage: read storm.json: %w", err)
-	}
-	var s engine.StormHistory
-	if err := json.Unmarshal(b, &s); err != nil {
-		return engine.StormHistory{}, fmt.Errorf("storage: parse storm.json: %w", err)
-	}
-	return s, nil
+	return readJSON[engine.StormHistory](a.stormPath(), "storm.json")
 }
 
 // AppendProfileEvent records a profile switch: it appends sw to the
@@ -283,15 +250,7 @@ func (a *Adapter) AppendProfileEvent(sw engine.ProfileSwitch) error {
 // returned unfolded — latest-per-label is a read-time fold
 // ([engine.LatestAnchors]).
 func (a *Adapter) ReadAnchors() (engine.AnchorLog, error) {
-	b, err := os.ReadFile(a.anchorsPath())
-	if err != nil {
-		return engine.AnchorLog{}, fmt.Errorf("storage: read anchors.json: %w", err)
-	}
-	var log engine.AnchorLog
-	if err := json.Unmarshal(b, &log); err != nil {
-		return engine.AnchorLog{}, fmt.Errorf("storage: parse anchors.json: %w", err)
-	}
-	return log, nil
+	return readJSON[engine.AnchorLog](a.anchorsPath(), "anchors.json")
 }
 
 // AppendAnchor records one milestone by appending it to anchors.json's
@@ -415,15 +374,7 @@ func (a *Adapter) buildAndWriteStatus(loc *time.Location, escalation string, sta
 
 // ReadEngineStatus reads engine/status.json (the derived projection).
 func (a *Adapter) ReadEngineStatus() (engine.Status, error) {
-	b, err := os.ReadFile(a.statusPath())
-	if err != nil {
-		return engine.Status{}, fmt.Errorf("storage: read status.json: %w", err)
-	}
-	var s engine.Status
-	if err := json.Unmarshal(b, &s); err != nil {
-		return engine.Status{}, fmt.Errorf("storage: parse status.json: %w", err)
-	}
-	return s, nil
+	return readJSON[engine.Status](a.statusPath(), "status.json")
 }
 
 // engineDayPath resolves the on-disk path for a day id

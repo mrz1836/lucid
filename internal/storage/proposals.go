@@ -168,16 +168,9 @@ type proposalPauseStateJSON struct {
 // state (no pause, zero count) when the file is absent — the first-run case.
 func (a *Adapter) ReadProposalPauseState() (ProposalPauseState, error) {
 	path := filepath.Join(a.home, proposalPauseFile)
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path at the Ledger root
-	if errors.Is(err, fs.ErrNotExist) {
-		return ProposalPauseState{}, nil
-	}
+	j, _, err := readJSONOptional[proposalPauseStateJSON](path, "proposal pause state")
 	if err != nil {
-		return ProposalPauseState{}, fmt.Errorf("storage: read proposal pause state: %w", err)
-	}
-	var j proposalPauseStateJSON
-	if err = json.Unmarshal(b, &j); err != nil {
-		return ProposalPauseState{}, fmt.Errorf("storage: parse proposal pause state: %w", err)
+		return ProposalPauseState{}, err
 	}
 	until, err := parseOptionalTimePtr(j.PausedUntil)
 	if err != nil {

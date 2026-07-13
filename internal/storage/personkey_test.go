@@ -53,7 +53,7 @@ func TestDerivePersonKey_Deterministic(t *testing.T) {
 	wl := data.Wordlist()
 	first, err := DerivePersonKey("Riley", wl)
 	require.NoError(t, err)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		got, err := DerivePersonKey("riley!!", wl)
 		require.NoError(t, err)
 		assert.Equal(t, first, got)

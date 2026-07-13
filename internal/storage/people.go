@@ -1,13 +1,12 @@
 package storage
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,16 +99,9 @@ func (a *Adapter) ReadPerson(key string) (PersonRecord, bool, error) {
 	if err != nil {
 		return PersonRecord{}, false, err
 	}
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path under the people tree, key is separator-checked
-	if errors.Is(err, fs.ErrNotExist) {
-		return PersonRecord{}, false, nil
-	}
-	if err != nil {
-		return PersonRecord{}, false, fmt.Errorf("storage: read person %q: %w", key, err)
-	}
-	var rec personRecordJSON
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return PersonRecord{}, false, fmt.Errorf("storage: parse person %q: %w", key, err)
+	rec, found, err := readJSONOptional[personRecordJSON](path, fmt.Sprintf("person %q", key))
+	if err != nil || !found {
+		return PersonRecord{}, false, err
 	}
 	return rec.decode()
 }
@@ -135,7 +127,7 @@ func (a *Adapter) ListPeopleKeys() ([]string, error) {
 		}
 		keys = append(keys, strings.TrimSuffix(e.Name(), personExt))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys, nil
 }
 
@@ -227,7 +219,7 @@ func mergePerson(existing PersonRecord, found bool, key string, m PersonMention)
 	rec.PersonKey = key
 	rec.DisplayName = m.DisplayName // latest spelling wins
 	rec.Aka = addUnique(rec.Aka, m.DisplayName)
-	sort.Strings(rec.Aka)
+	slices.Sort(rec.Aka)
 	if !m.At.IsZero() && (rec.FirstSeenAt.IsZero() || m.At.Before(rec.FirstSeenAt)) {
 		rec.FirstSeenAt = m.At
 	}
@@ -235,7 +227,7 @@ func mergePerson(existing PersonRecord, found bool, key string, m PersonMention)
 		rec.LastSeenAt = m.At
 	}
 	rec.EntryRefs = addUnique(rec.EntryRefs, m.RawEntryID)
-	sort.Strings(rec.EntryRefs)
+	slices.Sort(rec.EntryRefs)
 	return rec
 }
 
