@@ -162,8 +162,8 @@ func NewRegistry(kind, key, displayName, at string) Registry {
 // not mutated.
 func (r Registry) Apply(p RegistryPatch) Registry {
 	out := r
-	out.Aka = append([]string{}, r.Aka...)
-	out.StatusHistory = append([]StatusEvent{}, r.StatusHistory...)
+	out.Aka = slices.Clone(r.Aka)
+	out.StatusHistory = slices.Clone(r.StatusHistory)
 	out.Fields = cloneAnyMap(r.Fields)
 
 	if p.DisplayName != "" && p.DisplayName != out.DisplayName {
@@ -233,11 +233,10 @@ func normalizeRegistryName(name string) string {
 // cloneAnyMap deep-copies a one-level map (nil stays a fresh empty map). The
 // values are scalars/strings from a patch, so a shallow value copy is safe.
 func cloneAnyMap(m map[string]any) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
+	if m == nil {
+		return map[string]any{}
 	}
-	return out
+	return maps.Clone(m)
 }
 
 // sortedKeys returns the keys of a map in sorted order — a small determinism

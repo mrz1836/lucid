@@ -26,6 +26,7 @@ func TestEngineIsPure_NoIONoLLM(t *testing.T) {
 	allowed := map[string]bool{
 		`"cmp"`:     true,
 		`"fmt"`:     true,
+		`"maps"`:    true,
 		`"slices"`:  true,
 		`"sort"`:    true,
 		`"strconv"`: true,

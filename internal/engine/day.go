@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"maps"
 	"slices"
 	"time"
 )
@@ -89,7 +90,7 @@ func ImmutableCorrectionFields(c Correction) []string {
 // is not mutated — its Links map is deep-copied first.
 func (r DayRecord) Folded() DayRecord {
 	out := r
-	out.Links = cloneLinks(r.Links)
+	out.Links = maps.Clone(r.Links)
 	for _, c := range r.Corrections {
 		for k, v := range c.Fields {
 			applyFold(&out, k, v)
@@ -141,18 +142,6 @@ func applyFold(r *DayRecord, key string, v any) {
 	}
 }
 
-// cloneLinks returns a deep copy of a links map (nil stays nil).
-func cloneLinks(m map[string]string) map[string]string {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
 // toBool coerces a Go bool or JSON bool.
 func toBool(v any) (bool, bool) {
 	b, ok := v.(bool)
@@ -178,7 +167,7 @@ func toInt(v any) (int, bool) {
 func toStringMap(v any) (map[string]string, bool) {
 	switch m := v.(type) {
 	case map[string]string:
-		return cloneLinks(m), true
+		return maps.Clone(m), true
 	case map[string]any:
 		out := make(map[string]string, len(m))
 		for k, val := range m {

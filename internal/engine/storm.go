@@ -193,7 +193,7 @@ func StormBookkeeping(h StormHistory, now time.Time, loc *time.Location) (events
 // view a tripwire run reasons over before the adapter persists the appends.
 func (h StormHistory) WithEvents(events ...StormEvent) StormHistory {
 	out := h
-	out.History = append(append([]StormEvent{}, h.History...), events...)
+	out.History = append(slices.Clone(h.History), events...)
 	return out
 }
 

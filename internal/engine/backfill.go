@@ -12,7 +12,7 @@ import "time"
 func ResolveBackfillTarget(records []DayRecord, today time.Time, window int) time.Time {
 	completed := completedDateSet(records)
 	yesterday := AddDays(DateOf(today), -1)
-	for i := 0; i < window; i++ {
+	for i := range window {
 		d := AddDays(yesterday, -i)
 		if !completed[DateString(d)] {
 			return d

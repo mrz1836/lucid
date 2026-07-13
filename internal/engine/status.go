@@ -378,9 +378,7 @@ func daysToNextGate(chainStart *string, gates []int, ref time.Time, loc *time.Lo
 	}
 	elapsed := DaysBetween(start, ref)
 
-	sorted := append([]int(nil), gates...)
-	slices.Sort(sorted)
-	for _, g := range sorted {
+	for _, g := range slices.Sorted(slices.Values(gates)) {
 		if g > elapsed {
 			d := g - elapsed
 			return &d

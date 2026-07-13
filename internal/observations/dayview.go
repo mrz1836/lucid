@@ -107,7 +107,7 @@ func eventLine(e Event, spanning bool) string {
 // order every projection surfaces (ids encode the logical date and a
 // monotonic seq, so id order is time order within a day).
 func SortEventsByID(events []Event) []Event {
-	out := append([]Event{}, events...)
+	out := slices.Clone(events)
 	slices.SortStableFunc(out, func(a, b Event) int { return cmp.Compare(a.ID, b.ID) })
 	return out
 }

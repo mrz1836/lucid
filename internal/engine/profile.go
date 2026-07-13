@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -83,6 +84,6 @@ func ComputeSwitch(chain ChainConfig, state ProfileState, name string, now time.
 // updated. The history is append-only (engine-module.md §profile.json).
 func (s ProfileState) WithSwitch(sw ProfileSwitch) ProfileState {
 	out := ProfileState{Active: sw.To}
-	out.History = append(append([]ProfileSwitch{}, s.History...), sw)
+	out.History = append(slices.Clone(s.History), sw)
 	return out
 }

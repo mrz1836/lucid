@@ -330,7 +330,7 @@ func proposeSystem(in ProposeInput, strict bool) string {
 func denylist(in ProposeInput) string {
 	seen := map[string]bool{}
 	var out []string
-	for _, t := range append(append([]string{}, in.RejectedShapeTags...), in.UnansweredShapeTags...) {
+	for _, t := range slices.Concat(in.RejectedShapeTags, in.UnansweredShapeTags) {
 		if t != "" && !seen[t] {
 			seen[t] = true
 			out = append(out, t)

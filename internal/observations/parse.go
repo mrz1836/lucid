@@ -1,6 +1,7 @@
 package observations
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -526,7 +527,7 @@ func takeSide(tail []string) (side string, rest []string, ok bool) {
 	for i, t := range tail {
 		switch strings.ToLower(t) {
 		case "left", "right", "bilateral":
-			rest = append(append([]string{}, tail[:i]...), tail[i+1:]...)
+			rest = slices.Concat(tail[:i], tail[i+1:])
 			return strings.ToLower(t), rest, true
 		}
 	}

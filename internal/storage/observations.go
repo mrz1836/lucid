@@ -562,7 +562,7 @@ func appendLineFsync(path string, content []byte) error {
 	if err != nil {
 		return fmt.Errorf("storage: open %q for append: %w", path, err)
 	}
-	line := append(append([]byte{}, content...), '\n')
+	line := append(slices.Clone(content), '\n')
 	if _, werr := f.Write(line); werr != nil {
 		_ = f.Close()
 		return fmt.Errorf("storage: append to %q: %w", path, werr)
