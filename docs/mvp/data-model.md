@@ -11,9 +11,10 @@ the MVP gets there by upgrading this layout, not by replacing it.
 The two design rules that drive everything below:
 
 1. **Primary data is permanent.** The trees the user absolutely must
-   never lose are `raw/`, `observations/`,
+   never lose are `raw/`, `media/`, `observations/`,
    `registries/`, and `engine/` (minus the derived `status.json`):
-   each holds testimony or configuration that exists nowhere else.
+   each holds testimony, an attached artifact, or configuration that
+   exists nowhere else.
    `processed/`, `insights/`, `reflections/`, `engine/status.json`,
    and `projections/` are rebuildable.
 2. **Processed is rebuildable.** If the agents improve,
@@ -32,6 +33,9 @@ These rules trace directly to
 ├── lucid.json              # tiny config (paths, defaults, agent versions)
 ├── raw/                    # immutable raw entries (.md)
 │   └── 2026/05/raw_2026_05_05_19_42.md
+├── media/                  # immutable binary attachments (any file), + .json sidecar
+│   ├── 2026/07/2026-07-10-handwritten-notes.jpg
+│   └── 2026/07/2026-07-10-handwritten-notes.jpg.json
 ├── processed/              # JSON extraction artifacts, one per raw entry
 │   └── raw_2026_05_05_19_42.json
 ├── insights/               # validated insights (.md), one per accepted/nuanced
@@ -57,9 +61,9 @@ These rules trace directly to
 ```
 
 Subdirectories under `raw/` use a `YYYY/MM/` shard so a single
-directory does not grow unbounded (and `engine/days/` shards the same
-way). All other directories are flat in the MVP; sharding can be added
-later without breaking ids.
+directory does not grow unbounded (and `engine/days/` and `media/`
+shard the same way). All other directories are flat in the MVP;
+sharding can be added later without breaking ids.
 
 The `engine/` tree's record schemas, mutability rules, and derived-file
 semantics are owned by [`engine-module.md`](engine-module.md); the
@@ -75,6 +79,7 @@ and add two naming kinds: `day_YYYY_MM_DD` for logical-day records and
 | Kind | Convention | Example |
 |------|------------|---------|
 | Raw entry id | `raw_YYYY_MM_DD_HH_MM` (creation time, local TZ). Append `_SS` if a same-minute collision is detected. | `raw_2026_05_05_19_42`, or `raw_2026_05_05_19_42_07` on collision |
+| Media attachment | `YYYY-MM-DD-<slug>.<ext>` — logical-day prefix + a low-signal slug (from the caption, else the original basename), original extension preserved. Append `_N` on a same-day slug collision. The metadata sidecar is `<stored-filename>.json`. | `2026-07-10-handwritten-notes.jpg` (+ sidecar `…-notes.jpg.json`) |
 | Processed artifact id | Same id as the raw entry it describes. | `raw_2026_05_05_19_42.json` |
 | Insight id | `i_YYYY_MM_DD_<slot>` where `<slot>` is `a`, `b`, ... per day. | `i_2026_05_05_a` |
 | Session id | `session_YYYY_MM_DD_HH_MM` (thread open time, same `_SS` rule). | `session_2026_05_05_19_42` |
@@ -308,6 +313,94 @@ bootstrap: true
 Around the time I started my second job. I remember a stretch of
 months where I felt invisible in meetings.
 ```
+
+## Media attachments — `~/.lucid/media/`
+
+**Format:** the stored file is the original binary, byte-for-byte — **any
+file, stored opaquely** (a photo, a scanned PDF, a handwritten page, an
+artifact). Lucid never inspects, transcodes, or interprets the content at
+capture: there is no type gate and no allowlist. Video and audio are excluded
+by convention (the capture surface simply does not route them), not by a hard
+reject at the verb. Each stored file is paired with a small JSON **metadata
+sidecar**.
+
+**Mutability:** **Immutable**, exactly like `raw/`. The storage adapter has no
+`update_media`; a correction is a new attachment. A binary is primary data that
+exists nowhere else — it is backed up, never regenerated.
+
+Attachments are written by the deterministic, agent-free `lucid attach` verb
+(see [`../usage/commands.md`](../usage/commands.md) §`attach`). No model runs in
+the write path (P3): the copy, the hash, and the sidecar are all mechanical.
+Every attachment also emits one immutable `raw/` entry that references it, so the
+media is discoverable by the same reads that walk the Ledger — the day view
+([`../usage/commands.md`](../usage/commands.md) §`day`) surfaces the day's media
+as an inventory `Media:` line (stored path and caption only, never a score).
+
+### Layout
+
+Files shard by logical day under `YYYY/MM/`, mirroring `raw/`:
+
+```
+~/.lucid/media/
+└── 2026/07/
+    ├── 2026-07-10-handwritten-notes.jpg          # the stored binary
+    └── 2026-07-10-handwritten-notes.jpg.json     # its metadata sidecar
+```
+
+The filename is `YYYY-MM-DD-<slug>.<ext>`:
+
+* `YYYY-MM-DD` is the **logical day** the attachment is attributed to — 04:00
+  rollover-aware, and `--day @yesterday` attaches to the prior logical day,
+  reusing the same day resolution as observations (§ backdating in
+  [`observations-module.md`](observations-module.md); no second clock).
+* `<slug>` is a low-signal label derived from the caption when present, else the
+  original basename — lowercased, alphanumeric-and-hyphen, truncated.
+* `<ext>` is the **original extension, preserved** (content stored opaquely).
+
+A same-day slug collision appends `_N` (`…-notes_2.jpg`), the same discipline as
+the raw same-minute rule. The sidecar is `<stored-filename>.json` — the stored
+filename **including its extension** plus `.json` — so a `.json` original
+(`…-export.json`) and its sidecar (`…-export.json.json`) never collide.
+
+### Sidecar schema
+
+**Format:** JSON. One file per stored attachment.
+
+```json
+{
+  "id": "2026-07-10-handwritten-notes.jpg",
+  "sha256": "3b1f0c8e…e9",
+  "original_filename": "IMG_4823.jpg",
+  "captured_at": "2026-07-10T21:14:07-04:00",
+  "logical_day": "2026-07-10",
+  "caption": "handwritten session notes, page 1",
+  "alt": null,
+  "raw_entry_id": "raw_2026_07_10_21_14",
+  "source": "cli"
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `id` | yes | The stored filename (`YYYY-MM-DD-<slug>.<ext>`) — the on-disk name of the binary. |
+| `sha256` | yes | Integrity hash of the stored bytes, computed at write. A reader re-hashes the file and compares to detect corruption or drift. |
+| `original_filename` | yes | The basename as dropped, preserved for provenance even though the stored name is derived. |
+| `captured_at` | yes | When the attachment was written (local TZ, same offset rule as every other record). |
+| `logical_day` | yes | The logical day (`YYYY-MM-DD`) the attachment is attributed to — the filename prefix, from the shared rollover/backdate rules. |
+| `caption` | no | Optional free-text caption, stored verbatim. Absent on the frictionless "drop it" path. |
+| `alt` | no | Optional alt-text for a future accessible surface; `null` when unset. |
+| `raw_entry_id` | yes | The immutable `raw/` entry emitted alongside the attachment that references it — the link the day view and the Mirror follow. |
+| `source` | yes | Provenance token — the capture surface (`cli`, or a harness token), normalized on write, exactly as on the raw entry / session record. |
+
+### Durability — backed up, never committed
+
+The media store lives under `~/.lucid/`, the user-owned state root, **wholly
+separate from the code repository**. Binaries are **backed up by the
+state-folder backup, never committed** to git: the Ledger is the record and its
+backup is the durability story, so no code repo ever swells with photos. This is
+the same "primary data is permanent" rule the trees above follow — `media/` is
+primary, immutable, and belongs to the user, so a backup of `~/.lucid/` covers it
+in full.
 
 ## Processed artifacts — `~/.lucid/processed/`
 
