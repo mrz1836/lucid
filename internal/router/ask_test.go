@@ -141,7 +141,7 @@ func TestAsk_7_5_ByteIdenticalAndSerialized(t *testing.T) {
 	// Two concurrent /ask turns, each with its own (single-use) fake provider,
 	// exercise the read-only path under contention (St-6).
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

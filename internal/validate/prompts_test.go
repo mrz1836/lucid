@@ -151,10 +151,3 @@ func TestLooksLikeRegex(t *testing.T) {
 	assert.False(t, looksLikeRegex("You always fold under pressure."))
 	assert.False(t, looksLikeRegex("I noticed a possible pattern."))
 }
-
-// TestContainsString covers the small set helper.
-func TestContainsString(t *testing.T) {
-	assert.True(t, containsString([]string{"a", "b"}, "b"))
-	assert.False(t, containsString([]string{"a", "b"}, "c"))
-	assert.False(t, containsString(nil, "a"))
-}

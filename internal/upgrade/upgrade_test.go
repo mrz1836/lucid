@@ -321,7 +321,7 @@ func TestInstall_DownloadOversizeTriggersFileTooLarge(t *testing.T) {
 		default:
 			// Stream past maxDownloadBytes to trip the limit.
 			buf := bytes.Repeat([]byte("A"), 1<<20)
-			for i := 0; i < 600; i++ {
+			for range 600 {
 				if _, err := w.Write(buf); err != nil {
 					return
 				}
@@ -429,7 +429,7 @@ func TestDownloadAndVerify_OversizeBody(t *testing.T) {
 	// The httptest server streams just past maxDownloadBytes.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		buf := bytes.Repeat([]byte("A"), 1<<20)
-		for i := 0; i <= 501; i++ {
+		for range 502 {
 			if _, err := w.Write(buf); err != nil {
 				return
 			}

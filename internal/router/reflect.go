@@ -3,7 +3,8 @@ package router
 import (
 	"context"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -437,11 +438,7 @@ func (r *Router) dominanceLine() (string, error) {
 // by the lexically smallest key so the result is deterministic regardless of
 // map iteration order.
 func topPerson(counts map[string]int) (string, int) {
-	keys := make([]string, 0, len(counts))
-	for k := range counts {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(counts))
 	best, bestCount := "", 0
 	for _, k := range keys {
 		if counts[k] > bestCount {

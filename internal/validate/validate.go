@@ -22,7 +22,10 @@
 // is present and says what it skipped.
 package validate
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // Severity ranks a finding. An error fails the sweep (a real gate breach); a
 // warning is surfaced but never fails it (hygiene the build can carry).
@@ -168,17 +171,12 @@ func Run(opts Options) (Report, error) {
 // sortFindings orders findings deterministically (check, path, line, rule) so
 // the human and JSON output — and the tests — are stable across runs.
 func sortFindings(fs []Finding) {
-	sort.SliceStable(fs, func(i, j int) bool {
-		a, b := fs[i], fs[j]
-		switch {
-		case a.Check != b.Check:
-			return a.Check < b.Check
-		case a.Path != b.Path:
-			return a.Path < b.Path
-		case a.Line != b.Line:
-			return a.Line < b.Line
-		default:
-			return a.Rule < b.Rule
-		}
+	slices.SortStableFunc(fs, func(a, b Finding) int {
+		return cmp.Or(
+			cmp.Compare(a.Check, b.Check),
+			cmp.Compare(a.Path, b.Path),
+			cmp.Compare(a.Line, b.Line),
+			cmp.Compare(a.Rule, b.Rule),
+		)
 	})
 }

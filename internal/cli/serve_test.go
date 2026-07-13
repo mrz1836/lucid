@@ -9,10 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -166,13 +168,7 @@ func proposeEx(text, tag string, ids ...string) provider.Exchange {
 // TestServe_Registered proves `serve` is on the cobra root.
 func TestServe_Registered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	var found bool
-	for _, c := range root.Commands() {
-		if c.Name() == "serve" {
-			found = true
-			break
-		}
-	}
+	found := slices.ContainsFunc(root.Commands(), func(c *cobra.Command) bool { return c.Name() == "serve" })
 	assert.True(t, found, "serve must be registered on the root command")
 }
 

@@ -1,8 +1,9 @@
 package router
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -87,7 +88,7 @@ func (r *Router) matchPeople(query string) ([]storage.PersonRecord, error) {
 			matches = append(matches, rec)
 		}
 	}
-	sort.SliceStable(matches, func(i, j int) bool { return matches[i].PersonKey < matches[j].PersonKey })
+	slices.SortStableFunc(matches, func(a, b storage.PersonRecord) int { return cmp.Compare(a.PersonKey, b.PersonKey) })
 	return matches, nil
 }
 
@@ -97,12 +98,9 @@ func recordMatchesName(rec storage.PersonRecord, query string) bool {
 	if strings.EqualFold(strings.TrimSpace(rec.DisplayName), query) {
 		return true
 	}
-	for _, aka := range rec.Aka {
-		if strings.EqualFold(strings.TrimSpace(aka), query) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(rec.Aka, func(aka string) bool {
+		return strings.EqualFold(strings.TrimSpace(aka), query)
+	})
 }
 
 // renderCandidates builds the P-2 disambiguation result: the candidates listed
@@ -213,7 +211,7 @@ func (r *Router) insightsCiting(rec storage.PersonRecord) ([]string, error) {
 			}
 		}
 	}
-	sort.Strings(citing)
+	slices.Sort(citing)
 	return citing, nil
 }
 

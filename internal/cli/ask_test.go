@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -84,13 +86,7 @@ func runAsk(t *testing.T, args ...string) (stdout string, err error) {
 // TestAsk_Registered proves `ask` is on the cobra root (AC-6).
 func TestAsk_Registered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	var found bool
-	for _, c := range root.Commands() {
-		if c.Name() == "ask" {
-			found = true
-			break
-		}
-	}
+	found := slices.ContainsFunc(root.Commands(), func(c *cobra.Command) bool { return c.Name() == "ask" })
 	assert.True(t, found, "ask must be registered on the root command")
 }
 

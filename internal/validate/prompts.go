@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -87,7 +88,7 @@ func CheckDiagnosticLanguage(root string) ([]Finding, error) {
 func CheckSanctuaryTree(root string, denylist []string) ([]Finding, error) {
 	var findings []Finding
 	for _, want := range []string{"engine/", "observations/", "registries/"} {
-		if !containsString(denylist, want) {
+		if !slices.Contains(denylist, want) {
 			findings = append(findings, Finding{
 				Check:    CheckSanctuary,
 				Severity: SeverityError,
@@ -198,16 +199,6 @@ func fileStringLiterals(root, path string) ([]literal, error) {
 func looksLikeRegex(s string) bool {
 	for _, marker := range []string{`(?i)`, `\b`, `(?:`, `[a-z`, `[0-9`, `\w`, `\s`, `\d`, `^[`} {
 		if strings.Contains(s, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsString reports whether xs contains x.
-func containsString(xs []string, x string) bool {
-	for _, v := range xs {
-		if v == x {
 			return true
 		}
 	}

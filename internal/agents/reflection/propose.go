@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/mrz1836/lucid/internal/provider"
@@ -207,7 +208,7 @@ func validShapeTag(tag string, in ProposeInput) bool {
 	if strings.Count(tag, "-")+1 > maxShapeTagSegments {
 		return false
 	}
-	if contains(in.RejectedShapeTags, tag) || contains(in.UnansweredShapeTags, tag) {
+	if slices.Contains(in.RejectedShapeTags, tag) || slices.Contains(in.UnansweredShapeTags, tag) {
 		return false
 	}
 	return true
@@ -263,16 +264,6 @@ func noPattern(noLLM bool) ProposeResult {
 // people — the §R-4 "not enough signal" short-circuit.
 func (v ProcessedView) isEmpty() bool {
 	return len(v.Emotions) == 0 && len(v.Themes) == 0 && len(v.People) == 0
-}
-
-// contains reports whether xs holds v.
-func contains(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // windowSlice renders the current artifact and the recent window as the single

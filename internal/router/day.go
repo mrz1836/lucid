@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,12 +89,9 @@ func (r *Router) noLocationNote(date string, view storage.DayView) (string, erro
 // enricher event (so the note is suppressed once weather is present).
 func dayHasWeather(view storage.DayView) bool {
 	src := observations.EnricherSource(observations.EnricherWeather)
-	for _, e := range view.Obs.Events {
-		if e.Kind == observations.KindContextDay && e.Source == src {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(view.Obs.Events, func(e observations.Event) bool {
+		return e.Kind == observations.KindContextDay && e.Source == src
+	})
 }
 
 // resolveDayArg maps the optional `/day` argument to a logical date: empty is
