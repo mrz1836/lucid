@@ -164,7 +164,14 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "reflection": "reflection-2026.05.0",
     "safety_consent": "safety-2026.05.0"
   },
-  "bootstrap_mode": false
+  "bootstrap_mode": false,
+  "provider": {
+    "backend": "claude_cli",
+    "model": "opus",
+    "timeout_seconds": 120,
+    "endpoint": "http://localhost:11434",
+    "roles": {}
+  }
 }
 ```
 
@@ -187,6 +194,20 @@ The single global config file. Tiny, hand-editable, agent-readable.
   surface a dominance line — deterministic router copy, hypothesis
   language, gate cadence only (see
   [`agent-contracts.md`](agent-contracts.md) §3 "Gate recall").
+* `provider` selects the model backend for the agentic verbs (`/checkin`,
+  `/reflect`, `/ask`) — the config seam ADR-0006 mandates. `backend` is
+  `claude_cli` (the zero-setup default, an on-host `claude -p` one-shot) or `ollama`
+  (a local `/api/chat` daemon call); `model` is the backend's model (default `opus`;
+  e.g. `qwen2.5:14b` for Ollama); `timeout_seconds` bounds every call so a hung
+  backend degrades to a timeout rather than waiting forever; and `endpoint` is the
+  Ollama base URL (default `http://localhost:11434`, ignored by the Claude CLI
+  backend). The reserved `roles` map is empty by default — one configured backend
+  serves all four agent roles for now, and per-role `{backend, model}` overrides drop
+  in there later without a schema change. **No model API key lives here, or anywhere
+  in `lucid.json`** — auth is the vendor CLI's or the local daemon's. Full
+  per-backend invocation contract:
+  [`../adr/0006-model-access.md`](../adr/0006-model-access.md) §"Pinned invocation
+  contracts".
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt

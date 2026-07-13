@@ -40,6 +40,55 @@ local model runtime — never raw API keys**:
   key lives in `hush` (ADR-0005) and is injected at spawn — recorded
   as an exception, not a new normal.
 
+## Pinned invocation contracts
+
+The MVP ships **two** backends behind the one provider interface, selected by the
+`lucid.json` `provider` block (`backend`, `model`, `timeout_seconds`, `endpoint`,
+plus a reserved per-role `roles` map — [`../mvp/data-model.md`](../mvp/data-model.md)
+§`lucid.json`). A single configured backend serves all four agent roles for now; the
+`roles` map reserves per-role overrides so this decision's per-role mandate can be
+exercised later without a contract change. Each backend maps the shared
+`provider.Request` (System instruction + role-tagged Messages) onto its transport and
+the reply back into `provider.Response.Content`; a bounded failure returns the
+interface's `ErrTimeout` / `ErrUnavailable` sentinels rather than a raw error.
+
+### Claude Code CLI — `backend: "claude_cli"` (default)
+
+* **Invocation:** a fresh one-shot `claude -p --output-format json --model <model>`
+  per call (default model `opus`), the System instruction passed via
+  `--system-prompt` and the role-flattened Messages fed on stdin. Each completion is
+  one stateless bounded slice, so nothing persists between calls.
+* **Reply:** parse the JSON envelope and take `.result` as `Response.Content`.
+* **Errors:** a context deadline maps to `ErrTimeout`; a non-zero exit, a spawn
+  failure, an `is_error` envelope, expired OAuth / offline, or an empty `.result`
+  map to `ErrUnavailable` — the "no model reachable" degradation this ADR requires
+  surviving.
+* **Auth:** on-host subscription OAuth in the Claude CLI's own store; Lucid holds no
+  credential. Zero-setup, so it is the shipped default across every role.
+
+### Local Ollama — `backend: "ollama"`
+
+* **Invocation:** a non-streaming `POST <endpoint>/api/chat` (default endpoint
+  `http://localhost:11434`) with `{model, messages, stream: false}`, the System
+  instruction mapped to a leading `system` message and the role-tagged Messages
+  passed through. Default model `qwen2.5:14b`; any locally-pulled model is a one-line
+  config change.
+* **Reply:** read `.message.content` as `Response.Content`.
+* **Errors:** **every call is deadline-bounded** — a hung daemon (the known
+  binary-skew failure class, where a stale `ollama serve` leaves the endpoint hanging
+  while `/api/tags` stays healthy) maps to `ErrTimeout`, never an unbounded wait; a
+  refused connection, DNS failure, non-2xx status, or an unpulled/missing model maps
+  to `ErrUnavailable`.
+* **Sovereignty:** the local model is a first-class configuration, not a degraded
+  mode — the full-sovereignty path this ADR's Consequences require.
+
+The **Codex CLI** (OpenAI OAuth) remains sanctioned above but is not shipped in this
+pillar; the config seam and factory dispatch leave room for it — and any future
+backend — to register without a contract change. **No test requires live vendor
+auth:** agents are exercised against the `provider.Fake`, and the two real backends
+are proven once by a documented manual live-smoke
+([`../usage/harness-setup.md`](../usage/harness-setup.md)).
+
 ## Consequences
 
 * **Cost:** analysis rides subscriptions already paid for; running
