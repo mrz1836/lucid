@@ -11,14 +11,16 @@ import (
 // now is the fixed "now" for parse fixtures: 2026-07-02 21:45 in loc.
 var now = at(2026, 7, 2, 21, 45) //nolint:gochecknoglobals // deterministic test-fixture clock
 
-func parse(kind, class string, args ...string) ParseResult {
+func parse(kind Kind, class string, args ...string) ParseResult {
 	return ParseMicrolog(ParseInput{Kind: kind, Class: class, Args: args, Now: now, SpelledOK: true})
 }
 
 func TestResolveVerb(t *testing.T) {
 	cases := []struct {
-		verb, kind, class string
-		ok                bool
+		verb  string
+		kind  Kind
+		class string
+		ok    bool
 	}{
 		{"pain", KindPain, "", true},
 		{"ate", KindIntake, "food", true},

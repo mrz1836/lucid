@@ -17,7 +17,10 @@ import (
 // the empty, enricher-only, and unknown-kind edges, in both spelled-number
 // modes.
 func FuzzParseMicrolog(f *testing.F) {
-	seeds := []struct{ kind, argline string }{
+	seeds := []struct {
+		kind    Kind
+		argline string
+	}{
 		{KindPain, "7 knee @yesterday"},
 		{KindMood, "4 #anxious wired"},
 		{KindSleep, "10pm 6am quality 3"},
@@ -33,13 +36,13 @@ func FuzzParseMicrolog(f *testing.F) {
 		{"nonsense", "@@@ #### ????"},
 	}
 	for _, s := range seeds {
-		f.Add(s.kind, s.argline, true)
-		f.Add(s.kind, s.argline, false)
+		f.Add(string(s.kind), s.argline, true)
+		f.Add(string(s.kind), s.argline, false)
 	}
 
 	f.Fuzz(func(t *testing.T, kind, argline string, spelled bool) {
 		res := ParseMicrolog(ParseInput{
-			Kind:      kind,
+			Kind:      Kind(kind),
 			Args:      strings.Fields(argline),
 			Now:       now,
 			SpelledOK: spelled,
@@ -47,6 +50,6 @@ func FuzzParseMicrolog(f *testing.F) {
 		// Total: the result is always well-formed, whatever the input.
 		require.NotNil(t, res.Payload, "Payload must always be initialized")
 		require.NotNil(t, res.Refs, "Refs must always be initialized")
-		require.Equal(t, kind, res.Kind, "the invoked kind is always preserved")
+		require.Equal(t, Kind(kind), res.Kind, "the invoked kind is always preserved")
 	})
 }

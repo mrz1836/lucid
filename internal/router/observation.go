@@ -37,7 +37,7 @@ type CaptureRequest struct {
 // reject path; every other input is captured, partial or not (P1/P10).
 type CaptureResult struct {
 	EventID     string
-	Kind        string
+	Kind        observations.Kind
 	LogicalDate string
 	Partial     bool
 	Rejected    bool
@@ -128,7 +128,7 @@ const packetPointerLine = "A clinician packet for appointments is available: /pa
 // capture, appends the clinician-packet discovery pointer when the ephemeral
 // backoff (once per 30 days) allows. The pointer decision is the only place a
 // capture ack varies by kind, and it is still inventory — no evaluation.
-func (r *Router) captureAckWithPointer(kind, id string, partial bool, now time.Time) (string, error) {
+func (r *Router) captureAckWithPointer(kind observations.Kind, id string, partial bool, now time.Time) (string, error) {
 	ack := captureAck(kind, id, partial)
 	if kind != observations.KindIntervention {
 		return ack, nil
@@ -230,7 +230,7 @@ func buildProvenance(req CaptureRequest) (map[string]any, error) {
 // captureAck builds the inventory ack: "logged" plus the id, nothing
 // evaluative (observations.md §0). A partial capture says it was kept as
 // written — still no streak, score, or judgment.
-func captureAck(kind, id string, partial bool) string {
+func captureAck(kind observations.Kind, id string, partial bool) string {
 	if partial {
 		return fmt.Sprintf("Logged %s as `%s` — kept as written.", kind, id)
 	}

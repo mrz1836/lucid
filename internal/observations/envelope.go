@@ -60,7 +60,7 @@ const dateLayout = "2006-01-02"
 type Event struct {
 	ID                  string         `json:"id"`
 	Schema              int            `json:"schema"`
-	Kind                string         `json:"kind"`
+	Kind                Kind           `json:"kind"`
 	RecordedAt          string         `json:"recorded_at"`
 	OccurredAt          string         `json:"occurred_at"`
 	OccurredAtPrecision string         `json:"occurred_at_precision"`

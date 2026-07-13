@@ -28,7 +28,7 @@ func newObsStore(t *testing.T) *Adapter {
 	return a
 }
 
-func microEvent(kind, logicalDate string, payload map[string]any) observations.Event {
+func microEvent(kind observations.Kind, logicalDate string, payload map[string]any) observations.Event {
 	return observations.Event{
 		Schema: observations.Schema, Kind: kind,
 		RecordedAt: "2026-07-02T21:45:00-04:00", OccurredAt: "2026-07-02T21:45:00-04:00",

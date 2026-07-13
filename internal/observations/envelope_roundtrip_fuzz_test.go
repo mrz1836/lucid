@@ -33,7 +33,7 @@ func FuzzEventRoundTrip(f *testing.F) {
 		ev := Event{
 			ID:                  id,
 			Schema:              Schema,
-			Kind:                kind,
+			Kind:                Kind(kind),
 			RecordedAt:          "2026-07-05T18:41:39Z",
 			OccurredAt:          "2026-07-05T18:41:39Z",
 			OccurredAtPrecision: precision,

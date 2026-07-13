@@ -37,7 +37,7 @@ type PacketConfig struct {
 type Config struct {
 	Version            int            `json:"version"`
 	KeySalt            string         `json:"key_salt"`
-	KindsEnabled       []string       `json:"kinds_enabled"`
+	KindsEnabled       []Kind         `json:"kinds_enabled"`
 	CuriosityBudgetDay int            `json:"curiosity_budget_per_day"`
 	AgentSliceOptins   map[string]any `json:"agent_slice_optins"`
 	Packet             PacketConfig   `json:"packet"`
@@ -54,7 +54,7 @@ func DefaultConfig() Config {
 	return Config{
 		Version:            ConfigVersion,
 		KeySalt:            "",
-		KindsEnabled:       []string{KindPain, KindIntake, KindElimination, KindMood},
+		KindsEnabled:       []Kind{KindPain, KindIntake, KindElimination, KindMood},
 		CuriosityBudgetDay: 1,
 		AgentSliceOptins:   map[string]any{},
 		Packet:             PacketConfig{ClinicalContext: []string{}},
@@ -68,13 +68,13 @@ func DefaultConfig() Config {
 // KindEnabled reports whether kind may be captured under this config
 // (observations.md §10: all kinds off until enabled). A capture of a disabled
 // kind is rejected with the enable hint, never silently stored.
-func (c Config) KindEnabled(kind string) bool {
+func (c Config) KindEnabled(kind Kind) bool {
 	return slices.Contains(c.KindsEnabled, kind)
 }
 
 // EnableHint is the fixed rejection copy for a disabled kind (error-states:
 // "`pain` isn't enabled — add it to observations/config.json").
-func EnableHint(kind string) string {
+func EnableHint(kind Kind) string {
 	return fmt.Sprintf("`%s` isn't enabled — add it to observations/config.json", kind)
 }
 
@@ -112,7 +112,7 @@ func UnmarshalConfig(b []byte) (Config, error) {
 // file always carries [] / {} rather than null.
 func (c Config) normalized() Config {
 	if c.KindsEnabled == nil {
-		c.KindsEnabled = []string{}
+		c.KindsEnabled = []Kind{}
 	}
 	if c.AgentSliceOptins == nil {
 		c.AgentSliceOptins = map[string]any{}

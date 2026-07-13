@@ -23,7 +23,7 @@ func bootedObs(t *testing.T) *Router {
 	require.NoError(t, a.ScaffoldObservations())
 	cfg, err := a.ReadObservationsConfig()
 	require.NoError(t, err)
-	cfg.KindsEnabled = []string{
+	cfg.KindsEnabled = []observations.Kind{
 		observations.KindPain, observations.KindSymptom, observations.KindIntake,
 		observations.KindElimination, observations.KindMood, observations.KindSleep,
 		observations.KindMed, observations.KindIntervention, observations.KindMeasurement,
@@ -62,7 +62,7 @@ func TestCapture_ShorthandsWriteValidEnvelopes(t *testing.T) {
 	r := bootedObs(t)
 	cases := []struct {
 		tokens []string
-		kind   string
+		kind   observations.Kind
 	}{
 		{[]string{"pain", "6", "knee"}, observations.KindPain},
 		{[]string{"ate", "eggs,", "toast"}, observations.KindIntake},

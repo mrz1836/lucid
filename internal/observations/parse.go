@@ -7,23 +7,30 @@ import (
 	"time"
 )
 
+// Kind is an observation kind (observations.md §3) — the vocabulary a capture
+// verb resolves to. A defined string type so the compiler keeps an observation
+// kind from being confused with a registry kind (injury/thread/place/era) or a
+// place key; it marshals byte-identically to its underlying string, so the
+// event envelope is unchanged.
+type Kind string
+
 // Observation kinds (observations.md §3, the initial vocabulary). Kinds are
 // enabled per-instance; the parser resolves a verb to one of these and never
 // invents a value — capture never blocks, so an unparseable head lands on the
 // partial path with the invoked kind preserved.
 const (
-	KindPain         = "pain"
-	KindSymptom      = "symptom"
-	KindIntake       = "intake"
-	KindElimination  = "elimination"
-	KindMood         = "mood"
-	KindSleep        = "sleep"
-	KindMed          = "med"
-	KindIntervention = "intervention"
-	KindMeasurement  = "measurement"
-	KindMemory       = "memory"
-	KindLocation     = "context.location"
-	KindContextDay   = "context.day"
+	KindPain         Kind = "pain"
+	KindSymptom      Kind = "symptom"
+	KindIntake       Kind = "intake"
+	KindElimination  Kind = "elimination"
+	KindMood         Kind = "mood"
+	KindSleep        Kind = "sleep"
+	KindMed          Kind = "med"
+	KindIntervention Kind = "intervention"
+	KindMeasurement  Kind = "measurement"
+	KindMemory       Kind = "memory"
+	KindLocation     Kind = "context.location"
+	KindContextDay   Kind = "context.day"
 )
 
 // ParseMarkerPartial is the payload.parse value stamped on a capture that
@@ -61,7 +68,7 @@ func isIntakeClass(tok string) bool {
 // router intent"); every other enabled kind is reached through the generic
 // `/obs <kind>` form, where the verb is the kind itself. It returns ok=false
 // for a verb that names no known kind — the router rejects that as unknown.
-func ResolveVerb(verb string) (kind, class string, ok bool) {
+func ResolveVerb(verb string) (kind Kind, class string, ok bool) {
 	switch strings.ToLower(verb) {
 	case "pain":
 		return KindPain, "", true
@@ -80,8 +87,8 @@ func ResolveVerb(verb string) (kind, class string, ok bool) {
 	case "where":
 		return KindLocation, "", true
 	}
-	if IsCapturableKind(verb) {
-		return verb, "", true
+	if IsCapturableKind(Kind(verb)) {
+		return Kind(verb), "", true
 	}
 	return "", "", false
 }
@@ -89,8 +96,8 @@ func ResolveVerb(verb string) (kind, class string, ok bool) {
 // IsCapturableKind reports whether kind may be captured by a command
 // (observations.md §3). context.day is enricher-written only, so it is not
 // capturable; hypothesis/verdict are Scientist-layer, out of MVP scope.
-func IsCapturableKind(kind string) bool {
-	switch kind {
+func IsCapturableKind(kind Kind) bool {
+	switch kind { //nolint:exhaustive // deliberately partial: context.day is enricher-written only, so it (and any unknown kind) is not capturable and returns false via the default
 	case KindPain, KindSymptom, KindIntake, KindElimination, KindMood,
 		KindSleep, KindMed, KindIntervention, KindMeasurement, KindMemory, KindLocation:
 		return true
@@ -103,7 +110,7 @@ func IsCapturableKind(kind string) bool {
 // the argument tokens after the verb, and the clocks the parser needs to
 // resolve @-backdating and default occurred_at.
 type ParseInput struct {
-	Kind      string
+	Kind      Kind
 	Class     string
 	Args      []string
 	Now       time.Time
@@ -115,7 +122,7 @@ type ParseInput struct {
 // location capture (the router resolves that to a registry key), and the
 // Partial flag for the capture-never-blocks path.
 type ParseResult struct {
-	Kind        string
+	Kind        Kind
 	OccurredAt  time.Time
 	Precision   string
 	OccurredEnd *time.Time
@@ -176,7 +183,7 @@ func ParseMicrolog(in ParseInput) ParseResult {
 // capturable kind keeps the free text. Splitting the dispatch out keeps
 // ParseMicrolog's totality contract readable.
 func parseKindHead(res *ParseResult, rest []string, in ParseInput) {
-	switch in.Kind {
+	switch in.Kind { //nolint:exhaustive // deliberately partial: sleep is handled ahead of this dispatch, and context.day / any unknown kind fall to the free-text default
 	case KindPain:
 		parseScaleKind(res, rest, in, "intensity", 0, 10, true, parsePainTail)
 	case KindMood:

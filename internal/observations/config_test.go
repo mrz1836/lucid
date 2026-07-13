@@ -11,7 +11,7 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	c := DefaultConfig()
 	assert.Equal(t, ConfigVersion, c.Version)
-	assert.Equal(t, []string{KindPain, KindIntake, KindElimination, KindMood}, c.KindsEnabled)
+	assert.Equal(t, []Kind{KindPain, KindIntake, KindElimination, KindMood}, c.KindsEnabled)
 	assert.Equal(t, 1, c.CuriosityBudgetDay)
 	require.Len(t, c.Enrichers, 2)
 	assert.Equal(t, "weather", c.Enrichers[0].Name)

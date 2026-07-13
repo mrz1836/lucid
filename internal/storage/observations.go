@@ -232,7 +232,7 @@ func (a *Adapter) ReadObservationsRange(start, end string) ([]observations.Event
 // ReadObservationsKind reads every event of one kind across the whole tree,
 // sorted by id — the series read exports build on (Phase 12). It walks the
 // observation files and filters, skipping malformed lines.
-func (a *Adapter) ReadObservationsKind(kind string) ([]observations.Event, error) {
+func (a *Adapter) ReadObservationsKind(kind observations.Kind) ([]observations.Event, error) {
 	var out []observations.Event
 	err := filepath.WalkDir(a.observationsDir(), func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

@@ -206,7 +206,7 @@ func (a *Adapter) buildClinicianInput(cfg observations.Config, windowStart, wind
 
 // readKindInWindow reads every event of a kind and keeps those the predicate
 // admits, preserving id order.
-func (a *Adapter) readKindInWindow(kind string, inWindow func(string) bool) ([]observations.Event, error) {
+func (a *Adapter) readKindInWindow(kind observations.Kind, inWindow func(string) bool) ([]observations.Event, error) {
 	all, err := a.ReadObservationsKind(kind)
 	if err != nil {
 		return nil, err

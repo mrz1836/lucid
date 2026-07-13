@@ -14,7 +14,7 @@ import (
 )
 
 // appendObs appends one observation with an explicit payload on a logical day.
-func appendObs(t *testing.T, a *Adapter, kind, date string, payload map[string]any) {
+func appendObs(t *testing.T, a *Adapter, kind observations.Kind, date string, payload map[string]any) {
 	t.Helper()
 	_, err := a.AppendObservation(observations.Event{
 		Schema: observations.Schema, Kind: kind,

@@ -26,7 +26,7 @@ func enableAllObsKinds(t *testing.T) string {
 	require.NoError(t, a.ScaffoldObservations())
 	cfg, err := a.ReadObservationsConfig()
 	require.NoError(t, err)
-	cfg.KindsEnabled = []string{
+	cfg.KindsEnabled = []observations.Kind{
 		observations.KindPain, observations.KindElimination, observations.KindMood,
 		observations.KindIntake, observations.KindSleep, observations.KindLocation,
 	}
