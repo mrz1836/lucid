@@ -89,6 +89,7 @@ append-only Ledger under ~/.lucid/.`,
 	// stage lands; version + upgrade are wired now (Stage 0).
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newLogCmd())
+	root.AddCommand(newAttachCmd())
 	root.AddCommand(newCloseoutCmd())
 	root.AddCommand(newModeCmd())
 	root.AddCommand(newStatusCmd())
