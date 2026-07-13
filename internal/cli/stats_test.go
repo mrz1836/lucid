@@ -37,7 +37,7 @@ type statsJSON struct {
 // storage adapter over the same home for seeding raw entries and observations
 // at controlled dates. The CLI boots its own adapter over LUCID_HOME, so what
 // this seeds on disk is exactly what `lucid stats` reads back.
-func statsSeededHome(t *testing.T) (string, *storage.Adapter) {
+func statsSeededHome(t *testing.T) *storage.Adapter {
 	t.Helper()
 	home := isolatedHome(t)
 	a := storage.New(home)
@@ -45,7 +45,7 @@ func statsSeededHome(t *testing.T) (string, *storage.Adapter) {
 	require.NoError(t, err)
 	require.NoError(t, a.ScaffoldObservations())
 	require.NoError(t, a.ScaffoldEngine())
-	return home, a
+	return a
 }
 
 // seedStatsRaw writes one raw entry recorded at at (bucketed by its recorded
@@ -102,7 +102,7 @@ func TestStats_CLI_BareFreshLedger(t *testing.T) {
 // both days, each with its own counts, and the window totals are the sum
 // (AC-2). "today" resolves through the same rollover the day view uses.
 func TestStats_CLI_LastTwoDays(t *testing.T) {
-	_, a := statsSeededHome(t)
+	a := statsSeededHome(t)
 	withClock(t, afternoon()) // today = 2026-07-05, so --last 2 → 07-04..07-05
 
 	// 2026-07-04: two raw entries + one pain observation.
@@ -179,7 +179,7 @@ func TestStats_CLI_LastZeroUsageError(t *testing.T) {
 // every enabled kind present (zeros included) in config order — so a harness
 // reads a stable key set across runs (AC-6).
 func TestStats_CLI_JSONDenseByKind(t *testing.T) {
-	_, a := statsSeededHome(t)
+	a := statsSeededHome(t)
 	withClock(t, afternoon())
 	seedStatsObs(t, a, observations.KindPain, "2026-07-05", time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC), nil)
 	seedStatsObs(t, a, observations.KindIntake, "2026-07-05", time.Date(2026, 7, 5, 12, 30, 0, 0, time.UTC), nil)
@@ -215,7 +215,7 @@ func TestStats_CLI_JSONDenseByKind(t *testing.T) {
 // metadata only (AC-8). Distinctive text is planted in a raw entry body and an
 // observation note; neither may appear in the human or the --json output.
 func TestStats_CLI_NoContentLeak(t *testing.T) {
-	_, a := statsSeededHome(t)
+	a := statsSeededHome(t)
 	withClock(t, afternoon())
 
 	const rawMarker = "raw-body-sentinel-7788"
