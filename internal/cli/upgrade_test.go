@@ -222,3 +222,9 @@ func TestLookupEnvString(t *testing.T) {
 	assert.Equal(t, "value123", lookupEnvString("LUCID_TEST_ENV_VAR"))
 	assert.Empty(t, lookupEnvString("LUCID_DEFINITELY_UNSET_VAR_XYZ"))
 }
+
+// TestSelfCheckNotifierSend documents the no-op notifier contract: a self-check
+// delivers nothing, so Send never errors and never sends.
+func TestSelfCheckNotifierSend(t *testing.T) {
+	require.NoError(t, selfCheckNotifier{}.Send("bell", "body"))
+}

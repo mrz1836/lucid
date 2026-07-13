@@ -4,10 +4,42 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestParseBackfillDate covers the explicit YYYY-MM-DD backfill target parse:
+// a well-formed date resolves in the host zone, anything else is the start of
+// the compact form (ok=false) and the caller falls through to the router.
+func TestParseBackfillDate(t *testing.T) {
+	tests := []struct {
+		name   string
+		tok    string
+		wantOK bool
+	}{
+		{"iso date", "2026-07-05", true},
+		{"yesterday keyword", "yesterday", false},
+		{"compact form head", "dfx", false},
+		{"empty", "", false},
+		{"malformed date", "2026-13-40", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseBackfillDate(tt.tok)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				require.NotNil(t, got)
+				want, perr := time.ParseInLocation("2006-01-02", tt.tok, time.Now().Location())
+				require.NoError(t, perr)
+				assert.True(t, got.Equal(want))
+			} else {
+				assert.Nil(t, got)
+			}
+		})
+	}
+}
 
 // engineDayCount counts written day records under the isolated home.
 func engineDayCount(t *testing.T, home string) int {
