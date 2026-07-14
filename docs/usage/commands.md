@@ -283,6 +283,112 @@ lucid day yesterday
 lucid day 2026-06-01 --json
 ```
 
+### stats
+
+```
+lucid stats [--last N | --from YYYY-MM-DD --to YYYY-MM-DD] [--json]
+```
+
+Read-only **Ledger volume** rollup — *how much* has been recorded, counted per
+logical day: raw-entry count, observation count, observation counts by kind,
+total events, and a per-logical-day breakdown over a date range. A pure
+projection over the Ledger — deterministic, read-only, and **agent-free** (P9):
+no model in the path, and it never reads, prints, or returns journal / entry /
+observation-payload / Mirror **content**. Counts, kinds, and dates only. Writes
+nothing beyond the silent Ledger scaffold `day`/`status` already perform.
+
+**Range selection.** The window is a run of logical days, resolved on the same
+rollover basis `lucid day` uses:
+
+| Invocation | Window |
+|------------|--------|
+| `lucid stats` | The current logical day only (mirrors bare `lucid day`). |
+| `lucid stats --last N` | The `N` logical days ending at **and including** today (e.g. `--last 2` on `2026-07-11` → `2026-07-10..2026-07-11`). |
+| `lucid stats --from A --to B` | The inclusive explicit range `A..B`. |
+| `lucid stats --from A` | `A` through today (`--to` defaults to today). |
+| `lucid stats --to B` | The single day `B` (`--from` defaults to `--to`). |
+
+`--last` and `--from`/`--to` are **mutually exclusive** — passing both is a usage
+error. A malformed `--from`/`--to`, a `from` later than `to`, or `--last < 1` is
+likewise a usage error (exit `2`). A read never breaches a gate, so a resolved
+query exits `0`.
+
+**Output fields.** Both surfaces report the resolved date range, the logical-day
+basis, `raw_entries`, `observations`, `observations_by_kind`, `total_events`
+(`= raw_entries + observations`), and the per-day breakdown.
+`observations_by_kind` differs by surface: **dense** under `--json` — every
+enabled kind (`pain`, `intake`, `elimination`, `mood`, in config order) is
+emitted with zeros included, so the key set and order stay stable across every
+run (a harness parses one fixed shape); **sparse** in human output — only
+nonzero kinds are listed, for readability. `observations` counts *every*
+observation event on the day; `observations_by_kind` breaks down the enabled
+kinds only, so on a day carrying a context/enricher event (e.g. `context.day`,
+`context.location`) the by-kind counts can sum to fewer than `observations`.
+
+Human output (sparse by-kind):
+
+```text
+Stats 2026-07-10..2026-07-11 (logical days)
+Raw entries: 36
+Observations: 2
+  intake: 1
+  elimination: 1
+Total events: 38
+
+By day:
+  2026-07-10: 34 entries, 2 observations, 36 total
+  2026-07-11: 2 entries, 0 observations, 2 total
+```
+
+`--json` (field order fixed; `observations_by_kind` dense):
+
+```json
+{
+  "from": "2026-07-10",
+  "to": "2026-07-11",
+  "logical_day": true,
+  "raw_entries": 36,
+  "observations": 2,
+  "observations_by_kind": {"pain": 0, "intake": 1, "elimination": 1, "mood": 0},
+  "total_events": 38,
+  "days": [
+    {"date": "2026-07-10", "raw_entries": 34, "observations": 2, "total_events": 36},
+    {"date": "2026-07-11", "raw_entries": 2, "observations": 0, "total_events": 2}
+  ]
+}
+```
+
+**Two deliberate divergences from `lucid day`.** `stats` reuses the exact
+`lucid day` join per day, so a given day's counts match `lucid day` — with two
+documented exceptions:
+
+- **Raw entries follow recorded-civil-date bucketing; observations are
+  rollover-correct.** A raw entry is counted on the civil date it was recorded
+  (the same bucketing `lucid day` uses), while an observation is placed on its
+  rollover-correct `logical_date`. Near a rollover / DST boundary a same-moment
+  raw entry and observation can therefore fall on different days — matching
+  `lucid day` exactly.
+- **A spanning observation is counted once, on its start day.** A range
+  observation that covers several logical days is counted a single time, on its
+  start (`logical_date`) day, so the per-day columns sum exactly to the top-line
+  totals. (`lucid day` re-surfaces such a spanning event on every day it covers,
+  so for a mid-range spanned day `stats` can report fewer observations than
+  `lucid day`.)
+
+**`stats` vs `metrics`.** `stats` reports **Ledger volume** — how much has been
+recorded (raw-entry and observation counts per logical day). Its sibling
+read-only [`metrics`](#metrics) command reports **practice quality** — how the
+committed chain is going (streak, adherence, misses, days-since). The two share
+**no** output field; both read the same rollover / logical-day basis, so their
+day boundaries can never disagree.
+
+```sh
+lucid stats
+lucid stats --last 2
+lucid stats --from 2026-07-10 --to 2026-07-11
+lucid stats --last 7 --json
+```
+
 ### validate
 
 ```

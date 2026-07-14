@@ -70,8 +70,8 @@ func exitCodeForError(err error) int {
 // newRootCmd constructs the cobra root command fresh on every call
 // (no mutable package-level command state). It registers the full
 // command spine from ADR-0003 (`init|log|closeout|mode|status|day|
-// validate|export`) plus the `version` and `upgrade` verbs added in
-// ADR-0007.
+// stats|validate|export`) plus the `version` and `upgrade` verbs added
+// in ADR-0007. `stats` is the read-only Ledger-volume sibling of `day`.
 func newRootCmd(bi BuildInfo) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "lucid",
@@ -95,6 +95,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newObsCmd())
 	root.AddCommand(newDayCmd())
+	root.AddCommand(newStatsCmd())
 	root.AddCommand(newValidateCmd())
 	root.AddCommand(newExportCmd())
 	root.AddCommand(newVersionCmd(bi))

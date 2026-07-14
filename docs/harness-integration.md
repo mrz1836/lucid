@@ -17,7 +17,7 @@ deterministic spine right now, with **no LLM provider and no secrets inside
 Lucid** (the binary writes only `~/.lucid/`):
 
 `log` · `closeout` (+ `skip` / `backfill` / `today`) · `mode` · `status` ·
-`obs` (+ enabled kinds) · `day` · `anchor add` · `metrics` · `export` / `packet` ·
+`obs` (+ enabled kinds) · `day` · `anchor add` · `metrics` · `stats` · `export` / `packet` ·
 `validate` · `version` · `upgrade`
 
 That is the full nightly close-out + morning status loop — the core of a
