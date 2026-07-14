@@ -10,6 +10,10 @@ Every way to drive Lucid, in one place. Two surfaces:
 See [`install.md`](install.md) to get the binary and [`getting-started.md`](getting-started.md)
 for the daily flow.
 
+Prefer to talk instead of type? [`natural-language.md`](natural-language.md)
+describes the voice-first surface that maps plain language onto these commands —
+this reference stays the precise baseline.
+
 ## Global conventions
 
 - **`--json`** is a persistent flag on every command: *"Emit machine-readable

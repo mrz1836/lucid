@@ -46,6 +46,7 @@ its output. Acknowledge *after* the binary persists, never before.
 | Message | Router intent | How the skill drives it |
 |---------|---------------|-------------------------|
 | `/log <text>` | capture | `lucid log <text>` |
+| media/file attachment | media capture | `lucid attach <path> [--caption <text>] [--day @yesterday|@YYYY-MM-DD]` |
 | `/checkin` | guided Intake → structure → ≤1 proposal | router check-in (thread-driven, provider-backed) |
 | `/closeout …` | Engine close-out | `lucid closeout …` — **verbatim passthrough** |
 | `/closeout skip` | honest miss | `lucid closeout skip` — **verbatim passthrough** |
@@ -65,6 +66,69 @@ its output. Acknowledge *after* the binary persists, never before.
 
 Commands beyond this list are out of scope for the MVP. The skill never
 invents a command, an agent, or a field.
+
+## Natural-language translation (voice-first)
+
+The slash/CLI verbs above are the **canonical baseline** — precise,
+deterministic, and the contract every surface shares. This skill **may** also
+accept plain, spoken-style phrasing (the shape a voice-to-text message takes),
+recognize the intended verb, and **assemble the documented command** from it. It
+invents **no** command, field, or flag of its own: it can only assemble a verb
+that already exists, and if a message maps to nothing real it says so rather than
+guessing. The CLI is the contract; natural phrasing is the human interface. The
+full mechanism, per-verb phrasings, and synthetic examples live in
+[`../../docs/usage/natural-language.md`](../../docs/usage/natural-language.md).
+
+**Execution posture — reads run, writes confirm.** Voice-to-text is lossy and an
+Engine write lands an immutable day record, so the two verb classes are handled
+differently:
+
+* **Read verbs run immediately.** `status`, `day`, `metrics`, `log`, and `obs`
+  change no day record (a capture is additive, never an overwrite), so the skill
+  assembles and runs them as soon as it understands the message — no
+  confirmation step.
+* **State-writing verbs are echoed and confirmed.** For `closeout`,
+  `closeout backfill`, `mode`, and `closeout skip`, the skill **assembles the
+  compact command, shows it back, and waits for a one-word confirmation** before
+  running it. The consequential lifecycle verbs `storm`, `anchor`, and `profile`
+  are echoed for the same one-word confirm.
+
+**Ask, don't guess.** When a required piece — a chain-link state, a capacity, or
+an observation field — is missing or ambiguous, the skill asks **one** concise
+question and waits. It never fabricates a link state, a capacity, or any value
+the user did not give.
+
+**The boundaries do not change.** This is a phrasing layer over the same core;
+every guarantee holds exactly as it does on the command line:
+
+* **Engine verbs stay deterministic and are relayed verbatim** — never scored,
+  embellished, or celebrated (the verbatim-passthrough rule below applies
+  unchanged).
+* **Every write goes through `lucid`.** The skill only assembles and runs the
+  documented command; the agent-free core performs the write and acknowledges
+  after it lands. The skill never writes state itself.
+* **Mirror content is never scored.** A journal line or a capture is held, not
+  graded; the voice-first layer adds no judgement to what is written.
+* **The Ledger is never hand-edited.** No agent touches the files under
+  `~/.lucid/` directly — the store is append-only and schema'd, and the only way
+  in is a `lucid` verb.
+
+**Coverage.** The voice-first layer maps the everyday verbs plus the live
+practice-lifecycle verbs `storm`, `anchor`, `profile`, and `metrics` (each a
+documented verb in the [command reference](../../docs/usage/commands.md)). The
+three **provider-backed** Mirror verbs — `/checkin`, `/reflect`, and `/ask` — are
+**not yet wired** into this layer; their natural-language phrasing is
+**deliberately deferred** until they ship, so drive them by their documented
+forms until then.
+
+## Media attachments
+
+When the user asks to save or log an image/file, first persist the inbound file
+to a safe temporary local path if the harness only exposes it as transient media,
+then run `lucid attach <path>` with an optional caption. Do not store user media
+under the agent workspace as the final archive. The canonical media store is
+`~/.lucid/media/`, and `lucid attach` emits the stored path, sha256, logical day,
+linked raw id, and caption. Relay those fields back to the user.
 
 ## Verbatim passthrough on Engine verbs
 
