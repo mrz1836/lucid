@@ -107,6 +107,12 @@ every guarantee holds exactly as it does on the command line:
 * **Every write goes through `lucid`.** The skill only assembles and runs the
   documented command; the agent-free core performs the write and acknowledges
   after it lands. The skill never writes state itself.
+* **Shell-quote free text.** When invoking `lucid` through a shell, wrap every
+  user-authored free-text argument (journal lines, captions, limiters with
+  punctuation, observation notes) so punctuation such as `;`, `&`, `|`, `!`,
+  parentheses, and quotes cannot be interpreted by the shell. Prefer a single
+  fully quoted command argument for closeout/log text, then verify the saved
+  raw id/day when the write is consequential.
 * **Mirror content is never scored.** A journal line or a capture is held, not
   graded; the voice-first layer adds no judgement to what is written.
 * **The Ledger is never hand-edited.** No agent touches the files under
