@@ -38,10 +38,14 @@ const defaultBaseURL = "https://discord.com/api/v10"
 
 // httpTimeout bounds a single message POST (mirrors the enrichment fetcher's
 // 10s budget); errBodyCap bounds how much of a non-2xx response body is echoed
-// into the returned error so a failure never dumps an unbounded payload.
+// into the returned error so a failure never dumps an unbounded payload;
+// respBodyCap bounds how much of a 2xx body is read when a caller needs the
+// created message id (a Discord message object is a few KB — the cap only
+// guards against a pathological reply).
 const (
 	httpTimeout = 10 * time.Second
 	errBodyCap  = 512
+	respBodyCap = 1 << 16
 )
 
 // httpDoer is the one-method seam over [http.Client.Do] so tests can drive the
@@ -54,6 +58,14 @@ type httpDoer interface {
 // carrying the pre-rendered template text and nothing else.
 type message struct {
 	Content string `json:"content"`
+}
+
+// created is the subset of Discord's create-message (and get-message) response
+// the notifier reads: the snowflake id of the message. The companion path uses
+// it for read-back verification and to persist an idempotent delivery receipt;
+// the teeth path ([Discord.Send]) ignores it entirely.
+type created struct {
+	ID string `json:"id"`
 }
 
 // Discord is the concrete Discord-bot [scheduler.Notifier]. It resolves the
@@ -106,38 +118,114 @@ func New(token, userID, witnessID string, do httpDoer) *Discord {
 // logical channel ("user" or "witness"). An unknown logical channel or an
 // unresolved (unset) channel ID is an error, never a mis-send; a non-2xx
 // response surfaces the status and a short body snippet. It composes nothing —
-// the text is the fixed Engine template the scheduler handed it.
+// the text is the fixed Engine template the scheduler handed it. This is the
+// teeth path: it discards the created message id.
 func (d *Discord) Send(channel, text string) error {
+	_, err := d.post(channel, text)
+	return err
+}
+
+// SendReturningID POSTs the rendered text exactly like [Discord.Send] but
+// parses and returns the snowflake id Discord assigns the created message. The
+// companion path uses the id for read-back verification ([Discord.VerifyPresent])
+// and to persist an idempotent delivery receipt. An empty id in an otherwise-2xx
+// response is an error, so a caller never records a receipt it cannot verify.
+func (d *Discord) SendReturningID(channel, text string) (string, error) {
+	body, err := d.post(channel, text)
+	if err != nil {
+		return "", err
+	}
+	var c created
+	if err := json.Unmarshal(body, &c); err != nil {
+		return "", fmt.Errorf("notify: parse create-message response: %w", err)
+	}
+	if c.ID == "" {
+		return "", fmt.Errorf("notify: discord create-message response carried no message id")
+	}
+	return c.ID, nil
+}
+
+// VerifyPresent confirms a previously created message id is actually present in
+// the channel by GETting it from the Discord REST API — the read-back half of
+// the companion's "a real message id reappears in the channel" guarantee. A
+// non-2xx status (a 404 for a message that never landed), a body whose id does
+// not match, or an empty id argument is a clear error so a delivery is never
+// recorded as verified when the message is not really there.
+func (d *Discord) VerifyPresent(channel, messageID string) error {
 	id, err := d.resolve(channel)
 	if err != nil {
 		return err
 	}
+	if messageID == "" {
+		return fmt.Errorf("notify: cannot verify an empty message id")
+	}
+
+	url := fmt.Sprintf("%s/channels/%s/messages/%s", d.base, id, messageID)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("notify: build read-back request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bot "+d.token)
+
+	resp, err := d.do.Do(req)
+	if err != nil {
+		return fmt.Errorf("notify: read-back get from channel %s: %w", id, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyCap))
+		return fmt.Errorf("notify: read-back of message %s in channel %s returned status %d: %s",
+			messageID, id, resp.StatusCode, strings.TrimSpace(string(snippet)))
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, respBodyCap))
+	var c created
+	if err := json.Unmarshal(body, &c); err != nil {
+		return fmt.Errorf("notify: parse read-back response: %w", err)
+	}
+	if c.ID != messageID {
+		return fmt.Errorf("notify: read-back of message %s returned mismatched id %q", messageID, c.ID)
+	}
+	return nil
+}
+
+// post resolves the logical channel, POSTs the rendered text, and returns the
+// (bounded) 2xx response body — the shared transport both [Discord.Send] (teeth,
+// fire-and-forget) and [Discord.SendReturningID] (companion, needs the created
+// id) build on. Its resolve/marshal/request/status behavior and error wording
+// are byte-for-byte what Send used before, so the teeth path is unchanged.
+func (d *Discord) post(channel, text string) ([]byte, error) {
+	id, err := d.resolve(channel)
+	if err != nil {
+		return nil, err
+	}
 
 	body, err := json.Marshal(message{Content: text})
 	if err != nil {
-		return fmt.Errorf("notify: marshal message: %w", err)
+		return nil, fmt.Errorf("notify: marshal message: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/channels/%s/messages", d.base, id)
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("notify: build request: %w", err)
+		return nil, fmt.Errorf("notify: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bot "+d.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := d.do.Do(req)
 	if err != nil {
-		return fmt.Errorf("notify: post to channel %s: %w", id, err)
+		return nil, fmt.Errorf("notify: post to channel %s: %w", id, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyCap))
-		return fmt.Errorf("notify: discord post to channel %s returned status %d: %s",
+		return nil, fmt.Errorf("notify: discord post to channel %s returned status %d: %s",
 			id, resp.StatusCode, strings.TrimSpace(string(snippet)))
 	}
-	return nil
+	return io.ReadAll(io.LimitReader(resp.Body, respBodyCap))
 }
 
 // resolve maps a logical channel to its real Discord channel ID. An unknown

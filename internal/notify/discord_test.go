@@ -154,6 +154,90 @@ func TestNewDefaultsDoerToBoundedClient(t *testing.T) {
 	assert.Equal(t, defaultBaseURL, d.base)
 }
 
+func TestSendReturningID_ParsesCreatedID(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, `{"id":"1526225086254682172","channel_id":"U123"}`)
+
+	id, err := d.SendReturningID(engine.ChannelUser, "test fire")
+	require.NoError(t, err)
+	assert.Equal(t, "1526225086254682172", id)
+
+	// Routes, auths, and bodies exactly like Send — SendReturningID only adds
+	// parsing the id off the response.
+	assert.Equal(t, http.MethodPost, got.method)
+	assert.Equal(t, "/channels/U123/messages", got.path)
+	assert.Equal(t, "Bot tok-abc", got.auth)
+	assert.JSONEq(t, `{"content":"test fire"}`, got.body)
+}
+
+func TestSendReturningID_EmptyIDErrors(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, `{}`)
+
+	_, err := d.SendReturningID(engine.ChannelUser, "hi")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no message id")
+}
+
+func TestSendReturningID_MalformedResponseErrors(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, "not-json")
+
+	_, err := d.SendReturningID(engine.ChannelUser, "hi")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse create-message response")
+}
+
+func TestSendReturningID_PropagatesPostError(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusForbidden, `{"message":"Missing Access"}`)
+
+	_, err := d.SendReturningID(engine.ChannelUser, "hi")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status")
+}
+
+func TestVerifyPresent_PresentSucceeds(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, `{"id":"777"}`)
+
+	err := d.VerifyPresent(engine.ChannelUser, "777")
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodGet, got.method)
+	assert.Equal(t, "/channels/U123/messages/777", got.path)
+	assert.Equal(t, "Bot tok-abc", got.auth)
+}
+
+func TestVerifyPresent_AbsentErrors(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusNotFound, `{"message":"Unknown Message"}`)
+
+	err := d.VerifyPresent(engine.ChannelUser, "777")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status")
+}
+
+func TestVerifyPresent_MismatchedIDErrors(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, `{"id":"999"}`)
+
+	err := d.VerifyPresent(engine.ChannelUser, "777")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mismatched id")
+}
+
+func TestVerifyPresent_EmptyMessageIDErrorsBeforeAnyGet(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, `{"id":"777"}`)
+
+	err := d.VerifyPresent(engine.ChannelUser, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty message id")
+	assert.Empty(t, got.path) // never touched the network
+}
+
+func TestVerifyPresent_UnknownChannelErrorsBeforeAnyGet(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, `{"id":"777"}`)
+
+	err := d.VerifyPresent("nope", "777")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown logical channel")
+	assert.Empty(t, got.path)
+}
+
 func TestNewDiscordFromEnv(t *testing.T) {
 	t.Run("success reads all three vars", func(t *testing.T) {
 		t.Setenv(envHarnessToken, "bot-secret")
