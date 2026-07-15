@@ -74,7 +74,7 @@ Two threads, one substrate. The Mirror thread is the original steel thread
 Engine loop wraps around it nightly.
 
 ```
-        21:30  bell prompt (template)  ──►  user runs the chain in the world
+        19:00  bell prompt (template)  ──►  user runs the chain in the world
                                                     │
                                                     ▼
         /closeout   link flags · mode-relative scoring · capacity digit
@@ -87,7 +87,7 @@ Engine loop wraps around it nightly.
          budget burn)                                  proposes ≤1 pattern →
                     │                                  "does this resonate?"
                     ▼                                  → insight or rejection
-        09:00  tripwire (cron): completed → reset · 1 miss → L1 nudge
+        06:00  tripwire (cron): completed → reset · 1 miss → L1 nudge
                naming the floor · 2 consecutive → L2 to witness
                (dead-man: fires on ABSENCE of a day record)
 

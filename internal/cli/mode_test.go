@@ -52,7 +52,7 @@ func TestModeCLI_RejectedAfterBell(t *testing.T) {
 	require.ErrorIs(t, err, errModeNotAccepted)
 	assert.Equal(t, ExitErr, exitCodeForError(err))
 	assert.Empty(t, out)
-	assert.Contains(t, errOut, "Mode is fixed at the bell (21:30).")
+	assert.Contains(t, errOut, "Mode is fixed at the bell (19:00).")
 	assert.Equal(t, 0, engineDayCount(t, home))
 }
 

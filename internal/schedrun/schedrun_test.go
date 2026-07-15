@@ -321,7 +321,7 @@ func TestTripwireWorker_SecondRunSameDayIsNoOp(t *testing.T) {
 // ── Periodic registration from chain marks (AC-2) ────────────────────────────
 
 // TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks: reconciling from
-// the default chain marks (21:30 bell, 09:00 tripwire) registers both durable
+// the default chain marks (19:00 bell, 06:00 tripwire) registers both durable
 // periodics with the expected daily cron expressions.
 func TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
@@ -337,8 +337,8 @@ func TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks(t *testing.T) {
 		assert.True(t, v.Active, "periodic %s is active", v.Slug)
 		assert.Equal(t, queueName, v.Queue)
 	}
-	assert.Equal(t, "30 21 * * *", crons[slugBell], "bell fires at 21:30")
-	assert.Equal(t, "0 9 * * *", crons[slugTripwire], "tripwire fires at 09:00")
+	assert.Equal(t, "0 19 * * *", crons[slugBell], "bell fires at 19:00")
+	assert.Equal(t, "0 6 * * *", crons[slugTripwire], "tripwire fires at 06:00")
 }
 
 // TestUpsertPeriodics_IsIdempotentAcrossRestart: re-reconciling the same config

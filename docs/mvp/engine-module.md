@@ -259,7 +259,7 @@ append-only per engine §2).
   "version": 1,
   "chain_id": "night_chain",
   "label": "Journal. Dock. Read.",
-  "bell_time": "21:30",
+  "bell_time": "19:00",
   "rollover": "04:00",
   "backfill_window_days": 7,
   "links": [
@@ -272,7 +272,7 @@ append-only per engine §2).
   "footprint_cap_minutes": 30,
   "slo": {"isolated_miss_budget_per_30d": 4, "gate_threshold": 0.85, "gates": [30, 60, 90]},
   "bell": {"enabled": true},
-  "escalation": {"l1_enabled": true, "l2_enabled": false, "tripwire_time": "09:00"},
+  "escalation": {"l1_enabled": true, "l2_enabled": false, "tripwire_time": "06:00"},
   "away_mode": null,
   "profiles": {
     "nights": {"bell_time": "08:30", "tripwire_time": "17:00", "rollover": "12:00"}
@@ -508,7 +508,7 @@ storms, and profile switches included.
 ## The tripwire (scheduled job)
 
 One scheduled job, morning-run at the active profile's
-`tripwire_time` (default 09:00) — the bell prompt, its evening
+`tripwire_time` (default 06:00) — the bell prompt, its evening
 sibling, likewise posts at the active profile's `bell_time`. In a
 **standalone install** this job runs on the **go-flywheel** durable
 scheduler ([ADR-0004](../adr/0004-core-dependencies.md)) — the `lucid
@@ -578,7 +578,7 @@ makeup work exists anywhere in the system.
 | Trigger | Behavior | User message | Disk effect | Recovery |
 |---------|----------|--------------|-------------|----------|
 | `/closeout` twice same logical day | Idempotent no-op | "Already closed out — streak N." | None | — |
-| `/mode` after bell time | Reject | "Mode is fixed at the bell (21:30). Tonight runs as declared; the budget absorbs hard days." | None | Retro annotation |
+| `/mode` after bell time | Reject | "Mode is fixed at the bell (19:00). Tonight runs as declared; the budget absorbs hard days." | None | Retro annotation |
 | Close-out interrupted mid-flow | Write partial | "Saved what we got — floor still counts if the survival link ran." | Day record `partial: true` | `/closeout` again appends corrections |
 | Tripwire can't reach witness channel | Fall back | L1-style message to user: "L2 fired but couldn't reach <witness> — you owe the message." | `escalation_state: l2_fired` | Manual |
 | Clock/rollover ambiguity (e.g., travel TZ) | Trust host clock | — | Local-TZ timestamps per [`data-model.md`](data-model.md) | Away Mode pre-specs the trip |

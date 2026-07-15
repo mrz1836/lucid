@@ -413,8 +413,8 @@ func TestMarks(t *testing.T) {
 	chain := engine.DefaultChain()
 	bell, tripwire, err := Marks(chain, engine.DefaultProfile)
 	require.NoError(t, err)
-	assert.Equal(t, "21:30", bell)
-	assert.Equal(t, "09:00", tripwire)
+	assert.Equal(t, "19:00", bell)
+	assert.Equal(t, "06:00", tripwire)
 
 	bell, tripwire, err = Marks(chain, "nights")
 	require.NoError(t, err)

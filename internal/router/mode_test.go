@@ -37,7 +37,7 @@ func TestMode_RejectedAfterBell(t *testing.T) {
 	res, err := r.Mode(engine.ModeRed, atUTC(2026, 7, 5, 22, 0))
 	require.NoError(t, err)
 	assert.True(t, res.Rejected)
-	assert.Equal(t, "Mode is fixed at the bell (21:30). Tonight runs as declared; the budget absorbs hard days.", res.Ack)
+	assert.Equal(t, "Mode is fixed at the bell (19:00). Tonight runs as declared; the budget absorbs hard days.", res.Ack)
 	assert.Equal(t, 0, countFiles(t, home, "engine/days"), "a rejected mode writes no record")
 
 	_, found, err := a.ReadEngineDay("day_2026_07_05")
