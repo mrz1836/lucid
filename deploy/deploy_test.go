@@ -32,6 +32,10 @@ func TestRenderLaunchd_Defaults(t *testing.T) {
 	assert.Contains(t, out, "<key>LUCID_USER_CHANNEL_ID</key>")
 	assert.Contains(t, out, "<key>LUCID_WITNESS_CHANNEL_ID</key>")
 	assert.Contains(t, out, "<key>LUCID_SCHEDULER_DB</key>")
+	// PATH must be set explicitly — a launchd job inherits only a minimal
+	// default PATH, so bare tool names (~/go/bin, homebrew) would not resolve.
+	assert.Contains(t, out, "<key>PATH</key>")
+	assert.Contains(t, out, "<key>HOME</key>")
 	assert.Contains(t, out, "<true/>", "RunAtLoad/KeepAlive true render as <true/>")
 	// A supervised install never names lucid in the launchd job — hush does.
 	assert.NotContains(t, out, "<string>lucid</string>")
@@ -154,6 +158,41 @@ func TestRenderSupervise_CarriesNoSecretValue(t *testing.T) {
 	out, err := RenderSupervise(p)
 	require.NoError(t, err)
 	// The scope names the env var; the vault holds the value. Nothing here.
+	assert.NotContains(t, strings.ToLower(out), "bearer ")
+	assert.NotContains(t, out, "token = \"")
+}
+
+// TestRenderSupervise_CarriesStandingLease asserts the scheduler's rendered
+// supervise config enables hush's machine-bound standing lease
+// (standing_lease = true) alongside the client_machine_index the lease requires
+// — the zero-recurring-approval delivery the Engine depends on — while keeping
+// the distinct Lucid sender identity (scoped harness token + "Lucid Scheduler"
+// label). No secret value ships: the token is a name in scope, never a value.
+func TestRenderSupervise_CarriesStandingLease(t *testing.T) {
+	p := DefaultSuperviseParams()
+	assert.True(t, p.StandingLease, "the scheduler default opts into the standing lease")
+	assert.Positive(t, p.ClientMachineIndex, "a standing lease is machine-bound, so it needs a client machine index")
+
+	out, err := RenderSupervise(p)
+	require.NoError(t, err)
+
+	assert.Regexp(t, `standing_lease\s*=\s*true`, out, "rendered config enables the standing lease")
+	assert.Regexp(t, `client_machine_index\s*=\s*1`, out, "the standing lease is bound to this host's client key")
+	// The distinct Lucid identity survives the always-on change.
+	assert.Contains(t, out, `"LUCID_HARNESS_TOKEN"`, "the scoped Lucid token is retained")
+	assert.Contains(t, out, `daemon_label = "Lucid Scheduler"`, "the Lucid sender label is retained")
+	require.NoError(t, LintSupervise(out))
+}
+
+// TestRenderSupervise_StandingLeaseCarriesNoSecretValue proves the standing
+// lease does not smuggle a secret value into the artifact — enabling the lease
+// changes the session mode, not the S-7 property that scope names a secret and
+// the vault holds its value.
+func TestRenderSupervise_StandingLeaseCarriesNoSecretValue(t *testing.T) {
+	p := DefaultSuperviseParams()
+	require.True(t, p.StandingLease)
+	out, err := RenderSupervise(p)
+	require.NoError(t, err)
 	assert.NotContains(t, strings.ToLower(out), "bearer ")
 	assert.NotContains(t, out, "token = \"")
 }
