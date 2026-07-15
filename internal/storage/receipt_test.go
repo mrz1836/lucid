@@ -25,8 +25,8 @@ func TestCompanionReceipt_RoundTrip(t *testing.T) {
 	want := CompanionReceipt{
 		Date:        "2026-07-14",
 		Window:      "morning",
-		MessageID:   "1526225086254682172",
-		ChannelID:   "1525218650058129571",
+		MessageID:   "1600000000000000001",
+		ChannelID:   "1600000000000000002",
 		Verified:    true,
 		DeliveredAt: "2026-07-14T06:00:11-04:00",
 	}
