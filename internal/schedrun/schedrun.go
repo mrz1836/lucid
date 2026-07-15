@@ -72,6 +72,16 @@ type Options struct {
 	Notifier scheduler.Notifier
 	DBPath   string
 	Clock    models.Clock
+
+	// SuppressUserChannel hands the user-facing windows to the companion. When
+	// set, the tripwire worker runs [scheduler.Scheduler.RunTripwirePresented]
+	// (the witness L2 + monthly heartbeat still fire and escalation_state still
+	// persists — only the user-channel L1/L2-blocked/storm-lapse send is
+	// withheld) and the evening bell periodic is reconciled inactive, so the
+	// companion is the single user send per window. When unset (the default) the
+	// scheduler behaves exactly as before: bell and tripwire both deliver to the
+	// user. It threads only a bool into this write path — no model is reachable.
+	SuppressUserChannel bool
 }
 
 // bellArgs / tripwireArgs are the (empty) typed payloads for the two periodics:
@@ -100,11 +110,14 @@ func (w bellWorker) Work(_ context.Context, _ *flywheel.Job[bellArgs]) (flywheel
 
 // tripwireWorker fires the morning tripwire (which also carries the monthly
 // heartbeat). It holds a clock so the reference day is deterministic under test
-// and the store so it can honor the per-day idempotency guard.
+// and the store so it can honor the per-day idempotency guard. When presented
+// is set the companion owns the user-channel verdict, so the worker runs the
+// presented variant that withholds the Engine's own user send.
 type tripwireWorker struct {
-	sc    *scheduler.Scheduler
-	clock models.Clock
-	store *storage.Adapter
+	sc        *scheduler.Scheduler
+	clock     models.Clock
+	store     *storage.Adapter
+	presented bool
 }
 
 // Kind names the worker dispatched for kindTripwire.
@@ -112,7 +125,8 @@ func (tripwireWorker) Kind() string { return kindTripwire }
 
 // Work runs the morning dead-man for `now`. A per-day guard (A5) skips a second
 // run in the same wall day — a backstop under the flywheel per-bucket unique key
-// so a redundant fire never sends a second L1.
+// so a redundant fire never sends a second L1. In presented mode it runs the
+// companion-presented variant, which suppresses only the user-channel send.
 func (w tripwireWorker) Work(ctx context.Context, _ *flywheel.Job[tripwireArgs]) (flywheel.Result, error) {
 	now := w.clock.Now(ctx)
 	tw, err := w.store.ReadTripwireState()
@@ -122,7 +136,11 @@ func (w tripwireWorker) Work(ctx context.Context, _ *flywheel.Job[tripwireArgs])
 	if tw.LastRunDate == engine.DateString(engine.DateOf(now)) {
 		return flywheel.Result{}, nil
 	}
-	if _, err := w.sc.RunTripwire(now); err != nil {
+	run := w.sc.RunTripwire
+	if w.presented {
+		run = w.sc.RunTripwirePresented
+	}
+	if _, err := run(now); err != nil {
 		return flywheel.Result{}, err
 	}
 	return flywheel.Result{}, nil
@@ -170,12 +188,12 @@ func Run(ctx context.Context, opts Options) error {
 	if err = opts.Store.ScaffoldEngine(); err != nil {
 		return fmt.Errorf("schedrun: scaffold engine: %w", err)
 	}
-	if err = upsertPeriodics(ctx, db, opts.Store); err != nil {
+	if err = upsertPeriodics(ctx, db, opts.Store, opts.SuppressUserChannel); err != nil {
 		return err
 	}
 
 	sc := scheduler.New(opts.Store, opts.Notifier)
-	reg := buildRegistry(sc, clock, opts.Store)
+	reg := buildRegistry(sc, clock, opts.Store, opts.SuppressUserChannel)
 
 	node, err := flywheel.NewNode(flywheel.NodeConfig{
 		Runners: []flywheel.RunnerConfig{{
@@ -200,18 +218,24 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 // buildRegistry registers the bell and tripwire workers over one scheduler.
-func buildRegistry(sc *scheduler.Scheduler, clock models.Clock, store *storage.Adapter) *flywheel.Registry {
+// When presented is set the tripwire worker runs the companion-presented variant
+// (user-channel send suppressed); the bell worker is still registered, but its
+// periodic is reconciled inactive by upsertPeriodics so it never fires.
+func buildRegistry(sc *scheduler.Scheduler, clock models.Clock, store *storage.Adapter, presented bool) *flywheel.Registry {
 	reg := flywheel.NewRegistry()
 	flywheel.Register(reg, bellWorker{sc: sc})
-	flywheel.Register(reg, tripwireWorker{sc: sc, clock: clock, store: store})
+	flywheel.Register(reg, tripwireWorker{sc: sc, clock: clock, store: store, presented: presented})
 	return reg
 }
 
 // upsertPeriodics reconciles the bell and tripwire periodics from the default
 // profile's clock marks (chain.json). It is idempotent by slug, so it is safe to
 // call on every daemon boot. Only the fire clock is fixed to the default marks;
-// the tripwire's decision resolves the governing profile internally.
-func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter) error {
+// the tripwire's decision resolves the governing profile internally. When
+// suppressBell is set the bell is reconciled inactive on every boot — the
+// companion owns the evening user send — so a previously-active bell is turned
+// off cleanly and flips back on when suppression is disabled.
+func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter, suppressBell bool) error {
 	chain, err := store.ReadChainConfig()
 	if err != nil {
 		return fmt.Errorf("schedrun: read chain config: %w", err)
@@ -237,6 +261,17 @@ func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter) e
 		Slug: slugTripwire, Kind: kindTripwire, Cron: tripwireCron, Queue: queueName, Active: true,
 	}); err != nil {
 		return fmt.Errorf("schedrun: upsert tripwire periodic: %w", err)
+	}
+	// When the companion presents the evening user window, deactivate the bell on
+	// every boot so a previously-active bell is turned off cleanly (the upsert
+	// above re-activates it whenever suppression is disabled). A dedicated
+	// deactivate is required rather than an Active:false upsert: a false Active on
+	// a fresh insert is overridden by the periodic row's default-true column,
+	// whereas SetPeriodicActive updates the flag unconditionally.
+	if suppressBell {
+		if err := flywheel.SetPeriodicActive(ctx, db, slugBell, false); err != nil {
+			return fmt.Errorf("schedrun: deactivate bell periodic: %w", err)
+		}
 	}
 	return nil
 }

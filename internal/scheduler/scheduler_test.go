@@ -407,6 +407,159 @@ func TestTripwire_HeartbeatSuppressedByL2(t *testing.T) {
 	assert.Equal(t, 1, n.count(engine.ChannelWitness), "only the L2, no heartbeat")
 }
 
+// ── Send-free verdict + companion presentation ───────────────────────────────
+
+// TestTripwireUserVerdict_OneMissReturnsExactL1: the send-free verdict on a
+// one-miss day returns exactly the L1 string the live run would deliver — the
+// byte-for-byte line the companion appends — and writes/sends nothing.
+func TestTripwireUserVerdict_OneMissReturnsExactL1(t *testing.T) {
+	sc, a, n := newSched(t)
+	seed(t, a, completedRec("2026-07-04")) // 07-05 absent -> one miss
+
+	got, err := sc.TripwireUserVerdict(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+
+	// Byte-for-byte parity with the live run's L1 over an identical Ledger.
+	scLive, aLive, _ := newSched(t)
+	seed(t, aLive, completedRec("2026-07-04"))
+	rep, err := scLive.RunTripwire(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	require.Len(t, rep.Sends, 1)
+	assert.Equal(t, rep.Sends[0].Text, got, "the verdict is the exact L1 the Engine would send")
+	assert.True(t, strings.HasSuffix(got, templates.SignOff), "the pinned sign-off is present")
+
+	// Nothing delivered and nothing persisted by the verdict read.
+	assert.Empty(t, n.sent, "the verdict read delivers nothing")
+	tw, err := a.ReadTripwireState()
+	require.NoError(t, err)
+	assert.Empty(t, tw.LastRunDate, "the verdict read persists no tripwire state")
+	st, err := a.ReadEngineStatus()
+	require.NoError(t, err)
+	assert.Equal(t, engine.EscalationNone, st.EscalationState, "the verdict read persists no escalation")
+}
+
+// TestTripwireUserVerdict_CompletedReturnsEmpty: a completed reference day posts
+// nothing to the user, so the verdict is the empty string.
+func TestTripwireUserVerdict_CompletedReturnsEmpty(t *testing.T) {
+	sc, a, n := newSched(t)
+	seed(t, a, completedRec("2026-07-05"))
+
+	got, err := sc.TripwireUserVerdict(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	assert.Empty(t, got, "a completed day has no user verdict")
+	assert.Empty(t, n.sent)
+}
+
+// TestTripwireUserVerdict_PureL2ReturnsEmpty: a two-consecutive-miss day with an
+// armed witness escalates to the witness channel — no user send — so the
+// user-channel verdict is empty even though the Engine will fire an L2.
+func TestTripwireUserVerdict_PureL2ReturnsEmpty(t *testing.T) {
+	sc, a, n := newSched(t)
+	armWitness(t, a)
+	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false)) // 07-05 absent
+
+	got, err := sc.TripwireUserVerdict(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	assert.Empty(t, got, "an L2 is a witness send; there is no user verdict")
+	assert.Empty(t, n.sent)
+}
+
+// TestTripwireUserVerdict_L2BlockedReturnsUserNote: two consecutive misses with
+// an unarmed witness degrade to the user-channel L2-blocked note, so the verdict
+// carries that exact text.
+func TestTripwireUserVerdict_L2BlockedReturnsUserNote(t *testing.T) {
+	sc, a, _ := newSched(t)
+	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false))
+
+	got, err := sc.TripwireUserVerdict(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	assert.Equal(t, templates.L2Blocked(false), got, "the L2-blocked note is a user-channel verdict")
+}
+
+// TestRunTripwirePresented_SuppressesUserButPersists: on a one-miss day the
+// presented run delivers no user send (the companion presents it) yet still
+// persists escalation_state to l1_fired, exactly as the live run would.
+func TestRunTripwirePresented_SuppressesUserButPersists(t *testing.T) {
+	sc, a, n := newSched(t)
+	seed(t, a, completedRec("2026-07-04")) // 07-05 absent -> one miss
+
+	rep, err := sc.RunTripwirePresented(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	assert.Empty(t, rep.Sends, "no user send in presented mode")
+	assert.Zero(t, n.count(engine.ChannelUser), "the Engine stays silent on the user channel")
+	assert.Equal(t, engine.EscalationL1, rep.Escalation, "the decision still reaches l1_fired")
+
+	st, err := a.ReadEngineStatus()
+	require.NoError(t, err)
+	assert.Equal(t, engine.EscalationL1, st.EscalationState, "escalation_state persists unchanged in presented mode")
+
+	tw, err := a.ReadTripwireState()
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-06", tw.LastRunDate, "tripwire state still records the run")
+}
+
+// TestRunTripwirePresented_StillFiresWitnessL2: presentation withholds only the
+// user channel — the witness L2 tooth still fires on a two-consecutive-miss day
+// (carrying no Mirror bytes), and escalation still reaches l2_fired.
+func TestRunTripwirePresented_StillFiresWitnessL2(t *testing.T) {
+	sc, a, n := newSched(t)
+	armWitness(t, a)
+	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false)) // 07-05 absent
+
+	rep, err := sc.RunTripwirePresented(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	require.Len(t, rep.Sends, 1)
+	assert.Equal(t, engine.SendL2, rep.Sends[0].Kind)
+	assert.Equal(t, 1, n.count(engine.ChannelWitness), "the witness L2 still fires in presented mode")
+	assert.Zero(t, n.count(engine.ChannelUser))
+	assert.Equal(t, engine.EscalationL2, rep.Escalation)
+}
+
+// TestRunTripwirePresented_HeartbeatStillFires: the monthly heartbeat is a
+// witness send, so presentation does not suppress it — the first run of the
+// month still posts the heartbeat to the witness.
+func TestRunTripwirePresented_HeartbeatStillFires(t *testing.T) {
+	sc, a, n := newSched(t)
+	armWitness(t, a)
+	seed(t, a, completedRec("2026-07-05"), completedRec("2026-07-06"))
+
+	rep, err := sc.RunTripwirePresented(at(2026, 7, 6, 9, 0))
+	require.NoError(t, err)
+	require.Len(t, rep.Sends, 1)
+	assert.Equal(t, engine.SendHeartbeat, rep.Sends[0].Kind)
+	assert.Equal(t, 1, n.count(engine.ChannelWitness), "the heartbeat still fires in presented mode")
+	assert.Zero(t, n.count(engine.ChannelUser))
+}
+
+// TestRunTripwirePresented_StormLapseSuppressedFromUser: a storm lapse is a
+// user-channel note, so presentation withholds the Engine's own send while the
+// lapse is still appended to storm history (and the companion presents the note
+// via TripwireUserVerdict).
+func TestRunTripwirePresented_StormLapseSuppressedFromUser(t *testing.T) {
+	sc, a, n := newSched(t)
+	require.NoError(t, a.AppendStormEvent(engine.StormEvent{At: "2026-07-01T07:00:00Z", Event: engine.StormDeclared, Label: "clause-1"}))
+	seed(t, a, completedRec("2026-07-04")) // completed yesterday -> isolate the lapse
+
+	rep, err := sc.RunTripwirePresented(at(2026, 7, 5, 9, 0))
+	require.NoError(t, err)
+	assert.Zero(t, n.count(engine.ChannelUser), "the lapse note is withheld from the user in presented mode")
+	require.Len(t, rep.StormEvents, 1)
+	assert.Equal(t, engine.StormLapsed, rep.StormEvents[0].Event, "the lapse is still appended to storm history")
+
+	h, err := a.ReadStormState()
+	require.NoError(t, err)
+	assert.Equal(t, engine.StormLapsed, h.History[len(h.History)-1].Event, "storm bookkeeping persists in presented mode")
+
+	// On an identical pre-run Ledger the send-free read surfaces the withheld
+	// lapse line — the companion presents it before the tripwire consumes it.
+	scV, aV, _ := newSched(t)
+	require.NoError(t, aV.AppendStormEvent(engine.StormEvent{At: "2026-07-01T07:00:00Z", Event: engine.StormDeclared, Label: "clause-1"}))
+	seed(t, aV, completedRec("2026-07-04"))
+	verdict, err := scV.TripwireUserVerdict(at(2026, 7, 5, 9, 0))
+	require.NoError(t, err)
+	assert.Contains(t, verdict, "storm declaration lapsed", "the withheld note is available to the companion")
+}
+
 // ── Schedule metadata + purity ──────────────────────────────────────────────
 
 func TestMarks(t *testing.T) {

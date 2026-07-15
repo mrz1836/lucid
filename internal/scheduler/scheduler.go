@@ -14,6 +14,7 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mrz1836/lucid/internal/engine"
@@ -109,6 +110,76 @@ type tripwireContext struct {
 // unreachable), persists the escalation_state, and records the run so the
 // monthly heartbeat fires once per calendar month.
 func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
+	return sc.runTripwire(now, false)
+}
+
+// RunTripwirePresented runs the same modeless dead-man decision as
+// [Scheduler.RunTripwire] but suppresses the Engine's own user-channel sends
+// (L1, L2-blocked, storm-lapse). When the companion presents the morning
+// window it delivers that verdict itself — appending it byte-for-byte from
+// [Scheduler.TripwireUserVerdict] so a model can never reword the teeth. Every
+// other effect is identical to a live run: the witness L2 and the monthly
+// heartbeat still fire on the witness channel, storm events are still appended,
+// and escalation_state + tripwire state are still persisted. It is a pure
+// suppression of one delivery channel, not a change to the decision.
+func (sc *Scheduler) RunTripwirePresented(now time.Time) (Report, error) {
+	return sc.runTripwire(now, true)
+}
+
+// SelfCheck is the post-upgrade tripwire self-check (ADR-0007: on a supervised
+// host the managed-upgrade health check IS a tripwire self-check). It walks the
+// exact read-and-evaluate path [Scheduler.RunTripwire] would for `now` but
+// delivers nothing and persists nothing — a dry run. A nil return proves the
+// scheduler could still fire next morning after a supervised restart or an
+// upgrade; any read/parse failure surfaces as the health-check error that fails
+// the upgrade (P10: an upgrade that would cost a night is a failed upgrade).
+func (sc *Scheduler) SelfCheck(now time.Time) error {
+	tc, err := sc.gatherTripwire(now)
+	if err != nil {
+		return fmt.Errorf("scheduler: tripwire self-check: %w", err)
+	}
+	// Exercise the full pure decision path; discard it — a self-check sends
+	// nothing and writes nothing.
+	_ = evaluate(now, tc)
+	return nil
+}
+
+// TripwireUserVerdict renders the tripwire's user-channel verdict for `now`
+// without sending or persisting anything — the send-free read the companion
+// appends byte-for-byte below its composed morning message so a model can never
+// reword the Engine's line. It walks the same read-and-evaluate path
+// [Scheduler.RunTripwire] would (gatherTripwire + the pure evaluate), then
+// renders only the user-channel sends (L1, L2-blocked, storm-lapse) through
+// [templates.Render], joined in decision order. It returns "" on a
+// completed/normal day (the Engine posts nothing to the user that morning) and
+// on a pure L2 day (the escalation is a witness send). It delivers and persists
+// nothing: the witness L2, the monthly heartbeat, and every state write remain
+// the job of [Scheduler.RunTripwirePresented].
+func (sc *Scheduler) TripwireUserVerdict(now time.Time) (string, error) {
+	tc, err := sc.gatherTripwire(now)
+	if err != nil {
+		return "", fmt.Errorf("scheduler: tripwire user verdict: %w", err)
+	}
+	dec := evaluate(now, tc)
+	var parts []string
+	for _, s := range dec.Sends {
+		if s.Channel != engine.ChannelUser {
+			continue
+		}
+		if text := templates.Render(s); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n"), nil
+}
+
+// runTripwire is the shared body of the live and companion-presented runs. When
+// presented is set, the decision's user-channel sends are not delivered (the
+// companion owns that window's user send); every other effect — witness sends,
+// storm bookkeeping, and escalation_state + tripwire-state persistence — is
+// identical, so the modeless decision and its record never diverge between the
+// two modes.
+func (sc *Scheduler) runTripwire(now time.Time, presented bool) (Report, error) {
 	tc, err := sc.gatherTripwire(now)
 	if err != nil {
 		return Report{}, err
@@ -122,6 +193,11 @@ func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 
 	rep := Report{Reference: engine.DateString(tc.reference), Escalation: dec.EscalationState, StormEvents: dec.StormEvents}
 	for _, s := range dec.Sends {
+		// In presented mode the companion delivers the user-channel verdict, so
+		// the Engine stays silent on that channel; witness sends still fire.
+		if presented && s.Channel == engine.ChannelUser {
+			continue
+		}
 		msg, sendErr := sc.emit(s)
 		if sendErr != nil {
 			return rep, sendErr
@@ -145,24 +221,6 @@ func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 		return rep, err
 	}
 	return rep, nil
-}
-
-// SelfCheck is the post-upgrade tripwire self-check (ADR-0007: on a supervised
-// host the managed-upgrade health check IS a tripwire self-check). It walks the
-// exact read-and-evaluate path [Scheduler.RunTripwire] would for `now` but
-// delivers nothing and persists nothing — a dry run. A nil return proves the
-// scheduler could still fire next morning after a supervised restart or an
-// upgrade; any read/parse failure surfaces as the health-check error that fails
-// the upgrade (P10: an upgrade that would cost a night is a failed upgrade).
-func (sc *Scheduler) SelfCheck(now time.Time) error {
-	tc, err := sc.gatherTripwire(now)
-	if err != nil {
-		return fmt.Errorf("scheduler: tripwire self-check: %w", err)
-	}
-	// Exercise the full pure decision path; discard it — a self-check sends
-	// nothing and writes nothing.
-	_ = evaluate(now, tc)
-	return nil
 }
 
 // gatherTripwire scaffolds the engine tree and reads everything a morning
