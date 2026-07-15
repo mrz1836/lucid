@@ -75,29 +75,54 @@ type ProviderConfig struct {
 	Roles          map[string]ProviderRole `json:"roles"`
 }
 
+// CompanionConfig configures the daily companion — the Mirror-side,
+// model-allowed job that composes and delivers the morning and night
+// messages (companion.md). It is credential-dumb like the rest of
+// lucid.json: it carries no channel id and no token (those stay env-only —
+// LUCID_USER_CHANNEL_ID / LUCID_HARNESS_TOKEN), only the explicit paths to
+// the three opaque prompt files the compose worker reads. Enabled gates the
+// whole feature: the default zero value is false, so an unconfigured Ledger
+// runs the pure Engine teeth exactly as before. MorningTemplate,
+// NightTemplate, and SystemPrompt are each an opaque, self-contained prompt
+// file the worker opens directly — lucid never traverses into the directory
+// holding them (no dir-walk, no filename convention), so the block is the
+// whole firewall seam. Model optionally overrides provider.model for the
+// companion's compose call; empty inherits the provider default. Fire times
+// are deliberately not companion keys — they are inherited from the
+// chain.json bell/tripwire marks so the companion can never drift from the
+// deterministic pair (data-model.md §"lucid.json").
+type CompanionConfig struct {
+	Enabled         bool   `json:"enabled"`
+	MorningTemplate string `json:"morning_template"`
+	NightTemplate   string `json:"night_template"`
+	SystemPrompt    string `json:"system_prompt"`
+	Model           string `json:"model"`
+}
+
 // Config is the in-memory representation of lucid.json. Field order
 // matches the documented schema so a marshaled default file reads
 // identically to data-model.md §"lucid.json".
 type Config struct {
-	Version                  int            `json:"version"`
-	Home                     string         `json:"home"`
-	RawDir                   string         `json:"raw_dir"`
-	ProcessedDir             string         `json:"processed_dir"`
-	InsightsDir              string         `json:"insights_dir"`
-	PeopleDir                string         `json:"people_dir"`
-	SessionsDir              string         `json:"sessions_dir"`
-	ReflectionsDir           string         `json:"reflections_dir"`
-	WordlistPath             string         `json:"wordlist_path"`
-	RecentWindow             int            `json:"recent_window"`
-	RecentWindowMax          int            `json:"recent_window_max"`
-	IntakeMaxQuestions       int            `json:"intake_max_questions"`
-	AskInsightsCap           int            `json:"ask_insights_cap"`
-	AskReflectionsCap        int            `json:"ask_reflections_cap"`
-	ProposalPause            ProposalPause  `json:"proposal_pause"`
-	PersonDominanceThreshold float64        `json:"person_dominance_threshold"`
-	AgentVersions            AgentVersions  `json:"agent_versions"`
-	BootstrapMode            bool           `json:"bootstrap_mode"`
-	Provider                 ProviderConfig `json:"provider"`
+	Version                  int             `json:"version"`
+	Home                     string          `json:"home"`
+	RawDir                   string          `json:"raw_dir"`
+	ProcessedDir             string          `json:"processed_dir"`
+	InsightsDir              string          `json:"insights_dir"`
+	PeopleDir                string          `json:"people_dir"`
+	SessionsDir              string          `json:"sessions_dir"`
+	ReflectionsDir           string          `json:"reflections_dir"`
+	WordlistPath             string          `json:"wordlist_path"`
+	RecentWindow             int             `json:"recent_window"`
+	RecentWindowMax          int             `json:"recent_window_max"`
+	IntakeMaxQuestions       int             `json:"intake_max_questions"`
+	AskInsightsCap           int             `json:"ask_insights_cap"`
+	AskReflectionsCap        int             `json:"ask_reflections_cap"`
+	ProposalPause            ProposalPause   `json:"proposal_pause"`
+	PersonDominanceThreshold float64         `json:"person_dominance_threshold"`
+	AgentVersions            AgentVersions   `json:"agent_versions"`
+	BootstrapMode            bool            `json:"bootstrap_mode"`
+	Provider                 ProviderConfig  `json:"provider"`
+	Companion                CompanionConfig `json:"companion"`
 }
 
 // Default returns a fresh config carrying the documented default values
@@ -138,6 +163,10 @@ func Default() Config {
 			Endpoint:       "http://localhost:11434",
 			Roles:          map[string]ProviderRole{},
 		},
+		// The companion ships off: a fresh Ledger runs the pure Engine teeth
+		// until an operator points the three prompt-file paths at their own
+		// template dir and flips enabled true.
+		Companion: CompanionConfig{},
 	}
 }
 
@@ -220,6 +249,9 @@ func (c Config) Validate() error {
 	if err := c.Provider.validate(); err != nil {
 		return err
 	}
+	if err := c.Companion.validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -240,6 +272,32 @@ func (p ProviderConfig) validate() error {
 	for role, override := range p.Roles {
 		if override.Backend != "" && !KnownBackends[override.Backend] {
 			return fmt.Errorf("config: provider.roles[%q].backend %q is not a known backend", role, override.Backend)
+		}
+	}
+	return nil
+}
+
+// validate reports whether the companion block is structurally usable. The
+// feature is off by default, so a zero-valued block is always valid; but
+// once enabled, all three prompt-file paths must be set — an enabled
+// companion with a missing template path is a hard error, mirroring the
+// provider validate style, rather than a silent no-op that would leave a
+// life-critical daily ritual quietly dead. The optional model override is
+// unconstrained here: an unknown model surfaces at compose time from the
+// provider, exactly as provider.model does. There is no clip rule — no
+// companion bound is documented as coercible.
+func (c CompanionConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	paths := map[string]string{
+		"companion.morning_template": c.MorningTemplate,
+		"companion.night_template":   c.NightTemplate,
+		"companion.system_prompt":    c.SystemPrompt,
+	}
+	for name, v := range paths {
+		if v == "" {
+			return fmt.Errorf("config: %s must not be empty when companion.enabled is true", name)
 		}
 	}
 	return nil

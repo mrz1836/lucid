@@ -154,6 +154,119 @@ func TestProvider_RoundTripWithRoleOverride(t *testing.T) {
 	assert.Equal(t, "qwen2.5:14b", got.Provider.Roles["reflection"].Model)
 }
 
+// TestDefault_CompanionBlock pins the shipped companion default: the
+// feature is off and every prompt-file path is empty so a fresh Ledger
+// runs the pure Engine teeth until an operator opts in (data-model.md
+// §"lucid.json").
+func TestDefault_CompanionBlock(t *testing.T) {
+	c := Default().Companion
+	assert.False(t, c.Enabled, "companion ships disabled")
+	assert.Empty(t, c.MorningTemplate)
+	assert.Empty(t, c.NightTemplate)
+	assert.Empty(t, c.SystemPrompt)
+	assert.Empty(t, c.Model, "model override empty → inherits provider.model")
+}
+
+// TestCompanion_MarshalsDocumentedShape asserts a marshaled default config
+// carries the companion block with the explicit per-file path keys, off by
+// default, and — like the provider block — never leaks a token or channel
+// id into lucid.json (those stay env-only).
+func TestCompanion_MarshalsDocumentedShape(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+
+	var m struct {
+		Companion struct {
+			Enabled         bool   `json:"enabled"`
+			MorningTemplate string `json:"morning_template"`
+			NightTemplate   string `json:"night_template"`
+			SystemPrompt    string `json:"system_prompt"`
+			Model           string `json:"model"`
+		} `json:"companion"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.False(t, m.Companion.Enabled)
+	assert.Empty(t, m.Companion.MorningTemplate)
+	assert.Empty(t, m.Companion.NightTemplate)
+	assert.Empty(t, m.Companion.SystemPrompt)
+
+	s := string(b)
+	assert.Contains(t, s, `"companion":`)
+	assert.Contains(t, s, `"morning_template":`)
+	assert.Contains(t, s, `"system_prompt":`)
+	// No token or channel id ever lands in the config.
+	assert.NotContains(t, s, "harness_token")
+	assert.NotContains(t, s, "channel_id")
+}
+
+// TestCompanion_RoundTripEnabled proves a fully-configured companion block
+// survives a marshal/unmarshal cycle byte-identically in value — the
+// explicit per-file paths and the optional model override.
+func TestCompanion_RoundTripEnabled(t *testing.T) {
+	c := Default()
+	c.Companion = CompanionConfig{
+		Enabled:         true,
+		MorningTemplate: "/opt/lucid/companion/morning_template.md",
+		NightTemplate:   "/opt/lucid/companion/night_template.md",
+		SystemPrompt:    "/opt/lucid/companion/system_prompt.md",
+		Model:           "sonnet",
+	}
+	b, err := c.Marshal()
+	require.NoError(t, err)
+
+	got, err := Unmarshal(b)
+	require.NoError(t, err)
+	assert.Equal(t, c, got)
+	assert.Equal(t, "sonnet", got.Companion.Model)
+}
+
+// TestValidate_CompanionEnabledRequiresPaths is the companion validate
+// rule: an enabled companion missing any one of the three prompt-file
+// paths is a hard error, while all three set (with or without a model
+// override) validates.
+func TestValidate_CompanionEnabledRequiresPaths(t *testing.T) {
+	full := CompanionConfig{
+		Enabled:         true,
+		MorningTemplate: "m.md",
+		NightTemplate:   "n.md",
+		SystemPrompt:    "s.md",
+	}
+	failures := map[string]func(*CompanionConfig){
+		"missing morning": func(c *CompanionConfig) { c.MorningTemplate = "" },
+		"missing night":   func(c *CompanionConfig) { c.NightTemplate = "" },
+		"missing system":  func(c *CompanionConfig) { c.SystemPrompt = "" },
+	}
+	for name, mutate := range failures {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			c.Companion = full
+			mutate(&c.Companion)
+			assert.Error(t, c.Validate())
+		})
+	}
+
+	t.Run("all paths set validates", func(t *testing.T) {
+		c := Default()
+		c.Companion = full
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("model override does not require a known name", func(t *testing.T) {
+		c := Default()
+		c.Companion = full
+		c.Companion.Model = "some-future-model"
+		assert.NoError(t, c.Validate())
+	})
+}
+
+// TestValidate_CompanionDisabledIgnoresPaths confirms that while disabled
+// (the default), empty template paths are tolerated — the block is inert,
+// so it never blocks a load.
+func TestValidate_CompanionDisabledIgnoresPaths(t *testing.T) {
+	c := Default()
+	c.Companion = CompanionConfig{Enabled: false} // all paths empty
+	assert.NoError(t, c.Validate())
+}
+
 func TestValidate_Good(t *testing.T) {
 	require.NoError(t, Default().Validate())
 }
