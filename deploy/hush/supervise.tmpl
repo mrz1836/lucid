@@ -27,6 +27,12 @@ reason                    = "{{ .Reason }}"
 server_url                = "{{ .ServerURL }}"
 client_machine_index      = {{ .ClientMachineIndex }}
 session_type              = "supervisor"
+# standing_lease rides the one human-established grant to reissue this
+# machine-bound session with no recurring Discord approval (hush standing-lease
+# amendment). Opt-in and machine-bound: it requires client_machine_index (above)
+# and is scoped to the single harness token — the always-on delivery path for
+# the bell, tripwire, and monthly heartbeat.
+standing_lease            = {{ .StandingLease }}
 requested_ttl             = "{{ .RequestedTTL }}"
 refresh_window            = "{{ .RefreshWindow }}"
 cache_secrets_for_restart = true
