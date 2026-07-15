@@ -71,6 +71,13 @@ type SuperviseParams struct {
 	WorkingDir         string
 	EnvPassthrough     []string
 	DaemonLabel        string
+	// StandingLease opts this supervisor into hush's machine-bound standing
+	// lease: after a single human-established grant, hush reissues the session
+	// against this host's client key with no recurring approval. It is
+	// machine-bound (requires ClientMachineIndex set) and scoped to the single
+	// harness token — the zero-recurring-approval delivery the Engine's bell,
+	// tripwire, and monthly heartbeat depend on.
+	StandingLease bool
 }
 
 // DefaultLaunchdParams returns a representative, render-ready launchd config
@@ -86,6 +93,13 @@ func DefaultLaunchdParams() LaunchdParams {
 		RunAtLoad:       true,
 		KeepAlive:       true,
 		EnvironmentVariables: map[string]string{
+			// PATH is set explicitly: a launchd job inherits only a minimal
+			// default PATH, so bare tool names (~/go/bin, homebrew) would not
+			// resolve. HOME anchors the child's home for env_passthrough. The
+			// channel IDs are placeholder NAMES the operator replaces with the
+			// real per-host values (ADR-0005, S-7) — no real ID ships in-repo.
+			"PATH":                     "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+			"HOME":                     "/usr/local/var/lucid",
 			"LUCID_HOME":               "/usr/local/var/lucid",
 			"LUCID_SCHEDULER_DB":       "/usr/local/var/lucid/flywheel.db",
 			"LUCID_USER_CHANNEL_ID":    "replace-with-primary-channel-id",
@@ -121,6 +135,11 @@ func DefaultSuperviseParams() SuperviseParams {
 			"LUCID_USER_CHANNEL_ID", "LUCID_WITNESS_CHANNEL_ID", "LUCID_SCHEDULER_DB",
 		},
 		DaemonLabel: "Lucid Scheduler",
+		// The scheduler is Lucid's always-on delivery path (bell, tripwire,
+		// monthly heartbeat), so it runs under the standing lease — one human
+		// grant, then unattended reissue. Machine-bound via ClientMachineIndex
+		// above; scoped to the single harness token above (ADR-0005, S-7).
+		StandingLease: true,
 	}
 }
 
