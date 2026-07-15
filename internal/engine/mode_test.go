@@ -17,7 +17,7 @@ func TestValidMode(t *testing.T) {
 }
 
 // TestClocks_ModeRejected covers the three regions around the default clocks
-// (rollover 04:00, bell 21:30): accepted only after rollover and before the
+// (rollover 04:00, bell 19:00): accepted only after rollover and before the
 // bell; rejected in the small hours and once the bell has rung.
 func TestClocks_ModeRejected(t *testing.T) {
 	c, err := DefaultChain().ClocksFor(DefaultProfile)
@@ -29,7 +29,7 @@ func TestClocks_ModeRejected(t *testing.T) {
 	assert.True(t, c.ModeRejected(at(3, 0)), "small hours (before rollover) → rejected")
 	assert.False(t, c.ModeRejected(at(4, 0)), "at rollover the day opens → accepted")
 	assert.False(t, c.ModeRejected(at(14, 2)), "afternoon before the bell → accepted")
-	assert.True(t, c.ModeRejected(at(21, 30)), "at the bell → rejected")
+	assert.True(t, c.ModeRejected(at(19, 0)), "at the bell → rejected")
 	assert.True(t, c.ModeRejected(at(23, 0)), "after the bell → rejected")
 }
 

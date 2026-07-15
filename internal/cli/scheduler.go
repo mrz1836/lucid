@@ -8,9 +8,14 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/mrz1836/lucid/internal/companion"
+	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/notify"
+	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/schedrun"
+	"github.com/mrz1836/lucid/internal/scheduler"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -79,8 +84,12 @@ binary. The job store is disposable machinery kept outside the ~/.lucid Ledger
 }
 
 // runScheduler is the pure wiring the cobra layer delegates to: open storage,
-// build the env-injected notifier, install the signal-canceled context, and
-// hand off to the flywheel driver. Every startup error is funneled through a
+// build the env-injected notifier, boot the router (for config + the honest live
+// numbers), install the signal-canceled context, and hand off to the flywheel
+// driver. When the companion is enabled it presents both user windows, so the
+// teeth run with their user-channel send suppressed and the companion node runs
+// beside them under one canceled context; when disabled, only the teeth run —
+// byte-for-byte today's behavior. Every startup error is funneled through a
 // single "lucid: scheduler: <message>" stderr line (mirroring `upgrade`) before
 // being returned, so exitCodeForError still classifies it.
 func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error {
@@ -95,15 +104,85 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 		return fmt.Errorf("lucid: scheduler: %w", err)
 	}
 
+	// Scaffold the Ledger idempotently so the daemon comes up on a fresh host
+	// (lucid.json + the trees) before the router reads the config — the same
+	// scaffold-then-boot order every stateful command runs.
+	if _, err = store.Scaffold(); err != nil {
+		_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
+		return fmt.Errorf("lucid: scheduler: %w", err)
+	}
+
+	// Boot the router to load lucid.json (the companion gate + provider block)
+	// and to serve the companion's honest live numbers from the same projection
+	// `lucid metrics --json` exposes. Clip warnings surface once on stderr.
+	r := router.New(store)
+	warnings, err := r.Boot()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
+		return fmt.Errorf("lucid: scheduler: %w", err)
+	}
+	for _, w := range warnings {
+		_, _ = fmt.Fprintf(stderr, "warning: %s\n", w)
+	}
+	cfg := r.Config()
+
 	// The supervisor stops the daemon (on shutdown or a managed-upgrade drain)
 	// with SIGTERM; an operator uses Ctrl-C. Either cancels the context and the
-	// flywheel node drains to a clean return.
+	// flywheel node(s) drain to a clean return.
 	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := schedrun.Run(ctx, schedrun.Options{Store: store, Notifier: notifier, DBPath: dbPath}); err != nil {
+	if !cfg.Companion.Enabled {
+		// Teeth only: bell + tripwire both deliver to the user, exactly as before.
+		if err := schedrun.Run(ctx, schedrun.Options{Store: store, Notifier: notifier, DBPath: dbPath}); err != nil {
+			_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
+			return fmt.Errorf("lucid: scheduler: %w", err)
+		}
+		return nil
+	}
+
+	// Companion presents both user windows: the teeth run with their
+	// user-channel send suppressed (the modeless decision, witness L2, heartbeat,
+	// and escalation_state persistence all unchanged) and the companion node runs
+	// beside them. They share one context, so a failure in either drains the
+	// process and the supervisor restarts both together — the teeth are never
+	// left suppressed-but-silent.
+	if err := runSchedulerWithCompanion(ctx, store, r, notifier, cfg, dbPath); err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
 		return fmt.Errorf("lucid: scheduler: %w", err)
 	}
 	return nil
+}
+
+// runSchedulerWithCompanion runs the suppressed teeth and the companion node
+// concurrently under one errgroup: the first to fail cancels the other, so the
+// whole process exits and the supervisor restarts the pair. The companion reads
+// the send-free tripwire verdict through its own scheduler (a no-op notifier —
+// the verdict read never sends) and delivers through the same env-injected
+// Discord transport the teeth use.
+func runSchedulerWithCompanion(
+	ctx context.Context,
+	store *storage.Adapter,
+	numbers companion.NumbersReader,
+	notifier *notify.Discord,
+	cfg config.Config,
+	dbPath string,
+) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return schedrun.Run(gctx, schedrun.Options{
+			Store: store, Notifier: notifier, DBPath: dbPath, SuppressUserChannel: true,
+		})
+	})
+	g.Go(func() error {
+		return companion.Run(gctx, companion.Options{
+			Store:    store,
+			Config:   cfg.Companion,
+			Provider: cfg.Provider,
+			Numbers:  numbers,
+			Verdict:  scheduler.New(store, noopNotifier{}),
+			Notifier: notifier,
+		})
+	})
+	return g.Wait()
 }

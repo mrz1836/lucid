@@ -106,7 +106,7 @@ func DefaultChain() ChainConfig {
 		Version:            ChainVersion,
 		ChainID:            "night_chain",
 		Label:              "Journal. Dock. Read.",
-		BellTime:           "21:30",
+		BellTime:           "19:00",
 		Rollover:           "04:00",
 		BackfillWindowDays: 7,
 		Links: []Link{
@@ -119,7 +119,7 @@ func DefaultChain() ChainConfig {
 		FootprintCapMinutes: 30,
 		SLO:                 SLO{IsolatedMissBudgetPer30d: 4, GateThreshold: 0.85, Gates: []int{30, 60, 90}},
 		Bell:                Bell{Enabled: true},
-		Escalation:          Escalation{L1Enabled: true, L2Enabled: false, TripwireTime: "09:00"},
+		Escalation:          Escalation{L1Enabled: true, L2Enabled: false, TripwireTime: "06:00"},
 		AwayMode:            nil,
 		Profiles: map[string]ProfileClocks{
 			"nights": {BellTime: "08:30", TripwireTime: "17:00", Rollover: "12:00"},

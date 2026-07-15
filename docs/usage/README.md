@@ -18,6 +18,7 @@ Everything below runs on your own host; nothing syncs to a cloud.
 | [`install.md`](install.md) | Prerequisites, the three install paths (source, `go install`, release binary), verifying the build, and first-run setup (`lucid init`, `LUCID_HOME`). |
 | [`getting-started.md`](getting-started.md) | The mental model, the daily morning/evening rhythm, a synthetic first-week walkthrough, config, data & privacy, and what's not yet built. |
 | [`commands.md`](commands.md) | The full command reference — every `lucid` CLI command and sub-form, plus the chat/harness slash commands — with synopsis, flags, and examples. |
+| [`companion.md`](companion.md) | The optional daily companion — the model-composed morning and night messages: what it is, the two windows, the `companion` config block, testing a fire, and how fallback / missed-fire / alerting keep it never-silent. |
 | [`natural-language.md`](natural-language.md) | The voice-first / talk-instead-of-type surface — how a chat harness maps plain language onto the exact documented command, the reads-run / writes-confirm posture, the night close-out step by step, and synthetic side-by-side examples. |
 | [`harness-setup.md`](harness-setup.md) | Operator guide for driving the deterministic loop from a chat harness (Path A): install, reachability, loading the skill, channel routing, secrets posture, and end-to-end verification. |
 

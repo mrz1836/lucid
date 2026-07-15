@@ -35,7 +35,7 @@ just automates the two prompts.
    lucid mode green      # green = full · yellow = reduced · red = floor-only
    ```
 
-2. **The bell rings** (default ~21:30) — a fixed prompt, no sign-off. It's the
+2. **The bell rings** (default ~19:00) — a fixed prompt, no sign-off. It's the
    external trigger; you never have to start from memory or motivation.
 
 3. **Close out** — one deterministic, agent-free command that records the
@@ -69,7 +69,7 @@ just automates the two prompts.
 
    Your chain lives in `~/.lucid/engine/chain.json`. A fresh Ledger ships a
    sensible default — a three-link night chain (a journal line, phone on the
-   charger, a page in bed) with the bell at 21:30 and the tripwire at 09:00 — so
+   charger, a page in bed) with the bell at 19:00 and the tripwire at 06:00 — so
    `closeout` works immediately. Edit that file to make it yours: your links,
    their floors, and the clock profile. See
    [`../mvp/engine-module.md`](../mvp/engine-module.md). On your worst day the
@@ -83,7 +83,7 @@ before the boundary attribute to the previous day.
 
 ### Morning — the tripwire
 
-The morning job (default ~09:00) reads what the Engine recorded and does exactly
+The morning job (default ~06:00) reads what the Engine recorded and does exactly
 one of:
 
 - **Completed last night** → nothing but a quiet reset.
@@ -140,7 +140,7 @@ These agentic verbs have no bare-CLI equivalent; see
 # Day 0 — set up
 lucid init
 # (optional) make the chain yours in ~/.lucid/engine/chain.json —
-# a default 3-link night chain (bell 21:30, tripwire 09:00) ships ready to run
+# a default 3-link night chain (bell 19:00, tripwire 06:00) ships ready to run
 
 # Each evening
 lucid mode green

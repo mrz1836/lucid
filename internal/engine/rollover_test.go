@@ -16,8 +16,8 @@ func at(y int, m time.Month, d, hh, mm int) time.Time {
 	return time.Date(y, m, d, hh, mm, 0, 0, time.UTC)
 }
 
-// defaultClocks returns the default-profile clocks (bell 21:30, rollover
-// 04:00, tripwire 09:00).
+// defaultClocks returns the default-profile clocks (bell 19:00, rollover
+// 04:00, tripwire 06:00).
 func defaultClocks(t *testing.T) Clocks {
 	t.Helper()
 	c, err := DefaultChain().ClocksFor(DefaultProfile)
@@ -96,7 +96,7 @@ func TestClocksFor(t *testing.T) {
 	chain := DefaultChain()
 	def, err := chain.ClocksFor(DefaultProfile)
 	require.NoError(t, err)
-	assert.Equal(t, Clocks{BellMin: 1290, RolloverMin: 240, TripwireMin: 540}, def)
+	assert.Equal(t, Clocks{BellMin: 1140, RolloverMin: 240, TripwireMin: 360}, def)
 
 	nights, err := chain.ClocksFor("nights")
 	require.NoError(t, err)

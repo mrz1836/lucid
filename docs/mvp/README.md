@@ -103,14 +103,14 @@ transcript lives in [`steel-thread.md`](steel-thread.md).
 [`engine-module.md`](engine-module.md)):
 
 ```
- 21:30 bell prompt ─► chain runs in the world ─► /closeout (≤2 min, no LLM):
+ 19:00 bell prompt ─► chain runs in the world ─► /closeout (≤2 min, no LLM):
  link flags · declared-mode scoring · capacity digit · one journal line
       │                                   │
       ▼                                   ▼
  ~/.lucid/engine/ (day record,       ~/.lucid/raw/ (journal line enters
  streaks, budget burn)               the Mirror thread above)
 
- 09:00 tripwire: completed → reset · one miss → L1 nudge naming the floor
+ 06:00 tripwire: completed → reset · one miss → L1 nudge naming the floor
  · two consecutive → L2 to the witness (dead-man: fires on ABSENCE of data;
  topline status only, never content)
 ```

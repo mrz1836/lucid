@@ -110,7 +110,7 @@ func newRigWith(t *testing.T, workerClock models.Clock, notif scheduler.Notifier
 
 	fake, _ := notif.(*fakeNotifier)
 	sc := scheduler.New(store, notif)
-	reg := buildRegistry(sc, workerClock, store)
+	reg := buildRegistry(sc, workerClock, store, false)
 
 	sched := flywheel.NewSchedulerWithConfig(flywheel.SchedulerConfig{
 		DB: db, Client: flywheel.NewClient(db), BackfillCap: backfillCap,
@@ -318,16 +318,130 @@ func TestTripwireWorker_SecondRunSameDayIsNoOp(t *testing.T) {
 	assert.Equal(t, 1, r.notif.count(engine.ChannelUser), "the per-day guard suppresses the second run")
 }
 
+// ── Companion presentation: user-channel suppression ─────────────────────────
+
+// TestTripwireWorker_PresentedSuppressesUserSend proves the presented worker
+// keeps the teeth modeless while withholding the user-channel send: on a
+// one-miss day it fires no user L1 (the companion presents it) yet still
+// persists escalation_state to l1_fired. A default (non-presented) worker over
+// an identical Ledger still fires exactly one user L1 — today's behavior intact.
+func TestTripwireWorker_PresentedSuppressesUserSend(t *testing.T) {
+	workerNow := at(2026, 7, 6, 9, 5) // reference 07-05 absent -> one miss
+
+	// Presented: no user send, escalation still persisted.
+	r := newRig(t, models.NewFixedClock(workerNow))
+	seedDay(t, r.store, completedRec("2026-07-04"))
+	w := tripwireWorker{sc: scheduler.New(r.store, r.notif), clock: models.NewFixedClock(workerNow), store: r.store, presented: true}
+	_, err := w.Work(ctxAt(workerNow), &flywheel.Job[tripwireArgs]{})
+	require.NoError(t, err)
+	assert.Zero(t, r.notif.count(engine.ChannelUser), "the companion presents the verdict; the Engine sends nothing to the user")
+	st, err := r.store.ReadEngineStatus()
+	require.NoError(t, err)
+	assert.Equal(t, engine.EscalationL1, st.EscalationState, "escalation_state still persists in presented mode")
+
+	// Default: an identical Ledger fires exactly one user L1.
+	r2 := newRig(t, models.NewFixedClock(workerNow))
+	seedDay(t, r2.store, completedRec("2026-07-04"))
+	w2 := tripwireWorker{sc: scheduler.New(r2.store, r2.notif), clock: models.NewFixedClock(workerNow), store: r2.store}
+	_, err = w2.Work(ctxAt(workerNow), &flywheel.Job[tripwireArgs]{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, r2.notif.count(engine.ChannelUser), "SuppressUserChannel:false reproduces today's user L1")
+}
+
+// TestUpsertPeriodics_SuppressDeactivatesBell: when the companion owns the user
+// windows the evening bell periodic is reconciled inactive (so it never fires)
+// while the morning tripwire stays active — one night send, owned by the
+// companion.
+func TestUpsertPeriodics_SuppressDeactivatesBell(t *testing.T) {
+	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
+	ctx := ctxAt(at(2026, 7, 5, 12, 0))
+
+	require.NoError(t, upsertPeriodics(ctx, r.db, r.store, true))
+
+	views, err := flywheel.ListPeriodics(ctx, r.db)
+	require.NoError(t, err)
+	active := map[string]bool{}
+	for _, v := range views {
+		active[v.Slug] = v.Active
+	}
+	assert.False(t, active[slugBell], "the bell is deactivated when the companion presents the night window")
+	assert.True(t, active[slugTripwire], "the tripwire stays active")
+}
+
+// TestUpsertPeriodics_SuppressTogglesBellBackOn: reconciling suppressed then
+// un-suppressed flips the bell inactive and back to active on the next boot —
+// the reconcile makes the live state match the config every time.
+func TestUpsertPeriodics_SuppressTogglesBellBackOn(t *testing.T) {
+	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
+	ctx := ctxAt(at(2026, 7, 5, 12, 0))
+
+	require.NoError(t, upsertPeriodics(ctx, r.db, r.store, true))
+	require.NoError(t, upsertPeriodics(ctxAt(at(2026, 7, 6, 12, 0)), r.db, r.store, false))
+
+	views, err := flywheel.ListPeriodics(ctx, r.db)
+	require.NoError(t, err)
+	require.Len(t, views, 2, "no duplicate definitions across a toggle")
+	for _, v := range views {
+		if v.Slug == slugBell {
+			assert.True(t, v.Active, "the bell re-activates when suppression is disabled")
+		}
+	}
+}
+
+// TestRun_SuppressUserChannelDeactivatesBell proves Options.SuppressUserChannel
+// threads through Run's reconcile: the daemon comes up with the bell periodic
+// inactive so the companion is the single night send.
+func TestRun_SuppressUserChannelDeactivatesBell(t *testing.T) {
+	store := storage.New(filepath.Join(t.TempDir(), ".lucid"))
+	_, err := store.Scaffold()
+	require.NoError(t, err)
+
+	dbPath := filepath.Join(t.TempDir(), "flywheel.db")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{Store: store, Notifier: &fakeNotifier{}, DBPath: dbPath, SuppressUserChannel: true})
+	}()
+
+	require.Eventually(t, func() bool {
+		db, oerr := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
+		if oerr != nil {
+			return false
+		}
+		defer closeGorm(db)
+		views, lerr := flywheel.ListPeriodics(context.Background(), db)
+		if lerr != nil || len(views) != 2 {
+			return false
+		}
+		for _, v := range views {
+			if v.Slug == slugBell {
+				return !v.Active
+			}
+		}
+		return false
+	}, 5*time.Second, 25*time.Millisecond, "Run reconciles the bell inactive under SuppressUserChannel")
+
+	cancel()
+	select {
+	case rerr := <-done:
+		require.NoError(t, rerr, "a canceled node drains cleanly")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
 // ── Periodic registration from chain marks (AC-2) ────────────────────────────
 
 // TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks: reconciling from
-// the default chain marks (21:30 bell, 09:00 tripwire) registers both durable
+// the default chain marks (19:00 bell, 06:00 tripwire) registers both durable
 // periodics with the expected daily cron expressions.
 func TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	ctx := ctxAt(at(2026, 7, 5, 12, 0))
 
-	require.NoError(t, upsertPeriodics(ctx, r.db, r.store))
+	require.NoError(t, upsertPeriodics(ctx, r.db, r.store, false))
 
 	views, err := flywheel.ListPeriodics(ctx, r.db)
 	require.NoError(t, err)
@@ -337,8 +451,8 @@ func TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks(t *testing.T) {
 		assert.True(t, v.Active, "periodic %s is active", v.Slug)
 		assert.Equal(t, queueName, v.Queue)
 	}
-	assert.Equal(t, "30 21 * * *", crons[slugBell], "bell fires at 21:30")
-	assert.Equal(t, "0 9 * * *", crons[slugTripwire], "tripwire fires at 09:00")
+	assert.Equal(t, "0 19 * * *", crons[slugBell], "bell fires at 19:00")
+	assert.Equal(t, "0 6 * * *", crons[slugTripwire], "tripwire fires at 06:00")
 }
 
 // TestUpsertPeriodics_IsIdempotentAcrossRestart: re-reconciling the same config
@@ -347,8 +461,8 @@ func TestUpsertPeriodics_IsIdempotentAcrossRestart(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	ctx := ctxAt(at(2026, 7, 5, 12, 0))
 
-	require.NoError(t, upsertPeriodics(ctx, r.db, r.store))
-	require.NoError(t, upsertPeriodics(ctxAt(at(2026, 7, 6, 12, 0)), r.db, r.store))
+	require.NoError(t, upsertPeriodics(ctx, r.db, r.store, false))
+	require.NoError(t, upsertPeriodics(ctxAt(at(2026, 7, 6, 12, 0)), r.db, r.store, false))
 
 	views, err := flywheel.ListPeriodics(ctx, r.db)
 	require.NoError(t, err)
@@ -510,7 +624,7 @@ func TestUpsertPeriodics_RejectsMalformedClockMark(t *testing.T) {
 	chain.Escalation.TripwireTime = "24:61"
 	require.NoError(t, r.store.WriteChainConfig(chain))
 
-	err = upsertPeriodics(ctxAt(at(2026, 7, 5, 12, 0)), r.db, r.store)
+	err = upsertPeriodics(ctxAt(at(2026, 7, 5, 12, 0)), r.db, r.store, false)
 	require.Error(t, err)
 }
 
@@ -548,7 +662,7 @@ func TestUpsertPeriodics_SurfacesChainReadError(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	require.NoError(t, os.WriteFile(filepath.Join(r.store.Home(), "engine", "chain.json"), []byte("{not json"), 0o600))
 
-	err := upsertPeriodics(ctxAt(at(2026, 7, 5, 12, 0)), r.db, r.store)
+	err := upsertPeriodics(ctxAt(at(2026, 7, 5, 12, 0)), r.db, r.store, false)
 	require.Error(t, err)
 }
 

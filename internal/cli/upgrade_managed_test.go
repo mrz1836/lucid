@@ -29,7 +29,7 @@ func TestRunUpgrade_ManagedDeferredInDrainWindow(t *testing.T) {
 	require.NoError(t, os.WriteFile(execPath, []byte("old"), 0o755))
 	rel := newAssetServer(t, []byte("the new binary bytes"))
 	useTestSource(t, fakeSource{rel: rel}, execPath)
-	pinClock(t, time.Date(2026, 7, 6, 22, 0, 0, 0, time.UTC)) // 22:00 — inside 21:30→04:00
+	pinClock(t, time.Date(2026, 7, 6, 22, 0, 0, 0, time.UTC)) // 22:00 — inside 19:00→04:00
 
 	var stdout, stderr bytes.Buffer
 	err := runUpgrade(context.Background(), &stdout, &stderr, upgradeOptions{

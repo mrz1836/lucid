@@ -17,7 +17,7 @@ const minutesPerDay = 24 * 60
 // run inside (ADR-0007, P10): never between the evening bell and the morning
 // close-out — an upgrade that costs a night of the practice is a failed
 // upgrade regardless of what shipped. Both marks are minutes since local
-// midnight. When BellMin > CloseoutMin — the ordinary night chain, bell 21:30
+// midnight. When BellMin > CloseoutMin — the ordinary night chain, bell 19:00
 // with close-out due by the 04:00 rollover — the window wraps midnight.
 type DrainWindow struct {
 	// BellMin is the evening bell mark (minutes since local midnight).

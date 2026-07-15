@@ -176,6 +176,13 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "timeout_seconds": 120,
     "endpoint": "http://localhost:11434",
     "roles": {}
+  },
+  "companion": {
+    "enabled": false,
+    "morning_template": "",
+    "night_template": "",
+    "system_prompt": "",
+    "model": ""
   }
 }
 ```
@@ -213,6 +220,23 @@ The single global config file. Tiny, hand-editable, agent-readable.
   per-backend invocation contract:
   [`../adr/0006-model-access.md`](../adr/0006-model-access.md) §"Pinned invocation
   contracts".
+* `companion` configures the optional daily companion — the Mirror-side,
+  model-allowed job that composes and delivers the morning and night
+  messages. It ships **off** (`enabled: false`): a fresh Ledger runs the
+  pure Engine teeth (bell/tripwire) unchanged until an operator opts in.
+  `morning_template`, `night_template`, and `system_prompt` are **explicit
+  per-file paths**, each pointing at one opaque, self-contained prompt file
+  the compose worker opens directly — lucid never traverses into the
+  directory holding them (no dir-walk, no filename convention), so the block
+  is the whole personal/OSS seam: point the paths at any template dir you
+  like. When `enabled` is true all three paths must be non-empty or the
+  config is rejected. `model` optionally overrides `provider.model` for the
+  companion's compose call (empty inherits the provider default). Fire
+  **times are not companion keys** — the companion inherits the `chain.json`
+  bell/tripwire marks so it can never drift from the deterministic pair. Like
+  the provider block, `companion` is credential-dumb: the target channel and
+  the harness token stay env-only (`LUCID_USER_CHANNEL_ID` /
+  `LUCID_HARNESS_TOKEN`), never in `lucid.json`.
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt

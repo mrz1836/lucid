@@ -13,7 +13,7 @@ import (
 // effective the next logical day, never the current one.
 func TestProfile_EffectiveNextDay(t *testing.T) {
 	r, a, _ := newBootedRouter(t)
-	res, err := r.Profile("nights", atUTC(2026, 7, 7, 21, 50)) // after default bell 21:30
+	res, err := r.Profile("nights", atUTC(2026, 7, 7, 21, 50)) // after default bell 19:00
 	require.NoError(t, err)
 	assert.False(t, res.Rejected)
 	assert.Equal(t, "2026-07-08", res.Effective)
