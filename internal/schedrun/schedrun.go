@@ -167,7 +167,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	ctx = models.WithClock(ctx, clock)
 
-	dbPath, err := resolveDBPath(opts.DBPath)
+	dbPath, err := DefaultDBPath(opts.DBPath)
 	if err != nil {
 		return err
 	}
@@ -295,10 +295,12 @@ func cronFromHM(hm string) (string, error) {
 	return fmt.Sprintf("%d %d * * *", m, h), nil
 }
 
-// resolveDBPath resolves the job-DB path: an explicit --db wins, then the
-// LUCID_SCHEDULER_DB override, then the default under the user config dir. The
-// DB is disposable machinery kept outside the ~/.lucid Ledger (ADR-0004).
-func resolveDBPath(dbPath string) (string, error) {
+// DefaultDBPath resolves the disposable teeth job-DB path: an explicit override
+// wins, then the LUCID_SCHEDULER_DB env override, then the default flywheel.db
+// under the OS user-config dir (outside the ~/.lucid Ledger, ADR-0004). It is
+// exported so a read-only inspector resolves the exact same path the daemon
+// writes to, rather than duplicating the resolution and drifting from it.
+func DefaultDBPath(dbPath string) (string, error) {
 	if dbPath != "" {
 		return dbPath, nil
 	}

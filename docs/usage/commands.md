@@ -473,8 +473,16 @@ UPDATE_CHANNEL=edge lucid upgrade
 ### scheduler
 
 ```
-lucid scheduler run [--db <path>]
+lucid scheduler run    [--db <path>]
+lucid scheduler status [--scheduler-db <path>] [--companion-db <path>] [--json]
 ```
+
+The `scheduler` parent has two subcommands: **`run`** starts the autonomous
+daemon, and **[`status`](#scheduler-status)** is its read-only health sibling —
+it inspects local state and reports a verdict, sending nothing and touching no
+secret.
+
+#### scheduler run
 
 Run the autonomous accountability daemon: a durable **go-flywheel**
 scheduler ([ADR-0004](../adr/0004-core-dependencies.md)) that fires the
@@ -497,6 +505,79 @@ from the injected environment (see
 ```sh
 lucid scheduler run
 lucid scheduler run --db /var/lib/lucid/scheduler.db
+```
+
+#### scheduler status
+
+```
+lucid scheduler status [--scheduler-db <path>] [--companion-db <path>] [--json]
+```
+
+Read-only **health surface** for the autonomous scheduler — it answers one plain
+question: *is the scheduler healthy, what fires next, and what happened last?* It
+aggregates local state only and is **credential-dumb and agent-free**: it sends
+nothing, renews no secret, reads no prompt body, and runs no model. It reports the
+companion enabled/disabled state and its provider backend/model, each configured
+prompt path (existence only), the chain bell and tripwire marks, the teeth and
+companion periodics (cron, active flag, next run, last enqueue), the last companion
+delivery receipt per window, a bounded recent-run failure summary, and a
+best-effort host/supervisor probe — then rolls every check into one **verdict** and
+exits on it. Run it before the morning (`06:00`) and night (`19:00`) windows to
+confirm the next send will fire, and after them to confirm it did.
+
+| Flag | Effect |
+|------|--------|
+| `--json` | Emit the full report as JSON with a top-level `verdict` (`ok` \| `warn` \| `error`) and structured per-check results. The `verdict` mirrors the exit code. |
+| `--scheduler-db <path>` | Inspect an explicit teeth job-store path. Overrides `LUCID_SCHEDULER_DB`; defaults to the daemon's resolved path. |
+| `--companion-db <path>` | Inspect an explicit companion job-store path. Overrides `LUCID_COMPANION_DB`; defaults to the daemon's resolved path. |
+
+The command resolves the two disposable job-store paths exactly as the daemon does
+(flag → env → OS-user-config default) and **always prints the resolved paths**, so
+an environment / launchd path drift is visible rather than silently green.
+
+**Exit-code contract (a deliberate override of the [global table](#global-conventions)).**
+`scheduler status` is a *graded* command: its exit code is the health verdict,
+identical in text and `--json` output, so a health cron or agent can gate on the
+code alone without parsing JSON.
+
+| Code | Verdict | Meaning |
+|------|---------|---------|
+| `0` | `ok` | Healthy — every check passed (or is a benign `unknown`). |
+| `1` | `warn` | A benign-but-noteworthy condition (companion disabled, an unverified receipt). |
+| `2` | `error` | A real problem (a missing job store, a missed send, the daemon down). |
+
+Warnings are always printed (never swallowed) in both modes. A hard runtime failure
+— an unreadable Ledger — still surfaces as a normal error exit.
+
+**Verdict thresholds.** Each check classifies against this table; the report's
+verdict is the most severe check — `error` beats `warn` beats `ok`, and an
+`unknown` never lowers it:
+
+| Condition | Verdict |
+|-----------|---------|
+| Companion disabled | `warn` |
+| Teeth or (required) companion job store missing / unreadable | `error` |
+| Companion enabled but a configured prompt file is missing | `error` |
+| A required periodic inactive or missing while the companion is enabled | `error` |
+| Teeth bell inactive while the companion owns the night send | not a fault (suppressed) |
+| Latest companion receipt present but unverified | `warn` |
+| Most-recent already-elapsed window has no receipt, or only a stale one | `error` |
+| On-disk build newer than the running supervised daemon (stale daemon) | `warn` |
+| Daemon not running / not supervised | `error` |
+| Supervisor uninspectable on this platform | `unknown` (never lowers the verdict) |
+
+**Best-effort host checks.** The host/supervisor checks (the daemon process, its
+supervisor, and a stale supervised binary) run by default but are best-effort: on a
+platform where they cannot be inspected — a non-macOS host, or an unreadable
+supervisor — each reports `unknown`, never `ok`. An `unknown` check never lowers
+the verdict; only a positively detected problem (daemon down, stale binary) does.
+So the command is useful on any host and only goes red when something is actually
+wrong.
+
+```sh
+lucid scheduler status
+lucid scheduler status --json
+lucid scheduler status --scheduler-db /var/lib/lucid/flywheel.db
 ```
 
 ### storm
@@ -737,4 +818,5 @@ templates, the only autonomous messages Lucid sends. See
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `lucid scheduler run` posts with (a Discord bot token). Injected at spawn — vaulted in `hush` and never committed (ADR-0005); the binary reads it only from the environment. |
 | `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
 | `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2, monthly heartbeat). Injected, never committed. |
-| `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable job-store path; `--db` overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
+| `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable teeth job-store path; `--db` (on `run`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
+| `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status`; `--companion-db` overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |

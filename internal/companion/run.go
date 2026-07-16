@@ -160,7 +160,8 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 	if !now.Before(cutoffAt) {
 		r.alert(fmt.Sprintf(
 			"Lucid %s companion skipped — it is past the %s cut-off (the host was asleep at the fire time). No stale message was posted.",
-			mode, win.cutoff))
+			mode, win.cutoff,
+		))
 		return Outcome{Mode: mode, Skipped: true, SkipReason: skipPastCutoff}, nil
 	}
 
@@ -357,7 +358,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	ctx = models.WithClock(ctx, clock)
 
-	dbPath, err := resolveDBPath(o.DBPath)
+	dbPath, err := DefaultDBPath(o.DBPath)
 	if err != nil {
 		return err
 	}
@@ -490,11 +491,12 @@ func parseHM(hm string) (hour, minute int, err error) {
 	return h, m, nil
 }
 
-// resolveDBPath resolves the job-DB path: an explicit path wins, then the
-// LUCID_COMPANION_DB override, then the default under the user config dir. The
-// DB is disposable machinery kept outside the ~/.lucid Ledger and distinct from
-// the teeth's flywheel.db.
-func resolveDBPath(dbPath string) (string, error) {
+// DefaultDBPath resolves the disposable companion job-DB path: an explicit
+// override wins, then the LUCID_COMPANION_DB env override, then the default
+// companion.db under the OS user-config dir (outside the ~/.lucid Ledger, and
+// distinct from the teeth's flywheel.db). It is exported so a read-only inspector
+// resolves the exact same path the daemon writes to.
+func DefaultDBPath(dbPath string) (string, error) {
 	if dbPath != "" {
 		return dbPath, nil
 	}

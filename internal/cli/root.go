@@ -54,12 +54,29 @@ func Execute(ctx context.Context, bi BuildInfo) int {
 	return ExitOK
 }
 
-// exitCodeForError maps a returned error to a process exit code.
-// Flag/usage errors from cobra map to [ExitUsage]; everything else
-// (a runtime failure, or a breached `validate` gate) maps to [ExitErr].
+// ExitCoder is an error that carries its own process exit code. A command whose
+// success/failure is graded rather than binary (today: `scheduler status`, whose
+// health verdict is ok/warn/error) returns one so its tiered exit code reaches
+// the process identically in text and --json output, without exitCodeForError
+// having to know the command's verdict rules.
+type ExitCoder interface {
+	error
+	// ExitCode returns the process exit code this error maps to.
+	ExitCode() int
+}
+
+// exitCodeForError maps a returned error to a process exit code. An error that
+// carries its own code (an [ExitCoder], e.g. the `scheduler status` verdict) wins
+// so a graded command owns its tiered exit; flag/usage errors from cobra map to
+// [ExitUsage]; everything else (a runtime failure, or a breached `validate` gate)
+// maps to [ExitErr].
 func exitCodeForError(err error) int {
 	if err == nil {
 		return ExitOK
+	}
+	var coder ExitCoder
+	if errors.As(err, &coder) {
+		return coder.ExitCode()
 	}
 	if isUsageError(err) {
 		return ExitUsage
