@@ -589,22 +589,22 @@ func TestAtClock(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestResolveDBPath covers the explicit > env > default precedence and that the
+// TestDefaultDBPath covers the explicit > env > default precedence and that the
 // default lands outside the ~/.lucid Ledger, distinct from the teeth's job DB.
-func TestResolveDBPath(t *testing.T) {
+func TestDefaultDBPath(t *testing.T) {
 	explicit := filepath.Join(t.TempDir(), "custom.db")
-	got, err := resolveDBPath(explicit)
+	got, err := DefaultDBPath(explicit)
 	require.NoError(t, err)
 	assert.Equal(t, explicit, got, "an explicit path wins")
 
 	envPath := filepath.Join(t.TempDir(), "env.db")
 	t.Setenv(envCompanionDB, envPath)
-	got, err = resolveDBPath("")
+	got, err = DefaultDBPath("")
 	require.NoError(t, err)
 	assert.Equal(t, envPath, got, "the env override is next")
 
 	t.Setenv(envCompanionDB, "")
-	got, err = resolveDBPath("")
+	got, err = DefaultDBPath("")
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(got, filepath.Join("lucid", "companion.db")), "the default lands under the config dir, got %q", got)
 	assert.NotContains(t, got, filepath.Join(".lucid"), "the job DB is outside the Ledger")

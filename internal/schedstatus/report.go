@@ -2,15 +2,17 @@
 // read-only health surface that answers one plain question: "is the autonomous
 // Lucid scheduler healthy, what fires next, and what happened last?"
 //
-// It owns the report model, the health-verdict thresholds, the verdict rollup,
-// and both renderers (human text + JSON). It is deliberately pure: it performs
-// no filesystem, database, host, or model access, and imports only the standard
-// library. The CLI layer does the impure gathering (open the disposable job DBs
-// read-only, read the companion receipts, read lucid.json / chain.json, run the
-// best-effort host probe) and hands the already-gathered [Inputs] to [Assemble],
-// which returns a fully classified [Report]. Keeping every classification pure
-// makes the whole verdict matrix unit-testable with synthetic inputs and keeps
-// the package out of the pure Engine scheduler's import graph.
+// Its classification core — [Assemble], [Report], and the renderers (report.go,
+// render.go) — is deliberately pure: it performs no filesystem, database, host,
+// or model access, imports only the standard library, and turns an already-
+// gathered [Inputs] into a fully classified [Report]. The impure gathering lives
+// beside it in separate files (gather.go opens the disposable job DBs read-only,
+// reads the companion receipts, and reads lucid.json / chain.json; host.go +
+// host_*.go run the best-effort host/supervisor probe) and produces the [Inputs]
+// and host [Check]s the pure core consumes. Keeping every classification pure
+// makes the whole verdict matrix unit-testable with synthetic inputs, and no
+// model or provider is reachable from here, so the package never enters the pure
+// Engine scheduler's import graph.
 package schedstatus
 
 import (

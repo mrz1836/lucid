@@ -505,21 +505,21 @@ func TestCronFromHM(t *testing.T) {
 
 // ── DB path resolution ───────────────────────────────────────────────────────
 
-// TestResolveDBPath covers the --db > env > default precedence.
-func TestResolveDBPath(t *testing.T) {
+// TestDefaultDBPath covers the --db > env > default precedence.
+func TestDefaultDBPath(t *testing.T) {
 	explicit := filepath.Join(t.TempDir(), "custom.db")
-	got, err := resolveDBPath(explicit)
+	got, err := DefaultDBPath(explicit)
 	require.NoError(t, err)
 	assert.Equal(t, explicit, got, "an explicit path wins")
 
 	envPath := filepath.Join(t.TempDir(), "env.db")
 	t.Setenv(envSchedulerDB, envPath)
-	got, err = resolveDBPath("")
+	got, err = DefaultDBPath("")
 	require.NoError(t, err)
 	assert.Equal(t, envPath, got, "the env override is next")
 
 	t.Setenv(envSchedulerDB, "")
-	got, err = resolveDBPath("")
+	got, err = DefaultDBPath("")
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(got, filepath.Join("lucid", "flywheel.db")), "the default lands under the config dir, got %q", got)
 	assert.NotContains(t, got, filepath.Join(".lucid"), "the job DB is outside the Ledger")
