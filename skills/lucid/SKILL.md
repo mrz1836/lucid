@@ -154,6 +154,25 @@ path), never composed or initiated by this skill. The enrichment job likewise
 runs on its own schedule and posts nothing. This skill only handles
 user-initiated commands.
 
+## Scheduler health (read-only diagnostics)
+
+Before answering "is the scheduler running?", "why did morning/night not send?",
+or "what fires next?", run the read-only health surface and relay its verdict —
+never guess from process state:
+
+```sh
+lucid scheduler status          # calm human summary + a one-word verdict
+lucid scheduler status --json   # machine-readable, with a top-level verdict field
+```
+
+It aggregates local state only — the companion enabled/disabled state, the chain
+fire marks, the teeth and companion periodics (what fires next), the last delivery
+receipt per window (what happened last), and a best-effort host/supervisor probe —
+and rolls them into one verdict with a 3-tier exit code: `0` ok, `1` warn, `2`
+error, identical in text and `--json`. It **sends nothing, renews no secret, and
+reads no prompt body**, so it is safe to run any time. Relay the verdict plus the
+relevant failing check; never paraphrase it into false confidence.
+
 ## Witness wiring (Ring 0)
 
 The witness sees exactly one thing: the L2 escalation template, which carries

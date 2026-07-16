@@ -172,10 +172,44 @@ teeth send for themselves again, byte-for-byte as before.
 - The delivery receipts that guard idempotency are written **only through the
   binary**. Never hand-edit them.
 
+## Checking readiness (`lucid scheduler status`)
+
+Everything on this page — whether the companion is enabled, which provider and
+prompt files it will compose from, the two fire marks it inherits, the periodics
+that drive each window, and the last receipt per window — is reported in one
+read-only command. Run it before the morning (`06:00`) and night (`19:00`) windows
+to confirm the next send will fire, and after them to confirm it did:
+
+```sh
+lucid scheduler status          # calm human summary + a one-word verdict
+lucid scheduler status --json   # the same, machine-readable, for a cron or agent
+```
+
+It **sends nothing, renews no secret, and reads no prompt body** (existence only) —
+so it is safe to run any time. It rolls every check into one verdict with a 3-tier
+exit code, identical in text and `--json`, so a health cron can gate on the exit
+alone:
+
+- **`0` ok** — healthy; the next send will fire.
+- **`1` warn** — benign but worth a glance: the companion is disabled, or the last
+  receipt is unverified.
+- **`2` error** — a real problem the routine depends on: a missing job store, a
+  missing prompt file, an inactive required periodic, a **missed** already-elapsed
+  window (no receipt or only a stale one), or the daemon down / not supervised.
+
+**Best-effort host checks.** The daemon-process and supervisor checks run by default
+but never claim false confidence: on a platform where they cannot be inspected they
+report `unknown` (never `ok`), and an `unknown` never lowers the verdict — only a
+positively detected problem does. So the command is useful on any host and only goes
+red when something is actually wrong.
+
+The full flag, exit-code, and verdict-threshold tables live in the
+[command reference](commands.md#scheduler-status) under `scheduler status`.
+
 ## See also
 
 - [`commands.md`](commands.md) — the full `lucid` command reference, including
-  `companion fire` and `scheduler run`.
+  `companion fire`, `scheduler run`, and `scheduler status`.
 - [`../engine.md`](../engine.md) — the accountability teeth (bell, tripwire,
   escalation) and the chain marks the companion inherits.
 - [`../architecture.md`](../architecture.md) — the Mirror/Engine split and the
