@@ -46,6 +46,10 @@ sends themselves are the pre-committed Engine templates and nothing else.`,
 		Args: cobra.NoArgs,
 	}
 	parent.AddCommand(newSchedulerRunCmd())
+	// `status` is the read-only, credential-dumb health sibling of `run`: it
+	// inspects local state and reports a verdict, never sending or touching a
+	// secret. See internal/cli/scheduler_status.go.
+	parent.AddCommand(newSchedulerStatusCmd())
 	return parent
 }
 
