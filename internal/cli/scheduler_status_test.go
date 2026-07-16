@@ -150,11 +150,13 @@ func seedStatusJobDB(t *testing.T, path string, specs ...flywheel.PeriodicSpec) 
 // recent elapsed window.
 func seedHealthyDBs(t *testing.T, home, schedulerDB, companionDB string) {
 	t.Helper()
-	seedStatusJobDB(t, schedulerDB,
+	seedStatusJobDB(
+		t, schedulerDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: false},
 	)
-	seedStatusJobDB(t, companionDB,
+	seedStatusJobDB(
+		t, companionDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionMorning, Kind: "lucid_companion_morning", Cron: "0 6 * * *", Queue: "lucid-companion", Active: true},
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionNight, Kind: "lucid_companion_night", Cron: "0 19 * * *", Queue: "lucid-companion", Active: true},
 	)
@@ -220,7 +222,8 @@ func TestSchedulerStatus_Healthy_ExitOK(t *testing.T) {
 func TestSchedulerStatus_CompanionDisabled_Warn(t *testing.T) {
 	_, schedulerDB, _ := seedScheduler(t, false, "PROMPT BODY")
 	// Companion disabled → the bell is required active; seed both teeth active.
-	seedStatusJobDB(t, schedulerDB,
+	seedStatusJobDB(
+		t, schedulerDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: true},
 	)
@@ -285,7 +288,8 @@ func TestSchedulerStatus_JSON_HasVerdictAndShape(t *testing.T) {
 // modes, and the JSON verdict is "warn" (AC-4).
 func TestSchedulerStatus_ExitCodeIdenticalTextAndJSON(t *testing.T) {
 	_, schedulerDB, _ := seedScheduler(t, false, "PROMPT BODY")
-	seedStatusJobDB(t, schedulerDB,
+	seedStatusJobDB(
+		t, schedulerDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: true},
 	)
@@ -365,11 +369,11 @@ func TestSchedulerStatus_RuntimeFailure_ExitErr(t *testing.T) {
 	assert.Empty(t, out, "a runtime failure renders no report")
 }
 
-// TestStatusExit_IsExitCoder documents the exit-code seam: a statusExit carries
+// TestStatusExit_IsExitCoder documents the exit-code seam: a statusExitError carries
 // its verdict's code out through the [ExitCoder] interface exitCodeForError
 // honors, and its Error() names the verdict for a stray log line.
 func TestStatusExit_IsExitCoder(t *testing.T) {
-	e := statusExit{verdict: "warn", code: 1}
+	e := statusExitError{verdict: "warn", code: 1}
 	assert.Equal(t, 1, e.ExitCode())
 	assert.Contains(t, e.Error(), "warn")
 
@@ -392,7 +396,8 @@ func TestSchedulerStatus_DBFlagsOverrideEnv(t *testing.T) {
 	withClock(t, statusMorning())
 	withHostProbe(t, unknownHost()...)
 
-	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+	out, _, err := runRoot(
+		t, BuildInfo{Version: "dev"},
 		"scheduler", "status",
 		"--scheduler-db", schedulerDB,
 		"--companion-db", companionDB,

@@ -71,7 +71,8 @@ func TestGatherDB_Missing(t *testing.T) {
 func TestGatherDB_ReadsPeriodics(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Application Support", "lucid")
 	path := filepath.Join(dir, "flywheel.db")
-	seedJobDB(t, path,
+	seedJobDB(
+		t, path,
 		flywheel.PeriodicSpec{Slug: SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: true},
 		flywheel.PeriodicSpec{Slug: SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: false},
 	)
@@ -207,11 +208,13 @@ func TestGather_AssemblesEndToEnd(t *testing.T) {
 
 	teeth := filepath.Join(t.TempDir(), "flywheel.db")
 	comp := filepath.Join(t.TempDir(), "companion.db")
-	seedJobDB(t, teeth,
+	seedJobDB(
+		t, teeth,
 		flywheel.PeriodicSpec{Slug: SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
 		flywheel.PeriodicSpec{Slug: SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: false},
 	)
-	seedJobDB(t, comp,
+	seedJobDB(
+		t, comp,
 		flywheel.PeriodicSpec{Slug: SlugCompanionMorning, Kind: "lucid_companion_morning", Cron: "0 6 * * *", Queue: "lucid-companion", Active: true},
 		flywheel.PeriodicSpec{Slug: SlugCompanionNight, Kind: "lucid_companion_night", Cron: "0 19 * * *", Queue: "lucid-companion", Active: true},
 	)

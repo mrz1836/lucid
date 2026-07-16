@@ -141,24 +141,24 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 	// The report is now printed; carry the verdict's non-zero code out through the
 	// ExitCoder seam so text and --json exit identically without re-printing.
 	if code := report.ExitCode(); code != ExitOK {
-		return statusExit{verdict: report.Verdict, code: code}
+		return statusExitError{verdict: report.Verdict, code: code}
 	}
 	return nil
 }
 
-// statusExit carries a scheduler-status verdict's non-zero exit code out through
+// statusExitError carries a scheduler-status verdict's non-zero exit code out through
 // cobra's RunE without printing anything itself — the report is already rendered
 // and the root command has SilenceErrors set. It implements the [ExitCoder] seam
 // that exitCodeForError honors, so a warn verdict exits 1 and an error verdict
 // exits 2, identically in text and --json.
-type statusExit struct {
+type statusExitError struct {
 	verdict string
 	code    int
 }
 
 // Error names the verdict so a stray log line stays legible; it is never printed
 // on the normal path.
-func (e statusExit) Error() string { return "scheduler status: " + e.verdict }
+func (e statusExitError) Error() string { return "scheduler status: " + e.verdict }
 
 // ExitCode returns the verdict's process exit code (1 warn / 2 error).
-func (e statusExit) ExitCode() int { return e.code }
+func (e statusExitError) ExitCode() int { return e.code }

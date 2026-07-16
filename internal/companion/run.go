@@ -160,7 +160,8 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 	if !now.Before(cutoffAt) {
 		r.alert(fmt.Sprintf(
 			"Lucid %s companion skipped — it is past the %s cut-off (the host was asleep at the fire time). No stale message was posted.",
-			mode, win.cutoff))
+			mode, win.cutoff,
+		))
 		return Outcome{Mode: mode, Skipped: true, SkipReason: skipPastCutoff}, nil
 	}
 

@@ -60,6 +60,7 @@ func unknownHostChecks() []Check {
 func okCheck(name, detail string) Check    { return Check{Name: name, State: Ok, Detail: detail} }
 func warnCheck(name, detail string) Check  { return Check{Name: name, State: Warn, Detail: detail} }
 func errorCheck(name, detail string) Check { return Check{Name: name, State: Error, Detail: detail} }
+
 func unknownCheck(name, detail string) Check {
 	return Check{Name: name, State: Unknown, Detail: detail}
 }
