@@ -23,7 +23,8 @@ func benchDayViewFixture(nDay, nRange int) (day, candidates []Event) {
 	candidates = make([]Event, 0, nRange)
 	for i := range nRange {
 		candidates = append(candidates, rangeEvent(
-			fmt.Sprintf("obs_2026_07_01_%04d", i), "2026-07-01", "2026-07-02T07:10:00-04:00"))
+			fmt.Sprintf("obs_2026_07_01_%04d", i), "2026-07-01", "2026-07-02T07:10:00-04:00",
+		))
 	}
 	return day, candidates
 }
