@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -22,12 +23,9 @@ func fixedNow() time.Time {
 // Ledger, plus the adapter and home path.
 func newBootedRouter(t *testing.T) (*Router, *storage.Adapter, string) {
 	t.Helper()
-	home := filepath.Join(t.TempDir(), ".lucid")
-	a := storage.New(home)
-	_, err := a.Scaffold()
-	require.NoError(t, err)
+	home, a := lucidtest.Ledger(t, lucidtest.NestedHome())
 	r := New(a)
-	_, err = r.Boot()
+	_, err := r.Boot()
 	require.NoError(t, err)
 	return r, a, home
 }

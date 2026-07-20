@@ -15,6 +15,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -46,10 +47,7 @@ func seedJobDB(t *testing.T, path string, specs ...flywheel.PeriodicSpec) {
 // engine tree scaffolded, so chain marks and companion receipts can be read back.
 func seededLedger(t *testing.T) *storage.Adapter {
 	t.Helper()
-	a := storage.New(t.TempDir())
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldEngine())
+	_, a := lucidtest.Ledger(t, lucidtest.WithEngine())
 	return a
 }
 

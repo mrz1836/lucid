@@ -16,6 +16,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/engine/templates"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -60,10 +61,7 @@ func (f *fakeNotifier) first(channel string) (capture, bool) {
 // and fake notifier.
 func newSched(t *testing.T) (*Scheduler, *storage.Adapter, *fakeNotifier) {
 	t.Helper()
-	a := storage.New(filepath.Join(t.TempDir(), ".lucid"))
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldEngine())
+	_, a := lucidtest.Ledger(t, lucidtest.NestedHome(), lucidtest.WithEngine())
 	n := &fakeNotifier{failOn: map[string]bool{}}
 	return New(a, n), a, n
 }
