@@ -337,6 +337,7 @@ each future addition a localized change, not a redesign.
 | **Richer frameworks (Stoicism, NVC, IFS, ...)** | New Framework agent + framework definitions under `~/projects/lucid/agents/frameworks/`. | All other agent contracts. |
 | **New enrichers (air quality, wearable import, ...)** | A new entry in `observations/config.json` + an allowlist row for `fetch_enrichment`. Opt-in, outbound-minimal, keyless (a keyed source needs its own consent line). | The frozen event envelope; the fetch-audit discipline. |
 | **New observation kinds / registries / projections** | One row in [`../observations.md`](../observations.md) §3, a payload schema, optionally a shorthand — per the extension model in [`../architecture.md`](../architecture.md) §4b. | The envelope, the sanctuary denylist, every agent contract. |
+| **Workout companion (config-gated)** | A config-gated Mirror surface + two observation kinds (`workout`, `body_state`) + a deterministic recommender + a read-only trend projection + one configurable daily slot ([`workout-module.md`](workout-module.md)). Deterministic core; a bounded model call only phrases the pick. Off by default. | The frozen envelope, the sanctuary denylist, every agent contract; the runtime-never-depends-on-AI rule. |
 | **Therapist / Coach surfaces** | New named agents behind the Safety/Consent gate. Each requires its own contract in [`agent-contracts.md`](agent-contracts.md) before it ships. | One-pattern-per-session and approval-before-action gates. |
 
 If a proposed feature does not fit one of these extension points, the
