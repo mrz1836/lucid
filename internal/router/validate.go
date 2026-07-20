@@ -226,6 +226,7 @@ func (r *Router) persistInsight(
 			RawEntryIDs:             supportingOrCurrent(prop.SupportingEntryIDs, current.ID),
 			ProcessedArtifactID:     current.ID,
 			ReflectionPromptVersion: r.cfg.AgentVersions.Reflection,
+			Framework:               prop.Framework,
 			UserResponseKind:        kind,
 			UserResponseText:        resp.Text,
 		},

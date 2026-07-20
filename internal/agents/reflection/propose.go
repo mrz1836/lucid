@@ -64,8 +64,12 @@ type ProcessedView struct {
 
 // ProposeInput is the authorized slice for one propose call (agent-contracts
 // §3 Inputs): the current artifact, the recent window, the rejected and
-// unanswered shape-tag unions, the agent version to stamp, and the bootstrap
-// flag (which suppresses proposals entirely).
+// unanswered shape-tag unions, the agent version to stamp, the bootstrap flag
+// (which suppresses proposals entirely), and the active interpretation lens the
+// router resolved (nil for the baseline, lens-neutral voice — docs/frameworks.md
+// §5). Framework is the "<id> v<version>" provenance label a lens-framed
+// proposal stamps; it threads through to the persisted insight's
+// provenance.framework and is nil in the MVP (no lens is consented by default).
 type ProposeInput struct {
 	Current             ProcessedView
 	RecentWindow        []ProcessedView
@@ -73,6 +77,7 @@ type ProposeInput struct {
 	UnansweredShapeTags []string
 	AgentVersion        string
 	Bootstrap           bool
+	Framework           *string
 }
 
 // ProposeResult is Reflection's propose payload (agent-contracts.md §3
@@ -81,6 +86,10 @@ type ProposeInput struct {
 // no_pattern, MessageText only. NoLLM records that the outcome was reached
 // deterministically (no model call), which the tests assert on the empty-
 // window / empty-artifact / bootstrap paths (error-states.md §R-3/§R-4/§R-6).
+// Framework carries the active lens's "<id> v<version>" label through to the
+// persist path so a lens-framed insight records its provenance.framework; it is
+// echoed from the input only on a proposal outcome (nil otherwise, and nil for
+// the baseline voice).
 type ProposeResult struct {
 	Outcome            Outcome
 	ProposalText       string
@@ -88,6 +97,7 @@ type ProposeResult struct {
 	ShapeTag           string
 	SupportingEntryIDs []string
 	NoLLM              bool
+	Framework          *string
 }
 
 // proposalReply is the parsed model reply for one propose call.
@@ -120,7 +130,14 @@ func Propose(ctx context.Context, in ProposeInput, p provider.Provider) ProposeR
 	for _, strict := range []bool{false, true} {
 		reply, ok := proposeOnce(ctx, in, p, strict)
 		if ok {
-			return fromReply(reply)
+			res := fromReply(reply)
+			// Only a proposal becomes a persisted insight, so only a proposal
+			// carries the active lens's provenance label; a soft contradiction or
+			// no_pattern writes nothing and stays lens-neutral.
+			if res.Outcome == OutcomeProposal {
+				res.Framework = in.Framework
+			}
+			return res
 		}
 	}
 	return noPattern(false)

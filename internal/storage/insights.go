@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -29,6 +30,14 @@ const (
 // processed artifacts). The provenance validator rejects any insight whose
 // version does not begin with it.
 const reflectionVersionPrefix = "reflection-"
+
+// frameworkLabelPattern is the provenance.framework label grammar: "<id>
+// v<version>" (e.g. "stoicism v1", "attachment-theory v2"), the exact string
+// form frameworks.Lens.Label stamps on a lens-framed insight (docs/frameworks.md
+// §2; data-model.md §"Insight provenance"). A nil framework is the baseline,
+// lens-neutral voice and is always valid; a present label must match this shape
+// so a malformed stamp can never persist.
+var frameworkLabelPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)* v[1-9][0-9]*$`)
 
 // Insight status values (data-model.md §"Validated insights"). There is no
 // "pending": an unanswered proposal never produces an insight.
@@ -443,6 +452,11 @@ func validateProvenance(p provenanceYAML) error {
 	}
 	if strings.TrimSpace(p.UserResponseText) == "" {
 		return errors.New("storage: insight provenance user_response_text is empty")
+	}
+	// framework is nullable: nil is the baseline voice, a present value must be a
+	// well-formed "<id> v<version>" lens label (frameworks layer, docs/frameworks.md §2).
+	if p.Framework != nil && !frameworkLabelPattern.MatchString(*p.Framework) {
+		return fmt.Errorf("storage: insight provenance framework %q is not a %q label", *p.Framework, "<id> v<version>")
 	}
 	return nil
 }
