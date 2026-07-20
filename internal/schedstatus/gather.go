@@ -210,12 +210,10 @@ func periodicStatuses(views []flywheel.PeriodicView) []PeriodicStatus {
 		v := views[i]
 		ps := PeriodicStatus{Slug: v.Slug, Cron: v.Cron, Active: v.Active, Present: true}
 		if !v.NextRunAt.IsZero() {
-			next := v.NextRunAt
-			ps.NextRun = &next
+			ps.NextRun = v.NextRunAt
 		}
 		if v.LastEnqueuedAt != nil && !v.LastEnqueuedAt.IsZero() {
-			last := *v.LastEnqueuedAt
-			ps.LastEnqueue = &last
+			ps.LastEnqueue = *v.LastEnqueuedAt
 		}
 		out = append(out, ps)
 	}

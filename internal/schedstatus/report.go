@@ -100,12 +100,12 @@ type ChainMarks struct {
 // false when the slug is expected but not registered — the case that flips a
 // required periodic to a missing-periodic error.
 type PeriodicStatus struct {
-	Slug        string     `json:"slug"`
-	Cron        string     `json:"cron,omitempty"`
-	Active      bool       `json:"active"`
-	Present     bool       `json:"present"`
-	NextRun     *time.Time `json:"next_run,omitempty"`
-	LastEnqueue *time.Time `json:"last_enqueue,omitempty"`
+	Slug        string    `json:"slug"`
+	Cron        string    `json:"cron,omitempty"`
+	Active      bool      `json:"active"`
+	Present     bool      `json:"present"`
+	NextRun     time.Time `json:"next_run,omitzero"`
+	LastEnqueue time.Time `json:"last_enqueue,omitzero"`
 }
 
 // ReceiptStatus is the last companion delivery receipt for one window. Present

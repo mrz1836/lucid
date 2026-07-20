@@ -177,8 +177,8 @@ func existsMark(exists bool) string {
 }
 
 // fmtTime renders an optional timestamp, or an em dash when unset.
-func fmtTime(t *time.Time) string {
-	if t == nil || t.IsZero() {
+func fmtTime(t time.Time) string {
+	if t.IsZero() {
 		return "—"
 	}
 	return t.Format(timeLayout)

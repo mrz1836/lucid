@@ -141,3 +141,18 @@ func TestReportJSONVerdictMirrorsExit(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"verdict":"warn"`)
 }
+
+// TestPeriodicStatusTimeOmitzero locks the machine contract for the two time
+// fields: a set time is emitted, a zero time is omitted — the same JSON the
+// prior *time.Time+omitempty shape produced, now without pointer indirection.
+func TestPeriodicStatusTimeOmitzero(t *testing.T) {
+	set, err := json.Marshal(PeriodicStatus{Slug: "s", Present: true, NextRun: fixedNow()})
+	require.NoError(t, err)
+	require.Contains(t, string(set), `"next_run"`)
+	require.NotContains(t, string(set), `"last_enqueue"`, "a zero time is omitted")
+
+	zero, err := json.Marshal(PeriodicStatus{Slug: "s", Present: true})
+	require.NoError(t, err)
+	require.NotContains(t, string(zero), `"next_run"`)
+	require.NotContains(t, string(zero), `"last_enqueue"`)
+}
