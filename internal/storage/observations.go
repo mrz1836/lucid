@@ -229,6 +229,26 @@ func (a *Adapter) ReadObservationsRange(start, end string) ([]observations.Event
 	return observations.SortEventsByID(out), nil
 }
 
+// RecentObservations reads the observation events whose logical day falls in
+// the bounded, contract-named recent window [now-windowDays, now] (inclusive),
+// sorted by id — the slice the daily companion enriches its message from. The
+// window is anchored on now's civil date in now's own location, so "recent"
+// tracks the operator's day boundary; windowDays is the look-back the caller
+// names (the companion passes a fixed constant, the same order as
+// config.recent_window). A non-positive window reads only today, never an
+// inverted range. It wraps [Adapter.ReadObservationsRange], so it inherits the
+// day-file iteration and the malformed-line skip discipline and reads nothing
+// outside the named span — it does not filter by kind, leaving the
+// render-relevant selection to the composer.
+func (a *Adapter) RecentObservations(now time.Time, windowDays int) ([]observations.Event, error) {
+	if windowDays < 0 {
+		windowDays = 0
+	}
+	end := observations.DateOf(now)
+	start := end.AddDate(0, 0, -windowDays)
+	return a.ReadObservationsRange(observations.DateString(start), observations.DateString(end))
+}
+
 // ReadObservationsKind reads every event of one kind across the whole tree,
 // sorted by id — the series read exports build on (Phase 12). It walks the
 // observation files and filters, skipping malformed lines.

@@ -11,6 +11,7 @@ import (
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/engine/templates"
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/provider/factory"
 	"github.com/mrz1836/lucid/internal/router"
@@ -41,6 +42,30 @@ const (
 // — not user-facing copy, so it never appears in a delivered message.
 const numbersHeader = "LIVE NUMBERS (honest — copied straight from the chain; never round or invent these):"
 
+// recentWindowDays is the bounded look-back the companion enriches from — the
+// contract-named recent-observation slice the composer reads (and a later phase
+// renders into the message's context sections). It is the same order as the
+// Ledger's config.recent_window (7): a week of body-state context, no wider. A
+// worker constant, not config: the model-allowed reach is fixed by the contract
+// and never tuned per instance (Approach A4, the sanctuary boundary).
+const recentWindowDays = 7
+
+// renderKinds is the render-relevant observation vocabulary the companion
+// surfaces — the body-state signals (mood, pain, sleep, symptom) and the
+// companion-context kinds (withdrawal, habit_change, commitment). A recent read
+// is filtered to these, so neither the message nor the model ever sees an
+// unrelated kind (intake, med, measurement, memory, location): the reach is the
+// named slice, not the whole Ledger.
+var renderKinds = map[observations.Kind]bool{ //nolint:gochecknoglobals // a fixed, read-only set of the render-relevant observation kinds the composer surfaces
+	observations.KindMood:        true,
+	observations.KindPain:        true,
+	observations.KindSleep:       true,
+	observations.KindSymptom:     true,
+	observations.KindWithdrawal:  true,
+	observations.KindHabitChange: true,
+	observations.KindCommitment:  true,
+}
+
 // NumbersReader is the read-only engine projection the composer renders the
 // honest live-numbers block from — the exact MetricsResult / StatusResult that
 // `lucid metrics --json` and `lucid status --json` expose, read in-process so a
@@ -68,6 +93,18 @@ type ChainReader interface {
 	ReadChainConfig() (engine.ChainConfig, error)
 }
 
+// ObservationsReader is the read-only, bounded recent-observation seam the
+// composer enriches from. RecentObservations returns the events whose logical
+// day falls in the [now-windowDays, now] window, sorted by id; *storage.Adapter
+// satisfies it via RecentObservations. The companion reads only this named
+// slice — never the whole Ledger — so the model-allowed reach stays confined to
+// a week of the render-relevant kinds (Approach A4, the sanctuary boundary). It
+// is an interface so the compose core is testable with a scripted fake, exactly
+// like the numbers/verdict/chain readers.
+type ObservationsReader interface {
+	RecentObservations(now time.Time, windowDays int) ([]observations.Event, error)
+}
+
 // ProviderBuilder constructs the model backend from a resolved provider config.
 // It defaults to [factory.Build]; tests inject a builder that returns a
 // [provider.Fake] so no compose test needs live vendor auth (ADR-0006).
@@ -75,14 +112,17 @@ type ProviderBuilder func(config.ProviderConfig) (provider.Provider, error)
 
 // Deps is everything a [Composer] needs, wired by the composition root
 // (internal/cli) from the concrete router, scheduler, and storage adapter. The
-// three readers are interfaces so the compose core is testable with fakes and
-// the model-allowed reach stays confined to this package.
+// reader dependencies are interfaces so the compose core is testable with fakes
+// and the model-allowed reach stays confined to this package. Observations is
+// the optional recent-observation enrichment seam: a nil reader (the feature
+// simply unconfigured) leaves the message unenriched rather than failing it.
 type Deps struct {
-	Companion config.CompanionConfig
-	Provider  config.ProviderConfig
-	Numbers   NumbersReader
-	Verdict   VerdictReader
-	Chain     ChainReader
+	Companion    config.CompanionConfig
+	Provider     config.ProviderConfig
+	Numbers      NumbersReader
+	Verdict      VerdictReader
+	Chain        ChainReader
+	Observations ObservationsReader
 	// Build overrides the provider builder; nil defaults to factory.Build.
 	Build ProviderBuilder
 }
@@ -94,12 +134,13 @@ type Deps struct {
 // It performs no delivery — the flywheel node and CLI (later phases) own the
 // send, idempotency, and read-back.
 type Composer struct {
-	companion config.CompanionConfig
-	provider  config.ProviderConfig
-	numbers   NumbersReader
-	verdict   VerdictReader
-	chain     ChainReader
-	build     ProviderBuilder
+	companion    config.CompanionConfig
+	provider     config.ProviderConfig
+	numbers      NumbersReader
+	verdict      VerdictReader
+	chain        ChainReader
+	observations ObservationsReader
+	build        ProviderBuilder
 }
 
 // New constructs a Composer over its dependencies, defaulting the provider
@@ -110,12 +151,13 @@ func New(d Deps) *Composer {
 		build = factory.Build
 	}
 	return &Composer{
-		companion: d.Companion,
-		provider:  d.Provider,
-		numbers:   d.Numbers,
-		verdict:   d.Verdict,
-		chain:     d.Chain,
-		build:     build,
+		companion:    d.Companion,
+		provider:     d.Provider,
+		numbers:      d.Numbers,
+		verdict:      d.Verdict,
+		chain:        d.Chain,
+		observations: d.Observations,
+		build:        build,
 	}
 }
 
@@ -131,6 +173,16 @@ type Result struct {
 	UsedLLM  bool
 	Fallback bool
 	MissDay  bool
+	// Recent is the bounded, render-relevant recent-observation slice the
+	// composer read for enrichment — empty when nothing render-relevant was
+	// logged in the window or the read degraded. A later phase renders it into
+	// the message's context sections; delivery ignores it (it consumes Text).
+	Recent []observations.Event
+	// EnrichmentDegraded records that the recent-observation read failed, so the
+	// enrichment sections are omitted from an otherwise-delivered message. It is
+	// how the deliberately non-fatal read stays visible — a dry-run surfaces it
+	// rather than letting the omission pass silently.
+	EnrichmentDegraded bool
 }
 
 // Compose builds the companion message for one window at `now`. It reads the two
@@ -175,6 +227,12 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 	}
 
 	res := Result{Mode: mode, MissDay: missDay}
+
+	// Bounded recent-observation enrichment. This read is deliberately non-fatal
+	// — unlike the prompt/verdict/numbers reads above, which are the message and
+	// stay loud, the observations are enrichment layered on top, so a failure
+	// omits the sections and is recorded rather than killing the send.
+	res.Recent, res.EnrichmentDegraded = c.recentObservations(now)
 
 	prov, err := c.build(c.providerConfig())
 	if err != nil {
@@ -250,6 +308,30 @@ func (c *Composer) numbersBlock(now time.Time) (string, error) {
 	lines = append(lines, metricsRes.Lines...)
 	lines = append(lines, ambient...)
 	return strings.Join(lines, "\n"), nil
+}
+
+// recentObservations reads the bounded recent-observation slice and filters it
+// to the render-relevant kinds. Unlike the prompt, verdict, and numbers reads —
+// which are the message and stay loud — this read is enrichment layered on top,
+// so it is deliberately non-fatal: on any reader error it returns no events and
+// degraded=true, and the caller omits the enrichment sections while still
+// delivering the life-critical message. A nil reader (the feature simply
+// unconfigured) is not a degradation — it returns no events, degraded=false.
+func (c *Composer) recentObservations(now time.Time) (events []observations.Event, degraded bool) {
+	if c.observations == nil {
+		return nil, false
+	}
+	all, err := c.observations.RecentObservations(now, recentWindowDays)
+	if err != nil {
+		return nil, true
+	}
+	events = make([]observations.Event, 0, len(all))
+	for _, ev := range all {
+		if renderKinds[ev.Kind] {
+			events = append(events, ev)
+		}
+	}
+	return events, false
 }
 
 // fallback returns the deterministic message when the model is unreachable.

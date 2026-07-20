@@ -16,6 +16,7 @@ import (
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/engine/templates"
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/router"
 )
@@ -59,6 +60,23 @@ type fakeChain struct {
 
 func (f fakeChain) ReadChainConfig() (engine.ChainConfig, error) {
 	return f.chain, f.err
+}
+
+// fakeObservations is a scripted ObservationsReader: it returns a fixed slice
+// (or a read error) and records how it was called, so a compose test asserts
+// the composer filters to the render-relevant kinds, passes the bounded window,
+// and degrades non-fatally on a read error.
+type fakeObservations struct {
+	events []observations.Event
+	err    error
+	calls  int
+	window int
+}
+
+func (f *fakeObservations) RecentObservations(_ time.Time, windowDays int) ([]observations.Event, error) {
+	f.calls++
+	f.window = windowDays
+	return f.events, f.err
 }
 
 // --- fixtures ---------------------------------------------------------------
@@ -383,4 +401,75 @@ func TestCompose_NonSentinelProviderError_Propagates(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, res.Fallback, "a non-transport error is not a deterministic fallback")
 	assert.Empty(t, res.Text)
+}
+
+// newComposerWithObs wires a Composer with a recent-observation reader (the
+// path newComposer omits) so the enrichment seam is exercised with a scripted
+// fake.
+func newComposerWithObs(t *testing.T, obs ObservationsReader, p *provider.Fake) *Composer {
+	t.Helper()
+	return New(Deps{
+		Companion:    writePrompts(t),
+		Provider:     defaultProvider(),
+		Numbers:      sampleNumbers(),
+		Verdict:      fakeVerdict{},
+		Chain:        fakeChain{},
+		Observations: obs,
+		Build:        func(config.ProviderConfig) (provider.Provider, error) { return p, nil },
+	})
+}
+
+// TestCompose_Recent_FiltersToRenderKinds confirms the composer surfaces the
+// bounded recent slice, filtered to the render-relevant kinds (an unrelated
+// intake event is dropped), and passes the contract window to the reader.
+func TestCompose_Recent_FiltersToRenderKinds(t *testing.T) {
+	obs := &fakeObservations{events: []observations.Event{
+		{ID: "obs_2026_07_08_001", Kind: observations.KindMood},
+		{ID: "obs_2026_07_08_002", Kind: observations.KindIntake}, // not render-relevant
+		{ID: "obs_2026_07_08_003", Kind: observations.KindWithdrawal},
+		{ID: "obs_2026_07_08_004", Kind: observations.KindCommitment},
+	}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM"}}}
+	c := newComposerWithObs(t, obs, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+
+	assert.False(t, res.EnrichmentDegraded)
+	require.Len(t, res.Recent, 3, "the intake event is filtered out; the render-relevant kinds are kept")
+	assert.Equal(t, []observations.Kind{observations.KindMood, observations.KindWithdrawal, observations.KindCommitment},
+		[]observations.Kind{res.Recent[0].Kind, res.Recent[1].Kind, res.Recent[2].Kind})
+	assert.Equal(t, 1, obs.calls, "the reader is called exactly once")
+	assert.Equal(t, recentWindowDays, obs.window, "the bounded window constant is passed to the reader")
+}
+
+// TestCompose_RecentReadError_DegradesNonFatally confirms an enrichment read
+// error never fails the life-critical send: the message still composes, no
+// events are surfaced, and the degradation is recorded for a dry-run to show.
+func TestCompose_RecentReadError_DegradesNonFatally(t *testing.T) {
+	obs := &fakeObservations{err: errors.New("ledger read boom")}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM MORNING"}}}
+	c := newComposerWithObs(t, obs, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err, "an enrichment read error never fails the send")
+
+	assert.True(t, res.EnrichmentDegraded, "the degraded read is recorded so a dry-run surfaces it")
+	assert.Empty(t, res.Recent, "no events are surfaced on a degraded read")
+	assert.Equal(t, "WARM MORNING", res.Text, "the message is still composed")
+	assert.True(t, res.UsedLLM)
+}
+
+// TestCompose_NilObservationsReader_NotDegraded confirms an unconfigured reader
+// (the current daemon path, which builds Deps without Observations) leaves the
+// message unenriched without flagging a degradation.
+func TestCompose_NilObservationsReader_NotDegraded(t *testing.T) {
+	comp := writePrompts(t)
+	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM"}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.False(t, res.EnrichmentDegraded, "an unconfigured reader is not a degradation")
+	assert.Empty(t, res.Recent)
 }

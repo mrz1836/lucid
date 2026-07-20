@@ -165,6 +165,54 @@ func TestReadObservationsRangeAndKind(t *testing.T) {
 	assert.Zero(t, skipped)
 }
 
+// TestRecentObservations_WindowSortedUnfiltered proves the companion's read
+// seam returns exactly the [now-window, now] slice sorted by id, across every
+// kind (the render-relevant filter is the composer's concern, not the reader's),
+// and that the window bound and the non-positive clamp behave.
+func TestRecentObservations_WindowSortedUnfiltered(t *testing.T) {
+	a := newObsStore(t)
+	_, err := a.AppendObservation(microEvent(observations.KindMood, "2026-07-05", map[string]any{"level": 4}))
+	require.NoError(t, err)
+	_, err = a.AppendObservation(microEvent(observations.KindPain, "2026-07-06", map[string]any{"intensity": 3}))
+	require.NoError(t, err)
+	_, err = a.AppendObservation(microEvent(observations.KindIntake, "2026-07-06", map[string]any{"class": "food", "what": "eggs"}))
+	require.NoError(t, err)
+	_, err = a.AppendObservation(microEvent(observations.KindPain, "2026-07-08", map[string]any{"intensity": 5}))
+	require.NoError(t, err)
+
+	now := time.Date(2026, 7, 8, 9, 0, 0, 0, loc)
+
+	// A 7-day look-back spans 2026-07-01..2026-07-08 and returns every kind in
+	// range, sorted by id — the reader does not filter by kind.
+	got, err := a.RecentObservations(now, 7)
+	require.NoError(t, err)
+	require.Len(t, got, 4)
+	assert.Equal(t, "obs_2026_07_05_001", got[0].ID, "sorted by id, oldest first")
+	assert.Equal(t, "obs_2026_07_08_001", got[3].ID)
+	kinds := make([]observations.Kind, len(got))
+	for i, ev := range got {
+		kinds[i] = ev.Kind
+	}
+	assert.Contains(t, kinds, observations.KindIntake, "the reader is generic — it does not drop non-render kinds")
+
+	// A tighter 2-day window (start 2026-07-06) drops the 07-05 mood event.
+	got2, err := a.RecentObservations(now, 2)
+	require.NoError(t, err)
+	require.Len(t, got2, 3)
+	assert.Equal(t, "obs_2026_07_06_001", got2[0].ID)
+
+	// A zero window reads only today.
+	got0, err := a.RecentObservations(now, 0)
+	require.NoError(t, err)
+	require.Len(t, got0, 1)
+	assert.Equal(t, "obs_2026_07_08_001", got0[0].ID)
+
+	// A negative window is clamped to today, never an inverted range.
+	gotNeg, err := a.RecentObservations(now, -3)
+	require.NoError(t, err)
+	require.Len(t, gotNeg, 1)
+}
+
 func TestRegistry_ResolveCreateMerge(t *testing.T) {
 	a := newObsStore(t)
 
