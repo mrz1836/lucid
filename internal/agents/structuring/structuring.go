@@ -17,10 +17,10 @@ package structuring
 
 import (
 	"context"
-	"encoding/json"
 	"regexp"
 	"strings"
 
+	"github.com/mrz1836/lucid/internal/agents/agentutil"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -125,16 +125,12 @@ func Extract(ctx context.Context, in Input, p provider.Provider) Result {
 // rule (missing rationale, diagnostic notes, empty-without-notes) — every one
 // of which the caller treats as a failed attempt.
 func extractOnce(ctx context.Context, in Input, p provider.Provider, strict bool) (extraction, bool) {
-	resp, err := p.Complete(ctx, provider.Request{
+	ext, err := agentutil.CompleteJSON[extraction](ctx, p, provider.Request{
 		Intent:   "structuring.extract",
 		System:   extractSystem(strict),
 		Messages: entrySlice(in.Body),
 	})
 	if err != nil {
-		return extraction{}, false
-	}
-	var ext extraction
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &ext); jsonErr != nil {
 		return extraction{}, false
 	}
 	if !validExtraction(ext) {

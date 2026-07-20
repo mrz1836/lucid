@@ -2,9 +2,9 @@ package reflection
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
+	"github.com/mrz1836/lucid/internal/agents/agentutil"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -108,16 +108,12 @@ func SurfaceForRecall(ctx context.Context, in RecallInput, p provider.Provider) 
 // transport error, malformed JSON, or a rule break — reports ok=false so the
 // caller retries or degrades.
 func recallOnce(ctx context.Context, in RecallInput, p provider.Provider, strict bool) (recallReply, bool) {
-	resp, err := p.Complete(ctx, provider.Request{
+	reply, err := agentutil.CompleteJSON[recallReply](ctx, p, provider.Request{
 		Intent:   "reflection.surface_for_recall",
 		System:   recallSystem(in, strict),
 		Messages: recallSlice(in),
 	})
 	if err != nil {
-		return recallReply{}, false
-	}
-	var reply recallReply
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &reply); jsonErr != nil {
 		return recallReply{}, false
 	}
 	if !validRecall(reply, in) {

@@ -2,9 +2,10 @@ package reflection
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"strings"
 
+	"github.com/mrz1836/lucid/internal/agents/agentutil"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -161,21 +162,21 @@ func AnswerGrounded(ctx context.Context, in AnswerInput, p provider.Provider) An
 // cites out-of-slice is reported ok=true here; the slice check happens in the
 // caller so such an answer can reach Safety.
 func answerOnce(ctx context.Context, in AnswerInput, p provider.Provider, strict bool) (reply answerReply, ok, transportErr bool) {
-	resp, err := p.Complete(ctx, provider.Request{
+	parsed, err := agentutil.CompleteJSON[answerReply](ctx, p, provider.Request{
 		Intent:   "reflection.answer_grounded",
 		System:   answerSystem(in, strict),
 		Messages: answerSlice(in),
 	})
 	if err != nil {
-		return answerReply{}, false, true
+		// A parse failure is a well-formed transport that returned garbage
+		// (retry, then §R-12); anything else is a transport failure that did
+		// not reach a usable model (retry, then §N-3).
+		return answerReply{}, false, !errors.Is(err, agentutil.ErrParse)
 	}
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &reply); jsonErr != nil {
+	if !validAnswer(parsed) {
 		return answerReply{}, false, false
 	}
-	if !validAnswer(reply) {
-		return answerReply{}, false, false
-	}
-	return reply, true, false
+	return parsed, true, false
 }
 
 // validAnswer enforces the structural §3 rules independent of slice membership:

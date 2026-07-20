@@ -103,7 +103,8 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `~/.lucid/` (`LUCID_HOME` override); frontmatter + one file per record
   family; `fetch_enrichment.go` = the single audited network op.
 - [`internal/agents`](internal/agents)`/{intake,structuring,reflection,safety}`
-  — the LLM-backed agents.
+  — the LLM-backed agents; `agentutil/` holds the shared call-the-model-and-
+  decode-JSON helper (`CompleteJSON`), reachable only through `provider`.
 - [`internal/provider`](internal/provider) — the single model seam
   (`iface.go`, `fake.go`).
 - [`internal/validate`](internal/validate) — `lucid validate`, the read-only

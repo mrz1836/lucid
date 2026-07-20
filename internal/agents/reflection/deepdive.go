@@ -18,10 +18,10 @@ package reflection
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"strings"
 
+	"github.com/mrz1836/lucid/internal/agents/agentutil"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -161,16 +161,12 @@ func DeepDive(ctx context.Context, in DeepDiveInput, p provider.Provider) DeepDi
 // retries or degrades. Candidate validity is checked separately in
 // fromDeepDiveReply so a good narrative is never lost to a bad candidate.
 func deepDiveOnce(ctx context.Context, in DeepDiveInput, p provider.Provider, strict bool) (deepDiveReply, bool) {
-	resp, err := p.Complete(ctx, provider.Request{
+	reply, err := agentutil.CompleteJSON[deepDiveReply](ctx, p, provider.Request{
 		Intent:   "reflection.weekly_deepdive",
 		System:   deepDiveSystem(in, strict),
 		Messages: deepDiveSlice(in),
 	})
 	if err != nil {
-		return deepDiveReply{}, false
-	}
-	var reply deepDiveReply
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &reply); jsonErr != nil {
 		return deepDiveReply{}, false
 	}
 	if strings.TrimSpace(reply.Summary) == "" {
