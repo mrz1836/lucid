@@ -60,6 +60,109 @@ func runReflectWeek(t *testing.T, args ...string) (stdout string, err error) {
 	return out.String(), err
 }
 
+// seedProcessedArtifact scaffolds the isolated Ledger (idempotently) and writes
+// one valid processed artifact so the weekly apply path has a recent artifact to
+// anchor the insight's provenance to.
+func seedProcessedArtifact(t *testing.T, home, id string, at time.Time) {
+	t.Helper()
+	a := storage.New(home)
+	_, err := a.Scaffold()
+	require.NoError(t, err)
+	require.NoError(t, a.WriteProcessed(storage.ProcessedArtifact{
+		ID: id, EntryID: id, ProducedAt: at, AgentVersion: "structuring-2026.05.0",
+		Emotions: []storage.ProcessedItem{{Name: "calm", Rationale: "user said 'calm'"}},
+		Themes:   []storage.ProcessedItem{{Name: "prep", Rationale: "grounded in the entry"}},
+	}))
+}
+
+// runReflectWeekApply executes `lucid reflect week apply [args...]`, piping the
+// given stdin payload and capturing stdout and the command error.
+func runReflectWeekApply(t *testing.T, stdin string, args ...string) (stdout string, err error) {
+	t.Helper()
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	root.SetIn(strings.NewReader(stdin))
+	root.SetArgs(append([]string{"reflect", "week", "apply"}, args...))
+	err = root.ExecuteContext(context.Background())
+	return out.String(), err
+}
+
+// applyPayload marshals a well-formed apply envelope citing citeID.
+func applyPayload(t *testing.T, citeID, framework, kind, text string) string {
+	t.Helper()
+	env := reflectWeekApplyEnvelope{
+		Candidate: reflectWeekPatternView{
+			ProposalText:       "One possible pattern: preparation as a way to feel safe.",
+			ShapeTag:           "prep-as-safety",
+			SupportingEntryIDs: []string{citeID},
+		},
+		Framework: framework,
+		Response:  reflectWeekApplyResponse{Kind: kind, Text: text},
+	}
+	b, err := json.Marshal(env)
+	require.NoError(t, err)
+	return string(b)
+}
+
+// TestReflectWeekApply_DispatchResolves proves `reflect week apply` resolves to
+// the write leaf under the read-only week surface (AC-8 apply path).
+func TestReflectWeekApply_DispatchResolves(t *testing.T) {
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	apply, _, err := root.Find([]string{"reflect", "week", "apply"})
+	require.NoError(t, err)
+	assert.Equal(t, "apply", apply.Name())
+}
+
+// TestReflectWeekApply_AcceptPersistsInsight proves piping an accepted candidate
+// persists a tracked insight stamped with provenance.framework through the CLI
+// apply leaf (AC-6, AC-8; the Rock 1 DoD end-to-end via the command surface).
+func TestReflectWeekApply_AcceptPersistsInsight(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, reflectNow())
+	citeID := seedWeekRaw(t, home, reflectNow().Add(-3*24*time.Hour), "over-prepared for the review call")
+	seedProcessedArtifact(t, home, "p_2026_05_08_a", reflectNow().Add(-24*time.Hour))
+	withServeProvider(t, &provider.Fake{})
+
+	out, err := runReflectWeekApply(t, applyPayload(t, citeID, "stoicism v1", "accepted", "Yes, that fits."), "--json")
+	require.NoError(t, err)
+
+	var view reflectWeekApplyView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.True(t, view.Wrote)
+	require.NotEmpty(t, view.InsightID)
+
+	// The insight landed with its lens label and raw-entry citation.
+	assert.Equal(t, 1, countHomeFiles(t, home, "insights"))
+	ins, err := storage.New(home).ReadInsight(view.InsightID)
+	require.NoError(t, err)
+	require.NotNil(t, ins.Provenance.Framework)
+	assert.Equal(t, "stoicism v1", *ins.Provenance.Framework)
+	assert.Equal(t, []string{citeID}, ins.Provenance.RawEntryIDs)
+}
+
+// TestReflectWeekApply_UnknownKindErrors proves an unrecognized response kind is
+// rejected rather than silently degrading to unanswered.
+func TestReflectWeekApply_UnknownKindErrors(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, reflectNow())
+	seedProcessedArtifact(t, home, "p_2026_05_08_a", reflectNow().Add(-24*time.Hour))
+	withServeProvider(t, &provider.Fake{})
+
+	_, err := runReflectWeekApply(t, applyPayload(t, "raw_x", "", "maybe", ""), "--json")
+	require.Error(t, err)
+}
+
+// TestReflectWeekApply_EmptyStdinErrors proves apply is an explicit write: an
+// empty payload is an error, never a silent no-op.
+func TestReflectWeekApply_EmptyStdinErrors(t *testing.T) {
+	isolatedHome(t)
+	withServeProvider(t, &provider.Fake{})
+	_, err := runReflectWeekApply(t, "")
+	require.Error(t, err)
+}
+
 // TestReflectWeek_DispatchCoexistsWithReflect proves `reflect week` dispatches to
 // the read-only weekly surface while `reflect` and `reflect gate` still dispatch
 // to the recall parent (A1 — a non-subcommand positional runs the parent). This
