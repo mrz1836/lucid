@@ -291,8 +291,8 @@ func (a *Adapter) WriteReflection(rec Reflection) (ReflectionResult, error) {
 		return ReflectionResult{}, errors.New("storage: write_reflection: id is required")
 	}
 	dir := a.reflectionsDir()
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return ReflectionResult{}, fmt.Errorf("storage: prepare reflections dir: %w", err)
+	if err := ensureDir(dir, "reflections"); err != nil {
+		return ReflectionResult{}, err
 	}
 	path := filepath.Join(dir, rec.ID+reflectionExt)
 
@@ -363,13 +363,9 @@ func (a *Adapter) readReflectionIfPresent(path string) (*Reflection, error) {
 
 // decodeReflection parses a reflection document back into a Reflection.
 func decodeReflection(content []byte) (Reflection, error) {
-	front, body, err := SplitFrontmatter(content)
+	fm, body, err := parseFrontmatterInto[reflectionFrontmatter](content, "reflection")
 	if err != nil {
-		return Reflection{}, fmt.Errorf("storage: parse reflection: %w", err)
-	}
-	var fm reflectionFrontmatter
-	if err = yaml.Unmarshal(front, &fm); err != nil {
-		return Reflection{}, fmt.Errorf("storage: decode reflection frontmatter: %w", err)
+		return Reflection{}, err
 	}
 	created, err := parseRFC3339(fm.CreatedAt, "reflection created_at")
 	if err != nil {

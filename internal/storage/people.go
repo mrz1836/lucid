@@ -166,8 +166,8 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	if err != nil {
 		return PersonResult{}, err
 	}
-	if err = os.MkdirAll(a.peopleDir(), dirPerm); err != nil {
-		return PersonResult{}, fmt.Errorf("storage: prepare people dir: %w", err)
+	if err = ensureDir(a.peopleDir(), "people"); err != nil {
+		return PersonResult{}, err
 	}
 	content, err := marshalJSON(rec.encode())
 	if err != nil {

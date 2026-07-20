@@ -369,8 +369,8 @@ func (a *Adapter) UpdateRegistry(kind, key string, patch observations.RegistryPa
 			}
 		}
 	}
-	if err = os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
-		return observations.Registry{}, fmt.Errorf("storage: prepare registry dir: %w", err)
+	if err = ensureDir(filepath.Dir(path), "registry"); err != nil {
+		return observations.Registry{}, err
 	}
 	content, err := marshalJSON(rec.Normalized())
 	if err != nil {

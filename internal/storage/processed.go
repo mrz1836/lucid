@@ -118,8 +118,8 @@ func (a *Adapter) WriteProcessed(art ProcessedArtifact) error {
 		return fmt.Errorf("storage: rendered processed artifact failed validation: %w", err)
 	}
 	dir := a.processedDir()
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("storage: prepare processed dir: %w", err)
+	if err := ensureDir(dir, "processed"); err != nil {
+		return err
 	}
 	path := filepath.Join(dir, art.ID+processedExt)
 	if err := os.WriteFile(path, content, filePerm); err != nil {

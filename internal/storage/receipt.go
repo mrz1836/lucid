@@ -70,8 +70,8 @@ func (a *Adapter) WriteCompanionReceipt(r CompanionReceipt) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(a.companionDir(), dirPerm); err != nil {
-		return fmt.Errorf("storage: prepare companion dir: %w", err)
+	if err := ensureDir(a.companionDir(), "companion"); err != nil {
+		return err
 	}
 	if err := os.WriteFile(path, content, filePerm); err != nil {
 		return fmt.Errorf("storage: write companion receipt %q: %w", r.Window, err)
