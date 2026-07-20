@@ -494,7 +494,7 @@ func buildSections(events []observations.Event, now time.Time) []Section {
 // capture) or a float64 (a JSONL round-trip) — and always yields a non-empty
 // line, falling back to the verbatim note for a partial capture.
 func observationLine(ev observations.Event) string {
-	switch ev.Kind {
+	switch ev.Kind { //nolint:exhaustive // deliberately partial: only render-relevant kinds get a bespoke line; every other kind falls to the free-text default
 	case observations.KindMood:
 		return scaleLine("mood", ev.Payload, "level", "word")
 	case observations.KindPain:

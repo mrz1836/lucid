@@ -136,7 +136,8 @@ func wantSamplePanel() []string {
 // slotReply is a well-formed two-slot model reply — an interpretation block and
 // two action bullets under the delimiter labels the renderer parses.
 func slotReply(interp string, actions ...string) string {
-	lines := []string{interpDelim, interp, actionsDelim}
+	lines := make([]string, 0, 3+len(actions))
+	lines = append(lines, interpDelim, interp, actionsDelim)
 	for _, a := range actions {
 		lines = append(lines, "- "+a)
 	}
