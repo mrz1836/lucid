@@ -87,7 +87,7 @@ type reflectView struct {
 // `unanswered`; a harness may pipe a JSON batch of per-insight answers to apply
 // confirm / soften / retire (and kept / lapsed for ruled insights) in one shot.
 func newReflectCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "reflect [gate]",
 		Short: "Recall your validated insights (never proposes a new pattern)",
 		Args:  cobra.MaximumNArgs(1),
@@ -120,6 +120,11 @@ func newReflectCmd() *cobra.Command {
 			return renderReflect(cmd, res)
 		},
 	}
+	// `week` is the read-only weekly deep-dive — a separate surface that never
+	// writes, dispatched ahead of the `[gate]` positional (a non-subcommand arg
+	// still runs the parent, so `reflect` and `reflect gate` are unaffected).
+	cmd.AddCommand(newReflectWeekCmd())
+	return cmd
 }
 
 // reflectScopeFromArgs resolves the optional positional token to a scope: no arg

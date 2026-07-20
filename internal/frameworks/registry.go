@@ -12,8 +12,9 @@ package frameworks
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
+	"path"
 	"sort"
 
 	"github.com/mrz1836/lucid/internal/storage"
@@ -65,63 +66,78 @@ type lensFrontmatter struct {
 }
 
 // LoadLenses parses every *.md definition in dir into a slice of lenses,
-// sorted by id. Every Markdown file in dir is treated as a definition.
+// sorted by id. Every Markdown file in dir is treated as a definition. It is a
+// thin adapter over [LoadLensesFS] backed by the local directory, so a docs
+// checkout and the binary's embedded set travel the identical validation path.
 //
 // It fails closed: a file whose frontmatter is missing, unterminated, or
 // unparseable; a definition missing a required key (id, version, name); or a
 // duplicate id across two files all return an error rather than a partial or
 // silently-degraded set. A consent layer must never load a broken lens.
 func LoadLenses(dir string) ([]Lens, error) {
-	entries, err := os.ReadDir(dir)
+	return LoadLensesFS(os.DirFS(dir))
+}
+
+// LoadLensesFS is the filesystem-agnostic loader [LoadLenses] and the embedded
+// registry both build on: a local docs directory arrives as os.DirFS(dir), the
+// shipped set as the binary's embedded FS (github.com/mrz1836/lucid.FrameworksFS).
+// Every Markdown file at the root of fsys is treated as a definition, and it
+// fails closed for the same reasons as [LoadLenses].
+func LoadLensesFS(fsys fs.FS) ([]Lens, error) {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
-		return nil, fmt.Errorf("frameworks: read dir %q: %w", dir, err)
+		return nil, fmt.Errorf("frameworks: read dir: %w", err)
 	}
 	lenses := make([]Lens, 0, len(entries))
 	seen := make(map[string]string) // id -> file it first appeared in
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+		if e.IsDir() || path.Ext(e.Name()) != ".md" {
 			continue
 		}
-		lens, err := loadLensFile(filepath.Join(dir, e.Name()))
+		lens, err := loadLensEntry(fsys, e.Name())
 		if err != nil {
 			return nil, err
 		}
 		if first, dup := seen[lens.ID]; dup {
-			return nil, fmt.Errorf("frameworks: duplicate lens id %q in %s and %s",
-				lens.ID, filepath.Base(first), e.Name())
+			return nil, fmt.Errorf("frameworks: duplicate lens id %q in %s and %s", lens.ID, first, e.Name())
 		}
-		seen[lens.ID] = filepath.Join(dir, e.Name())
+		seen[lens.ID] = e.Name()
 		lenses = append(lenses, lens)
 	}
 	sort.Slice(lenses, func(i, j int) bool { return lenses[i].ID < lenses[j].ID })
 	return lenses, nil
 }
 
-// loadLensFile reads and validates a single definition file, reusing the
-// storage frontmatter fence-split idiom.
-func loadLensFile(path string) (Lens, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // caller-supplied docs dir; pure read of a versioned spec
+// loadLensEntry reads one definition file from fsys and validates it. name is
+// the root-relative file name (also the error label).
+func loadLensEntry(fsys fs.FS, name string) (Lens, error) {
+	b, err := fs.ReadFile(fsys, name)
 	if err != nil {
-		return Lens{}, fmt.Errorf("frameworks: read %q: %w", path, err)
+		return Lens{}, fmt.Errorf("frameworks: read %q: %w", name, err)
 	}
+	return parseLens(name, b)
+}
+
+// parseLens validates and decodes one definition file's bytes into a Lens,
+// reusing the storage frontmatter fence-split idiom. name is used only for
+// error messages, so the os- and embed-backed loaders report identically.
+func parseLens(name string, b []byte) (Lens, error) {
 	front, _, err := storage.SplitFrontmatter(b)
 	if err != nil {
-		return Lens{}, fmt.Errorf("frameworks: %s: %w", filepath.Base(path), err)
+		return Lens{}, fmt.Errorf("frameworks: %s: %w", name, err)
 	}
 	var fm lensFrontmatter
 	if err := yaml.Unmarshal(front, &fm); err != nil {
-		return Lens{}, fmt.Errorf("frameworks: decode %s frontmatter: %w", filepath.Base(path), err)
+		return Lens{}, fmt.Errorf("frameworks: decode %s frontmatter: %w", name, err)
 	}
 	if fm.ID == "" {
-		return Lens{}, fmt.Errorf("frameworks: %s: missing required frontmatter key %q", filepath.Base(path), "id")
+		return Lens{}, fmt.Errorf("frameworks: %s: missing required frontmatter key %q", name, "id")
 	}
 	if fm.Version < 1 {
-		return Lens{}, fmt.Errorf("frameworks: %s: lens %q has invalid version %d (want >= 1)",
-			filepath.Base(path), fm.ID, fm.Version)
+		return Lens{}, fmt.Errorf("frameworks: %s: lens %q has invalid version %d (want >= 1)", name, fm.ID, fm.Version)
 	}
 	if fm.Name == "" {
-		return Lens{}, fmt.Errorf("frameworks: %s: lens %q missing required frontmatter key %q",
-			filepath.Base(path), fm.ID, "name")
+		return Lens{}, fmt.Errorf("frameworks: %s: lens %q missing required frontmatter key %q", name, fm.ID, "name")
 	}
 	// The frontmatter and domain types carry identical fields, so a direct
 	// conversion yields the tag-free [Lens] the consent layer works with.
@@ -138,7 +154,15 @@ type Registry struct {
 // NewRegistry loads the definitions in dir and indexes them by id. It fails
 // closed for the same reasons as [LoadLenses].
 func NewRegistry(dir string) (*Registry, error) {
-	lenses, err := LoadLenses(dir)
+	return NewRegistryFS(os.DirFS(dir))
+}
+
+// NewRegistryFS loads the definitions from fsys and indexes them by id — the
+// constructor the CLI uses over the binary's embedded framework set so the
+// active labeled lens resolves without a docs directory on disk. It fails
+// closed for the same reasons as [LoadLensesFS].
+func NewRegistryFS(fsys fs.FS) (*Registry, error) {
+	lenses, err := LoadLensesFS(fsys)
 	if err != nil {
 		return nil, err
 	}
