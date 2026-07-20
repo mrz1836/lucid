@@ -56,7 +56,7 @@ func fetchChecksum(ctx context.Context, httpClient *http.Client, checksumURL, as
 // 64 hex characters (SHA-256); other lengths are rejected so we don't
 // accept an MD5 (32) or SHA-1 (40) collision.
 func parseChecksum(data, assetName string) (string, error) {
-	for _, line := range strings.Split(data, "\n") {
+	for line := range strings.SplitSeq(data, "\n") {
 		parts := strings.Fields(line)
 		if len(parts) < 2 || parts[1] != assetName {
 			continue

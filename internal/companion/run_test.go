@@ -18,6 +18,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -90,10 +91,7 @@ func (f *fakeDeliverer) Send(channel, text string) error {
 // the night mark to 19:00.
 func newStore(t *testing.T) *storage.Adapter {
 	t.Helper()
-	store := storage.New(filepath.Join(t.TempDir(), ".lucid"))
-	_, err := store.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, store.ScaffoldEngine())
+	_, store := lucidtest.Ledger(t, lucidtest.NestedHome(), lucidtest.WithEngine())
 	return store
 }
 

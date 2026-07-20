@@ -14,11 +14,11 @@ package reflection
 
 import (
 	"context"
-	"encoding/json"
 	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/mrz1836/lucid/internal/agents/agentutil"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -150,16 +150,12 @@ func Propose(ctx context.Context, in ProposeInput, p provider.Provider) ProposeR
 // the wrong soft-contradiction shape) — each of which the caller retries or
 // degrades on.
 func proposeOnce(ctx context.Context, in ProposeInput, p provider.Provider, strict bool) (proposalReply, bool) {
-	resp, err := p.Complete(ctx, provider.Request{
+	reply, err := agentutil.CompleteJSON[proposalReply](ctx, p, provider.Request{
 		Intent:   "reflection.propose",
 		System:   proposeSystem(in, strict),
 		Messages: windowSlice(in),
 	})
 	if err != nil {
-		return proposalReply{}, false
-	}
-	var reply proposalReply
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &reply); jsonErr != nil {
 		return proposalReply{}, false
 	}
 	if !validReply(reply, in) {

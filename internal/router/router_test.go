@@ -10,15 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // newScaffolded returns an adapter over a fresh, scaffolded temp Ledger.
 func newScaffolded(t *testing.T) *storage.Adapter {
 	t.Helper()
-	a := storage.New(t.TempDir())
-	_, err := a.Scaffold()
-	require.NoError(t, err)
+	_, a := lucidtest.Ledger(t)
 	return a
 }
 

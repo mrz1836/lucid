@@ -15,6 +15,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -46,10 +47,7 @@ func seedJobDB(t *testing.T, path string, specs ...flywheel.PeriodicSpec) {
 // engine tree scaffolded, so chain marks and companion receipts can be read back.
 func seededLedger(t *testing.T) *storage.Adapter {
 	t.Helper()
-	a := storage.New(t.TempDir())
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldEngine())
+	_, a := lucidtest.Ledger(t, lucidtest.WithEngine())
 	return a
 }
 
@@ -87,7 +85,7 @@ func TestGatherDB_ReadsPeriodics(t *testing.T) {
 	assert.True(t, bell.Present)
 	assert.True(t, bell.Active)
 	assert.Equal(t, "0 19 * * *", bell.Cron)
-	assert.NotNil(t, bell.NextRun, "an active periodic carries a next-run")
+	assert.False(t, bell.NextRun.IsZero(), "an active periodic carries a next-run")
 
 	trip, ok := findAny(in.Periodics, SlugTripwire)
 	require.True(t, ok)
@@ -255,12 +253,12 @@ func TestPeriodicStatuses(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, "a", got[0].Slug)
 	assert.True(t, got[0].Present)
-	require.NotNil(t, got[0].NextRun)
-	assert.Equal(t, next, *got[0].NextRun)
-	require.NotNil(t, got[0].LastEnqueue)
-	assert.Equal(t, last, *got[0].LastEnqueue)
-	assert.Nil(t, got[1].NextRun, "a zero next-run is left nil")
-	assert.Nil(t, got[1].LastEnqueue, "a nil last-enqueue stays nil")
+	require.False(t, got[0].NextRun.IsZero())
+	assert.Equal(t, next, got[0].NextRun)
+	require.False(t, got[0].LastEnqueue.IsZero())
+	assert.Equal(t, last, got[0].LastEnqueue)
+	assert.True(t, got[1].NextRun.IsZero(), "a zero next-run is left zero")
+	assert.True(t, got[1].LastEnqueue.IsZero(), "a nil last-enqueue stays zero")
 }
 
 // TestRunFailures maps flywheel failure views, formatting the finalized time and

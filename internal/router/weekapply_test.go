@@ -47,7 +47,8 @@ func TestApplyWeekProposal_AcceptTracksInsightWithFramework(t *testing.T) {
 
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "stoicism v1",
-		ProposalResponse{Kind: RespAccepted, Text: "Yes, that fits."}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespAccepted, Text: "Yes, that fits."}, RuleResponse{}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	assert.Equal(t, safety.Pass, res.Decision)
 	require.True(t, res.Wrote)
@@ -71,7 +72,8 @@ func TestApplyWeekProposal_AcceptBaselineVoiceNilFramework(t *testing.T) {
 
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "",
-		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	require.True(t, res.Wrote)
 
@@ -89,7 +91,8 @@ func TestApplyWeekProposal_NuancedCanonicalIsRefinement(t *testing.T) {
 
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "stoicism v1",
-		ProposalResponse{Kind: RespNuanced, Text: refine}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespNuanced, Text: refine}, RuleResponse{}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	require.True(t, res.Wrote)
 
@@ -109,7 +112,8 @@ func TestApplyWeekProposal_RuleAnswered(t *testing.T) {
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "stoicism v1",
 		ProposalResponse{Kind: RespAccepted, Text: "Yes."},
-		RuleResponse{Answered: true, Rule: rule}, &provider.Fake{}))
+		RuleResponse{Answered: true, Rule: rule}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	require.True(t, res.RuleSet)
 
@@ -129,7 +133,8 @@ func TestApplyWeekProposal_RejectedRecordsNoInsight(t *testing.T) {
 
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "stoicism v1",
-		ProposalResponse{Kind: RespRejected, Text: "No — that's not it."}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespRejected, Text: "No — that's not it."}, RuleResponse{}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	assert.True(t, res.Rejected)
 	assert.False(t, res.Wrote)
@@ -152,7 +157,8 @@ func TestApplyWeekProposal_UnansweredAdvancesPause(t *testing.T) {
 
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "stoicism v1",
-		ProposalResponse{Kind: RespUnanswered}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespUnanswered}, RuleResponse{}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	assert.True(t, res.Unanswered)
 	assert.False(t, res.Wrote)
@@ -174,10 +180,11 @@ func TestApplyWeekProposal_ThreeUnansweredArmsPause(t *testing.T) {
 	r, a, _ := newBootedRouter(t)
 	seedProc(t, a, curr, fixedNow(), nil, "prep")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 			cleanCandidate, fmt.Sprintf("prep-shape-%d", i), "stoicism v1",
-			ProposalResponse{Kind: RespUnanswered}, RuleResponse{}, &provider.Fake{}))
+			ProposalResponse{Kind: RespUnanswered}, RuleResponse{}, &provider.Fake{},
+		))
 		require.NoError(t, err)
 		require.True(t, res.Unanswered)
 	}
@@ -198,7 +205,8 @@ func TestApplyWeekProposal_SafetyBlockPersistsNothing(t *testing.T) {
 
 	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		"You have an avoidant attachment style.", "avoidant-label", "stoicism v1",
-		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{},
+	))
 	require.NoError(t, err)
 	assert.Equal(t, safety.Block, res.Decision)
 	assert.False(t, res.Wrote)
@@ -213,6 +221,7 @@ func TestApplyWeekProposal_NoProcessedArtifactErrors(t *testing.T) {
 	r, _, _ := newBootedRouter(t)
 	_, err := r.ApplyWeekProposal(context.Background(), applyReq(
 		cleanCandidate, "prep-as-safety", "stoicism v1",
-		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{}))
+		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{},
+	))
 	require.Error(t, err)
 }

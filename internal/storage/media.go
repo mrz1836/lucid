@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,7 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -221,7 +222,7 @@ func (a *Adapter) ReadMediaForDay(date string) ([]MediaRecord, error) {
 			out = append(out, rec)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b MediaRecord) int { return cmp.Compare(a.ID, b.ID) })
 	return out, nil
 }
 
@@ -248,7 +249,7 @@ func (a *Adapter) ListMedia() ([]MediaRecord, error) {
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b MediaRecord) int { return cmp.Compare(a.ID, b.ID) })
 	return out, nil
 }
 

@@ -268,8 +268,8 @@ func (a *Adapter) capacityByDate() (map[string]int, error) {
 // writeProjection writes a rebuildable projection file, creating projections/
 // if needed. Projections are overwritable — only exports.log is append-only.
 func (a *Adapter) writeProjection(path string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
-		return fmt.Errorf("storage: prepare projections dir: %w", err)
+	if err := ensureDir(filepath.Dir(path), "projections"); err != nil {
+		return err
 	}
 	if err := os.WriteFile(path, content, filePerm); err != nil {
 		return fmt.Errorf("storage: write projection %q: %w", path, err)

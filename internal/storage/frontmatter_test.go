@@ -113,3 +113,33 @@ func TestValidateJSONRequiredKeys(t *testing.T) {
 
 	assert.Error(t, ValidateJSONRequiredKeys([]byte("{bad json"), []string{"id"}))
 }
+
+type fmTestRec struct {
+	Name  string `yaml:"name"`
+	Count int    `yaml:"count"`
+}
+
+// TestParseFrontmatterInto covers the typed frontmatter decoder that the
+// reflection and insight readers share: a valid document yields the decoded
+// struct plus the body, a missing fence is a "parse <label>" error, and
+// malformed YAML is a "decode <label> frontmatter" error.
+func TestParseFrontmatterInto(t *testing.T) {
+	t.Run("valid decodes fields and body", func(t *testing.T) {
+		doc := []byte("---\nname: cedar\ncount: 3\n---\nbody line\n")
+		fm, body, err := parseFrontmatterInto[fmTestRec](doc, "widget")
+		require.NoError(t, err)
+		assert.Equal(t, fmTestRec{Name: "cedar", Count: 3}, fm)
+		assert.Equal(t, "body line\n", string(body))
+	})
+	t.Run("missing fence is a parse error", func(t *testing.T) {
+		_, _, err := parseFrontmatterInto[fmTestRec]([]byte("no fence here"), "widget")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "storage: parse widget:")
+	})
+	t.Run("malformed yaml is a decode error", func(t *testing.T) {
+		doc := []byte("---\nname: [unterminated\n---\nbody\n")
+		_, _, err := parseFrontmatterInto[fmTestRec](doc, "widget")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "storage: decode widget frontmatter:")
+	})
+}

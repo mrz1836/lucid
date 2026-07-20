@@ -35,6 +35,10 @@ func TestObservationsIsPure_NoIONoLLM(t *testing.T) {
 		`"strings"`:       true,
 		`"time"`:          true,
 		`"unicode"`:       true,
+		// keyderive is the shared, vetted-pure slug-derivation core (only
+		// crypto/sha256 + fmt + strings + unicode); permitting it keeps the
+		// "no io, no LLM" intent intact while removing duplication with storage.
+		`"github.com/mrz1836/lucid/internal/keyderive"`: true,
 	}
 	fset := token.NewFileSet()
 	var scanned int

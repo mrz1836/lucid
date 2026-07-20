@@ -47,6 +47,32 @@ func TestDeriveRegistryKey_SaltedStableFormat(t *testing.T) {
 	assert.Greater(t, len(keys), 1, "different salts must not collapse to one key")
 }
 
+// TestDeriveRegistryKey_Golden pins the salted derivation against the shipped
+// wordlist for a fixed set of (kind, name, salt) tuples. These are regression
+// anchors: if the wordlist, the salt handling (salt+NUL+name), or the
+// derivation math changes, existing registry filenames would drift and this
+// fails. It covers both an empty salt and a non-empty salt (which must not
+// collapse to the same key) and confirms case/punctuation variants normalize
+// to one key.
+func TestDeriveRegistryKey_Golden(t *testing.T) {
+	wl := wordlist(t)
+	type input struct{ kind, name, salt string }
+	golden := map[input]string{
+		{RegistryInjury, "left knee", ""}:           "injury_b-flame",
+		{RegistryInjury, "left knee", "salt-a"}:     "injury_c-peak",
+		{RegistryInjury, "Left Knee.", "salt-a"}:    "injury_c-peak",
+		{RegistryPlace, "Lisbon", ""}:               "place_b-marsh",
+		{RegistryPlace, "Lisbon", "salt-a"}:         "place_f-hook",
+		{RegistryThread, "money worries", "salt-a"}: "thread_r-clay",
+		{RegistryEra, "college years", "salt-a"}:    "era_d-swell",
+	}
+	for in, want := range golden {
+		got, err := DeriveRegistryKey(in.kind, in.name, in.salt, wl)
+		require.NoErrorf(t, err, "DeriveRegistryKey(%q, %q, %q)", in.kind, in.name, in.salt)
+		assert.Equalf(t, want, got, "DeriveRegistryKey(%q, %q, %q)", in.kind, in.name, in.salt)
+	}
+}
+
 func TestDeriveRegistryKey_Errors(t *testing.T) {
 	wl := wordlist(t)
 	_, err := DeriveRegistryKey("nonsense", "x", "s", wl)

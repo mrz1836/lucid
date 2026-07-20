@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/router"
@@ -50,13 +48,7 @@ is ever exposed.`,
 			if err != nil {
 				return err
 			}
-			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
-				return writeJSON(cmd.OutOrStdout(), res.View)
-			}
-			for _, line := range res.Lines {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
-			}
-			return nil
+			return emit(cmd, res.View, res.Lines)
 		},
 	}
 	cmd.Flags().IntVar(&last, "last", 0, "Report the last N logical days, ending at and including today")

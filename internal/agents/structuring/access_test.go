@@ -31,6 +31,10 @@ func TestStructuring_ReadsSingleEntryOnly(t *testing.T) {
 		`"regexp"`:        true,
 		`"strings"`:       true,
 		`"github.com/mrz1836/lucid/internal/provider"`: true,
+		// agentutil is the shared call-and-decode helper; it reaches only the
+		// provider boundary + stdlib (guarded by its own access test), so it
+		// gives Structuring no reach past the provider seam.
+		`"github.com/mrz1836/lucid/internal/agents/agentutil"`: true,
 	}
 
 	fset := token.NewFileSet()

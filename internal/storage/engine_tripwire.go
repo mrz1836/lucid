@@ -93,8 +93,8 @@ func (a *Adapter) WriteTripwireState(s TripwireState) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(a.engineDir(), dirPerm); err != nil {
-		return fmt.Errorf("storage: prepare engine dir: %w", err)
+	if err := ensureDir(a.engineDir(), "engine"); err != nil {
+		return err
 	}
 	if err := os.WriteFile(a.tripwirePath(), content, filePerm); err != nil {
 		return fmt.Errorf("storage: write tripwire.json: %w", err)

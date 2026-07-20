@@ -13,8 +13,6 @@ import (
 // window is this morning — the receipt-miss cases pivot on that.
 func fixedNow() time.Time { return time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC) }
 
-func ptrTime(t time.Time) *time.Time { return &t }
-
 func baseChain() ChainMarks { return ChainMarks{BellTime: "19:00", TripwireTime: "06:00"} }
 
 func okPrompts() []PromptPath {
@@ -32,8 +30,8 @@ func okTeeth(companionEnabled bool, now time.Time) DBInput {
 	return DBInput{
 		Path: "/var/lucid/flywheel.db",
 		Periodics: []PeriodicStatus{
-			{Slug: SlugBell, Cron: "0 19 * * *", Active: !companionEnabled, Present: true, NextRun: ptrTime(now.Add(6 * time.Hour))},
-			{Slug: SlugTripwire, Cron: "0 6 * * *", Active: true, Present: true, NextRun: ptrTime(now.Add(18 * time.Hour))},
+			{Slug: SlugBell, Cron: "0 19 * * *", Active: !companionEnabled, Present: true, NextRun: now.Add(6 * time.Hour)},
+			{Slug: SlugTripwire, Cron: "0 6 * * *", Active: true, Present: true, NextRun: now.Add(18 * time.Hour)},
 		},
 	}
 }

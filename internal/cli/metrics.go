@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -31,13 +29,7 @@ a harness reads one deterministic surface and never recomputes downstream.`,
 			if err != nil {
 				return err
 			}
-			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
-				return writeJSON(cmd.OutOrStdout(), res.Metrics)
-			}
-			for _, line := range res.Lines {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
-			}
-			return nil
+			return emit(cmd, res.Metrics, res.Lines)
 		},
 	}
 }

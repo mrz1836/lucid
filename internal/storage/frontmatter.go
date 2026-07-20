@@ -67,6 +67,24 @@ func ParseFrontmatter(content []byte) (fields map[string]any, body []byte, err e
 	return fields, body, nil
 }
 
+// parseFrontmatterInto splits a document's leading YAML frontmatter and decodes
+// it into a T — the typed counterpart to [ParseFrontmatter]'s generic map, and
+// the split-then-yaml.Unmarshal step the typed record readers hand-copied.
+// label names the record in both wraps: "parse <label>" for a missing or
+// malformed fence, "decode <label> frontmatter" for YAML that will not
+// unmarshal — preserving each caller's per-record wording. The body is returned
+// for readers that also need the document below the fence.
+func parseFrontmatterInto[T any](content []byte, label string) (fm T, body []byte, err error) {
+	front, body, err := SplitFrontmatter(content)
+	if err != nil {
+		return fm, nil, fmt.Errorf("storage: parse %s: %w", label, err)
+	}
+	if err := yaml.Unmarshal(front, &fm); err != nil {
+		return fm, nil, fmt.Errorf("storage: decode %s frontmatter: %w", label, err)
+	}
+	return fm, body, nil
+}
+
 // ValidateRequiredKeys reports the first required key missing from
 // fields, or nil when all are present. A key that is present with a
 // null value satisfies the check (presence, not non-nullness).

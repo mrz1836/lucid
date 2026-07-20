@@ -103,14 +103,16 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `~/.lucid/` (`LUCID_HOME` override); frontmatter + one file per record
   family; `fetch_enrichment.go` = the single audited network op.
 - [`internal/agents`](internal/agents)`/{intake,structuring,reflection,safety}`
-  — the LLM-backed agents.
+  — the LLM-backed agents; `agentutil/` holds the shared call-the-model-and-
+  decode-JSON helper (`CompleteJSON`), reachable only through `provider`.
 - [`internal/provider`](internal/provider) — the single model seam
   (`iface.go`, `fake.go`).
 - [`internal/validate`](internal/validate) — `lucid validate`, the read-only
   architecture-gate sweep (boundary, diagnostic-language, links, schema).
-- `internal/{config,upgrade,isoweek,deps}` + `data/` — config, self-update,
-  ISO-week math, pinned core deps (`go-flywheel`, `go-foundation`), embedded
-  person-key wordlist.
+- `internal/{config,upgrade,isoweek,deps,keyderive}` + `data/` — config,
+  self-update, ISO-week math, pinned core deps (`go-flywheel`, `go-foundation`),
+  the pure salted slug-derivation core shared by person_keys and registry keys,
+  and the embedded person-key wordlist.
 
 ## Build, verify, commit
 

@@ -15,11 +15,11 @@ package intake
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/mrz1836/lucid/internal/agents/agentutil"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -246,17 +246,13 @@ func decide(ctx context.Context, p provider.Provider, in Input, questions, answe
 
 // decideOnce performs a single decision completion and parses it.
 func decideOnce(ctx context.Context, p provider.Provider, in Input, questions, answers []string, strict bool) (decision, error) {
-	resp, err := p.Complete(ctx, provider.Request{
+	dec, err := agentutil.CompleteJSON[decision](ctx, p, provider.Request{
 		Intent:   "intake.decide",
 		System:   decideSystem(in, strict),
 		Messages: threadSlice(in, questions, answers),
 	})
 	if err != nil {
-		return decision{}, fmt.Errorf("intake: decide completion: %w", err)
-	}
-	var dec decision
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &dec); jsonErr != nil {
-		return decision{}, fmt.Errorf("intake: malformed decision payload: %w", jsonErr)
+		return decision{}, fmt.Errorf("intake: decide: %w", err)
 	}
 	if !dec.Done && strings.TrimSpace(dec.Question) == "" {
 		return decision{}, errors.New("intake: decision continues but supplies no question")
@@ -294,17 +290,13 @@ func buildBundle(ctx context.Context, in Input, p provider.Provider, questions, 
 
 // bundleOnce performs a single bundling completion and parses it.
 func bundleOnce(ctx context.Context, p provider.Provider, in Input, questions, answers []string, strict bool) (string, error) {
-	resp, err := p.Complete(ctx, provider.Request{
+	reply, err := agentutil.CompleteJSON[bundleReply](ctx, p, provider.Request{
 		Intent:   "intake.bundle",
 		System:   bundleSystem(strict),
 		Messages: threadSlice(in, questions, answers),
 	})
 	if err != nil {
-		return "", fmt.Errorf("intake: bundle completion: %w", err)
-	}
-	var reply bundleReply
-	if jsonErr := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &reply); jsonErr != nil {
-		return "", fmt.Errorf("intake: malformed bundle payload: %w", jsonErr)
+		return "", fmt.Errorf("intake: bundle: %w", err)
 	}
 	if strings.TrimSpace(reply.BundledText) == "" {
 		return "", errors.New("intake: empty bundled_text")

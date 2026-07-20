@@ -116,8 +116,10 @@ func TestCompanionFire_DryRun_ComposesNoSideEffect(t *testing.T) {
 	assert.False(t, ok, "a dry-run writes no delivery receipt")
 }
 
-// TestCompanionFire_DryRun_NightUsesNightTemplate proves the night window
-// composes from the night template (the fake echoes the body it was sent).
+// TestCompanionFire_DryRun_NightUsesNightTemplate proves the night window sends
+// the night template to the model, then renders the compact close-out framing:
+// the interpretation slot is deliberately suppressed at night (render.go), so
+// the model's composed preview never appears in the delivered night message.
 func TestCompanionFire_DryRun_NightUsesNightTemplate(t *testing.T) {
 	seedCompanionHome(t)
 	withClock(t, time.Date(2026, 7, 6, 19, 0, 0, 0, time.UTC))
@@ -126,7 +128,8 @@ func TestCompanionFire_DryRun_NightUsesNightTemplate(t *testing.T) {
 
 	out, _, err := runCompanion(t, "fire", "--mode", "night")
 	require.NoError(t, err)
-	assert.Contains(t, out, "WARM NIGHT PREVIEW")
+	assert.Contains(t, out, "🌙 **Night**", "the night window renders the night header")
+	assert.NotContains(t, out, "WARM NIGHT PREVIEW", "night suppresses the model's interpretation slot")
 	require.Len(t, fake.Requests, 1)
 	assert.Contains(t, fake.Requests[0].Messages[0].Content, "NIGHT BODY", "the night window sends the night template")
 }

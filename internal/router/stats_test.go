@@ -35,7 +35,7 @@ func statsRouter(t *testing.T) (*Router, *storage.Adapter) {
 // the exact join `lucid day` uses.
 func seedRaws(t *testing.T, a *storage.Adapter, day time.Time, n int) {
 	t.Helper()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		at := day.Add(time.Duration(i) * time.Minute)
 		_, err := a.WriteRaw(storage.RawEntry{
 			RecordedAt: at, OccurredAt: at, OccurredAtPrecision: storage.PrecisionExact,

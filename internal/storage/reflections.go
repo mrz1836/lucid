@@ -291,8 +291,8 @@ func (a *Adapter) WriteReflection(rec Reflection) (ReflectionResult, error) {
 		return ReflectionResult{}, errors.New("storage: write_reflection: id is required")
 	}
 	dir := a.reflectionsDir()
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return ReflectionResult{}, fmt.Errorf("storage: prepare reflections dir: %w", err)
+	if err := ensureDir(dir, "reflections"); err != nil {
+		return ReflectionResult{}, err
 	}
 	path := filepath.Join(dir, rec.ID+reflectionExt)
 
@@ -363,13 +363,9 @@ func (a *Adapter) readReflectionIfPresent(path string) (*Reflection, error) {
 
 // decodeReflection parses a reflection document back into a Reflection.
 func decodeReflection(content []byte) (Reflection, error) {
-	front, body, err := SplitFrontmatter(content)
+	fm, body, err := parseFrontmatterInto[reflectionFrontmatter](content, "reflection")
 	if err != nil {
-		return Reflection{}, fmt.Errorf("storage: parse reflection: %w", err)
-	}
-	var fm reflectionFrontmatter
-	if err = yaml.Unmarshal(front, &fm); err != nil {
-		return Reflection{}, fmt.Errorf("storage: decode reflection frontmatter: %w", err)
+		return Reflection{}, err
 	}
 	created, err := parseRFC3339(fm.CreatedAt, "reflection created_at")
 	if err != nil {
@@ -414,7 +410,7 @@ func splitReflectionBody(body string) (summary string, changeLog []string) {
 	}
 	if idx := strings.Index(s, changeLogHeading); idx >= 0 {
 		summary = strings.TrimSpace(s[:idx])
-		for _, line := range strings.Split(s[idx+len(changeLogHeading):], "\n") {
+		for line := range strings.SplitSeq(s[idx+len(changeLogHeading):], "\n") {
 			if entry, ok := strings.CutPrefix(strings.TrimSpace(line), "- "); ok {
 				changeLog = append(changeLog, entry)
 			}
@@ -428,7 +424,7 @@ func splitReflectionBody(body string) (summary string, changeLog []string) {
 // prefix (the "# Weekly recall — …" heading), so the caller can isolate the
 // summary from the heading regardless of the week label in it.
 func cutAfterLine(s, prefix string) (string, bool) {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.HasPrefix(line, prefix) {
 			if idx := strings.Index(s, line); idx >= 0 {
 				return s[idx+len(line):], true

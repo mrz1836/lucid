@@ -161,8 +161,8 @@ func (a *Adapter) WriteInsight(in Insight) (WriteInsightResult, error) {
 	}
 
 	dir := a.insightsDir()
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return WriteInsightResult{}, fmt.Errorf("storage: prepare insights dir: %w", err)
+	if err := ensureDir(dir, "insights"); err != nil {
+		return WriteInsightResult{}, err
 	}
 	id, err := a.nextInsightID(in.CreatedAt)
 	if err != nil {
@@ -194,13 +194,9 @@ func (a *Adapter) ReadInsight(id string) (Insight, error) {
 	if err != nil {
 		return Insight{}, fmt.Errorf("storage: read insight %q: %w", id, err)
 	}
-	front, body, err := SplitFrontmatter(b)
+	fm, body, err := parseFrontmatterInto[insightFrontmatter](b, fmt.Sprintf("insight %q", id))
 	if err != nil {
-		return Insight{}, fmt.Errorf("storage: parse insight %q: %w", id, err)
-	}
-	var fm insightFrontmatter
-	if err := yaml.Unmarshal(front, &fm); err != nil {
-		return Insight{}, fmt.Errorf("storage: decode insight %q frontmatter: %w", id, err)
+		return Insight{}, err
 	}
 	return fm.decode(extractInsightStatement(string(body)))
 }

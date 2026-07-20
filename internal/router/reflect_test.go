@@ -281,7 +281,7 @@ func TestReflect_6_7_GatePanelAllSurface(t *testing.T) {
 	r, a, _ := newBootedRouter(t)
 	base := time.Date(2026, time.April, 1, 12, 0, 0, 0, time.UTC)
 	ids := make([]string, 0, 12)
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		at := base.Add(time.Duration(i) * 24 * time.Hour)
 		if i < 5 {
 			ids = append(ids, seedRuledInsight(t, a, at, fmt.Sprintf("insight %d", i), "a stated rule"))

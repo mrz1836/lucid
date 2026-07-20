@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -25,13 +23,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
-				return writeJSON(cmd.OutOrStdout(), res.Status)
-			}
-			for _, line := range res.Lines {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
-			}
-			return nil
+			return emit(cmd, res.Status, res.Lines)
 		},
 	}
 }

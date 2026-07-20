@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -80,8 +79,8 @@ func (a *Adapter) WriteSession(s Session) (string, error) {
 		return "", errors.New("storage: session started_at is required")
 	}
 	dir := filepath.Join(a.home, sessionsDirName)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return "", fmt.Errorf("storage: prepare sessions dir: %w", err)
+	if err := ensureDir(dir, "sessions"); err != nil {
+		return "", err
 	}
 	if s.ID != "" {
 		return a.writeSessionAt(dir, s)

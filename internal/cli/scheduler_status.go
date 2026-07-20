@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/companion"
@@ -128,14 +126,8 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 
 	report := schedstatus.Assemble(inputs, clockNow())
 
-	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
-		if jErr := writeJSON(cmd.OutOrStdout(), report); jErr != nil {
-			return jErr
-		}
-	} else {
-		for _, line := range report.TextLines() {
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
-		}
+	if err := emit(cmd, report, report.TextLines()); err != nil {
+		return err
 	}
 
 	// The report is now printed; carry the verdict's non-zero code out through the
