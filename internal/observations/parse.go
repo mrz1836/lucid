@@ -31,6 +31,14 @@ const (
 	KindMemory       Kind = "memory"
 	KindLocation     Kind = "context.location"
 	KindContextDay   Kind = "context.day"
+
+	// Companion-context kinds (observations.md §3): capturable signals the daily
+	// companion renders when present and omits gracefully when absent. They are
+	// enable-gated and off by default — a fresh Ledger never carries them, so
+	// they change nothing until an operator adds them to kinds_enabled.
+	KindWithdrawal  Kind = "withdrawal"
+	KindHabitChange Kind = "habit_change"
+	KindCommitment  Kind = "commitment"
 )
 
 // ParseMarkerPartial is the payload.parse value stamped on a capture that
@@ -99,7 +107,8 @@ func ResolveVerb(verb string) (kind Kind, class string, ok bool) {
 func IsCapturableKind(kind Kind) bool {
 	switch kind { //nolint:exhaustive // deliberately partial: context.day is enricher-written only, so it (and any unknown kind) is not capturable and returns false via the default
 	case KindPain, KindSymptom, KindIntake, KindElimination, KindMood,
-		KindSleep, KindMed, KindIntervention, KindMeasurement, KindMemory, KindLocation:
+		KindSleep, KindMed, KindIntervention, KindMeasurement, KindMemory, KindLocation,
+		KindWithdrawal, KindHabitChange, KindCommitment:
 		return true
 	default:
 		return false
@@ -210,6 +219,17 @@ func parseKindHead(res *ParseResult, rest []string, in ParseInput) {
 			return
 		}
 		res.PlaceName = place
+	case KindWithdrawal:
+		// Optional 0–10 severity head, trailing text to note (voice-to-text:
+		// `/obs withdrawal 6 rough morning`; `/obs withdrawal groggy` → note).
+		parseScaleKind(res, rest, in, "severity", 0, 10, false, nil)
+	case KindHabitChange:
+		// Optional 0–10 change-load head, trailing text to note
+		// (`/obs habit_change 7 cut coffee`).
+		parseScaleKind(res, rest, in, "load", 0, 10, false, nil)
+	case KindCommitment:
+		// Free-text commitment testimony (`/obs commitment call the dentist`).
+		setFree(res, "what", rest)
 	default:
 		// A capturable kind with no special head rule: keep the free text.
 		setFree(res, "note", rest)

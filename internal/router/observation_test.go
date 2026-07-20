@@ -28,6 +28,7 @@ func bootedObs(t *testing.T) *Router {
 		observations.KindElimination, observations.KindMood, observations.KindSleep,
 		observations.KindMed, observations.KindIntervention, observations.KindMeasurement,
 		observations.KindMemory, observations.KindLocation,
+		observations.KindWithdrawal, observations.KindHabitChange, observations.KindCommitment,
 	}
 	require.NoError(t, a.SaveObservationsConfig(cfg))
 	r := New(a)
@@ -83,6 +84,59 @@ func TestCapture_ShorthandsWriteValidEnvelopes(t *testing.T) {
 		assert.Equal(t, observations.SourceMicrolog, ev.Source)
 		assert.Equal(t, observations.Schema, ev.Schema)
 	}
+}
+
+// TestCapture_CompanionContextKindsWriteValidEnvelopes: the three enable-gated
+// companion-context kinds capture valid frozen envelopes through the generic
+// /obs form with their documented head fields (AC-14).
+func TestCapture_CompanionContextKindsWriteValidEnvelopes(t *testing.T) {
+	r := bootedObs(t)
+
+	wd := capture(t, r, "obs", "withdrawal", "6", "rough", "morning")
+	assert.False(t, wd.Partial)
+	ev := readBack(t, r, wd)
+	require.NoError(t, ev.Validate())
+	assert.Equal(t, observations.KindWithdrawal, ev.Kind)
+	assert.EqualValues(t, 6, ev.Payload["severity"])
+	assert.Equal(t, "rough morning", ev.Payload["note"])
+
+	hc := capture(t, r, "obs", "habit_change", "7", "cut", "coffee")
+	assert.False(t, hc.Partial)
+	ev = readBack(t, r, hc)
+	require.NoError(t, ev.Validate())
+	assert.Equal(t, observations.KindHabitChange, ev.Kind)
+	assert.EqualValues(t, 7, ev.Payload["load"])
+	assert.Equal(t, "cut coffee", ev.Payload["note"])
+
+	cm := capture(t, r, "obs", "commitment", "call", "the", "dentist")
+	assert.False(t, cm.Partial)
+	ev = readBack(t, r, cm)
+	require.NoError(t, ev.Validate())
+	assert.Equal(t, observations.KindCommitment, ev.Kind)
+	assert.Equal(t, "call the dentist", ev.Payload["what"])
+}
+
+// TestCapture_CompanionContextKindsDisabledByDefault: a fresh Ledger (default
+// config) rejects each companion-context kind with the enable hint and writes
+// nothing — they are off until an operator adds them (AC-14 / §3).
+func TestCapture_CompanionContextKindsDisabledByDefault(t *testing.T) {
+	a := newScaffolded(t)
+	require.NoError(t, a.ScaffoldObservations()) // default config omits the companion-context kinds
+	r := New(a)
+	_, err := r.Boot()
+	require.NoError(t, err)
+
+	for _, kind := range []string{"withdrawal", "habit_change", "commitment"} {
+		res, cerr := r.Capture(CaptureRequest{Tokens: []string{"obs", kind, "x"}, Now: nowEDT()})
+		require.NoErrorf(t, cerr, "%s is a known kind, so a disabled capture rejects rather than errors", kind)
+		assert.Truef(t, res.Rejected, "%s must be rejected when disabled", kind)
+		assert.Emptyf(t, res.EventID, "%s writes no event when disabled", kind)
+		assert.Containsf(t, res.Ack, "observations/config.json", "%s reject carries the enable hint", kind)
+	}
+
+	events, _, rerr := a.ReadObservationsDay(observations.DateString(observations.DateOf(nowEDT())))
+	require.NoError(t, rerr)
+	assert.Empty(t, events, "no companion-context event lands on disk when disabled")
 }
 
 // TestCapture_DisabledKindRejectsWithHint (AC-7 / error-states).
