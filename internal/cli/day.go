@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,13 +29,7 @@ func newDayCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
-				return writeJSON(cmd.OutOrStdout(), res.View)
-			}
-			for _, line := range res.Lines {
-				_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
-			}
-			return nil
+			return emit(cmd, res.View, res.Lines)
 		},
 	}
 }
