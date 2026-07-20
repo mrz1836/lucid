@@ -24,7 +24,7 @@ import (
 // --- test doubles -----------------------------------------------------------
 
 // fakeNumbers is a scripted NumbersReader: it returns fixed projections (or a
-// read error) so a compose test asserts the numbers block equals exactly the
+// read error) so a compose test asserts the status panel equals exactly the
 // injected projection, with no live store.
 type fakeNumbers struct {
 	metrics router.MetricsResult
@@ -106,34 +106,41 @@ func writePrompts(t *testing.T) config.CompanionConfig {
 	}
 }
 
-// sampleNumbers is a decided-day projection (streak 5, 20/24 decided over 30) so
-// the ramp frame takes the streak branch; no ambient signals hold.
+// sampleNumbers is a decided-day projection (streak 5, 83% over 20/24 decided,
+// 2/3 error budget) so the status panel takes the decided-day branch; no ambient
+// signals hold.
 func sampleNumbers() fakeNumbers {
 	return fakeNumbers{
 		metrics: router.MetricsResult{
 			Metrics: engine.Metrics{
 				CurrentStreak: 5,
 				LongestStreak: 12,
-				Adherence:     engine.Window{Length: 30, Completed: 20, Decided: 24, DaysAccounted: 26},
-			},
-			Lines: []string{
-				"Streak: 5 (longest 12).",
-				"30-day adherence: 83% (20/24 decided, 26 accounted; floor-days 3, 12% floor).",
+				Adherence:     engine.Window{Length: 30, Adherence: 0.83, Completed: 20, Decided: 24, DaysAccounted: 26},
+				ErrorBudget:   engine.ErrorBudget{Budget: 3, Burn: 1, Remaining: 2},
 			},
 		},
 		status: router.StatusResult{Status: engine.Status{ConsecutiveMisses: 0, StormState: engine.StormNone}},
 	}
 }
 
-// wantSampleNumbers is the deterministic numbers block sampleNumbers renders to —
-// the ramp-frame line followed by the projection's own honest lines. Built
-// literally so the assertion is independent of the code under test.
-func wantSampleNumbers() string {
-	return strings.Join([]string{
-		"Chain: 5-day streak — 20/24 decided days completed over the last 30.",
-		"Streak: 5 (longest 12).",
-		"30-day adherence: 83% (20/24 decided, 26 accounted; floor-days 3, 12% floor).",
-	}, "\n")
+// wantSamplePanel is the compact status panel sampleNumbers renders to — the
+// streak+adherence hero line and the error-budget line. Built literally so the
+// assertion is independent of the code under test.
+func wantSamplePanel() []string {
+	return []string{
+		"⛓️ 5-day streak · 83% adherence (20/24 decided)",
+		"📊 Error budget · 2/3 isolated misses left",
+	}
+}
+
+// slotReply is a well-formed two-slot model reply — an interpretation block and
+// two action bullets under the delimiter labels the renderer parses.
+func slotReply(interp string, actions ...string) string {
+	lines := []string{interpDelim, interp, actionsDelim}
+	for _, a := range actions {
+		lines = append(lines, "- "+a)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // newComposer wires a Composer with a captured provider builder so tests can
@@ -161,10 +168,13 @@ func defaultProvider() config.ProviderConfig {
 
 // --- tests ------------------------------------------------------------------
 
-// TestCompose_NormalDayMorning_ComposesNoVerdict is the happy path: a completed
-// day (empty verdict) composes through the model, appends no verdict, and the
-// request carries the system prompt + template + the exact injected numbers.
-func TestCompose_NormalDayMorning_ComposesNoVerdict(t *testing.T) {
+// TestCompose_NormalDayMorning_RendersScaffold is the happy path: a completed
+// day (empty verdict) composes through the model, the model's prose fills the
+// interpretation slot, and the delivered text is the deterministic scaffold —
+// header, status panel, and the read — never the raw numbers dump. The compose
+// body hands the model the template, the panel context, and the slot
+// instruction.
+func TestCompose_NormalDayMorning_RendersScaffold(t *testing.T) {
 	comp := writePrompts(t)
 	p := &provider.Fake{Script: []provider.Exchange{{Content: "  WARM MORNING MESSAGE  "}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, fakeChain{}, p)
@@ -172,10 +182,17 @@ func TestCompose_NormalDayMorning_ComposesNoVerdict(t *testing.T) {
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 
-	assert.Equal(t, "WARM MORNING MESSAGE", res.Text, "model content is trimmed, no verdict appended")
 	assert.True(t, res.UsedLLM)
 	assert.False(t, res.Fallback)
 	assert.False(t, res.MissDay)
+
+	// The delivered text is the scaffold: header, panel, and the model's prose in
+	// the read slot — no verbatim metric dump.
+	assert.Contains(t, res.Text, "☀️ **Morning** · ", "the header leads")
+	for _, line := range wantSamplePanel() {
+		assert.Contains(t, res.Text, line, "the compact status panel renders")
+	}
+	assert.Contains(t, res.Text, "🧭 **The read**\nWARM MORNING MESSAGE", "the model prose fills the read slot, trimmed")
 
 	require.Equal(t, 1, p.Calls())
 	req := p.Requests[0]
@@ -184,61 +201,84 @@ func TestCompose_NormalDayMorning_ComposesNoVerdict(t *testing.T) {
 	require.Len(t, req.Messages, 1)
 	body := req.Messages[0].Content
 	assert.True(t, strings.HasPrefix(body, morningContent), "body leads with the per-mode template")
-	assert.Contains(t, body, numbersHeader)
-	assert.Contains(t, body, wantSampleNumbers(), "numbers equal the injected metrics/status projection")
+	assert.Contains(t, body, interpDelim, "the body instructs the two-slot contract")
+	assert.Contains(t, body, actionsDelim)
+	assert.Contains(t, body, wantSamplePanel()[0], "the panel is handed to the model as context")
+	assert.NotContains(t, body, "LIVE NUMBERS", "the old verbatim numbers dump is gone from the prompt")
 }
 
 // TestCompose_NightUsesNightTemplate confirms the night window reads the night
-// template and stamps the night intent.
+// template, stamps the night intent, and renders the distinct close-out framing.
 func TestCompose_NightUsesNightTemplate(t *testing.T) {
 	comp := writePrompts(t)
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM NIGHT"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("WARM NIGHT", "Close the chain.")}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, fakeChain{}, p)
 
 	res, err := c.Compose(context.Background(), ModeNight, time.Now())
 	require.NoError(t, err)
-	assert.Equal(t, "WARM NIGHT", res.Text)
+	assert.True(t, strings.HasPrefix(res.Text, "🌙 **Night** · "), "night header leads")
+	assert.Contains(t, res.Text, "🕯️ **Examen**\nWARM NIGHT", "night uses the examen framing")
+	assert.Contains(t, res.Text, "🌒 **Close-out**", "night uses the close-out framing")
 	require.Equal(t, 1, p.Calls())
 	assert.Equal(t, intentNight, p.Requests[0].Intent)
 	assert.True(t, strings.HasPrefix(p.Requests[0].Messages[0].Content, nightContent))
 }
 
-// TestCompose_MissDay_AppendsVerdictVerbatim: on a miss-day the model composes
-// the warmth and the Engine's user verdict is appended byte-for-byte below it
-// (trailing newline trimmed, internal newlines preserved).
-func TestCompose_MissDay_AppendsVerdictVerbatim(t *testing.T) {
+// TestCompose_SlotSuccess_RendersInterpAndActions parses both model slots and
+// renders them into the scaffold's read and next regions.
+func TestCompose_SlotSuccess_RendersInterpAndActions(t *testing.T) {
+	comp := writePrompts(t)
+	reply := slotReply("Steady week. The streak holds.", "Run the morning chain.", "Log a mood check at noon.")
+	p := &provider.Fake{Script: []provider.Exchange{{Content: reply}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.True(t, res.UsedLLM)
+	assert.Contains(t, res.Text, "🧭 **The read**\nSteady week. The streak holds.")
+	assert.Contains(t, res.Text, "▶️ **Next**\n• Run the morning chain.\n• Log a mood check at noon.")
+}
+
+// TestCompose_MissDay_RendersVerdictAsFinalGroup: on a miss-day the model
+// composes the warmth and the Engine's user verdict is rendered byte-for-byte as
+// the final scaffold group (trailing newline trimmed, internal newlines
+// preserved) — the teeth are never reworded.
+func TestCompose_MissDay_RendersVerdictAsFinalGroup(t *testing.T) {
 	comp := writePrompts(t)
 	verdict := "last night was a miss. Tonight is a must.\n— the form letter, pre-committed at Day 0.\n"
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM MORNING MESSAGE"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Own it and reset.", "Tonight is a must.")}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: verdict}, fakeChain{}, p)
 
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 
-	want := "WARM MORNING MESSAGE\n\nlast night was a miss. Tonight is a must.\n— the form letter, pre-committed at Day 0."
-	assert.Equal(t, want, res.Text)
+	wantVerdict := "last night was a miss. Tonight is a must.\n— the form letter, pre-committed at Day 0."
+	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+dividerLine+"\n\n"+wantVerdict),
+		"the verdict is the final group, divider-separated and verbatim")
+	assert.Contains(t, res.Text, "Own it and reset.", "the warm interpretation still renders above the verdict")
 	assert.True(t, res.MissDay)
 	assert.True(t, res.UsedLLM)
 	assert.False(t, res.Fallback)
 }
 
-// TestCompose_MissDayNight_AppendsVerdict confirms the verdict append is not
-// morning-only — the night window appends it too.
-func TestCompose_MissDayNight_AppendsVerdict(t *testing.T) {
+// TestCompose_MissDayNight_RendersVerdict confirms the verdict-as-final-group is
+// not morning-only — the night window renders it too.
+func TestCompose_MissDayNight_RendersVerdict(t *testing.T) {
 	comp := writePrompts(t)
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM NIGHT"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("A hard night.", "Close it out.")}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: "VERDICT LINE"}, fakeChain{}, p)
 
 	res, err := c.Compose(context.Background(), ModeNight, time.Now())
 	require.NoError(t, err)
-	assert.Equal(t, "WARM NIGHT\n\nVERDICT LINE", res.Text)
+	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+dividerLine+"\n\nVERDICT LINE"))
 	assert.True(t, res.MissDay)
 }
 
-// TestCompose_ProviderDown_NormalMorning_FallsBackToNumbers: on ErrUnavailable
-// the morning falls back to the deterministic honest numbers (no bell for the
-// morning window) so a message always lands; only warmth is lost.
-func TestCompose_ProviderDown_NormalMorning_FallsBackToNumbers(t *testing.T) {
+// TestCompose_ProviderDown_NormalMorning_FallsBackToScaffold: on ErrUnavailable
+// the morning renders the deterministic fallback scaffold — the panel, the
+// deterministic read, and a start-small action — so a valid message always lands
+// and only warmth is lost.
+func TestCompose_ProviderDown_NormalMorning_FallsBackToScaffold(t *testing.T) {
 	comp := writePrompts(t)
 	p := &provider.Fake{Script: []provider.Exchange{{Err: fmt.Errorf("cli offline: %w", provider.ErrUnavailable)}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, fakeChain{}, p)
@@ -246,16 +286,19 @@ func TestCompose_ProviderDown_NormalMorning_FallsBackToNumbers(t *testing.T) {
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 
-	assert.Equal(t, wantSampleNumbers(), res.Text)
 	assert.True(t, res.Fallback)
 	assert.False(t, res.UsedLLM)
 	assert.False(t, res.MissDay)
+	assert.Contains(t, res.Text, "☀️ **Morning** · ")
+	assert.Contains(t, res.Text, wantSamplePanel()[0], "the panel still renders on the fallback path")
+	assert.Contains(t, res.Text, "🧭 **The read**\n"+fallbackInterpMorning)
+	assert.Contains(t, res.Text, "▶️ **Next**\n• "+fallbackActionMorning)
 }
 
-// TestCompose_ProviderDown_NormalNight_FallsBackToBellPlusNumbers confirms the
-// night fallback carries the Engine's deterministic evening Bell above the
-// honest numbers.
-func TestCompose_ProviderDown_NormalNight_FallsBackToBellPlusNumbers(t *testing.T) {
+// TestCompose_ProviderDown_NormalNight_FallsBackToBellCloseout confirms the
+// night fallback scaffold's close-out action is the Engine's deterministic
+// evening Bell naming the chain.
+func TestCompose_ProviderDown_NormalNight_FallsBackToBellCloseout(t *testing.T) {
 	comp := writePrompts(t)
 	chain := fakeChain{chain: engine.ChainConfig{Label: "Journal. Dock. Read."}}
 	p := &provider.Fake{Script: []provider.Exchange{{Err: fmt.Errorf("timeout: %w", provider.ErrTimeout)}}}
@@ -264,16 +307,17 @@ func TestCompose_ProviderDown_NormalNight_FallsBackToBellPlusNumbers(t *testing.
 	res, err := c.Compose(context.Background(), ModeNight, time.Now())
 	require.NoError(t, err)
 
-	want := templates.Bell("Journal. Dock. Read.") + "\n\n" + wantSampleNumbers()
-	assert.Equal(t, want, res.Text)
 	assert.True(t, res.Fallback)
 	assert.False(t, res.UsedLLM)
+	assert.Contains(t, res.Text, "🌙 **Night** · ")
+	assert.Contains(t, res.Text, "🕯️ **Examen**\n"+fallbackInterpNight)
+	assert.Contains(t, res.Text, "🌒 **Close-out**\n• "+templates.Bell("Journal. Dock. Read."))
 }
 
-// TestCompose_ProviderDown_MissDay_FallsBackToVerdict confirms the teeth still
-// land unsoftened when the model is unreachable on a miss-day: the fallback body
-// is exactly the Engine's verdict, no bell, no numbers.
-func TestCompose_ProviderDown_MissDay_FallsBackToVerdict(t *testing.T) {
+// TestCompose_ProviderDown_MissDay_FallsBackWithVerdict confirms the teeth still
+// land when the model is unreachable on a miss-day: the fallback scaffold renders
+// with the Engine's verdict as its final group, verbatim.
+func TestCompose_ProviderDown_MissDay_FallsBackWithVerdict(t *testing.T) {
 	comp := writePrompts(t)
 	p := &provider.Fake{Script: []provider.Exchange{{Err: fmt.Errorf("x: %w", provider.ErrUnavailable)}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: "you missed — the floor: one line."}, fakeChain{}, p)
@@ -281,9 +325,41 @@ func TestCompose_ProviderDown_MissDay_FallsBackToVerdict(t *testing.T) {
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 
-	assert.Equal(t, "you missed — the floor: one line.", res.Text)
 	assert.True(t, res.Fallback)
 	assert.True(t, res.MissDay)
+	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+dividerLine+"\n\nyou missed — the floor: one line."),
+		"the verdict lands verbatim as the final group even on the fallback path")
+	assert.Contains(t, res.Text, wantSamplePanel()[0], "the fallback still carries the panel")
+}
+
+// TestCompose_EmptyModelReply_FallsBack: a model reply with no usable text (only
+// whitespace) is treated as a fallback rather than delivering an empty
+// interpretation.
+func TestCompose_EmptyModelReply_FallsBack(t *testing.T) {
+	comp := writePrompts(t)
+	p := &provider.Fake{Script: []provider.Exchange{{Content: "   \n  "}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.True(t, res.Fallback, "an empty reply falls back")
+	assert.False(t, res.UsedLLM)
+	assert.Contains(t, res.Text, fallbackInterpMorning)
+}
+
+// TestCompose_MissingDelimiter_UsesProseAsInterp: a model reply with no slot
+// delimiters is a valid scaffold, not a fallback — the whole prose becomes the
+// interpretation.
+func TestCompose_MissingDelimiter_UsesProseAsInterp(t *testing.T) {
+	comp := writePrompts(t)
+	p := &provider.Fake{Script: []provider.Exchange{{Content: "A quiet, steady paragraph with no delimiters."}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.True(t, res.UsedLLM, "plain prose is still the model's warmth, not a fallback")
+	assert.False(t, res.Fallback)
+	assert.Contains(t, res.Text, "🧭 **The read**\nA quiet, steady paragraph with no delimiters.")
 }
 
 // TestCompose_ModelOverride confirms companion.model overrides provider.model on
@@ -291,7 +367,7 @@ func TestCompose_ProviderDown_MissDay_FallsBackToVerdict(t *testing.T) {
 func TestCompose_ModelOverride(t *testing.T) {
 	comp := writePrompts(t)
 	comp.Model = "sonnet"
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "x"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("x", "y")}}}
 	c, got := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
 	_, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
@@ -299,48 +375,49 @@ func TestCompose_ModelOverride(t *testing.T) {
 	assert.Equal(t, "claude_cli", got.Backend, "backend is inherited unchanged")
 
 	comp2 := writePrompts(t)
-	p2 := &provider.Fake{Script: []provider.Exchange{{Content: "x"}}}
+	p2 := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("x", "y")}}}
 	c2, got2 := newComposer(t, comp2, defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p2)
 	_, err = c2.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 	assert.Equal(t, "opus", got2.Model, "empty companion.model inherits provider.model")
 }
 
-// TestCompose_EarlyRamp_FramesBuilding confirms the ramp frame takes the
-// building branch (no hollow percentage) when no day is decided yet.
-func TestCompose_EarlyRamp_FramesBuilding(t *testing.T) {
+// TestCompose_EarlyRamp_PanelFramesBuilding confirms the status panel handed to
+// the model takes the building branch (no hollow percentage) when no day is
+// decided yet.
+func TestCompose_EarlyRamp_PanelFramesBuilding(t *testing.T) {
 	comp := writePrompts(t)
 	nums := fakeNumbers{
 		metrics: router.MetricsResult{
 			Metrics: engine.Metrics{CurrentStreak: 0, Adherence: engine.Window{Length: 30, Completed: 2, Decided: 0, DaysAccounted: 3}},
-			Lines:   []string{"Streak: 0 (longest 0).", "30-day adherence: no decided days yet (3 accounted)."},
 		},
 		status: router.StatusResult{Status: engine.Status{}},
 	}
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Building.", "Begin.")}}}
 	c, _ := newComposer(t, comp, defaultProvider(), nums, fakeVerdict{}, fakeChain{}, p)
 	_, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 
 	body := p.Requests[0].Messages[0].Content
-	assert.Contains(t, body, "Building — 2 completed of 3 accounted so far; no decided day yet.")
-	assert.NotContains(t, body, "Chain: 0-day streak", "no streak framing before a day is decided")
+	assert.Contains(t, body, "⛓️ Building · 2 completed of 3 accounted — no decided day yet")
+	assert.NotContains(t, body, "adherence (", "no decided-day framing before a day is decided")
 }
 
-// TestCompose_StatusAmbient_Surfaced confirms the consecutive-miss and storm
-// ambient signals from the status projection are rendered when they hold.
-func TestCompose_StatusAmbient_Surfaced(t *testing.T) {
+// TestCompose_StatusAmbient_SurfacedInPanel confirms the consecutive-miss and
+// storm ambient signals are rendered into the panel handed to the model when
+// they hold.
+func TestCompose_StatusAmbient_SurfacedInPanel(t *testing.T) {
 	comp := writePrompts(t)
 	nums := sampleNumbers()
 	nums.status = router.StatusResult{Status: engine.Status{ConsecutiveMisses: 2, StormState: engine.StormStandingState}}
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Ambient.", "Steady.")}}}
 	c, _ := newComposer(t, comp, defaultProvider(), nums, fakeVerdict{}, fakeChain{}, p)
 	_, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 
 	body := p.Requests[0].Messages[0].Content
-	assert.Contains(t, body, "Consecutive misses: 2.")
-	assert.Contains(t, body, "Storm standing — the stake is stayed; contact continues.")
+	assert.Contains(t, body, "⚠️ Consecutive misses · 2")
+	assert.Contains(t, body, "🌩️ Storm standing — the stake is stayed")
 }
 
 // TestCompose_MissingPromptFile_Errors confirms a misconfigured (missing) prompt
@@ -403,6 +480,18 @@ func TestCompose_NonSentinelProviderError_Propagates(t *testing.T) {
 	assert.Empty(t, res.Text)
 }
 
+// TestCompose_NightFallback_ChainReadError_IsLoud confirms a night fallback that
+// cannot read the chain (for the Bell close-out) surfaces the error rather than
+// delivering a bell-less close-out.
+func TestCompose_NightFallback_ChainReadError_IsLoud(t *testing.T) {
+	comp := writePrompts(t)
+	ch := fakeChain{err: errors.New("chain read boom")}
+	p := &provider.Fake{Script: []provider.Exchange{{Err: fmt.Errorf("down: %w", provider.ErrUnavailable)}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{text: ""}, ch, p)
+	_, err := c.Compose(context.Background(), ModeNight, time.Now())
+	require.Error(t, err)
+}
+
 // newComposerWithObs wires a Composer with a recent-observation reader (the
 // path newComposer omits) so the enrichment seam is exercised with a scripted
 // fake.
@@ -429,7 +518,7 @@ func TestCompose_Recent_FiltersToRenderKinds(t *testing.T) {
 		{ID: "obs_2026_07_08_003", Kind: observations.KindWithdrawal},
 		{ID: "obs_2026_07_08_004", Kind: observations.KindCommitment},
 	}}
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("ok", "go")}}}
 	c := newComposerWithObs(t, obs, p)
 
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
@@ -443,12 +532,61 @@ func TestCompose_Recent_FiltersToRenderKinds(t *testing.T) {
 	assert.Equal(t, recentWindowDays, obs.window, "the bounded window constant is passed to the reader")
 }
 
+// TestCompose_Sections_RenderWithFreshness confirms the recent observations
+// render into their context sections with the "as logged <date>" freshness stamp
+// (and a stale flag past the threshold), covering the body-state, change /
+// withdrawal, and commitment kinds.
+func TestCompose_Sections_RenderWithFreshness(t *testing.T) {
+	now := time.Date(2026, 7, 20, 6, 0, 0, 0, time.UTC)
+	obs := &fakeObservations{events: []observations.Event{
+		{ID: "obs_2026_07_19_001", Kind: observations.KindMood, LogicalDate: "2026-07-19", Payload: map[string]any{"level": 7, "word": "steady"}},
+		{ID: "obs_2026_07_19_002", Kind: observations.KindSleep, LogicalDate: "2026-07-19", Payload: map[string]any{"quality": 8}},
+		{ID: "obs_2026_07_18_003", Kind: observations.KindWithdrawal, LogicalDate: "2026-07-18", Payload: map[string]any{"severity": 6, "note": "rough morning"}},
+		{ID: "obs_2026_07_17_004", Kind: observations.KindHabitChange, LogicalDate: "2026-07-17", Payload: map[string]any{"load": 7, "note": "cut coffee"}},
+		{ID: "obs_2026_07_15_005", Kind: observations.KindCommitment, LogicalDate: "2026-07-15", Payload: map[string]any{"what": "call the dentist"}},
+	}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Read.", "Act.")}}}
+	c := newComposerWithObs(t, obs, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, now)
+	require.NoError(t, err)
+
+	// Body & state: newest event is 2026-07-19 (two days back → fresh, no flag).
+	assert.Contains(t, res.Text, "🫀 **Body & state** · as logged 2026-07-19")
+	assert.Contains(t, res.Text, "• mood 7 — steady")
+	assert.Contains(t, res.Text, "• sleep · quality 8")
+	// Change & withdrawal: newest is the withdrawal at 2026-07-18 (still fresh).
+	assert.Contains(t, res.Text, "🔄 **Change & withdrawal** · as logged 2026-07-18")
+	assert.Contains(t, res.Text, "• withdrawal 6 — rough morning")
+	assert.Contains(t, res.Text, "• habit change 7 — cut coffee")
+	// Commitments: the only event is five days back → stale flag appended.
+	assert.Contains(t, res.Text, "📌 **Commitments** · as logged 2026-07-15 · stale")
+	assert.Contains(t, res.Text, "• call the dentist")
+}
+
+// TestCompose_AbsentKinds_OmitSections confirms a section with no logged event
+// is omitted — only the body-state section renders when just a mood is logged.
+func TestCompose_AbsentKinds_OmitSections(t *testing.T) {
+	now := time.Date(2026, 7, 20, 6, 0, 0, 0, time.UTC)
+	obs := &fakeObservations{events: []observations.Event{
+		{ID: "obs_2026_07_20_001", Kind: observations.KindMood, LogicalDate: "2026-07-20", Payload: map[string]any{"level": 6}},
+	}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("ok", "go")}}}
+	c := newComposerWithObs(t, obs, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, now)
+	require.NoError(t, err)
+	assert.Contains(t, res.Text, "🫀 **Body & state**")
+	assert.NotContains(t, res.Text, "Change & withdrawal", "an absent change signal leaves no stray section")
+	assert.NotContains(t, res.Text, "Commitments", "an absent commitment leaves no stray section")
+}
+
 // TestCompose_RecentReadError_DegradesNonFatally confirms an enrichment read
 // error never fails the life-critical send: the message still composes, no
 // events are surfaced, and the degradation is recorded for a dry-run to show.
 func TestCompose_RecentReadError_DegradesNonFatally(t *testing.T) {
 	obs := &fakeObservations{err: errors.New("ledger read boom")}
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM MORNING"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("WARM MORNING", "go")}}}
 	c := newComposerWithObs(t, obs, p)
 
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
@@ -456,20 +594,82 @@ func TestCompose_RecentReadError_DegradesNonFatally(t *testing.T) {
 
 	assert.True(t, res.EnrichmentDegraded, "the degraded read is recorded so a dry-run surfaces it")
 	assert.Empty(t, res.Recent, "no events are surfaced on a degraded read")
-	assert.Equal(t, "WARM MORNING", res.Text, "the message is still composed")
+	assert.Contains(t, res.Text, "WARM MORNING", "the message is still composed")
 	assert.True(t, res.UsedLLM)
 }
 
 // TestCompose_NilObservationsReader_NotDegraded confirms an unconfigured reader
-// (the current daemon path, which builds Deps without Observations) leaves the
-// message unenriched without flagging a degradation.
+// (a Deps built without Observations) leaves the message unenriched without
+// flagging a degradation.
 func TestCompose_NilObservationsReader_NotDegraded(t *testing.T) {
 	comp := writePrompts(t)
-	p := &provider.Fake{Script: []provider.Exchange{{Content: "WARM"}}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("WARM", "go")}}}
 	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
 
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 	assert.False(t, res.EnrichmentDegraded, "an unconfigured reader is not a degradation")
 	assert.Empty(t, res.Recent)
+}
+
+// TestCompose_RoutineInjected confirms a configured, readable routine file is
+// injected into the compose body as grounding context (never rendered verbatim
+// into the delivered message), and RoutineDegraded stays false.
+func TestCompose_RoutineInjected(t *testing.T) {
+	comp := writePrompts(t)
+	routine := filepath.Join(t.TempDir(), "morning-routine.md")
+	require.NoError(t, os.WriteFile(routine, []byte("MORNING ROUTINE ANCHOR\n"), 0o600))
+	comp.MorningRoutine = routine
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("grounded", "step")}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.False(t, res.RoutineDegraded)
+	body := p.Requests[0].Messages[0].Content
+	assert.Contains(t, body, "Intended morning routine:\nMORNING ROUTINE ANCHOR", "the routine is context for the model")
+	assert.NotContains(t, res.Text, "MORNING ROUTINE ANCHOR", "the routine doc is never dumped into the delivered message")
+}
+
+// TestCompose_RoutineUnreadable_DegradesNonFatally confirms a set-but-unreadable
+// routine path is omitted and recorded, never failing the send.
+func TestCompose_RoutineUnreadable_DegradesNonFatally(t *testing.T) {
+	comp := writePrompts(t)
+	comp.MorningRoutine = filepath.Join(t.TempDir(), "missing-routine.md")
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("ok", "go")}}}
+	c, _ := newComposer(t, comp, defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err, "an unreadable routine never fails the send")
+	assert.True(t, res.RoutineDegraded, "the unreadable routine is recorded")
+	assert.True(t, res.UsedLLM)
+	body := p.Requests[0].Messages[0].Content
+	assert.NotContains(t, body, "Intended morning routine:", "an unreadable routine is omitted from the context")
+}
+
+// TestObservationLine covers the per-kind bullet rendering, including the
+// partial (note-only) path and the pain side/site composition.
+func TestObservationLine(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   observations.Event
+		want string
+	}{
+		{"mood scale+word", observations.Event{Kind: observations.KindMood, Payload: map[string]any{"level": 7, "word": "steady"}}, "mood 7 — steady"},
+		{"mood partial note", observations.Event{Kind: observations.KindMood, Payload: map[string]any{"note": "wired feeling"}}, "mood — wired feeling"},
+		{"mood float round-trip", observations.Event{Kind: observations.KindMood, Payload: map[string]any{"level": float64(4)}}, "mood 4"},
+		{"pain side+site", observations.Event{Kind: observations.KindPain, Payload: map[string]any{"intensity": 4, "site": "back", "side": "left"}}, "pain 4 — left back"},
+		{"pain note fallback", observations.Event{Kind: observations.KindPain, Payload: map[string]any{"intensity": 3, "note": "dull ache"}}, "pain 3 — dull ache"},
+		{"sleep quality", observations.Event{Kind: observations.KindSleep, Payload: map[string]any{"quality": 8}}, "sleep · quality 8"},
+		{"symptom name+severity", observations.Event{Kind: observations.KindSymptom, Payload: map[string]any{"name": "headache", "severity": 6}}, "headache 6"},
+		{"withdrawal scale+note", observations.Event{Kind: observations.KindWithdrawal, Payload: map[string]any{"severity": 6, "note": "rough morning"}}, "withdrawal 6 — rough morning"},
+		{"habit_change scale+note", observations.Event{Kind: observations.KindHabitChange, Payload: map[string]any{"load": 7, "note": "cut coffee"}}, "habit change 7 — cut coffee"},
+		{"commitment what", observations.Event{Kind: observations.KindCommitment, Payload: map[string]any{"what": "call the dentist"}}, "call the dentist"},
+		{"commitment partial note", observations.Event{Kind: observations.KindCommitment, Payload: map[string]any{"note": "email the landlord"}}, "email the landlord"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, observationLine(tc.ev))
+		})
+	}
 }

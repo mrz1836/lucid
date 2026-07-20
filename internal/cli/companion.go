@@ -183,6 +183,9 @@ func renderCompanionDryRun(out io.Writer, res companion.Result) error {
 	if res.EnrichmentDegraded {
 		_, _ = fmt.Fprintln(out, "[enrichment degraded — recent observations could not be read; the message omits body-state context]")
 	}
+	if res.RoutineDegraded {
+		_, _ = fmt.Fprintln(out, "[routine unreadable — a configured routine file could not be read; the message omits routine-grounded context]")
+	}
 	if res.MissDay {
 		_, _ = fmt.Fprintln(out, "[miss-day — the Engine verdict is appended verbatim below]")
 	}
