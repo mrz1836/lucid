@@ -1,11 +1,18 @@
 # P-2 — Lens rotation (v1)
 
-**Status:** Blocked — on the frameworks layer *shipping*; its design
-is canonical ([`../frameworks.md`](../frameworks.md)) and lens
-attribution is ready (`provenance.framework` — see Prerequisites).
-The acted-on instrumentation — insight rules and their kept/lapsed
-record — is now specced
-([`../mvp/data-model.md`](../mvp/data-model.md) §"Validated
+**Status:** Deferred — this protocol is *automatic* lens rotation,
+which is out of scope for the current MVP. The lens-instrumentation
+prerequisite it was blocked on has now **shipped** — the consentable
+lens registry, stack consent, lens labeling, and `provenance.framework`
+attribution are live and applied on the read-only weekly deep-dive
+([`../usage/weekly-reflection.md`](../usage/weekly-reflection.md)), with
+lens selection **manual/deterministic** rather than rotated. What is
+still needed before a run: the full frameworks layer (the
+vocabulary-licensing mechanism and lens-aware `/checkin` proposals —
+[`../frameworks.md`](../frameworks.md) §6) and enough acted-on rule
+activity to beat the underpowered threshold. The acted-on
+instrumentation — insight rules and their kept/lapsed record — is
+specced ([`../mvp/data-model.md`](../mvp/data-model.md) §"Validated
 insights").
 
 ## Question
@@ -114,13 +121,16 @@ cannot attribute — and does not need to.
 
 ## Prerequisites
 
-* **The frameworks layer, shipped** — the design is canonical
-  ([`../frameworks.md`](../frameworks.md): definition files, the
-  router seam, stack consent, lens labeling, `provenance.framework`)
-  and four reference definitions exist, but the layer runs post-MVP;
-  until it is live there are no lenses to rotate. Arms must be lenses
-  from the user's consented stack (frameworks.md §3) — a trial lens
-  is not an arm.
+* **The frameworks layer, shipped in full** — the lens-instrumentation
+  stage is now live (the six reference definitions load as a consentable
+  registry, stack consent, one labeled lens per output, and
+  `provenance.framework`), applied on the read-only weekly deep-dive with
+  manual selection. Rotation still needs the remaining stages
+  ([`../frameworks.md`](../frameworks.md): the vocabulary-licensing
+  mechanism and the lens-aware `reflection.propose` seam); until those
+  are live there is a labeled lens but no rotation to run. Arms must be
+  lenses from the user's consented stack (frameworks.md §3) — a trial
+  lens is not an arm.
 * **Acted-on instrumentation** — **shipped**: insight rules with
   their kept/lapsed `rule_history[]`
   ([`../mvp/data-model.md`](../mvp/data-model.md) §"Validated
