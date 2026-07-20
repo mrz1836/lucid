@@ -182,6 +182,8 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "morning_template": "",
     "night_template": "",
     "system_prompt": "",
+    "morning_routine": "",
+    "night_routine": "",
     "model": ""
   }
 }
@@ -229,9 +231,19 @@ The single global config file. Tiny, hand-editable, agent-readable.
   the compose worker opens directly — lucid never traverses into the
   directory holding them (no dir-walk, no filename convention), so the block
   is the whole personal/OSS seam: point the paths at any template dir you
-  like. When `enabled` is true all three paths must be non-empty or the
-  config is rejected. `model` optionally overrides `provider.model` for the
-  companion's compose call (empty inherits the provider default). Fire
+  like. When `enabled` is true all three prompt paths must be non-empty or the
+  config is rejected. `morning_routine` and `night_routine` are two **optional**
+  opaque file-path keys — the same explicit-path seam as the three prompt files
+  — pointing at the operator's own morning and night routine documents. When
+  set, the compose worker reads each file and injects its contents as **context**
+  for that window's message, so the companion grounds its interpretation and next
+  action in the routine the operator actually intends instead of inventing one
+  each day; lucid never walks the directory holding them. They are **not**
+  required when `enabled` is true — an absent or empty routine key simply omits
+  the routine grounding (feature off for that window), so they never widen the
+  enabled-config requirement beyond the three prompt paths. `model` optionally
+  overrides `provider.model` for the companion's compose call (empty inherits the
+  provider default). Fire
   **times are not companion keys** — the companion inherits the `chain.json`
   bell/tripwire marks so it can never drift from the deterministic pair. Like
   the provider block, `companion` is credential-dumb: the target channel and

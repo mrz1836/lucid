@@ -32,6 +32,9 @@ func TestResolveVerb(t *testing.T) {
 		{"where", KindLocation, "", true},
 		{"symptom", KindSymptom, "", true},
 		{"med", KindMed, "", true},
+		{"withdrawal", KindWithdrawal, "", true},    // generic companion-context kind
+		{"habit_change", KindHabitChange, "", true}, // underscore kind reachable via /obs
+		{"commitment", KindCommitment, "", true},
 		{"PAIN", KindPain, "", true}, // case-insensitive verb
 		{"context.day", "", "", false},
 		{"nonsense", "", "", false},
@@ -51,6 +54,61 @@ func TestIsCapturableKind(t *testing.T) {
 	assert.True(t, IsCapturableKind(KindLocation))
 	assert.False(t, IsCapturableKind(KindContextDay)) // enricher-written only
 	assert.False(t, IsCapturableKind("hypothesis"))   // Scientist layer, out of MVP
+	assert.True(t, IsCapturableKind(KindWithdrawal))  // companion-context kinds are capturable
+	assert.True(t, IsCapturableKind(KindHabitChange))
+	assert.True(t, IsCapturableKind(KindCommitment))
+}
+
+// TestParse_CompanionContextKinds covers the three companion-context kinds
+// (observations.md §3): withdrawal/habit_change reuse the optional-scale head
+// (0–10, non-numeric head → note, out-of-range → partial); commitment is
+// free-text. All are voice-to-text friendly — trailing text lands in note/what.
+func TestParse_CompanionContextKinds(t *testing.T) {
+	// withdrawal: optional 0–10 severity, trailing text to note.
+	wd := parse(KindWithdrawal, "", "6", "rough", "morning")
+	assert.False(t, wd.Partial)
+	assert.Equal(t, 6, wd.Payload["severity"])
+	assert.Equal(t, "rough morning", wd.Payload["note"])
+
+	// withdrawal non-numeric head → no severity, full text is the note.
+	wdFree := parse(KindWithdrawal, "", "groggy", "and", "irritable")
+	assert.False(t, wdFree.Partial)
+	assert.NotContains(t, wdFree.Payload, "severity")
+	assert.Equal(t, "groggy and irritable", wdFree.Payload["note"])
+
+	// withdrawal out-of-range severity → partial, never clamped, kind kept.
+	wdOOR := parse(KindWithdrawal, "", "15")
+	assert.True(t, wdOOR.Partial)
+	assert.Equal(t, KindWithdrawal, wdOOR.Kind)
+	assert.Equal(t, "15", wdOOR.Payload["note"])
+	assert.Equal(t, ParseMarkerPartial, wdOOR.Payload["parse"])
+
+	// bare withdrawal → valid event (optional scale), empty payload.
+	wdBare := parse(KindWithdrawal, "")
+	assert.False(t, wdBare.Partial)
+	assert.NotContains(t, wdBare.Payload, "severity")
+
+	// habit_change: optional 0–10 load, trailing text to note.
+	hc := parse(KindHabitChange, "", "7", "cut", "coffee")
+	assert.False(t, hc.Partial)
+	assert.Equal(t, 7, hc.Payload["load"])
+	assert.Equal(t, "cut coffee", hc.Payload["note"])
+
+	// habit_change out-of-range → partial.
+	hcOOR := parse(KindHabitChange, "", "12")
+	assert.True(t, hcOOR.Partial)
+	assert.Equal(t, KindHabitChange, hcOOR.Kind)
+
+	// commitment: free-text `what`.
+	cm := parse(KindCommitment, "", "call", "the", "dentist")
+	assert.False(t, cm.Partial)
+	assert.Equal(t, "call the dentist", cm.Payload["what"])
+
+	// bare commitment → partial (nothing to record).
+	cmEmpty := parse(KindCommitment, "")
+	assert.True(t, cmEmpty.Partial)
+	assert.Equal(t, KindCommitment, cmEmpty.Kind)
+	assert.Equal(t, ParseMarkerPartial, cmEmpty.Payload["parse"])
 }
 
 // TestParse_Shorthands checks each named shorthand yields the documented kind

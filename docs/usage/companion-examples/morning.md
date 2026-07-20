@@ -2,17 +2,21 @@
 
 A neutral example of a **morning-window** template. It is opaque prompt text:
 Lucid reads this file verbatim and passes it to the model as the user message,
-joined with the honest live-numbers block. Replace it with your own — nothing
+joined with the deterministic context block (the status-panel summary, the recent
+observation digest, and your morning routine). Replace it with your own — nothing
 here is required wording. Point `companion.morning_template` in `lucid.json` at
 your own copy of a file like this.
 
 ---
 
-Compose a short, warm morning message to start my day.
+Fill the two slots for a morning message that sets up my day.
 
-- Open by reflecting the live numbers below honestly. If the chain is young or a
-  day was recently missed, say so plainly — never inflate, round, or invent a
-  number.
-- Name one concrete, doable thing worth focusing on today. Keep it small.
-- Keep the whole message to a few sentences. Calm, direct, no filler.
-- Do not add a subject line, a date line, or a sign-off.
+- **Interpretation:** read the day honestly from the context below — the chain
+  status, the recent body-and-state signals, any change or withdrawal load, my
+  commitments, and my intended morning routine. Name what matters this morning,
+  what changed, and anything worth watching. Keep it to a few calm sentences.
+- **Actions:** give one or two small, concrete things to do next, grounded in the
+  routine and the day's signals.
+
+Return only the two slots in the shape the system prompt defines. No header, no
+numbers restated, no sign-off.

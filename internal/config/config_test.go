@@ -164,6 +164,8 @@ func TestDefault_CompanionBlock(t *testing.T) {
 	assert.Empty(t, c.MorningTemplate)
 	assert.Empty(t, c.NightTemplate)
 	assert.Empty(t, c.SystemPrompt)
+	assert.Empty(t, c.MorningRoutine, "routine paths ship empty → feature off")
+	assert.Empty(t, c.NightRoutine, "routine paths ship empty → feature off")
 	assert.Empty(t, c.Model, "model override empty → inherits provider.model")
 }
 
@@ -181,6 +183,8 @@ func TestCompanion_MarshalsDocumentedShape(t *testing.T) {
 			MorningTemplate string `json:"morning_template"`
 			NightTemplate   string `json:"night_template"`
 			SystemPrompt    string `json:"system_prompt"`
+			MorningRoutine  string `json:"morning_routine"`
+			NightRoutine    string `json:"night_routine"`
 			Model           string `json:"model"`
 		} `json:"companion"`
 	}
@@ -189,11 +193,17 @@ func TestCompanion_MarshalsDocumentedShape(t *testing.T) {
 	assert.Empty(t, m.Companion.MorningTemplate)
 	assert.Empty(t, m.Companion.NightTemplate)
 	assert.Empty(t, m.Companion.SystemPrompt)
+	assert.Empty(t, m.Companion.MorningRoutine)
+	assert.Empty(t, m.Companion.NightRoutine)
 
 	s := string(b)
 	assert.Contains(t, s, `"companion":`)
 	assert.Contains(t, s, `"morning_template":`)
 	assert.Contains(t, s, `"system_prompt":`)
+	// The optional routine path keys always render, even when empty, so an
+	// operator can see the seam to point at their own routine docs.
+	assert.Contains(t, s, `"morning_routine":`)
+	assert.Contains(t, s, `"night_routine":`)
 	// No token or channel id ever lands in the config.
 	assert.NotContains(t, s, "harness_token")
 	assert.NotContains(t, s, "channel_id")
@@ -209,6 +219,8 @@ func TestCompanion_RoundTripEnabled(t *testing.T) {
 		MorningTemplate: "/opt/lucid/companion/morning_template.md",
 		NightTemplate:   "/opt/lucid/companion/night_template.md",
 		SystemPrompt:    "/opt/lucid/companion/system_prompt.md",
+		MorningRoutine:  "/opt/lucid/companion/morning_routine.md",
+		NightRoutine:    "/opt/lucid/companion/night_routine.md",
 		Model:           "sonnet",
 	}
 	b, err := c.Marshal()
@@ -218,6 +230,8 @@ func TestCompanion_RoundTripEnabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, c, got)
 	assert.Equal(t, "sonnet", got.Companion.Model)
+	assert.Equal(t, "/opt/lucid/companion/morning_routine.md", got.Companion.MorningRoutine)
+	assert.Equal(t, "/opt/lucid/companion/night_routine.md", got.Companion.NightRoutine)
 }
 
 // TestValidate_CompanionEnabledRequiresPaths is the companion validate
@@ -255,6 +269,41 @@ func TestValidate_CompanionEnabledRequiresPaths(t *testing.T) {
 		c.Companion = full
 		c.Companion.Model = "some-future-model"
 		assert.NoError(t, c.Validate())
+	})
+}
+
+// TestValidate_CompanionRoutinePathsOptional proves the routine paths are
+// enrichment-only: an enabled companion with all three prompt paths set
+// validates whether the morning_routine/night_routine keys are empty or set,
+// and adding routine paths never rescues a companion that is still missing a
+// required prompt path.
+func TestValidate_CompanionRoutinePathsOptional(t *testing.T) {
+	base := CompanionConfig{
+		Enabled:         true,
+		MorningTemplate: "m.md",
+		NightTemplate:   "n.md",
+		SystemPrompt:    "s.md",
+	}
+
+	t.Run("routine paths empty validates", func(t *testing.T) {
+		c := Default()
+		c.Companion = base
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("routine paths set validates", func(t *testing.T) {
+		c := Default()
+		c.Companion = base
+		c.Companion.MorningRoutine = "/r/morning.md"
+		c.Companion.NightRoutine = "/r/night.md"
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("routine paths do not rescue a missing prompt path", func(t *testing.T) {
+		c := Default()
+		c.Companion = base
+		c.Companion.SystemPrompt = ""
+		c.Companion.MorningRoutine = "/r/morning.md"
+		c.Companion.NightRoutine = "/r/night.md"
+		assert.Error(t, c.Validate())
 	})
 }
 

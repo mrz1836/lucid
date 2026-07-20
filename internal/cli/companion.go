@@ -103,12 +103,13 @@ func runCompanionFire(cmd *cobra.Command, modeStr string, deliver bool) error {
 	}
 
 	deps := companion.Deps{
-		Companion: cfg.Companion,
-		Provider:  cfg.Provider,
-		Numbers:   r,
-		Verdict:   scheduler.New(store, noopNotifier{}),
-		Chain:     store,
-		Build:     buildProvider,
+		Companion:    cfg.Companion,
+		Provider:     cfg.Provider,
+		Numbers:      r,
+		Verdict:      scheduler.New(store, noopNotifier{}),
+		Chain:        store,
+		Observations: store,
+		Build:        buildProvider,
 	}
 
 	if !deliver {
@@ -178,6 +179,12 @@ func renderCompanionDryRun(out io.Writer, res companion.Result) error {
 	_, _ = fmt.Fprintf(out, "── companion %s (dry-run — not delivered) ──\n", res.Mode)
 	if res.Fallback {
 		_, _ = fmt.Fprintln(out, "[deterministic fallback — the provider was unreachable; only warmth is lost]")
+	}
+	if res.EnrichmentDegraded {
+		_, _ = fmt.Fprintln(out, "[enrichment degraded — recent observations could not be read; the message omits body-state context]")
+	}
+	if res.RoutineDegraded {
+		_, _ = fmt.Fprintln(out, "[routine unreadable — a configured routine file could not be read; the message omits routine-grounded context]")
 	}
 	if res.MissDay {
 		_, _ = fmt.Fprintln(out, "[miss-day — the Engine verdict is appended verbatim below]")

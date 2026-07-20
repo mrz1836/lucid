@@ -52,8 +52,11 @@ type Config struct {
 // a binding property of the module.
 func DefaultConfig() Config {
 	return Config{
-		Version:            ConfigVersion,
-		KeySalt:            "",
+		Version: ConfigVersion,
+		KeySalt: "",
+		// The companion-context kinds (KindWithdrawal, KindHabitChange,
+		// KindCommitment) are deliberately absent here — they are enable-gated
+		// and off by default (observations.md §3), added per-instance only.
 		KindsEnabled:       []Kind{KindPain, KindIntake, KindElimination, KindMood},
 		CuriosityBudgetDay: 1,
 		AgentSliceOptins:   map[string]any{},
