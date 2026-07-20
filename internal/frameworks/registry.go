@@ -44,6 +44,14 @@ type Lens struct {
 	Composes []string
 }
 
+// Label is the provenance string form of the lens, "<id> v<version>" (e.g.
+// "stoicism v1"), stamped on a lens-framed insight's provenance.framework so a
+// later definition-version bump never retro-colors an already-framed insight
+// (docs/frameworks.md §2; docs/mvp/data-model.md §"Insight provenance").
+func (l Lens) Label() string {
+	return fmt.Sprintf("%s v%d", l.ID, l.Version)
+}
+
 // lensFrontmatter mirrors the YAML frontmatter block of a definition file. It
 // is decoded then copied into the exported [Lens], keeping the domain type
 // free of on-disk tags (the internal/storage insight pattern).
@@ -115,14 +123,9 @@ func loadLensFile(path string) (Lens, error) {
 		return Lens{}, fmt.Errorf("frameworks: %s: lens %q missing required frontmatter key %q",
 			filepath.Base(path), fm.ID, "name")
 	}
-	return Lens{
-		ID:       fm.ID,
-		Version:  fm.Version,
-		Name:     fm.Name,
-		Lineage:  fm.Lineage,
-		Licenses: fm.Licenses,
-		Composes: fm.Composes,
-	}, nil
+	// The frontmatter and domain types carry identical fields, so a direct
+	// conversion yields the tag-free [Lens] the consent layer works with.
+	return Lens(fm), nil
 }
 
 // Registry is an id-indexed, immutable view over a loaded set of lenses. It is
@@ -164,3 +167,29 @@ func (r *Registry) Lenses() []Lens {
 
 // Len reports how many lenses the registry holds.
 func (r *Registry) Len() int { return len(r.sorted) }
+
+// ActiveSelection is the minimal consent view [Registry.ActiveLens] needs: the
+// id of the deterministically-selected active framework, or ("", false) for
+// the baseline voice. config.Config satisfies it via ActiveFramework, so this
+// pure loader binds a selected id to its definition without depending on the
+// instance-config package — which lenses a user runs stays instance data
+// decided elsewhere (lucid.json).
+type ActiveSelection interface {
+	ActiveFramework() (string, bool)
+}
+
+// ActiveLens resolves the labeled lens that frames a run's proposals. It reads
+// the active id from sel (the consent/stack decision made in lucid.json) and
+// looks it up in the loaded registry. It returns (Lens, true) only when a lens
+// is both selected AND defined; a selected id with no shipped definition fails
+// closed to the baseline voice, never a partial or zero-value lens. No rotation
+// lives here — sel decides which id is active (deterministic, stack-ordered),
+// and this method only binds that id to its definition and version for the
+// "<id> v<version>" provenance label.
+func (r *Registry) ActiveLens(sel ActiveSelection) (Lens, bool) {
+	id, ok := sel.ActiveFramework()
+	if !ok {
+		return Lens{}, false
+	}
+	return r.Lens(id)
+}
