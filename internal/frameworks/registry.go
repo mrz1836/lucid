@@ -17,8 +17,9 @@ import (
 	"path"
 	"sort"
 
-	"github.com/mrz1836/lucid/internal/storage"
 	"gopkg.in/yaml.v3"
+
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // Lens is one interpretation framework defined by docs/frameworks/<id>.md
