@@ -115,6 +115,25 @@ The cross-cutting principles below bind all three tables.
 | Sf-7 | `answer` candidate cites an id not in the slice | `decision: "block"` with `reason_code: "unverified_claim"`. | Same as Sf-2. | None. | User retries `/ask`. |
 | Sf-8 | `answer` candidate gives advice / recommendation | `decision: "block"` with `reason_code: "agent_self_attempt"`. | Same as Sf-2. | None. | (none) |
 
+### Companion (daily companion — Mirror-side, model-allowed)
+
+The companion's full degrade layering — provider-unreachable fallback,
+host-asleep catch-up, idempotency, read-back, and the loud total-miss alert —
+lives in [`../usage/companion.md`](../usage/companion.md) §"When things go wrong".
+The rows below record the degrade paths this page owns: the ones that keep an
+enrichment or a slot from failing the life-critical daily send. The dividing
+principle is deterministic — **enrichment reads degrade quietly; the prompt,
+verdict, and live-number reads stay loud** — so a message is never silently
+half-built.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| C-1 | A routine path (`morning_routine` / `night_routine`) is set but missing or unreadable | Non-fatal: omit the routine grounding from the compose context and record the miss; the message still composes and sends. Enrichment never kills the daily send. | (none — the message sends without the routine grounding) | None. | Fix or clear the routine path; the next window picks it up. |
+| C-2 | The recent-observation read fails | Same non-fatal degrade: omit the affected context sections and compose from the status panel + slots. A dry run surfaces the omission so it is never invisible. | (none) | None. | Transient reads recover next window; a persistent failure surfaces in `scheduler status`. |
+| C-3 | Model reply is missing the slot delimiters, or returns no usable text | Tolerant parse: a reply with prose but no `%%INTERPRETATION%%` delimiter becomes the whole interpretation slot with no actions; a reply with no usable text takes the deterministic-scaffold fallback (panel + sections + deterministic interpretation + deterministic action). Still a valid, well-formed scaffold. | The rendered scaffold. | None (or the per-window receipt on delivery). | (none — the fallback is the recovery) |
+| C-4 | Ledger context older than the staleness threshold | Never silently mixed in: every Ledger-derived line carries an "as logged &lt;date&gt;" stamp, and a section whose newest event is older than the threshold (default 2 days) gets a `stale` flag on its meta. Live Engine numbers are always current and carry no stamp. | The scaffold with the freshness label. | None. | (none — labeling is the designed behavior) |
+| C-5 | A prompt file, the tripwire verdict, or a live-numbers read fails | Loud, unlike the enrichment reads above: the compose returns an error rather than an empty or half-built send, so the total-miss alert path (companion.md) fires. | The loud total-miss alert. | None. | Restore the file / projection; rerun the window or wait for the next fire. |
+
 ## Storage failures
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |

@@ -160,6 +160,9 @@ payload accepts `note?` (the grammar routes trailing text there).
 | `med` | `what`, `dose?`, `taken` (boolean, default true; false = deliberately logged skip), `effect?` (helped/partial/none), `note?` | Adherence *record*, not adherence *enforcement* (§0). |
 | `intervention` | `what`, `provider?`, `body_site?`, `note?` | PT session, injection, procedure, appointment — the "what have you tried since last visit" record; renders as timeline markers in the clinician packet (§7). |
 | `measurement` | `metric`, `value`, `unit`, `note?` | Weight, BP, HRV, anything numeric. Reviewed at gate cadence only (P4). |
+| `withdrawal` | `substance?`, `severity?`, `note?` | severity **0–10** when given; `substance` free text. A body/state signal for a substance being reduced or stopped — inventory of how the withdrawal is landing, never a compliance chart (§0). Enable-gated, **off by default**. |
+| `habit_change` | `load?`, `what?`, `note?` | `load` **0–10** — the felt weight of a habit being added or dropped; `what` free text. The change-load signal the companion renders, never a streak or a target (§0). Enable-gated, **off by default**. |
+| `commitment` | `what`, `note?` | `what` free text — a commitment logged as **context**, surfaced by the companion with an "as logged &lt;date&gt;" freshness stamp. Testimony the user chose to record, **not** a tracked task: no streak, no due date, no "you didn't do it" (§0). Enable-gated, **off by default**. |
 | `context.location` | `place_ref`, `note?` | **Sticky**: "I'm in Lisbon" holds until the next one. Stated by the user, never harvested from a device. **Sensitive by default**: excluded from every export and packet unless explicitly included per export; the off-limits registry applies to it as a kind; and stated plainly — sticky locations form a permanent trail on a non-wipeable ledger, so choose your coarseness accordingly (a city is plenty). |
 | `context.day` | per-enricher, one event per enricher per day | Written by enrichers only (§5). `occurred_at` = the logical date at local noon, precision `approximate`. |
 | `memory` | `text`, `certainty` (vivid/hazy/reconstructed), `era_ref?`, `note?` | See §8. |
@@ -168,6 +171,17 @@ payload accepts `note?` (the grammar routes trailing text there).
 
 Adding a kind is a one-row diff to this table plus a payload schema —
 no envelope change, no new subsystem.
+
+The last three rows (`withdrawal`, `habit_change`, `commitment`) are the
+**companion-context kinds**: capturable signals the daily companion
+([`usage/companion.md`](usage/companion.md)) renders as context when present and
+omits gracefully when absent. They ship **enabled per-instance and off by
+default** — a fresh Ledger never carries them, and they only receive commands
+once the operator adds them to `kinds_enabled`. Like every kind on this page they
+are governed by §0: they are inventory of what happened, never obligation. The
+companion may *surface* a logged commitment; it never grades one, reminds about
+one, or scores follow-through — a commitment that earns teeth becomes an Engine
+commitment through a Gate, exactly as an eating practice does (§9).
 
 ## 4. Micro-logs — the capture grammar
 

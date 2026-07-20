@@ -136,6 +136,18 @@ derivation in the MVP.)
 }
 ```
 
+`kinds_enabled` is the per-instance allowlist: a kind receives commands only
+when it is listed here (a capture of an unlisted kind is rejected with the enable
+hint, never silently stored). The default set stays small
+(`pain`, `intake`, `elimination`, `mood`); every other kind in
+[`../observations.md`](../observations.md) §3 is opt-in. The three
+**companion-context kinds** — `withdrawal`, `habit_change`, and `commitment`
+— are available to add here so the daily companion can render them, but they are
+**off by default**: a fresh Ledger never lists them, and an operator adds them
+only when they want to log and surface those signals. Enabling them changes
+nothing about the sanctuary or witness boundaries — like every kind, they are
+inventory the Engine never reads.
+
 ## The enrichment job
 
 A scheduled job, distinct from the Mirror's optional cron and from the
