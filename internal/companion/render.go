@@ -11,17 +11,17 @@ import (
 
 // This file owns the companion's message *layout*. The split is deliberate:
 // Lucid renders the whole sectioned scaffold deterministically — the header, the
-// status panel, the context sections, the dividers, the freshness labels, and
-// the ordering — while the model fills only two short slots dropped into fixed
-// places (an interpretation and one or two next actions). Because the layout is
+// status panel, the context sections, the freshness labels, and the ordering —
+// while the model fills only two short slots dropped into fixed places (an
+// interpretation and one or two next actions). Because the layout is
 // code, not prose, the readability contract is unit-testable and a model can
 // never produce a wall of numbers or restate a raw metric: it never owns the
 // structure. See docs/usage/companion.md §"The message scaffold".
 
 // Scaffold literals. These are the fixed structural tokens the layout is built
 // from — a chat surface renders markdown tables as raw text, so the scaffold
-// uses bullets, key/value lines, and a light horizontal divider only, staying
-// mobile-friendly. dividerLine separates the major groups.
+// uses bullets and key/value lines. Morning keeps a light horizontal divider;
+// night omits it so close-out stays compact.
 const (
 	dividerLine = "― ― ―"
 	bulletMark  = "•"
@@ -81,17 +81,18 @@ type Briefing struct {
 
 // Render turns a Briefing into the final Discord message. It is pure and
 // byte-stable: the same Briefing always renders the identical bytes, which is
-// what makes the readability contract testable. Major groups are joined by a
-// blank-line-padded `― ― ―` divider and empty groups are dropped, so a message
-// with no enrichment or no model slots still reads cleanly (no dangling
-// dividers).
+// what makes the readability contract testable. Morning major groups are joined
+// by a blank-line-padded `― ― ―` divider; night groups are joined by blank lines
+// only. Empty groups are dropped, so a message with no enrichment or no model
+// slots still reads cleanly (no dangling dividers).
 //
 // The region order differs by window. Morning is forward-looking — the status
 // panel is the hero, then the day's context, then the read and the next move.
 // Night is a close-out ritual — the day's read-back (the context sections)
-// leads, then the numbers, then the examen and the single close-out action —
-// so the two windows never read the same. The Engine verdict, when present, is
-// always the last group in both.
+// leads, then the numbers, then the single close-out action. Night deliberately
+// suppresses the interpretation slot and the divider line so it does not read
+// like a second morning memo. The Engine verdict, when present, is always the
+// last group in both.
 func Render(b Briefing) string {
 	header := renderHeader(b)
 	panel := strings.Join(b.Panel, "\n")
@@ -110,9 +111,13 @@ func Render(b Briefing) string {
 	verdict := strings.TrimSpace(b.Verdict)
 
 	var order []string
+	separator := "\n\n" + dividerLine + "\n\n"
 	if b.Mode == ModeNight {
-		// Close-out ordering: read-back (sections) leads, the numbers follow.
-		order = []string{header, sections, panel, interp, next, verdict}
+		// Close-out ordering: read-back (sections) leads, the numbers follow,
+		// and the user's single close-out action ends the ritual. The model's
+		// interpretation slot is intentionally not rendered at night.
+		order = []string{header, sections, panel, next, verdict}
+		separator = "\n\n"
 	} else {
 		// Forward-looking ordering: the status panel is the hero.
 		order = []string{header, panel, sections, interp, next, verdict}
@@ -124,7 +129,7 @@ func Render(b Briefing) string {
 			groups = append(groups, g)
 		}
 	}
-	return strings.Join(groups, "\n\n"+dividerLine+"\n\n")
+	return strings.Join(groups, separator)
 }
 
 // renderHeader renders the window header — `{emoji} **{Label}** · {Weekday,
@@ -191,12 +196,12 @@ func renderActions(mode Mode, actions []string) string {
 	return b.String()
 }
 
-// interpHeader is the interpretation-slot header, framed for the window: the
-// morning "read" is forward-looking; the night "examen" is a close-out
-// reflection.
+// interpHeader is the interpretation-slot header. Night currently suppresses
+// the interpretation slot in Render, but this remains defined for parser/render
+// contract completeness.
 func interpHeader(mode Mode) string {
 	if mode == ModeNight {
-		return "🕯️ **Examen**"
+		return "🌙 **The read**"
 	}
 	return "🧭 **The read**"
 }

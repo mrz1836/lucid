@@ -86,10 +86,10 @@ schema notes: [`../mvp/data-model.md`](../mvp/data-model.md) §"lucid.json".
 
 Lucid owns the message **layout**; the model fills only the prose. That split is
 what makes the briefing scannable and testable: the sectioned scaffold — the
-status panel, the section order, the whitespace, the dividers, and the freshness
-labels — is rendered by deterministic Lucid code, and the model writes only two
-short slots dropped into fixed places. A model can never produce a wall of
-numbers or restate a raw metric, because it never owns the layout.
+status panel, the section order, the whitespace, and the freshness labels — is
+rendered by deterministic Lucid code, and the model writes only two short slots
+dropped into fixed places. A model can never produce a wall of numbers or
+restate a raw metric, because it never owns the layout.
 
 For each window the compose worker:
 
@@ -142,14 +142,18 @@ interpretation, and action are always in distinct, scannable regions:
   platter, low cognitive load.
 - **Footer** — an optional closing line, and the appended verdict on a missed day.
 
-Major groups are separated by a `― ― ―` divider and blank lines, so the message
-reads cleanly on a phone. There are **no markdown tables** — a chat surface
-renders them as raw text, so the scaffold uses bullets and key/value lines only.
+Morning major groups are separated by a `― ― ―` divider and blank lines, so the
+forward-looking brief reads cleanly on a phone. Night deliberately omits those
+divider lines: it is a compact close-out prompt, not a second status memo. There
+are **no markdown tables** — a chat surface renders them as raw text, so the
+scaffold uses bullets and key/value lines only.
 
 **Night is a close-out, not a second morning.** The night scaffold reorders the
-regions into a close-out ritual — the day's read-back first, then the
-interpretation/examen, then a single close-out next action, then the verdict —
-distinct from the morning's forward-looking order.
+regions into a close-out ritual — the day's read-back first, then the compact
+status panel, then a single close-out next action, then the verdict — distinct
+from the morning's forward-looking order. The model may still produce an
+interpretation slot for contract compatibility, but the night renderer does not
+display a separate examen/read section; the action is the point.
 
 ### The two model slots
 
@@ -206,7 +210,7 @@ pure status brief lacks:
 |---|---|
 | Header: emoji + bold label · day | `{emoji} **Morning** · {Weekday, Mon D}` |
 | Hero status panel | The compact live-numbers panel |
-| `― ― ―` group dividers | Dividers between the panel, the sections, and the slots |
+| `― ― ―` group dividers | Morning dividers between the panel, the sections, and the slots; night omits them |
 | `{emoji} **{Label}** · {meta}` section headers, `•` bullets | The context sections |
 | Appended freshness flag on stale data | The `stale` flag on a section's meta |
 | Footer | Closing line / appended verdict |

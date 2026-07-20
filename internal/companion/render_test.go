@@ -79,9 +79,9 @@ func TestRender_MorningGolden(t *testing.T) {
 }
 
 // TestRender_NightOrdering confirms the night window is a distinct close-out
-// ritual: the day read-back (sections) leads before the status panel, and the
-// slots use the examen / close-out framing — never the morning ordering or
-// labels.
+// ritual: the day read-back (sections) leads before the status panel, the
+// interpretation slot is suppressed, and the action uses close-out framing —
+// never the morning ordering or labels.
 func TestRender_NightOrdering(t *testing.T) {
 	b := sampleMorningBriefing()
 	b.Mode = ModeNight
@@ -89,10 +89,12 @@ func TestRender_NightOrdering(t *testing.T) {
 	got := Render(b)
 
 	assert.True(t, strings.HasPrefix(got, "🌙 **Night** · Monday, Jul 20"), "night header leads")
-	assert.Contains(t, got, "🕯️ **Examen**", "night interpretation is the examen")
+	assert.NotContains(t, got, "🕯️ **Examen**", "night suppresses the separate examen/read section")
+	assert.NotContains(t, got, "Steady week. The streak holds", "night does not render the interpretation slot")
 	assert.Contains(t, got, "🌒 **Close-out**", "night action is the close-out")
 	assert.NotContains(t, got, "🧭 **The read**", "night does not use the morning read header")
 	assert.NotContains(t, got, "▶️ **Next**", "night does not use the morning next header")
+	assert.NotContains(t, got, dividerLine, "night omits divider lines for a compact close-out")
 
 	// Close-out ordering: the read-back section comes before the numbers panel,
 	// the reverse of the morning hero-first order.

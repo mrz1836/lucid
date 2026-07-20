@@ -209,7 +209,7 @@ func TestCompose_NormalDayMorning_RendersScaffold(t *testing.T) {
 }
 
 // TestCompose_NightUsesNightTemplate confirms the night window reads the night
-// template, stamps the night intent, and renders the distinct close-out framing.
+// template, stamps the night intent, and renders the compact close-out framing.
 func TestCompose_NightUsesNightTemplate(t *testing.T) {
 	comp := writePrompts(t)
 	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("WARM NIGHT", "Close the chain.")}}}
@@ -218,7 +218,8 @@ func TestCompose_NightUsesNightTemplate(t *testing.T) {
 	res, err := c.Compose(context.Background(), ModeNight, time.Now())
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(res.Text, "🌙 **Night** · "), "night header leads")
-	assert.Contains(t, res.Text, "🕯️ **Examen**\nWARM NIGHT", "night uses the examen framing")
+	assert.NotContains(t, res.Text, "🕯️ **Examen**", "night suppresses the separate examen section")
+	assert.NotContains(t, res.Text, "WARM NIGHT", "night does not render the interpretation slot")
 	assert.Contains(t, res.Text, "🌒 **Close-out**", "night uses the close-out framing")
 	require.Equal(t, 1, p.Calls())
 	assert.Equal(t, intentNight, p.Requests[0].Intent)
@@ -271,7 +272,8 @@ func TestCompose_MissDayNight_RendersVerdict(t *testing.T) {
 
 	res, err := c.Compose(context.Background(), ModeNight, time.Now())
 	require.NoError(t, err)
-	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+dividerLine+"\n\nVERDICT LINE"))
+	assert.True(t, strings.HasSuffix(res.Text, "\n\nVERDICT LINE"))
+	assert.NotContains(t, res.Text, dividerLine, "night verdict stays compact without divider chrome")
 	assert.True(t, res.MissDay)
 }
 
@@ -311,7 +313,8 @@ func TestCompose_ProviderDown_NormalNight_FallsBackToBellCloseout(t *testing.T) 
 	assert.True(t, res.Fallback)
 	assert.False(t, res.UsedLLM)
 	assert.Contains(t, res.Text, "🌙 **Night** · ")
-	assert.Contains(t, res.Text, "🕯️ **Examen**\n"+fallbackInterpNight)
+	assert.NotContains(t, res.Text, "🕯️ **Examen**", "night fallback suppresses the separate examen section")
+	assert.NotContains(t, res.Text, fallbackInterpNight, "night fallback does not render interpretation copy")
 	assert.Contains(t, res.Text, "🌒 **Close-out**\n• "+templates.Bell("Journal. Dock. Read."))
 }
 
