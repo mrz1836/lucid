@@ -66,6 +66,37 @@ func TestPropose_Proposal(t *testing.T) {
 	assert.False(t, got.NoLLM)
 }
 
+// TestPropose_ThreadsFrameworkOnProposal proves the active lens label threads
+// into a proposal result (so the persist path can stamp provenance.framework),
+// and that a lens-neutral input leaves it nil.
+func TestPropose_ThreadsFrameworkOnProposal(t *testing.T) {
+	reply := `{"outcome":"proposal","proposal_text":"One possible pattern: preparation as a way to feel safe.","shape_tag":"prep-as-safety","supporting_entry_ids":["` + curID + `"]}`
+
+	label := "stoicism v1"
+	framed := baseInput()
+	framed.Framework = &label
+	got := Propose(context.Background(), framed, fake(reply))
+	require.Equal(t, OutcomeProposal, got.Outcome)
+	require.NotNil(t, got.Framework)
+	assert.Equal(t, label, *got.Framework)
+
+	// Lens-neutral input carries no label.
+	got = Propose(context.Background(), baseInput(), fake(reply))
+	require.Equal(t, OutcomeProposal, got.Outcome)
+	assert.Nil(t, got.Framework)
+}
+
+// TestPropose_FrameworkNotStampedOnNoPattern proves the label never rides a
+// non-proposal outcome (only a proposal is ever persisted as an insight).
+func TestPropose_FrameworkNotStampedOnNoPattern(t *testing.T) {
+	label := "stoicism v1"
+	in := baseInput()
+	in.Framework = &label
+	got := Propose(context.Background(), in, fake(`{"outcome":"no_pattern","message_text":"not yet"}`))
+	assert.Equal(t, OutcomeNoPattern, got.Outcome)
+	assert.Nil(t, got.Framework, "no_pattern is lens-neutral — nothing is persisted")
+}
+
 // TestPropose_SoftContradiction accepts a two-id question ending in "?".
 func TestPropose_SoftContradiction(t *testing.T) {
 	reply := `{"outcome":"soft_contradiction","message_text":"Earlier you read as X; today more like Y. Want to look at the gap?","supporting_entry_ids":["` + winID + `","` + curID + `"]}`

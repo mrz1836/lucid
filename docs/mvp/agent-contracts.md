@@ -794,11 +794,23 @@ before implementation begins.
   "your goal is …" framing. Reflection only proposes patterns; it
   never proposes actions.
 
-### Framework (deferred — design complete)
+### Framework (partially live — labeling shipped, licensing deferred)
 
-* **Why deferred.** Selectable frameworks (Stoicism, IFS, NVC, ...)
-  ship only once Reflection/Safety are hardened in live use. The MVP
-  uses Lucid's single implicit voice
+* **Now live (labeling only).** The lens-instrumentation stage has
+  shipped: the six definition files load as a consentable lens registry,
+  stack consent is stored in `lucid.json` (`framework_stack`,
+  `framework_consents`, off by default), the deterministically-selected
+  active lens frames the read-only weekly deep-dive, and every persisted
+  weekly pattern is stamped with `provenance.framework`
+  (`<id> v<version>`). See
+  [`../usage/weekly-reflection.md`](../usage/weekly-reflection.md). This
+  is labeling and framing only — **no** license unlocks any blocklist
+  pattern (below), and lens selection is manual, not rotated
+  ([P-2](../protocols/P-2-lens-rotation.md) stays deferred).
+* **Why the rest is deferred.** The vocabulary-licensing mechanism and
+  lens-aware `/checkin` proposals ship only once Reflection/Safety are
+  further hardened in live use. Outside the weekly deep-dive the MVP uses
+  Lucid's single implicit voice
   ([`product-principles.md`](product-principles.md) §6).
 * **The design is canonical:** [`../frameworks.md`](../frameworks.md)
   — definition files as shareable specs under
@@ -810,13 +822,17 @@ before implementation begins.
   lens per output, the vocabulary-licensing mechanism with
   unlicensable certainty patterns, and `provenance.framework` on
   lens-framed insights.
-* **Pre-conditions to ship.** A live, hardened Reflection/Safety
-  pipeline; the Safety/Consent license check implemented (stack +
-  label + hypothesis-frame, frameworks.md §6); the contract diff on
-  this page turning this stub into a full six-section contract.
-* **Forbidden until then.** Reflection never frames a proposal in
-  named-framework terms, and no license unlocks any blocklist pattern
-  — in the MVP the blocklist stands whole.
+* **Pre-conditions for the remaining stages.** A live, hardened
+  Reflection/Safety pipeline; the Safety/Consent license check
+  implemented (stack + label + hypothesis-frame, frameworks.md §6); the
+  contract diff on this page turning this stub into a full six-section
+  contract.
+* **Still forbidden.** No license unlocks any blocklist pattern — the
+  blocklist stands whole and certainty framing is never permitted under
+  any lens. `/checkin`'s `reflection.propose` is not yet lens-aware and
+  never frames a proposal in named-framework terms; named-lens framing
+  is confined to the read-only weekly deep-dive, where it is labeled and
+  hypothesis-framed.
 
 ### Consolidation (deferred / replaced)
 

@@ -1,6 +1,14 @@
 # Lucid — The Frameworks Layer (interpretation lenses)
 
 **Date:** 2026-07-03 · **Status:** Canonical — a living concept, evolving with the project
+**Implementation:** the lens-instrumentation MVP has shipped — the six definition
+files load as a consentable lens registry, the stack/consent config
+(`framework_stack` / `framework_consents`) is live and off by default, and the
+active lens frames and labels the weekly deep-dive (`provenance.framework`) via
+the read-only [`usage/weekly-reflection.md`](usage/weekly-reflection.md) surface.
+Still deferred: the vocabulary-licensing mechanism (§6 — the blocklist stands
+whole, labeling only), lens-aware `/checkin` proposals, and automatic rotation
+([P-2](protocols/P-2-lens-rotation.md)).
 **Scope:** The pluggable-interpretation layer named in
 [`architecture.md`](architecture.md) §7 and the Mirror's
 "framework-based interpretation" responsibility (§3): what a framework
@@ -255,12 +263,19 @@ user explicitly chose (attachment theory cannot speak without saying
 * **No lens in the Engine, ever.** Bells, escalations, and templates
   have no voice and no worldview; the frameworks layer is Mirror-side
   only.
-* **Ships post-MVP.** The MVP keeps its single implicit voice; this
-  layer lands as the contract diff
-  [`mvp/agent-contracts.md`](mvp/agent-contracts.md) §Framework names,
-  once Reflection/Safety are hardened in live use. It must ship
-  before the aperture translation layer, and P-2 stays blocked until
-  it does.
+* **Ships in stages.** The MVP keeps its single implicit voice by
+  default; the lens-instrumentation stage has now shipped — the
+  registry, stack consent, one labeled lens per output, and
+  `provenance.framework` — applied on the read-only weekly deep-dive
+  ([`usage/weekly-reflection.md`](usage/weekly-reflection.md)) with
+  manual/deterministic lens selection. The remaining stages named in the
+  contract diff [`mvp/agent-contracts.md`](mvp/agent-contracts.md)
+  §Framework — the vocabulary-licensing mechanism (§6; until it lands the
+  blocklist stands whole and this is labeling only) and lens-aware
+  `/checkin` proposals — land once Reflection/Safety are further hardened
+  in live use. This layer must ship in full before the aperture
+  translation layer, and P-2 (automatic rotation) stays deferred until it
+  does.
 
 ## 8. Initial definitions
 

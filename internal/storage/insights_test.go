@@ -56,6 +56,55 @@ func TestWriteInsight_AllocatesSlotAndValidates(t *testing.T) {
 	assert.Contains(t, ins.Body, "test an idea once")
 }
 
+// TestWriteInsight_FrameworkLabelRoundTrips confirms a lens-framed insight
+// carries its "<id> v<version>" provenance.framework through render/parse and
+// re-validates on disk (AC-6).
+func TestWriteInsight_FrameworkLabelRoundTrips(t *testing.T) {
+	a := New(t.TempDir())
+	in := validInsight()
+	label := "stoicism v1"
+	in.Provenance.Framework = &label
+
+	res, err := a.WriteInsight(in)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(res.Path)
+	require.NoError(t, err)
+	require.NoError(t, ValidateInsight(content))
+
+	ins, err := a.ReadInsight(res.InsightID)
+	require.NoError(t, err)
+	require.NotNil(t, ins.Provenance.Framework)
+	assert.Equal(t, label, *ins.Provenance.Framework)
+}
+
+// TestWriteInsight_MalformedFrameworkRejected proves a present-but-malformed
+// framework label fails the provenance gate before any file is written, while a
+// nil framework (the baseline voice) stays valid (AC-6).
+func TestWriteInsight_MalformedFrameworkRejected(t *testing.T) {
+	a := New(t.TempDir())
+	for name, label := range map[string]string{
+		"prose":          "Stoicism version one",
+		"missing v":      "stoicism 1",
+		"uppercase id":   "Stoicism v1",
+		"zero version":   "stoicism v0",
+		"trailing space": "stoicism v1 ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := validInsight()
+			bad := label
+			in.Provenance.Framework = &bad
+			_, err := a.WriteInsight(in)
+			require.Error(t, err)
+		})
+	}
+	assert.Equal(t, 0, countInsightFiles(t, a), "no insight is written when the framework label is malformed")
+
+	// A nil framework remains valid — the baseline, lens-neutral voice.
+	_, err := a.WriteInsight(validInsight())
+	require.NoError(t, err)
+}
+
 // TestWriteInsight_SlotsAdvancePerDay confirms three insights on the same day
 // get a, b, c and the next day resets to a.
 func TestWriteInsight_SlotsAdvancePerDay(t *testing.T) {
