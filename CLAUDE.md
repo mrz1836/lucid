@@ -108,9 +108,10 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   (`iface.go`, `fake.go`).
 - [`internal/validate`](internal/validate) — `lucid validate`, the read-only
   architecture-gate sweep (boundary, diagnostic-language, links, schema).
-- `internal/{config,upgrade,isoweek,deps}` + `data/` — config, self-update,
-  ISO-week math, pinned core deps (`go-flywheel`, `go-foundation`), embedded
-  person-key wordlist.
+- `internal/{config,upgrade,isoweek,deps,keyderive}` + `data/` — config,
+  self-update, ISO-week math, pinned core deps (`go-flywheel`, `go-foundation`),
+  the pure salted slug-derivation core shared by person_keys and registry keys,
+  and the embedded person-key wordlist.
 
 ## Build, verify, commit
 

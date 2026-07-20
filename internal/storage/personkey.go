@@ -1,10 +1,9 @@
 package storage
 
 import (
-	"crypto/sha256"
 	"fmt"
-	"strings"
-	"unicode"
+
+	"github.com/mrz1836/lucid/internal/keyderive"
 )
 
 // personKeyPrefix is the fixed slug prefix for every person_key
@@ -17,13 +16,7 @@ const personKeyPrefix = "person_"
 // "m" and therefore share one person_key (data-model.md §"person_key
 // derivation").
 func NormalizeName(displayName string) string {
-	var b strings.Builder
-	for _, r := range displayName {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToLower(r))
-		}
-	}
-	return b.String()
+	return keyderive.Normalize(displayName)
 }
 
 // DerivePersonKey computes the deterministic base slug for a display
@@ -38,27 +31,15 @@ func NormalizeName(displayName string) string {
 //
 // It returns an error if the normalized name is empty or the wordlist
 // is empty (both would make the derivation meaningless). Collision
-// suffixes are handled by [ResolvePersonKey], not here.
+// suffixes are handled by [ResolvePersonKey], not here. The seed is the
+// bare normalized name (person_keys are unsalted); [keyderive.Derive]
+// owns the hash→word math.
 func DerivePersonKey(displayName string, wordlist []string) (string, error) {
 	normalized := NormalizeName(displayName)
 	if normalized == "" {
 		return "", fmt.Errorf("storage: cannot derive person_key from %q (empty after normalize)", displayName)
 	}
-	n := len(wordlist)
-	if n == 0 {
-		return "", fmt.Errorf("storage: cannot derive person_key: empty wordlist")
-	}
-
-	hash := sha256.Sum256([]byte(normalized))
-	word1 := wordlist[(int(hash[0])*256+int(hash[1]))%n]
-	word2 := wordlist[(int(hash[2])*256+int(hash[3]))%n]
-	if word1 == "" {
-		return "", fmt.Errorf("storage: wordlist entry is empty")
-	}
-
-	// word1's first rune is the initial; words are ASCII lowercase.
-	initial := []rune(word1)[0]
-	return fmt.Sprintf("%s%c-%s", personKeyPrefix, initial, word2), nil
+	return keyderive.Derive(personKeyPrefix, []byte(normalized), wordlist)
 }
 
 // KeyOwnerFunc reports, for a candidate person_key, the normalized name
@@ -82,17 +63,5 @@ func ResolvePersonKey(displayName string, wordlist []string, owner KeyOwnerFunc)
 	if err != nil {
 		return "", err
 	}
-	if owner == nil {
-		return base, nil
-	}
-
-	self := NormalizeName(displayName)
-	candidate := base
-	for suffix := 2; ; suffix++ {
-		stored, exists := owner(candidate)
-		if !exists || stored == self {
-			return candidate, nil
-		}
-		candidate = fmt.Sprintf("%s-%d", base, suffix)
-	}
+	return keyderive.Resolve(base, NormalizeName(displayName), keyderive.OwnerFunc(owner)), nil
 }

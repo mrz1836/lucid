@@ -1,12 +1,11 @@
 package observations
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
-	"unicode"
+
+	"github.com/mrz1836/lucid/internal/keyderive"
 )
 
 // Registry kinds (observations.md §8). The key is prefixed with the singular
@@ -90,25 +89,16 @@ func DeriveRegistryKey(kind, name, salt string, wordlist []string) (string, erro
 	if !ok {
 		return "", fmt.Errorf("observations: unknown registry kind %q", kind)
 	}
-	normalized := normalizeRegistryName(name)
+	normalized := keyderive.Normalize(name)
 	if normalized == "" {
 		return "", fmt.Errorf("observations: cannot derive %s key from %q (empty after normalize)", kind, name)
 	}
-	n := len(wordlist)
-	if n == 0 {
-		return "", fmt.Errorf("observations: cannot derive registry key: empty wordlist")
-	}
-
 	// Salt-prefix the normalized name before hashing (a NUL separates salt
 	// from name so no two (salt, name) pairs can collide by concatenation).
-	hash := sha256.Sum256([]byte(salt + "\x00" + normalized))
-	word1 := wordlist[(int(hash[0])*256+int(hash[1]))%n]
-	word2 := wordlist[(int(hash[2])*256+int(hash[3]))%n]
-	if word1 == "" {
-		return "", fmt.Errorf("observations: wordlist entry is empty")
-	}
-	initial := []rune(word1)[0]
-	return fmt.Sprintf("%s_%c-%s", prefix, initial, word2), nil
+	// The kind prefix carries its own trailing "_" so the shared deriver
+	// reproduces the injury_/place_/… filename shape exactly.
+	seed := []byte(salt + "\x00" + normalized)
+	return keyderive.Derive(prefix+"_", seed, wordlist)
 }
 
 // RegistryKeyOwnerFunc reports the normalized name stored under a candidate
@@ -126,18 +116,7 @@ func ResolveRegistryKey(kind, name, salt string, wordlist []string, owner Regist
 	if err != nil {
 		return "", err
 	}
-	if owner == nil {
-		return base, nil
-	}
-	self := normalizeRegistryName(name)
-	candidate := base
-	for suffix := 2; ; suffix++ {
-		stored, exists := owner(candidate)
-		if !exists || stored == self {
-			return candidate, nil
-		}
-		candidate = fmt.Sprintf("%s-%d", base, suffix)
-	}
+	return keyderive.Resolve(base, keyderive.Normalize(name), keyderive.OwnerFunc(owner)), nil
 }
 
 // NewRegistry builds a fresh registry record for a first mention.
@@ -205,7 +184,7 @@ func (r Registry) Normalized() Registry {
 // NormalizedName exposes the canonical identity of a referent name (the value
 // the collision-suffix owner check compares), so the storage adapter can key
 // its owner lookups on the same normalization the derivation uses.
-func NormalizedName(name string) string { return normalizeRegistryName(name) }
+func NormalizedName(name string) string { return keyderive.Normalize(name) }
 
 // kindPrefix returns the singular key prefix for a registry kind.
 func kindPrefix(kind string) (string, bool) {
@@ -215,19 +194,6 @@ func kindPrefix(kind string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-// normalizeRegistryName lowercases a name and strips punctuation/whitespace,
-// leaving only letters and digits — the same canonicalization people/ uses so
-// "Left knee" and "left knee." share one key.
-func normalizeRegistryName(name string) string {
-	var b strings.Builder
-	for _, ru := range name {
-		if unicode.IsLetter(ru) || unicode.IsDigit(ru) {
-			b.WriteRune(unicode.ToLower(ru))
-		}
-	}
-	return b.String()
 }
 
 // cloneAnyMap deep-copies a one-level map (nil stays a fresh empty map). The
