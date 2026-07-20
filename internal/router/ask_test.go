@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -44,7 +44,7 @@ func hashTree(t *testing.T, home string) string {
 		}
 		return nil
 	}))
-	sort.Strings(files)
+	slices.Sort(files)
 	h := sha256.New()
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -142,13 +142,11 @@ func TestAsk_7_5_ByteIdenticalAndSerialized(t *testing.T) {
 	// exercise the read-only path under contention (St-6).
 	var wg sync.WaitGroup
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			p := &provider.Fake{Script: []provider.Exchange{askAnswer(id)}}
 			_, err := r.Ask(context.Background(), AskRequest{Question: "how do I act in groups?", Provider: p})
 			assert.NoError(t, err)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -209,7 +207,7 @@ func TestAsk_SliceCapsRespected(t *testing.T) {
 	r.cfg.AskInsightsCap = 2 // force a tiny cap so truncation is provable
 
 	base := reflectWeekNow()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		seedInsight(t, a, base.Add(time.Duration(-i)*24*time.Hour), fmt.Sprintf("insight %d", i))
 	}
 

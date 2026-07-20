@@ -410,7 +410,7 @@ func splitReflectionBody(body string) (summary string, changeLog []string) {
 	}
 	if idx := strings.Index(s, changeLogHeading); idx >= 0 {
 		summary = strings.TrimSpace(s[:idx])
-		for _, line := range strings.Split(s[idx+len(changeLogHeading):], "\n") {
+		for line := range strings.SplitSeq(s[idx+len(changeLogHeading):], "\n") {
 			if entry, ok := strings.CutPrefix(strings.TrimSpace(line), "- "); ok {
 				changeLog = append(changeLog, entry)
 			}
@@ -424,7 +424,7 @@ func splitReflectionBody(body string) (summary string, changeLog []string) {
 // prefix (the "# Weekly recall — …" heading), so the caller can isolate the
 // summary from the heading regardless of the week label in it.
 func cutAfterLine(s, prefix string) (string, bool) {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.HasPrefix(line, prefix) {
 			if idx := strings.Index(s, line); idx >= 0 {
 				return s[idx+len(line):], true

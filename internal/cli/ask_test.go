@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"testing"
 	"time"
 
@@ -60,7 +59,7 @@ func homeTreeHash(t *testing.T, home string) string {
 		}
 		return nil
 	}))
-	sort.Strings(files)
+	slices.Sort(files)
 	h := sha256.New()
 	for _, f := range files {
 		b, err := os.ReadFile(f)

@@ -51,7 +51,7 @@ func readObsEvents(t *testing.T, home string) []observations.Event {
 		if rerr != nil {
 			return rerr
 		}
-		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 			if line == "" {
 				continue
 			}

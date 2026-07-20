@@ -180,7 +180,7 @@ func TestApplyWeekProposal_ThreeUnansweredArmsPause(t *testing.T) {
 	r, a, _ := newBootedRouter(t)
 	seedProc(t, a, curr, fixedNow(), nil, "prep")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		res, err := r.ApplyWeekProposal(context.Background(), applyReq(
 			cleanCandidate, fmt.Sprintf("prep-shape-%d", i), "stoicism v1",
 			ProposalResponse{Kind: RespUnanswered}, RuleResponse{}, &provider.Fake{},

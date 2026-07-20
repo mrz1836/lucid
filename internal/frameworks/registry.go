@@ -11,11 +11,12 @@
 package frameworks
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"os"
 	"path"
-	"sort"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 
@@ -105,7 +106,7 @@ func LoadLensesFS(fsys fs.FS) ([]Lens, error) {
 		seen[lens.ID] = e.Name()
 		lenses = append(lenses, lens)
 	}
-	sort.Slice(lenses, func(i, j int) bool { return lenses[i].ID < lenses[j].ID })
+	slices.SortFunc(lenses, func(a, b Lens) int { return cmp.Compare(a.ID, b.ID) })
 	return lenses, nil
 }
 

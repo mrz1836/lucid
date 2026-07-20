@@ -106,7 +106,7 @@ func ValidateEnricherURL(name, rawURL string) error {
 	if query == "" {
 		return fmt.Errorf("observations: enricher url carries no query")
 	}
-	for _, kv := range strings.Split(query, "&") {
+	for kv := range strings.SplitSeq(query, "&") {
 		key, val, found := strings.Cut(kv, "=")
 		if !found {
 			return fmt.Errorf("observations: malformed enricher url parameter %q", kv)
@@ -133,7 +133,7 @@ func validateEnricherParam(key, val string) error {
 			return fmt.Errorf("observations: enricher url %s %q is not a date", key, val)
 		}
 	case "daily":
-		for _, f := range strings.Split(val, ",") {
+		for f := range strings.SplitSeq(val, ",") {
 			if !slices.Contains(openMeteoDailyFields, f) {
 				return fmt.Errorf("observations: enricher url requests unknown daily field %q", f)
 			}

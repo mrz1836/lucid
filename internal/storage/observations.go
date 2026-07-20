@@ -604,7 +604,7 @@ func readJSONLLines(path string) (lines [][]byte, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: read %q: %w", path, err)
 	}
-	for _, raw := range strings.Split(string(b), "\n") {
+	for raw := range strings.SplitSeq(string(b), "\n") {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
