@@ -86,16 +86,24 @@ type ProviderConfig struct {
 // NightTemplate, and SystemPrompt are each an opaque, self-contained prompt
 // file the worker opens directly — lucid never traverses into the directory
 // holding them (no dir-walk, no filename convention), so the block is the
-// whole firewall seam. Model optionally overrides provider.model for the
-// companion's compose call; empty inherits the provider default. Fire times
-// are deliberately not companion keys — they are inherited from the
-// chain.json bell/tripwire marks so the companion can never drift from the
-// deterministic pair (data-model.md §"lucid.json").
+// whole firewall seam. MorningRoutine and NightRoutine are two more opaque,
+// self-contained file paths — the operator's intended morning and night
+// routine docs — that the compose worker reads for routine-grounded context;
+// they share the template seam's firewall shape (opaque path, no dir-walk) and
+// are optional: absent/empty means the routine section is gracefully omitted,
+// so they are never part of the enabled-companion required-path set. Model
+// optionally overrides provider.model for the companion's compose call; empty
+// inherits the provider default. Fire times are deliberately not companion
+// keys — they are inherited from the chain.json bell/tripwire marks so the
+// companion can never drift from the deterministic pair (data-model.md
+// §"lucid.json").
 type CompanionConfig struct {
 	Enabled         bool   `json:"enabled"`
 	MorningTemplate string `json:"morning_template"`
 	NightTemplate   string `json:"night_template"`
 	SystemPrompt    string `json:"system_prompt"`
+	MorningRoutine  string `json:"morning_routine"`
+	NightRoutine    string `json:"night_routine"`
 	Model           string `json:"model"`
 }
 
@@ -282,7 +290,10 @@ func (p ProviderConfig) validate() error {
 // once enabled, all three prompt-file paths must be set — an enabled
 // companion with a missing template path is a hard error, mirroring the
 // provider validate style, rather than a silent no-op that would leave a
-// life-critical daily ritual quietly dead. The optional model override is
+// life-critical daily ritual quietly dead. The morning_routine/night_routine
+// paths are deliberately absent from this required set: they are optional
+// enrichment, so an enabled companion with empty routine paths validates and
+// simply omits the routine section. The optional model override is
 // unconstrained here: an unknown model surfaces at compose time from the
 // provider, exactly as provider.model does. There is no clip rule — no
 // companion bound is documented as coercible.
