@@ -340,3 +340,107 @@ func TestUnmarshal_BadJSON(t *testing.T) {
 	_, err := Unmarshal([]byte("{not json"))
 	assert.Error(t, err)
 }
+
+// TestDefault_FrameworkLayerOff pins the shipped framework default: no lens is
+// stacked or consented, so the reflection voice stays baseline until an
+// operator amends the Charter stack (docs/frameworks.md §3). The collections
+// are non-nil so the file renders [] / {} rather than null.
+func TestDefault_FrameworkLayerOff(t *testing.T) {
+	c := Default()
+	assert.NotNil(t, c.FrameworkStack)
+	assert.Empty(t, c.FrameworkStack)
+	assert.NotNil(t, c.FrameworkConsents)
+	assert.Empty(t, c.FrameworkConsents)
+
+	for _, id := range []string{
+		"attachment-theory", "eight-dates", "four-agreements", "ifs", "nvc", "stoicism",
+	} {
+		assert.Falsef(t, c.LensConsented(id), "no lens is consented by default: %q", id)
+	}
+	if _, ok := c.ActiveFramework(); ok {
+		t.Error("ActiveFramework over the default stack: want none")
+	}
+}
+
+// TestLensConsented_FailsClosed proves a lens frames proposals only when it is
+// both in the standing stack AND carries a recorded consent timestamp — a
+// stacked-but-unconsented entry, a dangling consent for an unstacked lens, an
+// unknown id, and the empty id all read as not consented.
+func TestLensConsented_FailsClosed(t *testing.T) {
+	c := Default()
+	c.FrameworkStack = []string{"stoicism", "ifs"}
+	c.FrameworkConsents = map[string]string{
+		"stoicism": "2026-07-05T18:00:00-04:00",
+		// ifs is stacked but never consented; nvc is consented but not stacked.
+		"nvc": "2026-07-05T18:02:00-04:00",
+	}
+	assert.True(t, c.LensConsented("stoicism"), "stacked + consented ⇒ consented")
+	assert.False(t, c.LensConsented("ifs"), "stacked but not consented ⇒ fails closed")
+	assert.False(t, c.LensConsented("nvc"), "consented but not stacked ⇒ fails closed")
+	assert.False(t, c.LensConsented("stoicism-typo"), "unknown id ⇒ not consented")
+	assert.False(t, c.LensConsented(""), "empty id ⇒ not consented")
+
+	// An empty-string consent value is treated as no consent (fails closed).
+	c.FrameworkStack = append(c.FrameworkStack, "nvc")
+	c.FrameworkConsents["nvc"] = ""
+	assert.False(t, c.LensConsented("nvc"), "empty consent timestamp ⇒ fails closed")
+}
+
+// TestActiveFramework_FirstConsentedInStackOrder proves the active lens is
+// selected deterministically — the first consented lens in stack order — with
+// no rotation: a leading unconsented entry is skipped, and re-running never
+// changes the pick.
+func TestActiveFramework_FirstConsentedInStackOrder(t *testing.T) {
+	c := Default()
+	// ifs leads the stack but is unconsented, so stoicism (next, consented) wins.
+	c.FrameworkStack = []string{"ifs", "stoicism", "nvc"}
+	c.FrameworkConsents = map[string]string{
+		"stoicism": "2026-07-05T18:00:00-04:00",
+		"nvc":      "2026-07-05T18:02:00-04:00",
+	}
+	got, ok := c.ActiveFramework()
+	require.True(t, ok)
+	assert.Equal(t, "stoicism", got)
+	// Deterministic: a second call yields the same pick (no rotation).
+	again, _ := c.ActiveFramework()
+	assert.Equal(t, got, again)
+
+	// No stacked lens consented ⇒ the baseline voice.
+	c.FrameworkConsents = map[string]string{}
+	_, ok = c.ActiveFramework()
+	assert.False(t, ok)
+}
+
+// TestFramework_MarshalsEmptyCollections asserts the default framework block
+// renders [] / {} (never null) and that a populated block survives a
+// marshal/unmarshal round-trip byte-identically in value.
+func TestFramework_MarshalsEmptyCollections(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+	s := string(b)
+	assert.Contains(t, s, `"framework_stack": []`)
+	assert.Contains(t, s, `"framework_consents": {}`)
+
+	c := Default()
+	c.FrameworkStack = []string{"stoicism"}
+	c.FrameworkConsents = map[string]string{"stoicism": "2026-07-05T18:00:00-04:00"}
+	rb, err := c.Marshal()
+	require.NoError(t, err)
+	got, err := Unmarshal(rb)
+	require.NoError(t, err)
+	assert.Equal(t, c, got)
+}
+
+// TestValidate_FrameworkBlockOptional confirms the framework fields are
+// additive and optional — a config carrying a stack + consents still validates,
+// and so does one that omits them entirely (nil collections).
+func TestValidate_FrameworkBlockOptional(t *testing.T) {
+	c := Default()
+	c.FrameworkStack = []string{"stoicism"}
+	c.FrameworkConsents = map[string]string{"stoicism": "2026-07-05T18:00:00-04:00"}
+	assert.NoError(t, c.Validate())
+
+	c.FrameworkStack = nil
+	c.FrameworkConsents = nil
+	assert.NoError(t, c.Validate(), "nil framework collections validate (layer off)")
+}

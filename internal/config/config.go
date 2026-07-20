@@ -10,6 +10,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // SchemaVersion is the only lucid.json schema version the MVP
@@ -123,6 +124,19 @@ type Config struct {
 	BootstrapMode            bool            `json:"bootstrap_mode"`
 	Provider                 ProviderConfig  `json:"provider"`
 	Companion                CompanionConfig `json:"companion"`
+	// FrameworkStack is the ordered standing-consent list — one interpretation
+	// lens id per line the user has admitted to their stack at calibration or a
+	// quarterly Charter amendment (docs/frameworks.md §3). A lens in the stack
+	// may frame reflection proposals without re-asking; that is what the consent
+	// bought. Empty by default: the frameworks layer is off until an id is
+	// deliberately added, so the reflection voice stays baseline.
+	FrameworkStack []string `json:"framework_stack"`
+	// FrameworkConsents records when each stacked lens was consented (lens id →
+	// RFC3339 timestamp) — the audit trail the lens-rotation protocol's verdicts
+	// are checked against (docs/frameworks.md §3; docs/protocols/P-2-lens-
+	// rotation.md). A stacked lens with no recorded consent fails closed and
+	// never frames a proposal (see [Config.LensConsented]).
+	FrameworkConsents map[string]string `json:"framework_consents"`
 }
 
 // Default returns a fresh config carrying the documented default values
@@ -167,6 +181,12 @@ func Default() Config {
 		// until an operator points the three prompt-file paths at their own
 		// template dir and flips enabled true.
 		Companion: CompanionConfig{},
+		// The frameworks layer ships off: no lens is stacked or consented, so
+		// LensConsented is false for every id and the reflection voice stays
+		// baseline until an operator amends the Charter stack. Non-nil empties
+		// keep the marshaled file rendering [] / {} rather than null.
+		FrameworkStack:    []string{},
+		FrameworkConsents: map[string]string{},
 	}
 }
 
@@ -183,6 +203,42 @@ func (c Config) MirrorDirs() []string {
 		c.SessionsDir,
 		c.ReflectionsDir,
 	}
+}
+
+// LensConsented reports whether the interpretation lens id may frame a
+// reflection this run. It fails closed on two counts, mirroring the
+// observation-kind enable-gate ([observations.Config.KindEnabled]): the lens
+// must be in the standing FrameworkStack AND carry a non-empty consent
+// timestamp in FrameworkConsents. A hand-edited stack entry with no recorded
+// consent, a dangling consent for an unstacked lens, and the empty id all read
+// as not consented — the layer never silently frames a proposal in a lens the
+// user did not sign for (docs/frameworks.md §3; product-principles.md P9, fail
+// closed).
+func (c Config) LensConsented(id string) bool {
+	if id == "" {
+		return false
+	}
+	if !slices.Contains(c.FrameworkStack, id) {
+		return false
+	}
+	return c.FrameworkConsents[id] != ""
+}
+
+// ActiveFramework returns the id of the lens that frames this run's proposals,
+// selected deterministically: the first consented lens in FrameworkStack order
+// (the stack's head is the operative choice), skipping any leading entry that
+// is not yet consented. It returns ("", false) when no stacked lens is
+// consented — the baseline, lens-neutral voice. Selection is deliberately
+// static: automatic rotation is protocol P-2, deferred until the frameworks
+// layer is proven, so the active lens changes only when the user re-orders or
+// amends the stack (docs/frameworks.md §5; docs/protocols/P-2-lens-rotation.md).
+func (c Config) ActiveFramework() (string, bool) {
+	for _, id := range c.FrameworkStack {
+		if c.LensConsented(id) {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 // Clip returns a copy of the config with out-of-range values pulled
