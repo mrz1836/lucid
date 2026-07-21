@@ -111,7 +111,7 @@ func Recommend(in RecommendInput) Recommendation {
 		rec.Vetoes = append(rec.Vetoes, painVetoLine(primary, part))
 		primary = downshiftCard(prog)
 		reason = fmt.Sprintf(
-			"A pain signal on %s means backing off today — an easy recovery session is the safe call.", humanizePart(part),
+			"A pain signal on %s means backing off today — an easy recovery session is the safe choice.", humanizePart(part),
 		)
 	}
 
