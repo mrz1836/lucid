@@ -131,6 +131,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newInjuryCmd())
 	root.AddCommand(newEraCmd())
 	root.AddCommand(newThreadCmd())
+	root.AddCommand(newMemoryCmd())
 
 	return root
 }

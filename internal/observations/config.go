@@ -57,6 +57,10 @@ func DefaultConfig() Config {
 		// The companion-context kinds (KindWithdrawal, KindHabitChange,
 		// KindCommitment) are deliberately absent here — they are enable-gated
 		// and off by default (observations.md §3), added per-instance only.
+		// KindMemory (the life-archive story kind, mvp/life-archive.md §3) is
+		// likewise off by default: the excavation surface is enabled in the
+		// operator's own runtime, never defaulted-on in the OSS Ledger, so a
+		// disabled memory capture returns the enable hint rather than writing.
 		KindsEnabled:       []Kind{KindPain, KindIntake, KindElimination, KindMood},
 		CuriosityBudgetDay: 1,
 		AgentSliceOptins:   map[string]any{},

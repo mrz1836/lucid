@@ -305,3 +305,91 @@ func TestParse_ZeroNowDefaults(t *testing.T) {
 	assert.Equal(t, PrecisionExact, res.Precision)
 	assert.WithinDuration(t, time.Now(), res.OccurredAt, 5*time.Second)
 }
+
+// TestIsMemoryCertainty covers the shared certainty vocabulary gate: only the
+// three documented keywords are valid, case is the caller's concern.
+func TestIsMemoryCertainty(t *testing.T) {
+	for _, ok := range []string{"vivid", "hazy", "reconstructed"} {
+		assert.Truef(t, IsMemoryCertainty(ok), "%q is a certainty", ok)
+	}
+	for _, bad := range []string{"", "Vivid", "sure", "foggy"} {
+		assert.Falsef(t, IsMemoryCertainty(bad), "%q is not a certainty", bad)
+	}
+}
+
+// TestParseMemoryFields_ConventionKeys proves the structured story path fills
+// the convention payload keys on the frozen envelope (life-archive.md §3): text
+// anchors the memory, a valid certainty and the tone/why/follow-up/people keys
+// are set when present, and an out-of-vocabulary certainty is dropped rather
+// than stored — the write verb rejects it up front, so the payload never carries
+// a junk certainty.
+func TestParseMemoryFields_ConventionKeys(t *testing.T) {
+	payload, partial := ParseMemoryFields(MemoryInput{
+		Text:         "we drove to the coast at 2am",
+		Certainty:    "Vivid", // case-folded to a valid keyword
+		Tone:         "wild, free",
+		WhyItMatters: "first real taste of not asking permission",
+		FollowUp:     "who else was in the car?",
+		People:       []string{"Dana", " ", "Sam"},
+	})
+	assert.False(t, partial)
+	assert.Equal(t, "we drove to the coast at 2am", payload[MemoryFieldText])
+	assert.Equal(t, "vivid", payload[MemoryFieldCertainty])
+	assert.Equal(t, "wild, free", payload[MemoryFieldTone])
+	assert.Equal(t, "first real taste of not asking permission", payload[MemoryFieldWhyItMatters])
+	assert.Equal(t, "who else was in the car?", payload[MemoryFieldFollowUp])
+	assert.Equal(t, []string{"Dana", "Sam"}, payload[MemoryFieldPeople], "blank people are dropped")
+
+	// An unknown certainty is omitted, not stored (validated by the write verb).
+	junk, _ := ParseMemoryFields(MemoryInput{Text: "something", Certainty: "sure"})
+	assert.NotContains(t, junk, MemoryFieldCertainty)
+}
+
+// TestParseMemoryFields_PartialPath proves the capture-never-blocks contract:
+// an empty text yields the partial payload ({note, parse}), exactly like the
+// token grammar's empty-text path.
+func TestParseMemoryFields_PartialPath(t *testing.T) {
+	payload, partial := ParseMemoryFields(MemoryInput{Text: "   ", Tone: "dropped on partial"})
+	assert.True(t, partial)
+	assert.Equal(t, ParseMarkerPartial, payload["parse"])
+	assert.Contains(t, payload, "note")
+	assert.NotContains(t, payload, MemoryFieldTone, "convention keys are not kept on the partial path")
+}
+
+// TestResolveBackdate covers the single-token --day grammar the story-capture
+// verb reuses: empty is now/exact, a bare date is approximate (its own calendar
+// day, never rolled), @yesterday is approximate, a range yields an end, and an
+// unrecognized token falls back to now/exact (capture never blocks).
+func TestResolveBackdate(t *testing.T) {
+	// Empty → now at exact precision.
+	occ, prec, end := ResolveBackdate("", now)
+	assert.Equal(t, now, occ)
+	assert.Equal(t, PrecisionExact, prec)
+	assert.Nil(t, end)
+
+	// A bare date (no @) → approximate, its own calendar day (the excavated case).
+	occ, prec, end = ResolveBackdate("1999-06-01", now)
+	assert.Equal(t, PrecisionApproximate, prec)
+	assert.Nil(t, end)
+	assert.Equal(t, "1999-06-01", DeriveLogicalDate(occ, prec, DefaultRolloverMin))
+
+	// A leading @ is optional and equivalent.
+	occAt, precAt, _ := ResolveBackdate("@1999-06-01", now)
+	assert.Equal(t, occ, occAt)
+	assert.Equal(t, prec, precAt)
+
+	// @yesterday → approximate, the prior civil date.
+	occ, prec, _ = ResolveBackdate("@yesterday", now)
+	assert.Equal(t, PrecisionApproximate, prec)
+	assert.Equal(t, at(2026, 7, 1, 0, 0), occ)
+
+	// A range → range precision with an end.
+	_, prec, end = ResolveBackdate("@09:00-12:30", now)
+	assert.Equal(t, PrecisionRange, prec)
+	assert.NotNil(t, end)
+
+	// Junk falls back to now/exact — never a crash, never a block.
+	occ, prec, _ = ResolveBackdate("@notatime", now)
+	assert.Equal(t, now, occ)
+	assert.Equal(t, PrecisionExact, prec)
+}
