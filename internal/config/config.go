@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 // SchemaVersion is the only lucid.json schema version the MVP
@@ -108,6 +110,33 @@ type CompanionConfig struct {
 	Model           string `json:"model"`
 }
 
+// WorkoutConfig configures the optional workout companion — the config-gated,
+// off-by-default Mirror-side surface that recommends today's workout, records
+// what happened, and reviews progress (workout-module.md). Like CompanionConfig
+// it is credential-dumb: it carries no channel id and no token (those stay
+// env-only), only the explicit opaque file paths the surface reads. Enabled
+// gates the whole feature; the default zero value is false, so an unconfigured
+// Ledger runs only the existing teeth and companion. Program is the generic-
+// schema program JSON on an opaque operator path — read directly by the loader
+// with no dir-walk and no filename convention (the OSS/personal firewall seam):
+// a synthetic program in the repo's tests, the operator's private program at
+// runtime. SystemPrompt and Template are the two opaque prompt-file paths for
+// the model's phrasing call, the same seam as the companion's templates. Model
+// optionally overrides provider.model for the phrasing call; empty inherits the
+// provider default. SlotTime is the daily slot's local fire time (HH:MM) —
+// unlike the companion, the workout slot does not inherit the chain's bell/
+// tripwire marks (those defend the night chain; a workout window is a separate
+// personal choice), so a single configurable local time is the whole scheduling
+// seam (data-model.md §"lucid.json").
+type WorkoutConfig struct {
+	Enabled      bool   `json:"enabled"`
+	Program      string `json:"program"`
+	SlotTime     string `json:"slot_time"`
+	SystemPrompt string `json:"system_prompt"`
+	Template     string `json:"template"`
+	Model        string `json:"model"`
+}
+
 // Config is the in-memory representation of lucid.json. Field order
 // matches the documented schema so a marshaled default file reads
 // identically to data-model.md §"lucid.json".
@@ -132,6 +161,7 @@ type Config struct {
 	BootstrapMode            bool            `json:"bootstrap_mode"`
 	Provider                 ProviderConfig  `json:"provider"`
 	Companion                CompanionConfig `json:"companion"`
+	Workout                  WorkoutConfig   `json:"workout"`
 	// FrameworkStack is the ordered standing-consent list — one interpretation
 	// lens id per line the user has admitted to their stack at calibration or a
 	// quarterly Charter amendment (docs/frameworks.md §3). A lens in the stack
@@ -189,6 +219,11 @@ func Default() Config {
 		// until an operator points the three prompt-file paths at their own
 		// template dir and flips enabled true.
 		Companion: CompanionConfig{},
+		// The workout companion ships off too: the zero value is disabled with
+		// every opaque path empty, so a fresh Ledger runs only the existing
+		// teeth and companion until an operator points the program/prompt paths
+		// at their own files and flips enabled true.
+		Workout: WorkoutConfig{},
 		// The frameworks layer ships off: no lens is stacked or consented, so
 		// LensConsented is false for every id and the reflection voice stays
 		// baseline until an operator amends the Charter stack. Non-nil empties
@@ -316,6 +351,9 @@ func (c Config) Validate() error {
 	if err := c.Companion.validate(); err != nil {
 		return err
 	}
+	if err := c.Workout.validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -368,6 +406,56 @@ func (c CompanionConfig) validate() error {
 		}
 	}
 	return nil
+}
+
+// validate reports whether the workout block is structurally usable. Like the
+// companion, the feature is off by default so a zero-valued block always
+// validates; but once enabled, the three opaque file paths (program,
+// system_prompt, template) must be non-empty and slot_time must be a valid
+// HH:MM local time, or the config is rejected at load rather than silently
+// leaving a daily surface dead or scheduled at a bogus time. The optional model
+// override is unconstrained here — an unknown model surfaces at compose time
+// from the provider, exactly as provider.model does. There is no clip rule; no
+// workout bound is documented as coercible.
+func (c WorkoutConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	paths := map[string]string{
+		"workout.program":       c.Program,
+		"workout.system_prompt": c.SystemPrompt,
+		"workout.template":      c.Template,
+	}
+	for name, v := range paths {
+		if v == "" {
+			return fmt.Errorf("config: %s must not be empty when workout.enabled is true", name)
+		}
+	}
+	if !validClockHM(c.SlotTime) {
+		return fmt.Errorf("config: workout.slot_time %q must be a valid HH:MM when workout.enabled is true", c.SlotTime)
+	}
+	return nil
+}
+
+// validClockHM reports whether s is a usable "HH:MM" 24-hour local clock mark
+// (hour 0–23, minute 0–59). It matches the leniency of the scheduler's own
+// cronFromHM — a colon-separated pair of in-range integers — so a slot_time that
+// passes config validation is guaranteed to build a valid daily cron for the
+// workout node.
+func validClockHM(s string) bool {
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	h, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || h < 0 || h > 23 {
+		return false
+	}
+	m, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || m < 0 || m > 59 {
+		return false
+	}
+	return true
 }
 
 // Marshal renders the config as the exact indented JSON written to
