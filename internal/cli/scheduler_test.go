@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,6 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // setSchedulerEnv injects the environment the daemon reads at startup so the
@@ -154,6 +158,81 @@ func TestSchedulerRun_GracefulStopDrainsClean(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err, "a canceled daemon drains cleanly")
 		assert.Empty(t, stderr.String(), "a clean drain writes no error line")
+	case <-time.After(10 * time.Second):
+		t.Fatal("scheduler run did not return after cancellation")
+	}
+}
+
+// enableWorkoutInScheduler writes an enabled workout block (with a synthetic
+// program and the two opaque prompt files) into the LUCID_HOME the scheduler
+// env points at, so the daemon starts the workout node beside the teeth.
+func enableWorkoutInScheduler(t *testing.T) {
+	t.Helper()
+	home := os.Getenv("LUCID_HOME")
+	require.NotEmpty(t, home, "setSchedulerEnv must run first")
+	a := storage.New(home)
+	_, err := a.Scaffold()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	prog := filepath.Join(dir, "program.json")
+	require.NoError(t, os.WriteFile(prog, []byte("{}"), 0o600))
+	sys := filepath.Join(dir, "system_prompt.md")
+	tmpl := filepath.Join(dir, "daily_template.md")
+	require.NoError(t, os.WriteFile(sys, []byte("SYSTEM\n"), 0o600))
+	require.NoError(t, os.WriteFile(tmpl, []byte("TEMPLATE\n"), 0o600))
+
+	cfg, err := a.LoadConfig()
+	require.NoError(t, err)
+	cfg.Workout = config.WorkoutConfig{
+		Enabled: true, Program: prog, SlotTime: "12:00", SystemPrompt: sys, Template: tmpl,
+	}
+	require.NoError(t, a.SaveConfig(cfg))
+}
+
+// TestSchedulerRun_WorkoutEnabled_StartsSlotNode proves the config gate: with the
+// workout block enabled the daemon starts the workout slot node, which reconciles
+// its daily periodic into its own disposable job DB (LUCID_WORKOUT_DB), and a
+// cancel drains the whole set cleanly. The teeth-only drain test above is the
+// paired "workout disabled → not started" proof (only the two teeth periodics
+// appear and no workout job DB is created).
+func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
+	setSchedulerEnv(t)
+	enableWorkoutInScheduler(t)
+	dbPath := filepath.Join(t.TempDir(), "flywheel.db")
+	workoutDB := filepath.Join(t.TempDir(), "workout.db")
+	t.Setenv("LUCID_WORKOUT_DB", workoutDB)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	var stderr bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- runScheduler(ctx, &stderr, dbPath) }()
+
+	// The workout node reconciles its single daily periodic into its own job DB —
+	// proof the config gate started it beside the teeth.
+	require.Eventually(t, func() bool {
+		db, err := gorm.Open(sqlite.Open(workoutDB), &gorm.Config{Logger: gormlogger.Discard})
+		if err != nil {
+			return false
+		}
+		defer func() {
+			if sqlDB, e := db.DB(); e == nil {
+				_ = sqlDB.Close()
+			}
+		}()
+		views, lerr := flywheel.ListPeriodics(context.Background(), db)
+		if lerr != nil {
+			return false
+		}
+		return len(views) == 1 && views[0].Slug == "lucid-workout-daily"
+	}, 15*time.Second, 25*time.Millisecond, "the daemon starts the workout slot node beside the teeth")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "a canceled daemon with the workout node drains cleanly")
 	case <-time.After(10 * time.Second):
 		t.Fatal("scheduler run did not return after cancellation")
 	}

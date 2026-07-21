@@ -241,7 +241,15 @@ these amendments:
   not Coach — they have no voice at all. Insight rules are not Coach
   either: recorded testimony revisited at recall, never tracked,
   celebrated, or reminded ([`agent-contracts.md`](agent-contracts.md)
-  §3).
+  §3). The config-gated, off-by-default **daily companion** and
+  **workout module** ([`workout-module.md`](workout-module.md)) are the
+  narrow exception: each recommends on a silver platter with a
+  *deterministic core the model only phrases* — no goal trees, no
+  celebration, no voice of their own, no teeth. They add a **surface, not
+  a new steel thread**: the one steel thread stands unchanged, and a fresh
+  Ledger runs the pure teeth until an operator opts in. The workout
+  module's two new kinds stay inventory (its streak is the Engine chain's,
+  not a score on an event — [`../observations.md`](../observations.md) §0).
 * **Amended:** "No autonomous notifications" becomes: none except the
   three pre-committed template sends (bell, L1, L2), each behind a
   recorded consent flag, none containing Mirror content.

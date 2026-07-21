@@ -19,3 +19,4 @@ new one; records are append-only, like everything else here
 | [0006](0006-model-access.md) | Model access: OAuth'd vendor CLIs and local models, never API keys | Accepted |
 | [0007](0007-cli-conventions.md) | CLI conventions: the house style (`hush`, `go-broadcast`, `atlas`) | Accepted |
 | [0008](0008-harness-skill.md) | Harness integration: one managed `lucid` skill | Accepted |
+| [0009](0009-workout-companion.md) | Workout companion: a config-gated, deterministic-core Mirror surface | Accepted |

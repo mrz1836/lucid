@@ -163,6 +163,8 @@ payload accepts `note?` (the grammar routes trailing text there).
 | `withdrawal` | `substance?`, `severity?`, `note?` | severity **0–10** when given; `substance` free text. A body/state signal for a substance being reduced or stopped — inventory of how the withdrawal is landing, never a compliance chart (§0). Enable-gated, **off by default**. |
 | `habit_change` | `load?`, `what?`, `note?` | `load` **0–10** — the felt weight of a habit being added or dropped; `what` free text. The change-load signal the companion renders, never a streak or a target (§0). Enable-gated, **off by default**. |
 | `commitment` | `what`, `note?` | `what` free text — a commitment logged as **context**, surfaced by the companion with an "as logged &lt;date&gt;" freshness stamp. Testimony the user chose to record, **not** a tracked task: no streak, no due date, no "you didn't do it" (§0). Enable-gated, **off by default**. |
+| `workout` | `type`, `movements?`, `duration_min?`, `rpe?`, `body_parts?`, `note?` | The **workout-module** completed-session record ([`mvp/workout-module.md`](mvp/workout-module.md)): `type` free text (the session card name or a free description), `rpe` **0–10** session-effort scale, `body_parts[]` free text matched to the program's focus vocabulary when unambiguous. A bare `type` is a valid event ("I trained"). Enable-gated, **off by default**. |
+| `body_state` | `body_part`, `soreness?`, `pain?`, `note?` | The workout-module body signal: `body_part` free text, matched to the injury registry when unambiguous; `soreness` **0–10** (ordinary training soreness); `pain` **0–10 NRS** (the same scale as `pain`) — the signal the recommender's hard-stop reads. Distinct from `pain`: it pairs soreness *and* pain against a named part for recovery reasoning. Inventory, never a grade (§0). Enable-gated, **off by default**. |
 | `context.location` | `place_ref`, `note?` | **Sticky**: "I'm in Lisbon" holds until the next one. Stated by the user, never harvested from a device. **Sensitive by default**: excluded from every export and packet unless explicitly included per export; the off-limits registry applies to it as a kind; and stated plainly — sticky locations form a permanent trail on a non-wipeable ledger, so choose your coarseness accordingly (a city is plenty). |
 | `context.day` | per-enricher, one event per enricher per day | Written by enrichers only (§5). `occurred_at` = the logical date at local noon, precision `approximate`. |
 | `memory` | `text`, `certainty` (vivid/hazy/reconstructed), `era_ref?`, `note?` | See §8. |
@@ -182,6 +184,16 @@ are governed by §0: they are inventory of what happened, never obligation. The
 companion may *surface* a logged commitment; it never grades one, reminds about
 one, or scores follow-through — a commitment that earns teeth becomes an Engine
 commitment through a Gate, exactly as an eating practice does (§9).
+
+The `workout` and `body_state` rows are the **workout-module kinds**: capturable
+signals the [workout companion](mvp/workout-module.md) reads to recommend today's
+session (respecting recovery windows and pain-flag hard stops) and to review
+progress over time. They ship **enabled per-instance and off by default** on the
+same terms — inventory of what happened (§0), never a streak, target, or score.
+The workout streak the surface shows is the **Engine chain's**, read from the
+fold, never written onto these events; the progress trend is a read-only
+projection (§7), never stored. A workout practice that ever earns teeth becomes
+an Engine link through a Gate, exactly as an eating practice does (§9).
 
 ## 4. Micro-logs — the capture grammar
 

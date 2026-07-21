@@ -316,6 +316,136 @@ func TestValidate_CompanionDisabledIgnoresPaths(t *testing.T) {
 	assert.NoError(t, c.Validate())
 }
 
+// TestDefault_WorkoutBlock pins the shipped workout default: the feature is off
+// and every opaque path and the slot time are empty, so a fresh Ledger runs only
+// the existing teeth and companion until an operator opts in (data-model.md
+// §"lucid.json"; workout-module.md).
+func TestDefault_WorkoutBlock(t *testing.T) {
+	w := Default().Workout
+	assert.False(t, w.Enabled, "workout ships disabled")
+	assert.Empty(t, w.Program)
+	assert.Empty(t, w.SlotTime)
+	assert.Empty(t, w.SystemPrompt)
+	assert.Empty(t, w.Template)
+	assert.Empty(t, w.Model, "model override empty → inherits provider.model")
+}
+
+// TestWorkout_MarshalsDocumentedShape asserts a marshaled default config carries
+// the workout block with the documented keys, off by default, and — like the
+// companion and provider blocks — never leaks a token or channel id into
+// lucid.json (those stay env-only).
+func TestWorkout_MarshalsDocumentedShape(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+
+	var m struct {
+		Workout struct {
+			Enabled      bool   `json:"enabled"`
+			Program      string `json:"program"`
+			SlotTime     string `json:"slot_time"`
+			SystemPrompt string `json:"system_prompt"`
+			Template     string `json:"template"`
+			Model        string `json:"model"`
+		} `json:"workout"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.False(t, m.Workout.Enabled)
+	assert.Empty(t, m.Workout.Program)
+	assert.Empty(t, m.Workout.SlotTime)
+
+	s := string(b)
+	assert.Contains(t, s, `"workout":`)
+	assert.Contains(t, s, `"program":`)
+	assert.Contains(t, s, `"slot_time":`)
+	assert.Contains(t, s, `"template":`)
+	// No token or channel id ever lands in the config.
+	assert.NotContains(t, s, "harness_token")
+	assert.NotContains(t, s, "channel_id")
+}
+
+// TestWorkout_RoundTripEnabled proves a fully-configured workout block survives
+// a marshal/unmarshal cycle byte-identically in value — the opaque paths, the
+// slot time, and the optional model override.
+func TestWorkout_RoundTripEnabled(t *testing.T) {
+	c := Default()
+	c.Workout = WorkoutConfig{
+		Enabled:      true,
+		Program:      "/opt/lucid/workout/program.json",
+		SlotTime:     "12:00",
+		SystemPrompt: "/opt/lucid/workout/system_prompt.md",
+		Template:     "/opt/lucid/workout/daily_template.md",
+		Model:        "sonnet",
+	}
+	b, err := c.Marshal()
+	require.NoError(t, err)
+
+	got, err := Unmarshal(b)
+	require.NoError(t, err)
+	assert.Equal(t, c, got)
+	assert.Equal(t, "sonnet", got.Workout.Model)
+	assert.Equal(t, "12:00", got.Workout.SlotTime)
+	assert.Equal(t, "/opt/lucid/workout/program.json", got.Workout.Program)
+}
+
+// TestValidate_WorkoutEnabledRequiresPaths is the workout validate rule: an
+// enabled workout missing any one of the three opaque paths, or carrying a bad
+// slot_time, is a hard error, while all three paths set with a valid HH:MM
+// slot_time (with or without a model override) validates.
+func TestValidate_WorkoutEnabledRequiresPaths(t *testing.T) {
+	full := WorkoutConfig{
+		Enabled:      true,
+		Program:      "p.json",
+		SlotTime:     "12:00",
+		SystemPrompt: "s.md",
+		Template:     "t.md",
+	}
+	failures := map[string]func(*WorkoutConfig){
+		"missing program":       func(w *WorkoutConfig) { w.Program = "" },
+		"missing system_prompt": func(w *WorkoutConfig) { w.SystemPrompt = "" },
+		"missing template":      func(w *WorkoutConfig) { w.Template = "" },
+		"empty slot_time":       func(w *WorkoutConfig) { w.SlotTime = "" },
+		"non-clock slot_time":   func(w *WorkoutConfig) { w.SlotTime = "noon" },
+		"hour out of range":     func(w *WorkoutConfig) { w.SlotTime = "25:00" },
+		"minute out of range":   func(w *WorkoutConfig) { w.SlotTime = "12:60" },
+		"missing colon":         func(w *WorkoutConfig) { w.SlotTime = "1200" },
+	}
+	for name, mutate := range failures {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			c.Workout = full
+			mutate(&c.Workout)
+			assert.Error(t, c.Validate())
+		})
+	}
+
+	t.Run("all paths set with valid slot_time validates", func(t *testing.T) {
+		c := Default()
+		c.Workout = full
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("model override does not require a known name", func(t *testing.T) {
+		c := Default()
+		c.Workout = full
+		c.Workout.Model = "some-future-model"
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("single-digit hour slot_time validates", func(t *testing.T) {
+		c := Default()
+		c.Workout = full
+		c.Workout.SlotTime = "9:30"
+		assert.NoError(t, c.Validate())
+	})
+}
+
+// TestValidate_WorkoutDisabledIgnoresPaths confirms that while disabled (the
+// default), empty paths and slot time are tolerated — the block is inert, so it
+// never blocks a load.
+func TestValidate_WorkoutDisabledIgnoresPaths(t *testing.T) {
+	c := Default()
+	c.Workout = WorkoutConfig{Enabled: false} // all fields empty
+	assert.NoError(t, c.Validate())
+}
+
 func TestValidate_Good(t *testing.T) {
 	require.NoError(t, Default().Validate())
 }

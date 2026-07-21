@@ -55,8 +55,12 @@ func DefaultConfig() Config {
 		Version: ConfigVersion,
 		KeySalt: "",
 		// The companion-context kinds (KindWithdrawal, KindHabitChange,
-		// KindCommitment) are deliberately absent here — they are enable-gated
-		// and off by default (observations.md §3), added per-instance only.
+		// KindCommitment) and the workout-module kinds (KindWorkout,
+		// KindBodyState) are deliberately absent here — they are enable-gated
+		// and off by default (observations.md §3), added per-instance only. The
+		// generic KindEnabled gate and EnableHint copy already cover them, so a
+		// capture of a workout/body_state kind on a fresh Ledger is rejected
+		// with the enable hint rather than silently stored.
 		KindsEnabled:       []Kind{KindPain, KindIntake, KindElimination, KindMood},
 		CuriosityBudgetDay: 1,
 		AgentSliceOptins:   map[string]any{},

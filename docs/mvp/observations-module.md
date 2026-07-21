@@ -148,6 +148,16 @@ only when they want to log and surface those signals. Enabling them changes
 nothing about the sanctuary or witness boundaries — like every kind, they are
 inventory the Engine never reads.
 
+The two **workout-module kinds** — `workout` and `body_state`
+([`../observations.md`](../observations.md) §3) — are added here on the same
+terms: capturable, **off by default**, inventory the Engine never reads. The
+[workout companion](workout-module.md) reads them to recommend today's session
+(respecting per-body-part recovery windows and pain-flag hard stops) and to
+review progress — a **user-invoked** projection that joins across trees, exactly
+like `/day`, never an agent reading them. Enabling them widens no sanctuary or
+witness boundary, and the workout streak the surface shows is the Engine chain's
+(read from the fold), never a score written onto these events.
+
 ## The enrichment job
 
 A scheduled job, distinct from the Mirror's optional cron and from the

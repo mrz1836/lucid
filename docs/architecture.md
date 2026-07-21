@@ -76,6 +76,17 @@ an entire self-experimentation layer assembled from one registry
 deterministic projections, riding cadences that already exist — no
 new subsystem.
 
+The **workout companion** ([`docs/mvp/workout-module.md`](mvp/workout-module.md))
+is a second worked example, on the Mirror side: a config-gated daily
+surface assembled from two event kinds (`workout`, `body_state`), a
+**deterministic** recommender (rotation, per-body-part recovery windows,
+pain-flag hard stops), and a read-only trend projection, riding one new
+configurable daily slot and the existing chain fold — no new subsystem, no
+new envelope. The recommendation is deterministic; a bounded model call
+only phrases it, so the runtime never depends on AI (P9), and the two new
+kinds stay inventory — the workout streak is the Engine chain's, never a
+score on an event (P3).
+
 What is *never* an extension: changing the envelope, mutating past
 events, adding a subsystem beyond those already named in §3
 (Agent-Self, Charter, and Witness are base design activated by

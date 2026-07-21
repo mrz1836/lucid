@@ -25,6 +25,14 @@ func TestConfig_KindEnabled(t *testing.T) {
 	assert.True(t, c.KindEnabled(KindPain))
 	assert.False(t, c.KindEnabled(KindSleep)) // not in the default set
 	assert.False(t, c.KindEnabled(KindLocation))
+	// The workout-module kinds are enable-gated and off by default (like the
+	// companion-context kinds): a fresh Ledger never carries them.
+	assert.False(t, c.KindEnabled(KindWorkout))
+	assert.False(t, c.KindEnabled(KindBodyState))
+	// The generic enable hint covers the new kinds, so a disabled capture is
+	// rejected with a useful pointer rather than silently stored.
+	assert.Contains(t, EnableHint(KindWorkout), "workout")
+	assert.Contains(t, EnableHint(KindWorkout), "observations/config.json")
 }
 
 func TestEnableHint(t *testing.T) {
