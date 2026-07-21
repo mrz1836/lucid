@@ -757,6 +757,139 @@ invocation contract: [`../adr/0006-model-access.md`](../adr/0006-model-access.md
 > [command]` for help on any command, and `lucid completion <bash|zsh|fish|powershell>`
 > to generate a shell-completion script.
 
+### injury
+
+```
+lucid injury <name> [--status active|managed|resolved] [--onset @yesterday|YYYY-MM-DD]
+             [--body-area <text>] [--cause <text>] [--severity <text>]
+             [--lasting-effects <text>] [--current-limitations <text>]
+             [--treatments <text>] [--uncertainty <text>] [--note <text>] [--json]
+```
+
+Record or amend an injury in the `injury` registry — the first of the
+**life-archive** verbs (full guide: [`life-archive.md`](life-archive.md); field
+convention: [`../mvp/life-archive.md`](../mvp/life-archive.md) §2). The first
+mention of a name creates the record; a later call with the same name amends it,
+merging the supplied fields and appending any status transition to the
+append-only `status_history` (recorded, never overwritten). Backdate-aware onset
+(`--onset`) records its precision. Every flag is optional — a bare `lucid injury
+"left knee"` is a valid first mention. Deterministic, agent-free; scaffolds on
+first use. No field is a score, streak, or target (inventory, not obligation).
+`--json` emits `{kind, key, display_name, status, created, fields}`.
+
+```sh
+lucid injury "left knee"
+lucid injury "left knee" --status managed --onset 2014-09 --current-limitations "no deep squats" --json
+```
+
+### era
+
+```
+lucid era <name> [--start @yesterday|YYYY-MM-DD] [--end @yesterday|YYYY-MM-DD] [--note <text>] [--json]
+```
+
+Record or amend a life chapter in the `era` registry ([`life-archive.md`](life-archive.md);
+[`../mvp/life-archive.md`](../mvp/life-archive.md) §4). Either bound may be
+approximate; omit `--end` for a still-running chapter. Stories attach to an era
+via `lucid memory --era <key>`, so the past becomes browsable by chapter. Same
+create-then-amend, append-only merge, and `{kind, key, display_name, status,
+created, fields}` `--json` shape as `injury`.
+
+```sh
+lucid era "wild summer" --start 2010-06-01
+lucid era "the coast years" --start 2010 --end 2014 --json
+```
+
+### thread
+
+```
+lucid thread <name> [--intent <text>] [--domain <text>]... [--status active|managed|resolved] [--note <text>] [--json]
+```
+
+Record or amend a thread you're working on in the `thread` registry
+([`life-archive.md`](life-archive.md); [`../mvp/life-archive.md`](../mvp/life-archive.md) §4).
+`--intent` is the one-line statement of what it is; `--domain` is repeatable. A
+thread has **no progress number, percent, or streak** — the obliquity guard is
+structural, there is no flag to set one, and the write path omits any that slip
+through. Same append-only merge and `--json` shape as the other registry verbs.
+
+```sh
+lucid thread "learning to sail" --intent "get comfortable single-handing" --domain skill --domain outdoors
+lucid thread "the memoir" --intent "write the messy years down" --status active --json
+```
+
+### memory
+
+```
+lucid memory <text> [--certainty vivid|hazy|reconstructed] [--era <key>] [--place <name>]
+             [--people <name>,<name>]... [--tone <text>] [--why <text>] [--followup <text>]
+             [--day @yesterday|YYYY-MM-DD] [--attach <path> [--caption <text>]] [--json]
+```
+
+Record a story from your past as one `memory` observation, written at a backdated
+`occurred_at` and linked to the era, place, and people it belongs to
+([`life-archive.md`](life-archive.md); [`../mvp/life-archive.md`](../mvp/life-archive.md) §3).
+The `memory` kind is **enable-gated** — like every observation kind it ships off;
+a disabled kind prints the enable hint and writes nothing (exit `0`). `--certainty`
+is the honesty field; `--era`/`--place`/`--people` become the story's `refs`;
+`--day` is the backdate grammar (`@yesterday`, `YYYY-MM-DD`, or an approximate
+year). **Optional media, never a gate:** `--attach <path>` reuses
+[`lucid attach`](#attach) and links the returned raw id from `refs.entry`; a
+text-only story omits it and is never blocked. Deterministic, agent-free;
+scaffolds on first use. `--json` emits `{event_id, logical_date, partial,
+rejected, refs}`.
+
+```sh
+lucid memory "the night we drove to the coast" --era wild-summer --certainty vivid --day 2010-07
+lucid memory "the pier at 2am" --era wild-summer --attach ~/Pictures/pier.jpg --caption "the old boardwalk" --json
+```
+
+### excavate
+
+```
+lucid excavate [--json]
+```
+
+**Read-only.** Select the next memory cluster to excavate — the thinnest injury
+or the least-excavated era, over two separate tracks — and emit its generic
+prompt templates ([`life-archive.md`](life-archive.md);
+[`../mvp/life-archive.md`](../mvp/life-archive.md) §5–§6). Nothing under
+`~/.lucid/` changes and **no model runs**: this is the deterministic half of the
+excavation ritual; a chat harness reads `--json` and drives the one-cluster-at-a-time
+conversation on its own surface. An empty or fully-excavated store degrades to an
+honest empty result (the calm fallback, no model spent). `--json` emits `{found,
+track, key, display_name, reason, gaps, prompts}`; the human form prints the
+cluster and prompts as bullets (no tables).
+
+```sh
+lucid excavate
+lucid excavate --json
+```
+
+### recall
+
+```
+lucid recall [--era <key> | --thread <key> | --injury <key>] [--json]
+```
+
+**Read-only.** Browse the archive by era, thread, or injury (mutually-exclusive
+dimension flags); with no flag, print the archive index over all three
+([`life-archive.md`](life-archive.md); [`../mvp/life-archive.md`](../mvp/life-archive.md) §7).
+Every surfaced item carries its **source context** — the supporting
+raw/observation ids and its provenance — so nothing is uncited (a story cites its
+observation id; a referent cites its registry record). Nothing is written and no
+model runs, mirroring `excavate`; the same projection-only reads back the
+[weekly reflection](weekly-reflection.md). A key that does not resolve, and an
+empty archive, each print an honest fallback. `--json` emits `{dimension, key,
+found, referent, items}`; the human form prints bullets with a `Cites:` line per
+item (no tables).
+
+```sh
+lucid recall
+lucid recall --era wild-summer
+lucid recall --injury left-knee --json
+```
+
 ## Chat/harness slash commands
 
 These run **only through a chat harness** with the Lucid skill installed
