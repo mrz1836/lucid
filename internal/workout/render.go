@@ -5,9 +5,9 @@ package workout
 // sectioned scaffold, and the model (in compose.go) only phrases the prose around
 // an already-decided recommendation. Because the layout is code, not prose, the
 // readability contract is unit-testable and a model can never restructure the
-// message, drop the safety line, or talk the user into a fourth "just push
+// message, talk the user into a fourth "just push
 // through it" door: it never owns the structure. See
-// docs/mvp/workout-module.md §"The message scaffold" and §"Safety copy".
+// docs/mvp/workout-module.md §"The message scaffold".
 
 import (
 	"fmt"
@@ -16,10 +16,9 @@ import (
 )
 
 // Scaffold literals. A chat surface renders markdown tables as raw text, so the
-// layout is built from bullets and light horizontal dividers, exactly like the
+// layout is built from bullets and blank-line spacing, exactly like the
 // companion. The date format is Go's reference layout for "Monday, Jul 20".
 const (
-	workoutDivider = "― ― ―"
 	workoutBullet  = "•"
 	workoutDateFmt = "Monday, Jan 2"
 )
@@ -32,7 +31,6 @@ const (
 	emojiOfferings = "🎯"
 	emojiProgress  = "📈"
 	emojiReason    = "💡"
-	emojiSafety    = "🛟"
 )
 
 // The three offering labels — exactly three doors, always: the recommended plan,
@@ -44,27 +42,19 @@ const (
 	labelBackOff     = "Back off"
 )
 
-// safetyLine is the deterministic not-medical-advice line every rendered message
-// carries — authored boundary copy (docs/mvp/workout-module.md §"Safety copy"),
-// the same stance as observations.md §9. It is a fixed constant, not program
-// config, so the line is present even when the program omits its own safety copy
-// and even when the model is down. The guard test asserts it is always rendered.
-const safetyLine = "This is not medical advice — for concerning pain or injury, consult a professional."
-
 // Render turns an already-decided Recommendation and its Trend into the final
 // Discord message. It is pure and byte-stable: the same inputs always render the
 // identical bytes, which is what makes the readability contract testable. The
-// region order is fixed — header, the three offerings, the progress panel, the
-// one-line reason, then the safety line — with each non-empty region joined by a
-// blank-line-padded divider. An empty region (a blank reason) is dropped so the
-// message never carries a dangling divider.
+// region order is fixed — header, the three offerings, the progress panel, then
+// the one-line reason — with each non-empty region joined by blank lines. An
+// empty region (a blank reason) is dropped so the message never carries dangling
+// structural chrome.
 func Render(rec Recommendation, tr Trend, now time.Time) string {
 	regions := []string{
 		renderHeader(now),
 		renderOfferings(rec),
 		renderProgress(tr),
 		renderReason(rec.Reason),
-		renderSafety(),
 	}
 	groups := make([]string, 0, len(regions))
 	for _, r := range regions {
@@ -72,7 +62,7 @@ func Render(rec Recommendation, tr Trend, now time.Time) string {
 			groups = append(groups, r)
 		}
 	}
-	return strings.Join(groups, "\n\n"+workoutDivider+"\n\n")
+	return strings.Join(groups, "\n\n")
 }
 
 // renderHeader renders the window header — `{emoji} **Workout** · {Weekday, Mon D}`.
@@ -91,9 +81,9 @@ func renderOfferings(rec Recommendation) string {
 	b.WriteString(" **Today's options**")
 	b.WriteString("\n")
 	b.WriteString(offeringLine(labelRecommended, cardOffering(rec.Primary)))
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	b.WriteString(offeringLine(labelEasier, cardOffering(rec.Fallback)))
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	b.WriteString(offeringLine(labelBackOff, backOffOffering(rec)))
 	return b.String()
 }
@@ -215,12 +205,6 @@ func renderReason(reason string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s **Why** — %s", emojiReason, reason)
-}
-
-// renderSafety renders the deterministic safety line under its header. It is
-// always present — the one region Render can never drop.
-func renderSafety() string {
-	return fmt.Sprintf("%s %s", emojiSafety, safetyLine)
 }
 
 // bulletLine prefixes a panel line with the bullet mark.

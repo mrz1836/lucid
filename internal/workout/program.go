@@ -396,6 +396,5 @@ func ExampleProgram() Program {
 			NoStrengthen:         []string{"upper_traps"},
 		},
 		PainFlagThreshold: 5,
-		SafetyCopy:        "This is not medical advice — for concerning pain or injury, consult a professional.",
 	}
 }

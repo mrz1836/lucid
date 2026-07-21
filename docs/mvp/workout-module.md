@@ -83,9 +83,8 @@ model phrasing the companion already sanctioned.
    slice, each with a deterministic fallback. Neither ever changes the
    decision (architecture P9: the runtime never depends on AI).
 6. **Never diagnosis, never treatment advice** ([`../observations.md`](../observations.md) §9).
-   Every rendered message carries a deterministic safety line and avoids
-   clinical or prescriptive framing; the same Safety boundary that
-   governs every Lucid surface applies (§"Safety copy").
+   The surface avoids clinical or prescriptive framing while keeping the card
+   compact; the same Safety boundary that governs every Lucid surface applies.
 7. **Synthetic examples only** ([`product-principles.md`](product-principles.md) §9).
    Every program, card, and worked example in this repo is synthetic.
    The personal program — with a real body's injuries, recovery windows,
@@ -205,8 +204,7 @@ The schema, with a **synthetic** example (no personal content):
     "provocative_positions": ["any loaded position that reproduces a specific joint pain"],
     "no_strengthen": ["already-overworked stabilizers named by the operator"]
   },
-  "pain_flag_threshold": 5,
-  "safety_copy": "This is not medical advice — for concerning pain or injury, consult a professional."
+  "pain_flag_threshold": 5
 }
 ```
 
@@ -223,7 +221,6 @@ Field semantics, binding:
 | `daily_anchor` | The "something every day" floor — inventory only, never a target the system grades. `items[]` are the anchor movements; `mode: "accumulate"` marks a movement done in small sets through the day; `targets_by_week` overrides item targets for a given 1-indexed program week. |
 | `guardrails` | `avoid_movements[]` and `provocative_positions[]` are never recommended; `no_strengthen[]` names parts the program deliberately does not load. All three are generic slots the operator fills with their real specifics. |
 | `pain_flag_threshold` | The `body_state.pain` value (0–10) at or above which the recommender emits a hard-stop and downshifts (default 5). |
-| `safety_copy` | The deterministic not-medical-advice line the render always includes (§"Safety copy"). |
 
 Payload schemas version forward per the frozen-envelope rule; a loader
 reads what it understands and skips what it doesn't.
@@ -380,7 +377,7 @@ provider outage — the model never changes the pick.
 
 Lucid owns the **layout**; the model fills only the prose — the same
 split the companion draws. Every message is a deterministic, byte-stable
-scaffold, mobile-friendly (bullets, `― ― ―` dividers, **no markdown
+scaffold, mobile-friendly (bullets, blank-line spacing, **no markdown
 tables** — a chat surface renders them as raw text):
 
 * **Header** — `{emoji} **Workout** · {Weekday, Mon D}`.
@@ -396,46 +393,31 @@ tables** — a chat surface renders them as raw text):
   compact panel, never a grade.
 * **Reason** — the deterministic one-liner: why this card today (or why
   it was downshifted).
-* **Safety line** — the deterministic not-medical-advice line, always
-  present (§"Safety copy").
-
 The model's phrasing rides in a bounded slot; everything else — the panel,
-the ordering, the three-offering structure, the safety line — is Lucid's,
-and renders identically with the model down.
+the ordering, and the three-offering structure — is Lucid's, and renders
+identically with the model down.
 
-## Safety copy
-
-Every rendered message includes a deterministic safety line —
-`safetyLine`, a fixed constant: *"This is not medical advice — for
-concerning pain or injury, consult a professional."* It is authored
-boundary copy, the same stance as [`../observations.md`](../observations.md)
-§9 ("never diagnosis, never treatment advice") and the health-projection
-boundary in [`scope.md`](scope.md) §7 — not a clinical claim, a pointer
-to professional care.
-
-The render is also held to the voice constraints every Lucid surface
-obeys: hypothesis/offer framing, and **no** coaching-imperative or
+The render is held to the voice constraints every Lucid surface obeys:
+hypothesis/offer framing, and **no** coaching-imperative or
 phrase-blocklist token ([`product-principles.md`](product-principles.md)
 §6). The deterministic core owns the pick, so the phrasing never has to
-command — it offers three doors and names the safe one. A guard test
-asserts the safety line is present and that no blocklist/coaching-imperative
-token appears in the rendered output.
+command — it offers three doors and names the back-off option.
 
 ## Error states (extends [`error-states.md`](error-states.md))
 
 The dividing principle is the companion's: **enrichment reads degrade
-quietly; the pick, the safety line, and the live-number reads stay loud** —
+quietly; the pick and the live-number reads stay loud** —
 a message is never silently half-built, and the daily send never falls
 silent.
 
 | # | Trigger | Behavior | Disk effect |
 |---|---------|----------|-------------|
-| W-1 | Program path missing/unreadable | Degrade to "no program": the surface renders an honest empty recommendation with the safety line, not a crash | None |
+| W-1 | Program path missing/unreadable | Degrade to "no program": the surface renders an honest empty recommendation, not a crash | None |
 | W-2 | Recent-observation read fails | Non-fatal: the recommender falls to the plain-calendar path (missing-data rule); the message still composes | None |
 | W-3 | Workout extraction returns malformed fields | Retry once stricter, then **degrade**: store the drop as a `workout` event with `payload.parse: "partial"` and the verbatim note (capture never blocks) | Event written |
 | W-4 | Out-of-range scale (`rpe`/`pain`/`soreness` beyond bounds) | Partial path — stored with the invoked kind, never silently clamped | Event written |
 | W-5 | Disabled kind used (`workout`/`body_state` not in `kinds_enabled`) | Reject with the enable hint, exactly like every observation kind | None |
-| W-6 | Provider unreachable at the slot / on-demand | Deterministic `Render` of the already-decided recommendation; only the model's warmth is lost, the pick and safety line stand | None (or the slot receipt on delivery) |
+| W-6 | Provider unreachable at the slot / on-demand | Deterministic `Render` of the already-decided recommendation; only the model's warmth is lost, the pick stands | None (or the slot receipt on delivery) |
 | W-7 | Slot double-fire on a retry | Receipt idempotency (`ReadCompanionReceipt("workout")`): a retry whose message still reads back in the channel skips | Per-window receipt |
 | W-8 | Host asleep past the slot cutoff | Bounded catch-up with a `(late)` note within the window; past the cutoff the send is skipped and the miss is alerted, never a stale midday message hours late | None |
 | W-9 | Total miss (compose/deliver/read-back fails) | Loud best-effort alert to the user channel, then a loud job error into the supervised log — silence is the one outcome the slot never produces | None |
@@ -472,7 +454,7 @@ touches no disk on every path.
 `BuildTrend` computes with zero and sparse data, stores nothing back, and
 reads the streak from the Engine fold; `Render` is byte-stable, shows
 exactly three offerings, uses no markdown tables, fits under a minute of
-reading, and the guard test asserts the safety line present and zero
+reading, and the guard test asserts zero
 blocklist/coaching-imperative tokens.
 
 **Phase 16 — Capture (structured + spoken).**

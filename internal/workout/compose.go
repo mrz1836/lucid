@@ -39,7 +39,7 @@ const emojiCoach = "💬"
 // instruction, not user-facing copy: Lucid has already decided the plan and will
 // render the card below, so the model must phrase, never restate, restructure, or
 // override.
-const contextHeader = "CONTEXT — Lucid has already decided today's session and will render the header, the three options, the progress panel, the reason, and the safety line below. Do NOT restate them, do NOT add, drop, or change any option, and do NOT give medical or diagnostic advice — read this only to ground your phrasing."
+const contextHeader = "CONTEXT — Lucid has already decided today's session and will render the header, the three options, the progress panel, and the reason below. Do NOT restate them, do NOT add, drop, or change any option, and do NOT give medical or diagnostic advice — read this only to ground your phrasing."
 
 // slotInstruction tells the model to return only the bounded phrasing slot: a
 // short, warm, non-commanding note. Everything structural is Lucid's, so the
@@ -331,7 +331,7 @@ func progressDigest(tr Trend) []string {
 // phrasing note. The spine is [Render] verbatim, so the message renders byte-
 // identically to the deterministic path with the note simply prepended — the
 // model contributes the note and nothing else, and it can never restructure the
-// card, drop the safety line, or add a fourth door. An empty note falls back to
+// card or add a fourth door. An empty note falls back to
 // the pure spine.
 func renderWithNote(note string, rec Recommendation, tr Trend, now time.Time) string {
 	spine := Render(rec, tr, now)
@@ -339,7 +339,7 @@ func renderWithNote(note string, rec Recommendation, tr Trend, now time.Time) st
 	if note == "" {
 		return spine
 	}
-	return fmt.Sprintf("%s %s\n\n%s\n\n%s", emojiCoach, note, workoutDivider, spine)
+	return fmt.Sprintf("%s %s\n\n%s", emojiCoach, note, spine)
 }
 
 // readPromptFile reads one explicit, opaque prompt file. It opens exactly the

@@ -63,14 +63,14 @@ func TestRouterWorkout_ComposesPhrasedMessage(t *testing.T) {
 	assert.True(t, res.UsedLLM)
 	assert.False(t, res.Fallback)
 	assert.Contains(t, res.Text, "You showed up")
-	assert.Contains(t, res.Text, "not medical advice")
+	assert.NotContains(t, res.Text, "not medical advice")
 	assert.NotEmpty(t, res.Recommendation.Primary.Name, "the decided pick is projected for --json")
 	assert.Equal(t, 1, p.Calls())
 	assert.Equal(t, "workout.daily", p.Requests[0].Intent)
 }
 
 // TestRouterWorkout_FallbackOnProviderDown: an unreachable provider renders the
-// deterministic scaffold — the pick and safety line stand, only warmth is lost.
+// deterministic scaffold — the pick stands, only warmth is lost.
 func TestRouterWorkout_FallbackOnProviderDown(t *testing.T) {
 	r := bootedWorkoutSurface(t)
 	p := &provider.Fake{Script: []provider.Exchange{{Err: provider.ErrUnavailable}}}
@@ -79,7 +79,7 @@ func TestRouterWorkout_FallbackOnProviderDown(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.Fallback)
 	assert.False(t, res.UsedLLM)
-	assert.Contains(t, res.Text, "not medical advice")
+	assert.NotContains(t, res.Text, "not medical advice")
 }
 
 // TestRouterWorkout_MissingProgramIsLoud: an enabled surface pointed at an absent

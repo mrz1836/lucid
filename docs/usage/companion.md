@@ -136,17 +136,20 @@ interpretation, and action are always in distinct, scannable regions:
   lines, one section per available signal group (body & state, change &
   withdrawal, commitments, routine anchor). A section with no data is omitted
   entirely.
-- **Interpretation** — the first model slot: what matters, what changed, what
-  needs attention — a few sentences.
-- **Next** — the second model slot: one or two concrete next actions, on a silver
-  platter, low cognitive load.
+- **Interpretation** — what matters, what changed, what needs attention — a few
+  sentences. Morning displays this as **The read**; night suppresses the
+  separate interpretation slot so close-out stays compact.
+- **Action cue** — morning renders this as **Morning routine**, grounded in the
+  configured routine; night renders it as the single **Close-out** cue. The
+  scaffold never renders a generic **Next** section or invents an action when no
+  routine/action is available.
 - **Footer** — an optional closing line, and the appended verdict on a missed day.
 
-Morning major groups are separated by a `― ― ―` divider and blank lines, so the
-forward-looking brief reads cleanly on a phone. Night deliberately omits those
-divider lines: it is a compact close-out prompt, not a second status memo. There
-are **no markdown tables** — a chat surface renders them as raw text, so the
-scaffold uses bullets and key/value lines only.
+Major groups are separated by blank lines only. Both morning and night omit
+horizontal divider lines, so the card reads like one compact phone message rather
+than a status memo with separators. There are **no markdown tables** — a chat
+surface renders them as raw text, so the scaffold uses bullets and key/value
+lines only.
 
 **Night is a close-out, not a second morning.** The night scaffold reorders the
 regions into a close-out ritual — the day's read-back first, then the compact
@@ -155,10 +158,10 @@ from the morning's forward-looking order. The model may still produce an
 interpretation slot for contract compatibility, but the night renderer does not
 display a separate examen/read section; the action is the point.
 
-### The two model slots
+### The model slots
 
-The model returns exactly two labeled slots, each introduced by a delimiter line
-on its own line:
+The model may return two labeled slots, each introduced by a delimiter line on
+its own line:
 
 ```text
 %%INTERPRETATION%%
@@ -169,14 +172,17 @@ on its own line:
 ```
 
 - `%%INTERPRETATION%%` — the interpretation slot: free prose in your own voice
-  (owned by your personal template), a few sentences.
-- `%%ACTIONS%%` — one or two lines, each a single concrete action.
+  (owned by your personal template), a few sentences. Morning renders it as
+  **The read**; night currently does not display it.
+- `%%ACTIONS%%` — one or two lines, each a single concrete action. Morning
+  renders these as **Morning routine** when grounded in the configured routine;
+  night renders them as **Close-out**. The header is never the generic **Next**.
 
 The parser is deliberately tolerant: if the `%%INTERPRETATION%%` delimiter is
 absent, the whole trimmed model reply becomes the interpretation and there are no
-actions — still a valid scaffold. Everything outside the two slots (the panel,
-the sections, the headers, the freshness labels, the ordering) is Lucid's, not
-the model's.
+actions — still a valid scaffold. Everything outside the slots (the panel, the
+sections, the headers, the freshness labels, the ordering) is Lucid's, not the
+model's.
 
 ### Freshness — "as logged" and stale
 
@@ -210,12 +216,11 @@ pure status brief lacks:
 |---|---|
 | Header: emoji + bold label · day | `{emoji} **Morning** · {Weekday, Mon D}` |
 | Hero status panel | The compact live-numbers panel |
-| `― ― ―` group dividers | Morning dividers between the panel, the sections, and the slots; night omits them |
 | `{emoji} **{Label}** · {meta}` section headers, `•` bullets | The context sections |
 | Appended freshness flag on stale data | The `stale` flag on a section's meta |
 | Footer | Closing line / appended verdict |
 | *(none — a status brief stops here)* | **Interpretation slot** — what it means |
-| *(none)* | **Next slot** — what to do next |
+| Action row | **Morning routine** / **Close-out** slot — the concrete cue |
 
 Those last two regions are the difference between a status dump and an operating
 surface: the "what it means" and the "what to do next" a briefing alone never

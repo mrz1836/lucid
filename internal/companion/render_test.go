@@ -43,32 +43,24 @@ func sampleMorningBriefing() Briefing {
 }
 
 // TestRender_MorningGolden pins the exact bytes of a full morning message so the
-// scaffold's structure — header, dividers, panel, section, `•` bullets, and the
-// two slots in the forward-looking order — is a hard contract, and asserts the
+// scaffold's structure — header, panel, section, `•` bullets, and the
+// read slot in the forward-looking order — is a hard contract, and asserts the
 // render is byte-stable across repeated calls.
 func TestRender_MorningGolden(t *testing.T) {
 	want := strings.Join([]string{
 		"☀️ **Morning** · Monday, Jul 20",
 		"",
-		"― ― ―",
-		"",
 		"⛓️ 5-day streak · 83% adherence (20/24 decided)",
 		"📊 Error budget · 2/3 isolated misses left · 4d to gate",
-		"",
-		"― ― ―",
 		"",
 		"🫀 **Body & state** · as logged 2026-07-19",
 		"• mood 7 — steady",
 		"• sleep 6.5h",
 		"",
-		"― ― ―",
-		"",
 		"🧭 **The read**",
 		"Steady week. The streak holds; adherence is comfortably above floor.",
 		"",
-		"― ― ―",
-		"",
-		"▶️ **Next**",
+		"🌅 **Morning routine**",
 		"• Run the morning chain before email.",
 		"• Log a mood check at noon.",
 	}, "\n")
@@ -94,7 +86,7 @@ func TestRender_NightOrdering(t *testing.T) {
 	assert.Contains(t, got, "🌒 **Close-out**", "night action is the close-out")
 	assert.NotContains(t, got, "🧭 **The read**", "night does not use the morning read header")
 	assert.NotContains(t, got, "▶️ **Next**", "night does not use the morning next header")
-	assert.NotContains(t, got, dividerLine, "night omits divider lines for a compact close-out")
+	assert.NotContains(t, got, "― ― ―", "night omits divider lines for a compact close-out")
 
 	// Close-out ordering: the read-back section comes before the numbers panel,
 	// the reverse of the morning hero-first order.
@@ -113,7 +105,7 @@ func TestRender_NightOrdering(t *testing.T) {
 }
 
 // TestRender_OmitsEmptySections drops a section with no bullet lines and leaves
-// no dangling divider when a whole region is empty.
+// no dangling structural chrome when a whole region is empty.
 func TestRender_OmitsEmptySections(t *testing.T) {
 	b := sampleMorningBriefing()
 	b.Sections = []Section{
@@ -124,12 +116,12 @@ func TestRender_OmitsEmptySections(t *testing.T) {
 	assert.Contains(t, got, "🫀 **Body & state**")
 	assert.NotContains(t, got, "Commitments", "an empty section leaves no stray header")
 
-	// A briefing with no sections at all has no divider between the panel and the
-	// interpretation beyond the single separators — and never a doubled divider.
+	// A briefing with no sections at all still has only blank-line separators —
+	// never horizontal divider chrome.
 	noSections := sampleMorningBriefing()
 	noSections.Sections = nil
 	out := Render(noSections)
-	assert.NotContains(t, out, dividerLine+"\n\n"+dividerLine, "no dangling doubled divider")
+	assert.NotContains(t, out, "― ― ―", "morning omits divider lines entirely")
 }
 
 // TestRender_OmitsEmptySlots renders cleanly when the model slots are empty —
@@ -140,7 +132,7 @@ func TestRender_OmitsEmptySlots(t *testing.T) {
 	b.Actions = nil
 	got := Render(b)
 	assert.NotContains(t, got, "🧭 **The read**", "no interpretation header without prose")
-	assert.NotContains(t, got, "▶️ **Next**", "no next header without actions")
+	assert.NotContains(t, got, "▶️ **Next**", "morning has no generic next header")
 	assert.Contains(t, got, "⛓️ 5-day streak", "the deterministic panel still renders")
 }
 
@@ -150,8 +142,8 @@ func TestRender_VerdictIsLastGroup(t *testing.T) {
 	b := sampleMorningBriefing()
 	b.Verdict = "last night was a miss. Tonight is a must."
 	got := Render(b)
-	assert.True(t, strings.HasSuffix(got, "\n\n"+dividerLine+"\n\nlast night was a miss. Tonight is a must."),
-		"the verdict is the last group, divider-separated")
+	assert.True(t, strings.HasSuffix(got, "\n\nlast night was a miss. Tonight is a must."),
+		"the verdict is the last group, blank-line-separated")
 }
 
 // TestBuildStatusPanel_CompactDecidedDay: a decided-day panel is the compact
