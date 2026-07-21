@@ -35,7 +35,11 @@ func TestResolveVerb(t *testing.T) {
 		{"withdrawal", KindWithdrawal, "", true},    // generic companion-context kind
 		{"habit_change", KindHabitChange, "", true}, // underscore kind reachable via /obs
 		{"commitment", KindCommitment, "", true},
-		{"PAIN", KindPain, "", true}, // case-insensitive verb
+		{"workout", KindWorkout, "", true},      // workout kind via capturable fallback
+		{"body_state", KindBodyState, "", true}, // underscore kind reachable via /obs
+		{"sore", KindBodyState, "", true},       // friendly body_state alias
+		{"bodystate", KindBodyState, "", true},  // friendly body_state alias
+		{"PAIN", KindPain, "", true},            // case-insensitive verb
 		{"context.day", "", "", false},
 		{"nonsense", "", "", false},
 	}
@@ -57,6 +61,8 @@ func TestIsCapturableKind(t *testing.T) {
 	assert.True(t, IsCapturableKind(KindWithdrawal))  // companion-context kinds are capturable
 	assert.True(t, IsCapturableKind(KindHabitChange))
 	assert.True(t, IsCapturableKind(KindCommitment))
+	assert.True(t, IsCapturableKind(KindWorkout)) // workout-module kinds are capturable
+	assert.True(t, IsCapturableKind(KindBodyState))
 }
 
 // TestParse_CompanionContextKinds covers the three companion-context kinds
@@ -109,6 +115,113 @@ func TestParse_CompanionContextKinds(t *testing.T) {
 	assert.True(t, cmEmpty.Partial)
 	assert.Equal(t, KindCommitment, cmEmpty.Kind)
 	assert.Equal(t, ParseMarkerPartial, cmEmpty.Payload["parse"])
+}
+
+// TestParse_WorkoutKind covers the workout micro-log grammar (workout-module.md
+// §"Two new observation kinds"): type is the head, minute-suffixed duration and
+// an rpe marker are recognized deterministically, everything else is the note,
+// and malformed/out-of-range/empty heads take the partial path (capture never
+// blocks).
+func TestParse_WorkoutKind(t *testing.T) {
+	// type + duration + attached rpe + trailing note.
+	full := parse(KindWorkout, "", "push", "50min", "rpe7", "felt", "strong")
+	assert.False(t, full.Partial)
+	assert.Equal(t, "push", full.Payload["type"])
+	assert.Equal(t, 50, full.Payload["duration_min"])
+	assert.Equal(t, 7, full.Payload["rpe"])
+	assert.Equal(t, "felt strong", full.Payload["note"])
+
+	// spaced rpe form and the `50m` / `50mins` duration variants.
+	spaced := parse(KindWorkout, "", "legs", "45m", "rpe", "8")
+	assert.False(t, spaced.Partial)
+	assert.Equal(t, 45, spaced.Payload["duration_min"])
+	assert.Equal(t, 8, spaced.Payload["rpe"])
+	assert.NotContains(t, spaced.Payload, "note")
+
+	mins := parse(KindWorkout, "", "cardio", "30mins")
+	assert.Equal(t, 30, mins.Payload["duration_min"])
+
+	// a bare type is a valid "I trained" event.
+	bare := parse(KindWorkout, "", "pull")
+	assert.False(t, bare.Partial)
+	assert.Equal(t, "pull", bare.Payload["type"])
+	assert.NotContains(t, bare.Payload, "duration_min")
+	assert.NotContains(t, bare.Payload, "rpe")
+
+	// a bare integer stays in the note — the parser never guesses a duration.
+	bareInt := parse(KindWorkout, "", "row", "5", "sets")
+	assert.NotContains(t, bareInt.Payload, "duration_min")
+	assert.Equal(t, "5 sets", bareInt.Payload["note"])
+
+	// out-of-range rpe → partial, kind kept, never clamped.
+	oor := parse(KindWorkout, "", "push", "rpe12")
+	assert.True(t, oor.Partial)
+	assert.Equal(t, KindWorkout, oor.Kind)
+	assert.Equal(t, "push rpe12", oor.Payload["note"])
+	assert.Equal(t, ParseMarkerPartial, oor.Payload["parse"])
+
+	// an rpe marker with no value → partial.
+	rpeEmpty := parse(KindWorkout, "", "push", "rpe")
+	assert.True(t, rpeEmpty.Partial)
+	assert.Equal(t, KindWorkout, rpeEmpty.Kind)
+
+	// empty head → partial (nothing to record).
+	empty := parse(KindWorkout, "")
+	assert.True(t, empty.Partial)
+	assert.Equal(t, KindWorkout, empty.Kind)
+	assert.Equal(t, ParseMarkerPartial, empty.Payload["parse"])
+}
+
+// TestParse_BodyStateKind covers the body_state micro-log grammar: body_part is
+// the head, a bare leading integer reads as soreness (the `/sore <part> 4`
+// form), explicit sore/pain keyword pairs set either 0–10 scale, a note word
+// like "pain" never trips the partial path, and out-of-range/empty heads take
+// the partial path.
+func TestParse_BodyStateKind(t *testing.T) {
+	// `/sore shoulder 4 aching` (via the friendly alias's soreness-first read).
+	soreFirst := parse(KindBodyState, "", "shoulder", "4", "aching")
+	assert.False(t, soreFirst.Partial)
+	assert.Equal(t, "shoulder", soreFirst.Payload["body_part"])
+	assert.Equal(t, 4, soreFirst.Payload["soreness"])
+	assert.Equal(t, "aching", soreFirst.Payload["note"])
+
+	// explicit keyword pairs set both scales.
+	both := parse(KindBodyState, "", "knee", "sore", "5", "pain", "7", "tight")
+	assert.False(t, both.Partial)
+	assert.Equal(t, "knee", both.Payload["body_part"])
+	assert.Equal(t, 5, both.Payload["soreness"])
+	assert.Equal(t, 7, both.Payload["pain"])
+	assert.Equal(t, "tight", both.Payload["note"])
+
+	// a note containing the word "pain" (no numeric follower) stays in the note.
+	noPain := parse(KindBodyState, "", "shoulder", "aching", "no", "pain")
+	assert.False(t, noPain.Partial)
+	assert.NotContains(t, noPain.Payload, "pain")
+	assert.Equal(t, "aching no pain", noPain.Payload["note"])
+
+	// a bare part is a valid event.
+	bare := parse(KindBodyState, "", "hamstring")
+	assert.False(t, bare.Partial)
+	assert.Equal(t, "hamstring", bare.Payload["body_part"])
+	assert.NotContains(t, bare.Payload, "soreness")
+	assert.NotContains(t, bare.Payload, "pain")
+
+	// out-of-range soreness → partial, never clamped.
+	oorSore := parse(KindBodyState, "", "back", "15")
+	assert.True(t, oorSore.Partial)
+	assert.Equal(t, KindBodyState, oorSore.Kind)
+	assert.Equal(t, ParseMarkerPartial, oorSore.Payload["parse"])
+
+	// out-of-range keyword pain → partial.
+	oorPain := parse(KindBodyState, "", "back", "pain", "12")
+	assert.True(t, oorPain.Partial)
+	assert.Equal(t, KindBodyState, oorPain.Kind)
+
+	// empty head → partial (nothing to record).
+	empty := parse(KindBodyState, "")
+	assert.True(t, empty.Partial)
+	assert.Equal(t, KindBodyState, empty.Kind)
+	assert.Equal(t, ParseMarkerPartial, empty.Payload["parse"])
 }
 
 // TestParse_Shorthands checks each named shorthand yields the documented kind
