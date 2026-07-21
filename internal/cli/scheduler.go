@@ -17,6 +17,7 @@ import (
 	"github.com/mrz1836/lucid/internal/schedrun"
 	"github.com/mrz1836/lucid/internal/scheduler"
 	"github.com/mrz1836/lucid/internal/storage"
+	"github.com/mrz1836/lucid/internal/workout"
 )
 
 // schedulerFlagDB is the `--db` flag on `lucid scheduler run`. Centralized so
@@ -92,10 +93,11 @@ binary. The job store is disposable machinery kept outside the ~/.lucid Ledger
 // numbers), install the signal-canceled context, and hand off to the flywheel
 // driver. When the companion is enabled it presents both user windows, so the
 // teeth run with their user-channel send suppressed and the companion node runs
-// beside them under one canceled context; when disabled, only the teeth run —
-// byte-for-byte today's behavior. Every startup error is funneled through a
-// single "lucid: scheduler: <message>" stderr line (mirroring `upgrade`) before
-// being returned, so exitCodeForError still classifies it.
+// beside them under one canceled context; when the workout slot is enabled its
+// node runs beside them too. When neither companion-class node is enabled only
+// the teeth run — byte-for-byte today's behavior. Every startup error is funneled
+// through a single "lucid: scheduler: <message>" stderr line (mirroring
+// `upgrade`) before being returned, so exitCodeForError still classifies it.
 func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error {
 	store, err := storage.Open()
 	if err != nil {
@@ -136,7 +138,7 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if !cfg.Companion.Enabled {
+	if !cfg.Companion.Enabled && !cfg.Workout.Enabled {
 		// Teeth only: bell + tripwire both deliver to the user, exactly as before.
 		if err := schedrun.Run(ctx, schedrun.Options{Store: store, Notifier: notifier, DBPath: dbPath}); err != nil {
 			_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
@@ -145,29 +147,32 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 		return nil
 	}
 
-	// Companion presents both user windows: the teeth run with their
-	// user-channel send suppressed (the modeless decision, witness L2, heartbeat,
-	// and escalation_state persistence all unchanged) and the companion node runs
-	// beside them. They share one context, so a failure in either drains the
-	// process and the supervisor restarts both together — the teeth are never
-	// left suppressed-but-silent.
-	if err := runSchedulerWithCompanion(ctx, store, r, notifier, cfg, dbPath); err != nil {
+	// At least one companion-class node runs beside the teeth. When the companion
+	// presents both user windows the teeth run with their user-channel send
+	// suppressed (the modeless decision, witness L2, heartbeat, and
+	// escalation_state persistence all unchanged); the workout slot never
+	// suppresses the teeth (it is an additive midday send). They share one
+	// context, so a failure in any node drains the process and the supervisor
+	// restarts the set together — the teeth are never left suppressed-but-silent.
+	if err := runSchedulerWithCompanions(ctx, store, r, notifier, cfg, dbPath); err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
 		return fmt.Errorf("lucid: scheduler: %w", err)
 	}
 	return nil
 }
 
-// runSchedulerWithCompanion runs the suppressed teeth and the companion node
-// concurrently under one errgroup: the first to fail cancels the other, so the
-// whole process exits and the supervisor restarts the pair. The companion reads
-// the send-free tripwire verdict through its own scheduler (a no-op notifier —
-// the verdict read never sends) and delivers through the same env-injected
-// Discord transport the teeth use.
-func runSchedulerWithCompanion(
+// runSchedulerWithCompanions runs the teeth and every enabled companion-class
+// node concurrently under one errgroup: the first to fail cancels the rest, so
+// the whole process exits and the supervisor restarts the set. The teeth suppress
+// their user-channel send only when the companion presents those windows; the
+// companion reads the send-free tripwire verdict through its own scheduler (a
+// no-op notifier — the verdict read never sends), and the workout slot reads its
+// deterministic recommendation through the router's metrics/observation seams.
+// All nodes deliver through the same env-injected Discord transport the teeth use.
+func runSchedulerWithCompanions(
 	ctx context.Context,
 	store *storage.Adapter,
-	numbers companion.NumbersReader,
+	r *router.Router,
 	notifier *notify.Discord,
 	cfg config.Config,
 	dbPath string,
@@ -175,18 +180,37 @@ func runSchedulerWithCompanion(
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return schedrun.Run(gctx, schedrun.Options{
-			Store: store, Notifier: notifier, DBPath: dbPath, SuppressUserChannel: true,
+			Store: store, Notifier: notifier, DBPath: dbPath, SuppressUserChannel: cfg.Companion.Enabled,
 		})
 	})
-	g.Go(func() error {
-		return companion.Run(gctx, companion.Options{
-			Store:    store,
-			Config:   cfg.Companion,
-			Provider: cfg.Provider,
-			Numbers:  numbers,
-			Verdict:  scheduler.New(store, noopNotifier{}),
-			Notifier: notifier,
+	if cfg.Companion.Enabled {
+		g.Go(func() error {
+			return companion.Run(gctx, companion.Options{
+				Store:    store,
+				Config:   cfg.Companion,
+				Provider: cfg.Provider,
+				Numbers:  r,
+				Verdict:  scheduler.New(store, noopNotifier{}),
+				Notifier: notifier,
+			})
 		})
-	})
+	}
+	if cfg.Workout.Enabled {
+		g.Go(func() error {
+			// The workout slot keeps its own disposable job DB (LUCID_WORKOUT_DB, or
+			// a workout.db under the OS config dir) rather than sharing the teeth's
+			// --db file: SQLite is single-writer, so co-locating two flywheel nodes
+			// on one file would contend. The default is separate files per node.
+			return workout.Run(gctx, workout.Options{
+				Store:        store,
+				Config:       cfg.Workout,
+				Provider:     cfg.Provider,
+				Metrics:      r.WorkoutMetrics(),
+				Observations: store,
+				Injuries:     store,
+				Notifier:     notifier,
+			})
+		})
+	}
 	return g.Wait()
 }

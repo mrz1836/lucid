@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/workout"
 )
@@ -26,6 +28,14 @@ const (
 	flagWText      = "text"
 )
 
+// Flags on `lucid workout fire`. --deliver actually sends; the default is a
+// dry-run compose with zero side effect. --dry-run is accepted explicitly so a
+// script can be unambiguous; it is mutually exclusive with --deliver.
+const (
+	workoutFlagDeliver = "deliver"
+	workoutFlagDryRun  = "dry-run"
+)
+
 // scaleMax is the inclusive upper bound of every 0–10 reading a workout log
 // accepts (rpe, soreness, pain). An out-of-range value is a usage error, never
 // silently clamped.
@@ -34,8 +44,9 @@ const scaleMax = 10
 // newWorkoutCmd wires `lucid workout`: the config-gated workout companion's
 // command group. A bare `lucid workout` composes the on-demand recommendation
 // (deterministic pick, model-phrased delivery, deterministic fallback); the
-// `log` child captures a completed session. The daily-slot `fire` verb is added
-// by its build stage.
+// `log` child captures a completed session; the `fire` child composes (and
+// optionally delivers) one daily-slot message on demand — the same idempotent,
+// read-back-verified path the scheduled daily slot takes.
 func newWorkoutCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workout",
@@ -55,7 +66,126 @@ the model only phrases it, so the message still renders with the provider down.
 		},
 	}
 	cmd.AddCommand(newWorkoutLogCmd())
+	cmd.AddCommand(newWorkoutFireCmd())
 	return cmd
+}
+
+// newWorkoutFireCmd wires `lucid workout fire [--dry-run|--deliver]`. The
+// scheduled daily slot runs inside `lucid scheduler run`; this verb is the
+// operator's way to compose (and optionally deliver) one slot message now — to
+// preview the message, prove the pipeline end to end, or re-send after a miss.
+// A dry-run composes and prints with zero side effect (no delivery, no receipt);
+// --deliver posts one idempotent, read-back-verified message to the user channel
+// through the same [workout.Runner] the scheduled slot uses, so a delivered test
+// fire honors the missed-fire window and the delivery receipt exactly as a real
+// fire would.
+func newWorkoutFireCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fire",
+		Short: "Compose the daily workout message now (dry-run by default)",
+		Long: `fire composes one workout-slot message immediately. By default it is a
+dry-run: it composes and prints the message and touches nothing (no send, no
+delivery receipt). Pass --deliver to actually post one idempotent, read-back-
+verified message to the user channel — the same path the scheduled daily slot
+takes, so a delivered test fire honors the missed-fire window and the delivery
+receipt exactly as a real fire would.`,
+		Args: cobra.NoArgs,
+		Example: `  # Preview today's workout message without sending it.
+  lucid workout fire
+
+  # Actually deliver one workout message now.
+  lucid workout fire --deliver`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			deliver, _ := cmd.Flags().GetBool(workoutFlagDeliver)
+			return runWorkoutFire(cmd, deliver)
+		},
+	}
+	cmd.Flags().Bool(workoutFlagDeliver, false, "Deliver the message (default: dry-run compose with no side effect)")
+	cmd.Flags().Bool(workoutFlagDryRun, false, "Compose and print without delivering (the default)")
+	cmd.MarkFlagsMutuallyExclusive(workoutFlagDeliver, workoutFlagDryRun)
+	return cmd
+}
+
+// runWorkoutFire boots the Ledger + router and either captures a dry-run (the
+// deterministic pick, model-phrased, printed with no side effect) or delivers
+// one idempotent slot message through the shared [workout.Runner]. The deliver
+// path needs the env-injected Discord transport (the credential-dumb notifier —
+// token + channel come from the environment only).
+func runWorkoutFire(cmd *cobra.Command, deliver bool) error {
+	r, err := bootedRouter(cmd)
+	if err != nil {
+		return err
+	}
+	cfg := r.Config()
+	if !cfg.Workout.Enabled {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: workout.enabled is false — the scheduler will not fire this automatically")
+	}
+
+	if !deliver {
+		p, perr := buildProvider(cfg.Provider)
+		if perr != nil {
+			return perr
+		}
+		res, wErr := r.Workout(cmd.Context(), clockNow(), p)
+		if wErr != nil {
+			return wErr
+		}
+		return renderWorkoutDryRun(cmd.OutOrStdout(), res)
+	}
+
+	discord, err := notify.NewDiscordFromEnv()
+	if err != nil {
+		return fmt.Errorf("lucid workout fire: %w", err)
+	}
+	runner := workout.NewRunner(workout.Deps{
+		Workout:      cfg.Workout,
+		Provider:     cfg.Provider,
+		Metrics:      r.WorkoutMetrics(),
+		Observations: r.Store(),
+		Injuries:     r.Store(),
+		Build:        buildProvider,
+	}, discord, r.Store())
+	out, err := runner.Fire(cmd.Context(), clockNow())
+	if err != nil {
+		return err
+	}
+	return renderWorkoutFire(cmd.OutOrStdout(), out)
+}
+
+// renderWorkoutDryRun prints a composed slot message for a person to read,
+// naming the deterministic-fallback and enrichment-degraded paths when they
+// fired so a preview is never mistaken for the model's warm output when it was
+// not.
+func renderWorkoutDryRun(out io.Writer, res router.WorkoutResult) error {
+	_, _ = fmt.Fprintln(out, "── workout (dry-run — not delivered) ──")
+	if res.Fallback {
+		_, _ = fmt.Fprintln(out, "[deterministic fallback — the provider was unreachable; only the phrasing warmth is lost]")
+	}
+	if res.EnrichmentDegraded {
+		_, _ = fmt.Fprintln(out, "[enrichment degraded — recent workout/body-state history could not be read; today follows the plain program calendar]")
+	}
+	_, _ = fmt.Fprintln(out, res.Text)
+	return nil
+}
+
+// renderWorkoutFire reports how a real delivery resolved: a skip (idempotent or
+// past the cut-off) or a delivered message id, noting a late-note or fallback
+// delivery.
+func renderWorkoutFire(out io.Writer, o workout.Outcome) error {
+	switch {
+	case o.Skipped:
+		_, _ = fmt.Fprintf(out, "workout slot skipped (%s).\n", o.SkipReason)
+	case o.Delivered:
+		note := ""
+		if o.Late {
+			note += " (late note prepended)"
+		}
+		if o.Fallback {
+			note += " (deterministic fallback)"
+		}
+		_, _ = fmt.Fprintf(out, "workout delivered%s — message %s.\n", note, o.MessageID)
+	}
+	return nil
 }
 
 // workoutRecommendationJSON is the --json projection of the on-demand surface:

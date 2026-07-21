@@ -65,6 +65,14 @@ func (r *Router) Workout(ctx context.Context, now time.Time, p provider.Provider
 	}, nil
 }
 
+// WorkoutMetrics returns the read-only engine-metrics adapter the workout
+// composer folds the streak/adherence from — the router's own [Router.Metrics]
+// projection narrowed to [engine.Metrics]. It is exported so the daemon and the
+// `lucid workout fire` verb can wire a [workout.Runner]/[workout.Options] over
+// the router's dependencies without the workout package importing the router
+// (the two would otherwise form an import cycle).
+func (r *Router) WorkoutMetrics() workout.MetricsReader { return workoutMetrics{r} }
+
 // workoutMetrics adapts the router's own Metrics result to the [engine.Metrics]
 // the workout composer folds the streak/adherence from, so internal/workout never
 // imports the router (the two would otherwise form an import cycle).

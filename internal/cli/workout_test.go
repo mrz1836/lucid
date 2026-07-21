@@ -257,3 +257,60 @@ func TestWorkout_Log_DisabledKindRejectedCLI(t *testing.T) {
 	assert.Contains(t, out, "isn't enabled")
 	assert.Empty(t, eventsOfKind(readObsEvents(t, home), observations.KindWorkout))
 }
+
+// --- workout fire (on-demand daily-slot verb) -------------------------------
+
+// TestWorkoutFire_CommandRegistered proves the `fire` child is wired under
+// `workout` and carries the deliver/dry-run flags (AC-7 slot, on-demand).
+func TestWorkoutFire_CommandRegistered(t *testing.T) {
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	fireCmd, _, err := root.Find([]string{"workout", "fire"})
+	require.NoError(t, err)
+	assert.Equal(t, "fire", fireCmd.Name())
+	assert.NotNil(t, fireCmd.Flags().Lookup(workoutFlagDeliver), "fire exposes --deliver")
+	assert.NotNil(t, fireCmd.Flags().Lookup(workoutFlagDryRun), "fire exposes --dry-run")
+}
+
+// TestWorkoutFire_DryRun_ComposesNoDeliver: a bare `workout fire` is a dry-run —
+// it composes and prints today's message (the deterministic scaffold plus the
+// model's phrasing) and touches nothing. No Discord env is read on this path.
+func TestWorkoutFire_DryRun_ComposesNoDeliver(t *testing.T) {
+	enableWorkoutSurface(t)
+	withScriptedProvider(t, provider.Exchange{Content: "Good to see you today."})
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "fire")
+	require.NoError(t, err)
+	assert.Contains(t, out, "dry-run — not delivered")
+	assert.Contains(t, out, "Good to see you today.", "the model note is rendered")
+	assert.Contains(t, out, "**Workout**", "the deterministic header is present")
+	assert.Contains(t, out, "not medical advice", "the safety line is always present")
+}
+
+// TestWorkoutFire_DryRun_ProviderDownStillRenders: the dry-run renders
+// deterministically when the provider is unreachable and names the fallback.
+func TestWorkoutFire_DryRun_ProviderDownStillRenders(t *testing.T) {
+	enableWorkoutSurface(t)
+	withScriptedProvider(t, provider.Exchange{Err: provider.ErrTimeout})
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "fire")
+	require.NoError(t, err)
+	assert.Contains(t, out, "dry-run — not delivered")
+	assert.Contains(t, out, "deterministic fallback")
+	assert.Contains(t, out, "not medical advice")
+}
+
+// TestWorkoutFire_DeliverAndDryRunMutuallyExclusive: --deliver and --dry-run
+// cannot both be set, so an unambiguous script never asks for both.
+func TestWorkoutFire_DeliverAndDryRunMutuallyExclusive(t *testing.T) {
+	enableWorkoutSurface(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "fire", "--deliver", "--dry-run")
+	require.Error(t, err)
+}
+
+// TestWorkoutFire_RejectsArgs: fire is a no-args verb — a stray positional is a
+// usage error caught before any compose or delivery.
+func TestWorkoutFire_RejectsArgs(t *testing.T) {
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	root.SetArgs([]string{"workout", "fire", "extra"})
+	require.Error(t, root.Execute())
+}
