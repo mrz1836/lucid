@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +14,7 @@ import (
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
+	"github.com/mrz1836/lucid/internal/workout"
 )
 
 // enableWorkoutKinds points LUCID_HOME at an isolated home, scaffolds it, and
@@ -70,6 +74,94 @@ func TestWorkout_CommandRegistered(t *testing.T) {
 	cmd, _, err := root.Find([]string{"workout", "log"})
 	require.NoError(t, err)
 	assert.Equal(t, "log", cmd.Name())
+}
+
+// enableWorkoutSurface sets up an isolated home with the workout feature fully
+// configured: the workout + body_state kinds enabled, a synthetic program and the
+// two opaque prompt files written to disk, and an enabled workout block in
+// lucid.json pointing at them — so the on-demand `lucid workout` command composes
+// against a real (empty) Ledger.
+func enableWorkoutSurface(t *testing.T) {
+	t.Helper()
+	home := enableWorkoutKinds(t) // isolated home + workout/body_state kinds enabled
+
+	dir := t.TempDir()
+	prog := filepath.Join(dir, "program.json")
+	b, err := json.Marshal(workout.ExampleProgram())
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(prog, b, 0o600))
+	sys := filepath.Join(dir, "system_prompt.md")
+	tmpl := filepath.Join(dir, "daily_template.md")
+	require.NoError(t, os.WriteFile(sys, []byte("SYSTEM VOICE\n"), 0o600))
+	require.NoError(t, os.WriteFile(tmpl, []byte("TEMPLATE BODY\n"), 0o600))
+
+	a := storage.New(home)
+	cfg, err := a.LoadConfig()
+	require.NoError(t, err)
+	cfg.Workout = config.WorkoutConfig{
+		Enabled: true, Program: prog, SlotTime: "12:00", SystemPrompt: sys, Template: tmpl,
+	}
+	require.NoError(t, a.SaveConfig(cfg))
+}
+
+// TestWorkout_OnDemand_RendersRecommendation proves the bare `lucid workout` verb
+// composes today's recommendation: the model phrases a note and the message still
+// carries the deterministic header, options, and safety line (AC-7 command, AC-9).
+func TestWorkout_OnDemand_RendersRecommendation(t *testing.T) {
+	enableWorkoutSurface(t)
+	withScriptedProvider(t, provider.Exchange{Content: "Great to see you here today."})
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "workout")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Great to see you here today.", "the model note is rendered")
+	assert.Contains(t, out, "**Workout**", "the deterministic header is present")
+	assert.Contains(t, out, "Today's options")
+	assert.Contains(t, out, "not medical advice", "the safety line is always present")
+	assert.NotContains(t, errOut, "deterministic fallback", "the model path is not a fallback")
+}
+
+// TestWorkout_OnDemand_JSON proves --json emits the decided Recommendation/Trend
+// projection rather than the rendered message (AC-8).
+func TestWorkout_OnDemand_JSON(t *testing.T) {
+	enableWorkoutSurface(t)
+	withScriptedProvider(t, provider.Exchange{Content: "note"})
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "--json")
+	require.NoError(t, err)
+
+	var payload struct {
+		Recommendation workout.Recommendation `json:"recommendation"`
+		Trend          workout.Trend          `json:"trend"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.NotEmpty(t, payload.Recommendation.Primary.Name, "the decided pick is projected")
+	assert.NotEmpty(t, payload.Recommendation.Fallback.Name, "the easier door is projected")
+}
+
+// TestWorkout_OnDemand_ProviderDownStillRenders proves the on-demand surface
+// renders deterministically when the provider is unreachable: the message stands
+// (safety line present) and the fallback is noted on stderr (AC-9 degrade).
+func TestWorkout_OnDemand_ProviderDownStillRenders(t *testing.T) {
+	enableWorkoutSurface(t)
+	withScriptedProvider(t, provider.Exchange{Err: provider.ErrUnavailable})
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "workout")
+	require.NoError(t, err)
+	assert.Contains(t, out, "**Workout**")
+	assert.Contains(t, out, "not medical advice")
+	assert.Contains(t, errOut, "deterministic fallback")
+}
+
+// TestWorkout_OnDemand_DisabledWarns proves a Ledger without a workout block warns
+// on stderr but does not crash (it still errors loudly on the absent program,
+// surfacing the misconfiguration rather than composing a synthetic program).
+func TestWorkout_OnDemand_DisabledWarns(t *testing.T) {
+	isolatedHome(t)
+	withScriptedProvider(t, provider.Exchange{Content: "note"})
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "workout")
+	require.Error(t, err, "an unconfigured program is a loud error")
+	assert.Contains(t, errOut, "workout.enabled is false")
 }
 
 // TestWorkout_Log_StructuredCLI: the structured flags write one workout event

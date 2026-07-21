@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/router"
+	"github.com/mrz1836/lucid/internal/workout"
 )
 
 // Workout `log` flag names. The content flags carry the structured capture; the
@@ -31,10 +32,10 @@ const (
 const scaleMax = 10
 
 // newWorkoutCmd wires `lucid workout`: the config-gated workout companion's
-// command group. This phase lands the capture verb (`workout log`); the
-// on-demand recommendation and daily-slot verbs are added by their build
-// stages. A bare `lucid workout` prints help until the recommendation verb
-// lands, so the command spine is discoverable from day one.
+// command group. A bare `lucid workout` composes the on-demand recommendation
+// (deterministic pick, model-phrased delivery, deterministic fallback); the
+// `log` child captures a completed session. The daily-slot `fire` verb is added
+// by its build stage.
 func newWorkoutCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workout",
@@ -42,10 +43,66 @@ func newWorkoutCmd() *cobra.Command {
 		Long: `lucid workout is the workout companion: it recommends today's session,
 records what actually happened, and reviews progress over time. The feature is
 config-gated and off by default; enable it by adding a workout block to
-lucid.json and the workout/body_state kinds to observations/config.json.`,
+lucid.json and the workout/body_state kinds to observations/config.json.
+
+Run bare, it composes today's recommendation on demand — a deterministic core
+picks and vetoes the session (rotation, recovery windows, pain hard stops) and
+the model only phrases it, so the message still renders with the provider down.
+--json emits the decided recommendation and trend instead of the rendered text.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runWorkout(cmd)
+		},
 	}
 	cmd.AddCommand(newWorkoutLogCmd())
 	return cmd
+}
+
+// workoutRecommendationJSON is the --json projection of the on-demand surface:
+// the decided pick and the read-only trend, exactly the deterministic core's
+// output so a harness reads the same recommendation the message renders.
+type workoutRecommendationJSON struct {
+	Recommendation workout.Recommendation `json:"recommendation"`
+	Trend          workout.Trend          `json:"trend"`
+}
+
+// runWorkout composes and prints the on-demand recommendation + trend. The
+// deterministic core owns the pick; the model only phrases it, and a provider
+// outage still renders the message deterministically. --json emits the decided
+// Recommendation/Trend projection instead of the rendered message; the degrade
+// notes (deterministic fallback, enrichment-degraded) go to stderr so the piped
+// stdout stays the clean message.
+func runWorkout(cmd *cobra.Command) error {
+	r, err := bootedRouter(cmd)
+	if err != nil {
+		return err
+	}
+	cfg := r.Config()
+	if !cfg.Workout.Enabled {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: workout.enabled is false — add a workout block to lucid.json to enable the daily slot")
+	}
+	p, err := buildProvider(cfg.Provider)
+	if err != nil {
+		return err
+	}
+	res, err := r.Workout(cmd.Context(), clockNow(), p)
+	if err != nil {
+		return err
+	}
+	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+		return writeJSON(cmd.OutOrStdout(), workoutRecommendationJSON{
+			Recommendation: res.Recommendation,
+			Trend:          res.Trend,
+		})
+	}
+	if res.Fallback {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "[deterministic fallback — the provider was unreachable; only the phrasing warmth is lost]")
+	}
+	if res.EnrichmentDegraded {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "[enrichment degraded — recent workout/body-state history could not be read; today follows the plain program calendar]")
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Text)
+	return nil
 }
 
 // newWorkoutLogCmd wires `lucid workout log`: capture a completed session two
