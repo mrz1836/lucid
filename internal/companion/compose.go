@@ -48,19 +48,29 @@ const recentWindowDays = 7
 // contextHeader introduces the deterministic context handed to the model. It is
 // instruction, not user-facing copy: Lucid has already rendered the header, the
 // status panel, and the context sections into the delivered message, so the
-// model must not restate any of it — it reads the block only to ground its two
-// slots.
+// model must not restate any of it — it reads the block only to ground its mode-specific
+// slot(s).
 const contextHeader = "CONTEXT — Lucid has already rendered the header, the status panel, and the context sections below into the message. Do NOT restate any numbers or re-list these signals; read them only to ground your interpretation."
 
-// slotInstruction tells the model to return exactly the two labeled slots the
-// scaffold drops into fixed places. It names the same delimiter tokens the
-// renderer's parseSlots scans for (interpDelim / actionsDelim), so the prompt
-// and the parser can never drift.
-const slotInstruction = "Respond with EXACTLY the two labeled slots below and nothing else. Lucid renders everything else. " +
-	"Write the interpretation as 2–4 short sentences: what matters now, what changed, what needs attention. " +
-	"Then give one or two concrete, low-effort next actions.\n\n" +
-	interpDelim + "\n<your interpretation>\n\n" +
-	actionsDelim + "\n- <first action>\n- <optional second action>"
+// slotInstruction returns the model-slot instruction for the window. Morning
+// renders the action slot as a routine cue — no generic Next region — while night
+// renders the action slot as the close-out cue. It names the same delimiter
+// tokens the renderer's parseSlots scans for (interpDelim / actionsDelim), so
+// the prompt and the parser can never drift.
+func slotInstruction(mode Mode) string {
+	base := "Lucid renders everything else. Write the interpretation as 2–4 short sentences: " +
+		"what matters now, what changed, what needs attention."
+	if mode == ModeNight {
+		return "Respond with EXACTLY the two labeled slots below and nothing else. " + base +
+			" Then give one concrete, low-effort close-out action.\n\n" +
+			interpDelim + "\n<your interpretation>\n\n" +
+			actionsDelim + "\n- <close-out action>"
+	}
+	return "Respond with EXACTLY the two labeled slots below and nothing else. " + base +
+		" Then give one concrete action grounded in the intended morning routine; do not invent a generic Next item.\n\n" +
+		interpDelim + "\n<your interpretation>\n\n" +
+		actionsDelim + "\n- <morning routine cue>"
+}
 
 // The deterministic fallback copy fired when the model is unreachable or returns
 // nothing usable. Only warmth is lost — the panel, the context sections, and (on
@@ -70,7 +80,7 @@ const slotInstruction = "Respond with EXACTLY the two labeled slots below and no
 const (
 	fallbackInterpMorning = "A quieter read today — the numbers above tell the real story. Start small and put the day on the board."
 	fallbackInterpNight   = "A quieter read tonight — the day's signals are above. Read them honestly, then let the day close."
-	fallbackActionMorning = "Start with the smallest move on the chain — two minutes to begin."
+	fallbackActionMorning = "Start the real morning routine: water from the thermos → oral care → ginger-cayenne."
 )
 
 // renderKinds is the render-relevant observation vocabulary the companion
@@ -227,7 +237,7 @@ func New(d Deps) *Composer {
 }
 
 // Result is one composed message and how it was reached. Text is the rendered
-// scaffold to deliver. UsedLLM records the model filled the two slots; Fallback
+// scaffold to deliver. UsedLLM records the model filled the requested slot(s); Fallback
 // records the deterministic path fired (the model was unreachable or returned
 // nothing usable) so the caller can still alert that warmth was lost. MissDay
 // records the Engine posted a user verdict for the window — rendered as the
@@ -633,15 +643,15 @@ func payloadString(p map[string]any, key string) (string, bool) {
 // composeBody assembles the single authorized user message the model composes
 // from: the per-mode template (the operator's voice), the deterministic context
 // block (status panel + recent-signal digest + intended routine), and the
-// two-slot instruction. The model returns only the two slots; Lucid renders
-// everything else.
+// mode-specific slot instruction. The model returns only the named slot(s);
+// Lucid renders everything else.
 func composeBody(tmpl string, mode Mode, panel []string, sections []Section, routine string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimRight(tmpl, "\n"))
 	b.WriteString("\n\n")
 	b.WriteString(contextBlock(mode, panel, sections, routine))
 	b.WriteString("\n\n")
-	b.WriteString(slotInstruction)
+	b.WriteString(slotInstruction(mode))
 	return b.String()
 }
 

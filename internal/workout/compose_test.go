@@ -116,7 +116,7 @@ func baseDeps(t *testing.T, obs *fakeObs, inj fakeInjuries, f *provider.Fake) De
 // TestComposeLLMPathPhrasesTheDecidedPick proves the happy path: the deterministic
 // core picks Monday's legs card, the model phrases a bounded note, and the
 // rendered message leads with that note and still carries the whole deterministic
-// scaffold (header, options, safety line). The one model call is the phrasing
+// scaffold (header, options, progress). The one model call is the phrasing
 // intent, framed by the system prompt, and grounded on the plan digest.
 func TestComposeLLMPathPhrasesTheDecidedPick(t *testing.T) {
 	t.Parallel()
@@ -134,7 +134,7 @@ func TestComposeLLMPathPhrasesTheDecidedPick(t *testing.T) {
 	assert.Contains(t, res.Text, emojiCoach+" "+note)
 	assert.Contains(t, res.Text, "**Workout**", "the deterministic header is present")
 	assert.Contains(t, res.Text, "Legs + hips", "the decided card is rendered")
-	assert.Contains(t, res.Text, safetyLine, "the safety line is always present")
+	assert.NotContains(t, res.Text, "not medical advice")
 
 	// Exactly one phrasing call, correctly framed and grounded.
 	require.Equal(t, 1, fake.Calls())
@@ -185,8 +185,8 @@ func TestComposePassesInjuriesToHardStop(t *testing.T) {
 // --- fallback paths ---------------------------------------------------------
 
 // TestComposeFallsBackOnProviderDown proves the provider-outage sentinels render
-// the deterministic scaffold verbatim — the pick and the safety line stand, only
-// the leading note is lost, and the text is exactly Render's output.
+// the deterministic scaffold verbatim — the pick stands, only the leading note
+// is lost, and the text is exactly Render's output.
 func TestComposeFallsBackOnProviderDown(t *testing.T) {
 	t.Parallel()
 
@@ -204,7 +204,7 @@ func TestComposeFallsBackOnProviderDown(t *testing.T) {
 			assert.True(t, res.Fallback)
 			assert.False(t, res.UsedLLM)
 			assert.NotContains(t, res.Text, emojiCoach, "no model note on the deterministic path")
-			assert.Contains(t, res.Text, safetyLine)
+			assert.NotContains(t, res.Text, "not medical advice")
 			assert.Equal(t, Render(res.Recommendation, res.Trend, now), res.Text, "the fallback is exactly the deterministic Render")
 		})
 	}

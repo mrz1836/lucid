@@ -15,8 +15,8 @@ Fill the two slots for a morning message that sets up my day.
   status, the recent body-and-state signals, any change or withdrawal load, my
   commitments, and my intended morning routine. Name what matters this morning,
   what changed, and anything worth watching. Keep it to a few calm sentences.
-- **Actions:** give one or two small, concrete things to do next, grounded in the
-  routine and the day's signals.
+- **Actions:** give one concrete cue from the configured morning routine. This
+  renders as **Morning routine**, not as a generic Next section.
 
-Return only the two slots in the shape the system prompt defines. No header, no
+Return only the slots in the shape the system prompt defines. No header, no
 numbers restated, no sign-off.

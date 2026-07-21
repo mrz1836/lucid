@@ -106,7 +106,7 @@ func enableWorkoutSurface(t *testing.T) {
 
 // TestWorkout_OnDemand_RendersRecommendation proves the bare `lucid workout` verb
 // composes today's recommendation: the model phrases a note and the message still
-// carries the deterministic header, options, and safety line (AC-7 command, AC-9).
+// carries the deterministic header, options, and progress panel (AC-7 command, AC-9).
 func TestWorkout_OnDemand_RendersRecommendation(t *testing.T) {
 	enableWorkoutSurface(t)
 	withScriptedProvider(t, provider.Exchange{Content: "Great to see you here today."})
@@ -116,7 +116,7 @@ func TestWorkout_OnDemand_RendersRecommendation(t *testing.T) {
 	assert.Contains(t, out, "Great to see you here today.", "the model note is rendered")
 	assert.Contains(t, out, "**Workout**", "the deterministic header is present")
 	assert.Contains(t, out, "Today's options")
-	assert.Contains(t, out, "not medical advice", "the safety line is always present")
+	assert.NotContains(t, out, "not medical advice")
 	assert.NotContains(t, errOut, "deterministic fallback", "the model path is not a fallback")
 }
 
@@ -140,7 +140,7 @@ func TestWorkout_OnDemand_JSON(t *testing.T) {
 
 // TestWorkout_OnDemand_ProviderDownStillRenders proves the on-demand surface
 // renders deterministically when the provider is unreachable: the message stands
-// (safety line present) and the fallback is noted on stderr (AC-9 degrade).
+// and the fallback is noted on stderr (AC-9 degrade).
 func TestWorkout_OnDemand_ProviderDownStillRenders(t *testing.T) {
 	enableWorkoutSurface(t)
 	withScriptedProvider(t, provider.Exchange{Err: provider.ErrUnavailable})
@@ -148,7 +148,7 @@ func TestWorkout_OnDemand_ProviderDownStillRenders(t *testing.T) {
 	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "workout")
 	require.NoError(t, err)
 	assert.Contains(t, out, "**Workout**")
-	assert.Contains(t, out, "not medical advice")
+	assert.NotContains(t, out, "not medical advice")
 	assert.Contains(t, errOut, "deterministic fallback")
 }
 
@@ -283,7 +283,7 @@ func TestWorkoutFire_DryRun_ComposesNoDeliver(t *testing.T) {
 	assert.Contains(t, out, "dry-run — not delivered")
 	assert.Contains(t, out, "Good to see you today.", "the model note is rendered")
 	assert.Contains(t, out, "**Workout**", "the deterministic header is present")
-	assert.Contains(t, out, "not medical advice", "the safety line is always present")
+	assert.NotContains(t, out, "not medical advice")
 }
 
 // TestWorkoutFire_DryRun_ProviderDownStillRenders: the dry-run renders
@@ -296,7 +296,7 @@ func TestWorkoutFire_DryRun_ProviderDownStillRenders(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "dry-run — not delivered")
 	assert.Contains(t, out, "deterministic fallback")
-	assert.Contains(t, out, "not medical advice")
+	assert.NotContains(t, out, "not medical advice")
 }
 
 // TestWorkoutFire_DeliverAndDryRunMutuallyExclusive: --deliver and --dry-run

@@ -51,8 +51,8 @@ func sampleTrend() Trend {
 }
 
 // TestRenderGolden pins the exact bytes of a full ordinary-day message so the
-// scaffold's structure — header, dividers, the three offerings, the progress
-// panel, the reason, and the safety line — is a hard contract, and asserts the
+// scaffold's structure — header, the three offerings, blank lines between
+// offering bullets, the progress panel, and the reason — is a hard contract, and asserts the
 // render is byte-stable across repeated calls.
 func TestRenderGolden(t *testing.T) {
 	t.Parallel()
@@ -60,14 +60,12 @@ func TestRenderGolden(t *testing.T) {
 	want := strings.Join([]string{
 		emojiHeader + " **Workout** · Monday, Jul 20",
 		"",
-		workoutDivider,
-		"",
 		emojiOfferings + " **Today's options**",
 		workoutBullet + " **Recommended** — Legs + hips · legs · goblet squat, hip hinge",
-		workoutBullet + " **Easier** — Easy legs · bodyweight squat, glute bridge",
-		workoutBullet + " **Back off** — a lighter day is always fine — gentle mobility, an easy walk, or simply rest",
 		"",
-		workoutDivider,
+		workoutBullet + " **Easier** — Easy legs · bodyweight squat, glute bridge",
+		"",
+		workoutBullet + " **Back off** — a lighter day is always fine — gentle mobility, an easy walk, or simply rest",
 		"",
 		emojiProgress + " **Progress**",
 		workoutBullet + " 5-day streak",
@@ -75,13 +73,7 @@ func TestRenderGolden(t *testing.T) {
 		workoutBullet + " 20 of the last 28 days had no logged session",
 		workoutBullet + " Body: legs soreness 6",
 		"",
-		workoutDivider,
-		"",
 		emojiReason + " **Why** — On the program calendar today: Legs + hips.",
-		"",
-		workoutDivider,
-		"",
-		emojiSafety + " " + safetyLine,
 	}, "\n")
 
 	got := Render(sampleRecommendation(), sampleTrend(), renderNow())
@@ -125,10 +117,10 @@ func TestRenderUnderAMinute(t *testing.T) {
 	assert.Less(t, len(strings.Fields(got)), 140, "well under ~200 words a minute of reading allows")
 }
 
-// TestRenderSafetyGuard is the boundary guard: every rendered message — ordinary,
-// pain-hard-stop, and an honest empty one — carries the deterministic safety line
-// and no coaching-imperative or phrase-blocklist token (product-principles.md §6).
-func TestRenderSafetyGuard(t *testing.T) {
+// TestRenderVoiceGuard is the boundary guard: every rendered message — ordinary,
+// pain-hard-stop, and an honest empty one — carries no coaching-imperative or
+// phrase-blocklist token (product-principles.md §6).
+func TestRenderVoiceGuard(t *testing.T) {
 	t.Parallel()
 
 	painRec := sampleRecommendation()
@@ -154,8 +146,7 @@ func TestRenderSafetyGuard(t *testing.T) {
 			t.Parallel()
 			got := Render(tc.rec, tc.tr, renderNow())
 
-			assert.Contains(t, got, safetyLine, "the safety line is always present")
-			assert.Contains(t, got, "not medical advice")
+			assert.NotContains(t, got, "not medical advice")
 			assert.False(t, safety.MatchesBlocklist(got), "the rendered message carries no phrase-blocklist token")
 			lower := strings.ToLower(got)
 			assert.NotContains(t, lower, "you should", "no coaching imperative")
@@ -184,7 +175,7 @@ func TestRenderPainHardStopBecomesBackOffDoor(t *testing.T) {
 
 // TestRenderEmptyTrendAndReason proves the honest empty message: the reason region
 // is dropped (no dangling divider), the streak frames the build, the body line is
-// absent, and the safety line still closes the message.
+// absent, and no horizontal divider chrome remains.
 func TestRenderEmptyTrendAndReason(t *testing.T) {
 	t.Parallel()
 
@@ -196,11 +187,10 @@ func TestRenderEmptyTrendAndReason(t *testing.T) {
 	got := Render(rec, Trend{WindowDays: 28}, renderNow())
 
 	assert.NotContains(t, got, "**Why**", "an empty reason drops the whole region")
-	assert.NotContains(t, got, workoutDivider+"\n\n"+workoutDivider, "no dangling doubled divider")
+	assert.NotContains(t, got, "― ― ―", "no horizontal divider chrome")
 	assert.Contains(t, got, "Building — no active streak yet", "a zero streak frames the build, not a hollow 0-day")
 	assert.Contains(t, got, "0 of the last 28 days had no logged session")
 	assert.NotContains(t, got, "Body:", "no body line when nothing is logged")
-	assert.True(t, strings.HasSuffix(got, emojiSafety+" "+safetyLine), "the safety line always closes the message")
 }
 
 // TestRenderBodyResponseFormatsPainAndSoreness proves a part reporting both

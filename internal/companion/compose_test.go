@@ -203,7 +203,7 @@ func TestCompose_NormalDayMorning_RendersScaffold(t *testing.T) {
 	body := req.Messages[0].Content
 	assert.True(t, strings.HasPrefix(body, morningContent), "body leads with the per-mode template")
 	assert.Contains(t, body, interpDelim, "the body instructs the two-slot contract")
-	assert.Contains(t, body, actionsDelim)
+	assert.Contains(t, body, actionsDelim, "morning prompt requests a routine cue action slot")
 	assert.Contains(t, body, wantSamplePanel()[0], "the panel is handed to the model as context")
 	assert.NotContains(t, body, "LIVE NUMBERS", "the old verbatim numbers dump is gone from the prompt")
 }
@@ -224,6 +224,7 @@ func TestCompose_NightUsesNightTemplate(t *testing.T) {
 	require.Equal(t, 1, p.Calls())
 	assert.Equal(t, intentNight, p.Requests[0].Intent)
 	assert.True(t, strings.HasPrefix(p.Requests[0].Messages[0].Content, nightContent))
+	assert.Contains(t, p.Requests[0].Messages[0].Content, actionsDelim, "night prompt still requests close-out action")
 }
 
 // TestCompose_SlotSuccess_RendersInterpAndActions parses both model slots and
@@ -238,7 +239,8 @@ func TestCompose_SlotSuccess_RendersInterpAndActions(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.UsedLLM)
 	assert.Contains(t, res.Text, "🧭 **The read**\nSteady week. The streak holds.")
-	assert.Contains(t, res.Text, "▶️ **Next**\n• Run the morning chain.\n• Log a mood check at noon.")
+	assert.Contains(t, res.Text, "🌅 **Morning routine**\n• Run the morning chain.")
+	assert.NotContains(t, res.Text, "▶️ **Next**", "morning does not render a generic next section")
 }
 
 // TestCompose_MissDay_RendersVerdictAsFinalGroup: on a miss-day the model
@@ -255,8 +257,8 @@ func TestCompose_MissDay_RendersVerdictAsFinalGroup(t *testing.T) {
 	require.NoError(t, err)
 
 	wantVerdict := "last night was a miss. Tonight is a must.\n— the form letter, pre-committed at Day 0."
-	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+dividerLine+"\n\n"+wantVerdict),
-		"the verdict is the final group, divider-separated and verbatim")
+	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+wantVerdict),
+		"the verdict is the final group, blank-line-separated and verbatim")
 	assert.Contains(t, res.Text, "Own it and reset.", "the warm interpretation still renders above the verdict")
 	assert.True(t, res.MissDay)
 	assert.True(t, res.UsedLLM)
@@ -273,7 +275,7 @@ func TestCompose_MissDayNight_RendersVerdict(t *testing.T) {
 	res, err := c.Compose(context.Background(), ModeNight, time.Now())
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(res.Text, "\n\nVERDICT LINE"))
-	assert.NotContains(t, res.Text, dividerLine, "night verdict stays compact without divider chrome")
+	assert.NotContains(t, res.Text, "― ― ―", "night verdict stays compact without divider chrome")
 	assert.True(t, res.MissDay)
 }
 
@@ -295,7 +297,8 @@ func TestCompose_ProviderDown_NormalMorning_FallsBackToScaffold(t *testing.T) {
 	assert.Contains(t, res.Text, "☀️ **Morning** · ")
 	assert.Contains(t, res.Text, wantSamplePanel()[0], "the panel still renders on the fallback path")
 	assert.Contains(t, res.Text, "🧭 **The read**\n"+fallbackInterpMorning)
-	assert.Contains(t, res.Text, "▶️ **Next**\n• "+fallbackActionMorning)
+	assert.Contains(t, res.Text, "🌅 **Morning routine**\n• "+fallbackActionMorning)
+	assert.NotContains(t, res.Text, "▶️ **Next**", "morning fallback does not render generic Next")
 }
 
 // TestCompose_ProviderDown_NormalNight_FallsBackToBellCloseout confirms the
@@ -331,7 +334,7 @@ func TestCompose_ProviderDown_MissDay_FallsBackWithVerdict(t *testing.T) {
 
 	assert.True(t, res.Fallback)
 	assert.True(t, res.MissDay)
-	assert.True(t, strings.HasSuffix(res.Text, "\n\n"+dividerLine+"\n\nyou missed — the floor: one line."),
+	assert.True(t, strings.HasSuffix(res.Text, "\n\nyou missed — the floor: one line."),
 		"the verdict lands verbatim as the final group even on the fallback path")
 	assert.Contains(t, res.Text, wantSamplePanel()[0], "the fallback still carries the panel")
 }

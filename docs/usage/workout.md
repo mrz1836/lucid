@@ -83,8 +83,6 @@ byte-stable, mobile-friendly scaffold (bullets, no markdown tables):
 - **Progress** — streak (from the Engine chain), frequency direction, skipped-day
   count, and recent body response — a compact glance, never a grade.
 - **Why** — the deterministic one-liner: why this card today, or why it downshifted.
-- **Safety** — a fixed *"This is not medical advice — for concerning pain or injury,
-  consult a professional."* line, always present.
 
 The model contributes only the leading note; everything else is Lucid's and renders
 identically with the provider down (then the note is simply absent). `--json` emits

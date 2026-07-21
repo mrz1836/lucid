@@ -20,11 +20,10 @@ import (
 
 // Scaffold literals. These are the fixed structural tokens the layout is built
 // from — a chat surface renders markdown tables as raw text, so the scaffold
-// uses bullets and key/value lines. Morning keeps a light horizontal divider;
-// night omits it so close-out stays compact.
+// uses bullets and key/value lines. Both windows omit horizontal divider chrome
+// so the delivered card stays compact on a phone.
 const (
-	dividerLine = "― ― ―"
-	bulletMark  = "•"
+	bulletMark = "•"
 	// dateHeaderFmt renders the header day ("Monday, Jul 20").
 	dateHeaderFmt = "Monday, Jan 2"
 	// logicalDateFmt parses an event's stored logical date ("2026-07-19") for
@@ -81,16 +80,15 @@ type Briefing struct {
 
 // Render turns a Briefing into the final Discord message. It is pure and
 // byte-stable: the same Briefing always renders the identical bytes, which is
-// what makes the readability contract testable. Morning major groups are joined
-// by a blank-line-padded `― ― ―` divider; night groups are joined by blank lines
-// only. Empty groups are dropped, so a message with no enrichment or no model
-// slots still reads cleanly (no dangling dividers).
+// what makes the readability contract testable. Major groups are joined by
+// blank lines only. Empty groups are dropped, so a message with no enrichment or
+// no model slots still reads cleanly (no dangling structural chrome).
 //
 // The region order differs by window. Morning is forward-looking — the status
-// panel is the hero, then the day's context, then the read and the next move.
+// panel is the hero, then the day's context, then the read.
 // Night is a close-out ritual — the day's read-back (the context sections)
 // leads, then the numbers, then the single close-out action. Night deliberately
-// suppresses the interpretation slot and the divider line so it does not read
+// suppresses the interpretation slot so it does not read
 // like a second morning memo. The Engine verdict, when present, is always the
 // last group in both.
 func Render(b Briefing) string {
@@ -111,15 +109,15 @@ func Render(b Briefing) string {
 	verdict := strings.TrimSpace(b.Verdict)
 
 	var order []string
-	separator := "\n\n" + dividerLine + "\n\n"
+	separator := "\n\n"
 	if b.Mode == ModeNight {
 		// Close-out ordering: read-back (sections) leads, the numbers follow,
 		// and the user's single close-out action ends the ritual. The model's
 		// interpretation slot is intentionally not rendered at night.
 		order = []string{header, sections, panel, next, verdict}
-		separator = "\n\n"
 	} else {
-		// Forward-looking ordering: the status panel is the hero.
+		// Forward-looking ordering: the status panel is the hero. Morning renders actions only as a routine cue, never as a generic
+		// invented Next section.
 		order = []string{header, panel, sections, interp, next, verdict}
 	}
 
@@ -212,7 +210,7 @@ func nextHeader(mode Mode) string {
 	if mode == ModeNight {
 		return "🌒 **Close-out**"
 	}
-	return "▶️ **Next**"
+	return "🌅 **Morning routine**"
 }
 
 // buildStatusPanel renders the compact status panel from the engine
