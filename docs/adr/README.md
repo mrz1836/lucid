@@ -20,3 +20,4 @@ new one; records are append-only, like everything else here
 | [0007](0007-cli-conventions.md) | CLI conventions: the house style (`hush`, `go-broadcast`, `atlas`) | Accepted |
 | [0008](0008-harness-skill.md) | Harness integration: one managed `lucid` skill | Accepted |
 | [0009](0009-workout-companion.md) | Workout companion: a config-gated, deterministic-core Mirror surface | Accepted |
+| [0010](0010-life-archive-excavation.md) | Life-archive excavation: build the deferred Mirror surface on the frozen foundation | Accepted |

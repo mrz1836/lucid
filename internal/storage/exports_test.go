@@ -143,6 +143,98 @@ func TestExportClinicianPacket_SinceLastExport(t *testing.T) {
 	assert.Len(t, log, 2, "every render appends one disclosure-log line")
 }
 
+// seedInjury writes an injury registry record with a status and convention
+// Fields — the storage-layer equivalent of a `lucid injury` write.
+func seedInjury(t *testing.T, a *Adapter, key, name, status string, fields map[string]any) {
+	t.Helper()
+	_, err := a.UpdateRegistry(observations.RegistryInjury, key, observations.RegistryPatch{
+		DisplayName: name, At: "2026-06-01T09:00:00Z", Status: status, Fields: fields,
+	})
+	require.NoError(t, err)
+}
+
+// TestInjuryContext proves the structured projection: active + managed injuries
+// are included, resolved is excluded, the output is byte-stable in key order,
+// and the convention Fields map onto the struct. Seeded out of key order to
+// prove the sort.
+func TestInjuryContext(t *testing.T) {
+	a := newObsStore(t)
+
+	// Seeded deliberately out of alphabetical key order.
+	seedInjury(t, a, "injury_c-oak", "right shoulder", observations.StatusManaged, map[string]any{
+		"body_area": "right shoulder", "current_limitations": "no overhead press",
+		"timeline": "since 2019", "severity": "moderate",
+	})
+	seedInjury(t, a, "injury_a-cedar", "left knee", observations.StatusActive, map[string]any{
+		"body_area": "left knee", "current_limitations": "no deep squats under load",
+		"timeline": "since 2014", "severity": "mild now",
+	})
+	seedInjury(t, a, "injury_b-maple", "old ankle roll", observations.StatusResolved, map[string]any{
+		"body_area": "left ankle",
+	})
+
+	ctx, err := a.InjuryContext()
+	require.NoError(t, err)
+
+	// Resolved excluded; active + managed only, in byte-stable key order.
+	require.Len(t, ctx, 2, "resolved injuries are excluded")
+	assert.Equal(t, "injury_a-cedar", ctx[0].Key, "sorted by key")
+	assert.Equal(t, "injury_c-oak", ctx[1].Key)
+
+	// Convention Fields mapped onto the struct.
+	assert.Equal(t, "left knee", ctx[0].DisplayName)
+	assert.Equal(t, observations.StatusActive, ctx[0].Status)
+	assert.Equal(t, "left knee", ctx[0].BodyArea)
+	assert.Equal(t, "no deep squats under load", ctx[0].CurrentLimitations)
+	assert.Equal(t, "since 2014", ctx[0].Timeline)
+	assert.Equal(t, "mild now", ctx[0].Severity)
+	assert.Equal(t, observations.StatusManaged, ctx[1].Status)
+	assert.Equal(t, "no overhead press", ctx[1].CurrentLimitations)
+}
+
+// TestInjuryContext_EmptyAndMissingFields proves an empty store is an
+// empty-but-valid projection, and an injury with no convention Fields yields
+// empty strings (capture never blocks, so a bare injury is projectable).
+func TestInjuryContext_EmptyAndMissingFields(t *testing.T) {
+	a := newObsStore(t)
+
+	empty, err := a.InjuryContext()
+	require.NoError(t, err)
+	assert.Empty(t, empty, "an empty registry is an empty projection, not an error")
+
+	seedInjury(t, a, "injury_a-cedar", "bare injury", observations.StatusActive, nil)
+	bare, err := a.InjuryContext()
+	require.NoError(t, err)
+	require.Len(t, bare, 1)
+	assert.Equal(t, "bare injury", bare[0].DisplayName)
+	assert.Empty(t, bare[0].BodyArea, "a missing convention field projects as empty, not a panic")
+	assert.Empty(t, bare[0].Severity)
+}
+
+// TestInjuryContext_NoDiagnosticLanguage is the sanctuary guard: the projection
+// renders the registry facts verbatim and synthesizes no clinical-advice
+// language of its own (observations.md §9, "never diagnosis, never treatment
+// advice"). Facts go in; the projection adds no diagnostic tokens.
+func TestInjuryContext_NoDiagnosticLanguage(t *testing.T) {
+	a := newObsStore(t)
+	seedInjury(t, a, "injury_a-cedar", "left knee", observations.StatusManaged, map[string]any{
+		"body_area": "left knee", "current_limitations": "no deep squats", "severity": "moderate",
+	})
+
+	ctx, err := a.InjuryContext()
+	require.NoError(t, err)
+	require.Len(t, ctx, 1)
+
+	rendered := strings.ToLower(strings.Join([]string{
+		ctx[0].Key, ctx[0].DisplayName, ctx[0].Status, ctx[0].BodyArea,
+		ctx[0].CurrentLimitations, ctx[0].Timeline, ctx[0].Severity,
+	}, " "))
+	for _, banned := range []string{"diagnos", "prescrib", "you should", "treatment plan", "recommend", "consult a"} {
+		assert.NotContains(t, rendered, banned,
+			"the projection renders registry facts only, never synthesized clinical advice")
+	}
+}
+
 func TestExportClinicianPacket_AllAndOverride(t *testing.T) {
 	a := newObsStore(t)
 	require.NoError(t, a.ScaffoldEngine())

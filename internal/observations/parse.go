@@ -59,9 +59,26 @@ const (
 // projections treat it as an unknown-valued point rather than dropping it.
 const ParseMarkerPartial = "partial"
 
-// isMemoryCertainty reports whether tok is a memory certainty keyword
-// (observations.md §3 memory: vivid / hazy / reconstructed).
-func isMemoryCertainty(tok string) bool {
+// Memory payload keys (mvp/life-archive.md §3, the story convention on the
+// frozen envelope). text/certainty are the base memory grammar [parseMemory]
+// captures; tone, why_it_matters, follow_up, and people are the excavation
+// convention keys a structured story capture fills. They are payload keys, not
+// new envelope fields — the envelope stays frozen at schema 1 (observations.md
+// §2: "new needs go in payload/tags/refs, never a new top-level field").
+const (
+	MemoryFieldText         = "text"
+	MemoryFieldCertainty    = "certainty"
+	MemoryFieldTone         = "tone"
+	MemoryFieldWhyItMatters = "why_it_matters"
+	MemoryFieldFollowUp     = "follow_up"
+	MemoryFieldPeople       = "people"
+)
+
+// IsMemoryCertainty reports whether tok is a memory certainty keyword
+// (observations.md §3 memory: vivid / hazy / reconstructed). It is the shared
+// vocabulary gate for both the token grammar [parseMemory] and the structured
+// story-capture verb, so the two paths never diverge on what counts as valid.
+func IsMemoryCertainty(tok string) bool {
 	switch tok {
 	case "vivid", "hazy", "reconstructed":
 		return true
@@ -398,17 +415,81 @@ func parseMeasurement(res *ParseResult, tokens []string) {
 }
 
 // parseMemory sets certainty (when the head is a certainty keyword) and the
-// verbatim memory text.
+// verbatim memory text — the quick token grammar for a memory. The rich
+// convention keys (tone/why_it_matters/follow_up/people) are filled by the
+// structured story-capture verb through [ParseMemoryFields], which shares this
+// key vocabulary.
 func parseMemory(res *ParseResult, tokens []string) {
-	if len(tokens) > 0 && isMemoryCertainty(strings.ToLower(tokens[0])) {
-		res.Payload["certainty"] = strings.ToLower(tokens[0])
+	if len(tokens) > 0 && IsMemoryCertainty(strings.ToLower(tokens[0])) {
+		res.Payload[MemoryFieldCertainty] = strings.ToLower(tokens[0])
 		tokens = tokens[1:]
 	}
 	if len(tokens) == 0 {
 		markPartial(res, nil)
 		return
 	}
-	res.Payload["text"] = strings.Join(tokens, " ")
+	res.Payload[MemoryFieldText] = strings.Join(tokens, " ")
+}
+
+// MemoryInput carries the structured convention fields for one excavated story
+// memory (mvp/life-archive.md §3) — the rich counterpart to the `/obs memory`
+// token grammar [parseMemory]. Only Text anchors the memory; every other field
+// is optional. It keeps the memory vocabulary in this pure package beside the
+// envelope it writes to, so the life-archive write verb builds a payload without
+// re-encoding the field names.
+type MemoryInput struct {
+	Text         string
+	Certainty    string
+	Tone         string
+	WhyItMatters string
+	FollowUp     string
+	People       []string
+}
+
+// ParseMemoryFields builds a KindMemory payload from the structured convention
+// fields on the frozen envelope (mvp/life-archive.md §3; schema stays 1, no new
+// top-level field). It keeps the capture-never-blocks contract: an empty Text
+// yields the partial payload ({note, parse}) exactly like [parseMemory]'s
+// empty-text path, so a structured story with nothing to anchor it is kept, not
+// dropped. An out-of-vocabulary certainty is omitted rather than stored (the
+// write verb validates it up front); people are trimmed and de-blanked, kept as
+// testimony even when no person key resolves.
+func ParseMemoryFields(in MemoryInput) (payload map[string]any, partial bool) {
+	text := strings.TrimSpace(in.Text)
+	if text == "" {
+		return map[string]any{"note": "", "parse": ParseMarkerPartial}, true
+	}
+	payload = map[string]any{MemoryFieldText: text}
+	if c := strings.ToLower(strings.TrimSpace(in.Certainty)); IsMemoryCertainty(c) {
+		payload[MemoryFieldCertainty] = c
+	}
+	putPayloadStr(payload, MemoryFieldTone, in.Tone)
+	putPayloadStr(payload, MemoryFieldWhyItMatters, in.WhyItMatters)
+	putPayloadStr(payload, MemoryFieldFollowUp, in.FollowUp)
+	if people := cleanTokens(in.People); len(people) > 0 {
+		payload[MemoryFieldPeople] = people
+	}
+	return payload, false
+}
+
+// putPayloadStr sets a payload key only when its trimmed value is non-empty, so
+// an unset convention field leaves no key.
+func putPayloadStr(m map[string]any, key, val string) {
+	if v := strings.TrimSpace(val); v != "" {
+		m[key] = v
+	}
+}
+
+// cleanTokens trims each entry and drops blanks, returning nil when nothing
+// survives — an unset people list leaves no payload key.
+func cleanTokens(in []string) []string {
+	var out []string
+	for _, s := range in {
+		if v := strings.TrimSpace(s); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // parseWorkout sets the workout type and any deterministically-recognizable
@@ -641,6 +722,29 @@ func parseSleep(res *ParseResult, tokens []string, now time.Time) {
 		res.OccurredEnd = &wake
 	}
 	setNote(res, rest)
+}
+
+// ResolveBackdate resolves a single date token (a `--day` flag) through the
+// same @-grammar [ParseMicrolog] applies inline (observations.md §4), so a
+// structured write verb backdates identically to an inline @-token. A leading
+// @ is optional. An empty arg is now at exact precision; a bare date or
+// @yesterday is approximate (a placeholder past date, never rolled over so an
+// old memory keeps its own calendar day); a range yields an end. It never
+// blocks — an unrecognized token falls back to now at exact precision, keeping
+// capture total (product-principles.md P10).
+func ResolveBackdate(dayArg string, now time.Time) (occ time.Time, precision string, end *time.Time) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	arg := strings.TrimSpace(dayArg)
+	if arg == "" {
+		return now, PrecisionExact, nil
+	}
+	if !strings.HasPrefix(arg, "@") {
+		arg = "@" + arg
+	}
+	occ, precision, end, _ = extractBackdate([]string{arg}, now)
+	return occ, precision, end
 }
 
 // extractBackdate scans the argument tokens for an @-token and resolves it to

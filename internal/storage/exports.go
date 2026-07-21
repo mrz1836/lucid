@@ -220,20 +220,94 @@ func (a *Adapter) readKindInWindow(kind observations.Kind, inWindow func(string)
 	return out, nil
 }
 
+// InjuryContext is the structured, read-only injury-context projection a
+// workout / body-guidance consumer reads (life-archive.md §6, the Q3=A clean
+// seam). It carries the registry facts that context needs — read verbatim from
+// the injury convention Fields (life-archive.md §2) — and never a diagnosis or
+// treatment recommendation (observations.md §9). One entry is emitted per
+// active/managed injury (resolved excluded), in byte-stable key order, so the
+// consumer reads this seam instead of touching raw registry state (the
+// sanctuary rule: consumers read projections, not state).
+type InjuryContext struct {
+	Key                string
+	DisplayName        string
+	Status             string
+	BodyArea           string
+	CurrentLimitations string
+	Timeline           string
+	Severity           string
+}
+
+// activeManagedInjuries reads the injury registry and keeps only the
+// active/managed records (resolved excluded), preserving ReadRegistryKind's
+// key-sorted order for byte-stability. It is the single filter both the
+// clinician packet's activeInjuryLines and the InjuryContext projection render
+// from — one helper, two renders — so the packet and the projection can never
+// diverge (life-archive.md §6).
+func (a *Adapter) activeManagedInjuries() ([]observations.Registry, error) {
+	recs, err := a.ReadRegistryKind(observations.RegistryInjury)
+	if err != nil {
+		return nil, err
+	}
+	out := recs[:0:0]
+	for _, r := range recs {
+		if r.Status == observations.StatusActive || r.Status == observations.StatusManaged {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 // activeInjuryLines renders the active/managed injuries as "name (status)",
 // sorted by key for byte-stability.
 func (a *Adapter) activeInjuryLines() ([]string, error) {
-	recs, err := a.ReadRegistryKind(observations.RegistryInjury)
+	recs, err := a.activeManagedInjuries()
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, r := range recs {
-		if r.Status == observations.StatusActive || r.Status == observations.StatusManaged {
-			out = append(out, fmt.Sprintf("%s (%s)", r.DisplayName, r.Status))
-		}
+		out = append(out, fmt.Sprintf("%s (%s)", r.DisplayName, r.Status))
 	}
 	return out, nil
+}
+
+// InjuryContext returns the structured injury-context projection
+// (life-archive.md §6): one [InjuryContext] per active/managed injury, its
+// fields read from the injury convention Fields, in byte-stable key order. It is
+// a pure read — no projection file is written — and it renders registry facts
+// only, never synthesizing diagnostic or treatment language of its own. This is
+// the stable seam a workout / body-guidance consumer reads instead of reaching
+// into raw registry state.
+func (a *Adapter) InjuryContext() ([]InjuryContext, error) {
+	recs, err := a.activeManagedInjuries()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]InjuryContext, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, InjuryContext{
+			Key:                r.Key,
+			DisplayName:        r.DisplayName,
+			Status:             r.Status,
+			BodyArea:           injuryField(r.Fields, "body_area"),
+			CurrentLimitations: injuryField(r.Fields, "current_limitations"),
+			Timeline:           injuryField(r.Fields, "timeline"),
+			Severity:           injuryField(r.Fields, "severity"),
+		})
+	}
+	return out, nil
+}
+
+// injuryField reads a convention Field as a string, returning "" when the key is
+// absent or (after a hand-edit) not a string. The write path stores these fields
+// as strings (registrywrite.go putField), so the assertion holds for every
+// machine-written record and degrades honestly for anything else.
+func injuryField(fields map[string]any, key string) string {
+	if s, ok := fields[key].(string); ok {
+		return s
+	}
+	return ""
 }
 
 // engineFactsInWindow maps in-window logical dates to their capacity/mode.

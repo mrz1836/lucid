@@ -60,7 +60,11 @@ func DefaultConfig() Config {
 		// and off by default (observations.md §3), added per-instance only. The
 		// generic KindEnabled gate and EnableHint copy already cover them, so a
 		// capture of a workout/body_state kind on a fresh Ledger is rejected
-		// with the enable hint rather than silently stored.
+		// with the enable hint rather than silently stored. KindMemory (the
+		// life-archive story kind, mvp/life-archive.md §3) is likewise off by
+		// default: the excavation surface is enabled in the operator's own
+		// runtime, never defaulted-on in the OSS Ledger, so a disabled memory
+		// capture returns the enable hint rather than writing.
 		KindsEnabled:       []Kind{KindPain, KindIntake, KindElimination, KindMood},
 		CuriosityBudgetDay: 1,
 		AgentSliceOptins:   map[string]any{},

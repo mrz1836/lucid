@@ -100,7 +100,7 @@ func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 		return CaptureResult{}, err
 	}
 
-	ev, err := r.store.AppendObservation(r.buildEvent(parsed, now, provenance))
+	ev, err := r.store.AppendObservation(r.buildEvent(parsed, now, provenance, observations.SourceMicrolog))
 	if err != nil {
 		return CaptureResult{}, fmt.Errorf("could not log the observation; nothing was saved: %w", err)
 	}
@@ -170,8 +170,10 @@ func (r *Router) resolvePlace(parsed *observations.ParseResult, now time.Time) (
 // logical day under the MVP default rollover so it joins the Engine's civil
 // day. The storage adapter assigns the id. Harness provenance, when supplied,
 // rides in payload.provenance — the envelope never grows a top-level field
-// (observations.md §2), and the event's own source stays microlog.
-func (r *Router) buildEvent(parsed observations.ParseResult, now time.Time, provenance map[string]any) observations.Event {
+// (observations.md §2). source is the event's provenance: a micro-log capture
+// passes SourceMicrolog; an excavated story passes SourceExcavation — the one
+// field that distinguishes the two write paths on the shared envelope.
+func (r *Router) buildEvent(parsed observations.ParseResult, now time.Time, provenance map[string]any, source string) observations.Event {
 	ev := observations.Event{
 		Schema:              observations.Schema,
 		Kind:                parsed.Kind,
@@ -179,7 +181,7 @@ func (r *Router) buildEvent(parsed observations.ParseResult, now time.Time, prov
 		OccurredAt:          parsed.OccurredAt.Format(time.RFC3339),
 		OccurredAtPrecision: parsed.Precision,
 		LogicalDate:         observations.DeriveLogicalDate(parsed.OccurredAt, parsed.Precision, observations.DefaultRolloverMin),
-		Source:              observations.SourceMicrolog,
+		Source:              source,
 		Payload:             parsed.Payload,
 		Tags:                parsed.Tags,
 		Refs:                parsed.Refs,

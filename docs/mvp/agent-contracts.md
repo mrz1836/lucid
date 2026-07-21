@@ -85,7 +85,14 @@ future agent unless a contract explicitly overrides them.
   enters `raw/` as an ordinary entry, via the router. Widening agent
   access to observation-derived data requires both a contract diff on
   this page and a recorded per-instance opt-in
-  (`observations/config.json` `agent_slice_optins`), default off.
+  (`observations/config.json` `agent_slice_optins`), default off. The
+  life-archive read surfaces ([`life-archive.md`](life-archive.md)) sit
+  **on the module side of this line, not the agent side**: cluster
+  selection and its prompt templates, the injury-context projection, and
+  the recall/browse bundle are deterministic and **agent-free**, reading
+  the registries and `memory` events **only through router projection
+  seams** — never a raw sanctuary tree, never an agent slice. They add no
+  agent input and widen no contract's inputs; the denylist stands whole.
 
 These rules are non-negotiable. Every contract below assumes them.
 

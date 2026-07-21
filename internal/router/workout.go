@@ -112,7 +112,7 @@ func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 
 	// The durable record: the workout event is written first, so a body-state
 	// append failure below never leaves the session unrecorded.
-	ev, err := r.store.AppendObservation(r.buildEvent(workoutParseResult(req, now), now, provenance))
+	ev, err := r.store.AppendObservation(r.buildEvent(workoutParseResult(req, now), now, provenance, observations.SourceMicrolog))
 	if err != nil {
 		return WorkoutLogResult{}, fmt.Errorf("could not log the workout; nothing was saved: %w", err)
 	}
@@ -124,7 +124,7 @@ func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 			if !ok {
 				continue
 			}
-			bev, bErr := r.store.AppendObservation(r.buildEvent(parsed, now, provenance))
+			bev, bErr := r.store.AppendObservation(r.buildEvent(parsed, now, provenance, observations.SourceMicrolog))
 			if bErr != nil {
 				res.Ack = workoutLogAck(res)
 				return res, fmt.Errorf("logged the workout but could not log a body-state reading: %w", bErr)
