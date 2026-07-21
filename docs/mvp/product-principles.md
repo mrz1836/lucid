@@ -44,12 +44,27 @@ deferred surfaces so future work has a clear seam to slot into.
 |------|------------------------------------|---------------|
 | **Journal** | Remembers everything; surfaces patterns the user can't see. Capture-first, structure-later. | **Required now.** The steel thread is a Journal-first loop: capture → raw entry → structuring → optional pattern. |
 | **Therapist** | Builds a living map of fears, triggers, wounds, growth edges. Connects today's spike to a wound from months ago. | **Mostly deferred.** The MVP only proposes one possible pattern per session and frames it as a hypothesis. No wound-mapping, no trigger inventory, no diagnostic language. |
-| **Coach** | Tracks goals, celebrates progress, suggests next actions. | **Deferred.** Goals, progress narrative, and conversational encouragement are out of scope. Reflection is the only "looking forward" affordance, and only as recall. |
+| **Coach** | Tracks goals, celebrates progress, suggests next actions. | **Deferred as a voice; a config-gated companion-class surface is the narrow exception.** Goals, progress narrative, and conversational encouragement stay out of scope. Two config-gated, off-by-default surfaces — the [daily companion](../usage/companion.md) and the [workout module](workout-module.md) — recommend on a silver platter with a *deterministic core the model only phrases*; neither carries a Coach voice, goal trees, or teeth. Reflection remains the only agent "looking forward" affordance, and only as recall. |
 | **Engine** | Defends committed daily practices: bell, chain, floors, honest escalation up to a human witness ([`../engine.md`](../engine.md)). | **Required now, deliberately voiceless.** The agent-free module in [`engine-module.md`](engine-module.md): deterministic close-out, streak arithmetic, template escalation. Teeth attach to the *act* only; content is sanctuary. |
 | **Agent-Self** | Drafts messages, follow-ups, and external actions in the user's voice; user approves. | **Deferred except as a constraint.** The MVP never sends or schedules anything externally. The Agent-Self surface is named so it can be added later behind the same approval boundary. |
 
 The MVP role focus is **Journal + Mirror/Reflection**. Everything else is a
 named seam, not a hidden assumption.
+
+**Two named seams are now partly filled — as config-gated companion-class
+surfaces, not as their long-term roles.** The
+[daily companion](../usage/companion.md) and the
+[workout module](workout-module.md) each ship **off by default** and add a
+deterministic-core, model-phrased daily surface (a briefing; a workout
+recommendation on a silver platter). They are deliberately *not* the Coach:
+no goal trees, no progress celebration, no accountability voice, and no
+teeth of their own. The workout module's two new observation kinds
+(`workout`, `body_state`) are **inventory like every other kind** — carrying
+no streak, target, or score — and the workout streak the surface shows is
+the **Engine chain's**, read from the fold, never a score written onto an
+event ([`../observations.md`](../observations.md) §0). A workout practice
+that ever earns teeth becomes an Engine link through a Gate, exactly like an
+eating practice.
 
 ## 2. The MVP is one steel thread, not a menu
 

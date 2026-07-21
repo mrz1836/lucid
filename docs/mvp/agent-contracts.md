@@ -749,6 +749,111 @@ only for explicit user-visible acknowledgements like "saved as
 | (intent: `answer`) "You should start journaling daily about this." | block | `agent_self_attempt` | (router fallback — `/ask` never advises) |
 | (intent: `answer`) "Based on `i_2026_99_99_z`, …" (id not in slice) | block | `unverified_claim` | (router fallback) |
 
+## 5. Workout Extraction (config-gated module — off by default)
+
+### Purpose
+
+Turn a spoken free-text workout drop into the structured `workout` (and,
+when present, `body_state`) fields the router writes — the voice-first
+capture path of the [workout module](workout-module.md). It is a
+**capture-assist** agent in the shape of Intake: it reads only the drop
+the user is submitting, never the Ledger, and turns their own words into
+fields. The deterministic `lucid workout log` flag form is the always-
+available no-LLM path; this agent is the optional convenience for a spoken
+log. It ships only inside the config-gated, off-by-default workout module.
+
+### Inputs
+
+The router hands the extractor exactly:
+
+```text
+{
+  "command": "workout.extract",
+  "text": "<the user's spoken workout drop, verbatim>",
+  "agent_versions": { "workout": "workout-2026.07.0" }
+}
+```
+
+Nothing else — no recent window, no program, no prior events.
+
+### Outputs
+
+A single structured payload (the `workout` / `body_state` fields from
+[workout-module.md](workout-module.md), all optional except a workout
+`type`):
+
+```json
+{
+  "type": "pull + posture",
+  "duration_min": 50,
+  "rpe": 6,
+  "body_parts": ["back", "rear shoulders"],
+  "soreness": [{"body_part": "back", "soreness": 3}],
+  "pain_flags": [],
+  "notes": "felt clean, shoulder quiet",
+  "degraded": false
+}
+```
+
+`degraded: true` marks the fallback path (below); the router still writes
+the drop so capture is never lost.
+
+### Allowed data access / tools
+
+* The single `text` drop passed in. **Nothing else** — no raw entries, no
+  processed artifacts, no observations, registries, insights, or people
+  records, and no storage handle. The agent imports no Ledger package.
+* One LLM call with that drop as the slice.
+* No tools beyond the LLM call.
+
+### Forbidden behavior
+
+* Reading any `~/.lucid/` tree, or any prior event. Extraction sees the
+  current drop only.
+* Cross-session generalization, pattern-spotting, or inference. It is a
+  scribe, not Reflection — it turns *this* drop into fields and nothing
+  more.
+* Inventing fields the drop does not support. An unmentioned duration or
+  RPE is absent, never guessed.
+* Recommending a workout, evaluating the session, or scoring the body.
+  The recommendation is the deterministic core's; extraction only records
+  what happened.
+* Diagnostic, prescriptive, or clinical language in `notes`. Notes are
+  the user's words.
+* Writing to disk. It returns fields; the router's deterministic capture
+  writes the durable events.
+
+### Failure handling and validation rules
+
+* If the LLM returns malformed output, the extractor retries once with a
+  stricter prompt. If still malformed, it **degrades**: the router stores
+  the drop as a `workout` event with `payload = {note: <verbatim>,
+  parse: "partial"}` — capture never blocks
+  ([`../observations.md`](../observations.md) §0, P10).
+* If the drop is empty, no LLM call is made and nothing is written.
+* **Validation rules:**
+  * `type` is non-empty on the non-degraded path.
+  * `rpe`, `soreness`, and `pain` are in range (0–10) or the field takes
+    the partial path — never silently clamped.
+  * `agent_version` is set and stamped onto the written event.
+  * No phrase-blocklist hit in `notes`
+    ([`product-principles.md`](product-principles.md) §6).
+
+### Note — the workout compose (phrasing) reach
+
+The workout module's daily message is *phrased* by a separate module
+worker (not this agent), exactly like the companion's compose. That
+worker reads a **bounded, recent** `workout` / `body_state` slice plus the
+program and phrases an **already-decided** deterministic recommendation —
+the companion's documented sanctuary reach ([`../usage/companion.md`](../usage/companion.md)).
+It performs **no inference over the reflective corpus**, introduces no
+hypothesis, writes nothing, and never changes the pick; it is a user-
+invoked surface reading the user's own ledger back to them, not an agent
+mining it. The cross-cutting sanctuary denylist for *agent inference*
+therefore stands unchanged: no Reflection-class agent reads the workout
+kinds, and widening that still requires a contract diff plus a per-instance
+`agent_slice_optins` entry, default off.
+
 ## Optional / deferred contracts
 
 These contracts are named so the architecture has explicit seams and so

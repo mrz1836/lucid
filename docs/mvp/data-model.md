@@ -203,6 +203,14 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "morning_routine": "",
     "night_routine": "",
     "model": ""
+  },
+  "workout": {
+    "enabled": false,
+    "program": "",
+    "slot_time": "",
+    "system_prompt": "",
+    "template": "",
+    "model": ""
   }
 }
 ```
@@ -267,6 +275,28 @@ The single global config file. Tiny, hand-editable, agent-readable.
   the provider block, `companion` is credential-dumb: the target channel and
   the harness token stay env-only (`LUCID_USER_CHANNEL_ID` /
   `LUCID_HARNESS_TOKEN`), never in `lucid.json`.
+* `workout` configures the optional **workout companion** — the config-gated,
+  off-by-default surface that recommends today's workout, records it, and
+  reviews progress ([`workout-module.md`](workout-module.md)). It ships **off**
+  (`enabled: false`) like `companion`. `program` is an **opaque per-file path**
+  the loader opens directly (no dir-walk) — the generic-schema program JSON,
+  which is the whole personal/OSS seam: the repo ships only a synthetic example
+  program, and the operator points `program` at their own (private) program file.
+  `system_prompt` and `template` are the two prompt paths for the model's phrasing
+  call, the same explicit-path seam as the companion's. `slot_time` is the daily
+  slot's local fire time (`HH:MM`) — **configurable, default midday**, and unlike
+  the companion the workout slot does **not** inherit the chain marks (the bell
+  and tripwire defend the night chain; a workout window is a separate personal
+  choice). When `enabled` is true, `program`, `system_prompt`, and `template` must
+  be non-empty and `slot_time` a valid `HH:MM`, or the config is rejected.
+  `model` optionally overrides `provider.model` for the phrasing call. Like
+  `companion`, `workout` is credential-dumb — no channel id, token, or model API
+  key lives here. The two new observation kinds this surface reads and writes —
+  `workout` and `body_state` — live in the observations tree (schemas owned by
+  [`observations-module.md`](observations-module.md) and
+  [`../observations.md`](../observations.md) §3), enable-gated and off by default;
+  `~/.lucid/` gains no new top-level tree for the workout module — the program
+  file it reads is the operator's, outside the Ledger.
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt

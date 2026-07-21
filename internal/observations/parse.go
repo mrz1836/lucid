@@ -39,6 +39,18 @@ const (
 	KindWithdrawal  Kind = "withdrawal"
 	KindHabitChange Kind = "habit_change"
 	KindCommitment  Kind = "commitment"
+
+	// Workout-module kinds (observations.md §3, workout-module.md §"Two new
+	// observation kinds"): capturable inventory the workout companion reads to
+	// recommend today's session and review progress. Like the companion-context
+	// kinds they are enable-gated and off by default. `workout` records a
+	// completed session (type/movements/duration/rpe/body_parts/note);
+	// `body_state` pairs soreness and pain against a named part — the signal the
+	// recommender's recovery guardrail and pain-flag hard stop read. Both carry
+	// no streak, quota, target, or grade: they are inventory the Engine never
+	// touches, exactly like every other kind.
+	KindWorkout   Kind = "workout"
+	KindBodyState Kind = "body_state"
 )
 
 // ParseMarkerPartial is the payload.parse value stamped on a capture that
@@ -111,6 +123,10 @@ func ResolveVerb(verb string) (kind Kind, class string, ok bool) {
 		return KindSleep, "", true
 	case "where":
 		return KindLocation, "", true
+	case "sore", "bodystate":
+		// Friendly aliases for the body_state kind; `body_state` itself (and
+		// `workout`) resolve through the capturable fallback below.
+		return KindBodyState, "", true
 	}
 	if IsCapturableKind(Kind(verb)) {
 		return Kind(verb), "", true
@@ -125,7 +141,7 @@ func IsCapturableKind(kind Kind) bool {
 	switch kind { //nolint:exhaustive // deliberately partial: context.day is enricher-written only, so it (and any unknown kind) is not capturable and returns false via the default
 	case KindPain, KindSymptom, KindIntake, KindElimination, KindMood,
 		KindSleep, KindMed, KindIntervention, KindMeasurement, KindMemory, KindLocation,
-		KindWithdrawal, KindHabitChange, KindCommitment:
+		KindWithdrawal, KindHabitChange, KindCommitment, KindWorkout, KindBodyState:
 		return true
 	default:
 		return false
@@ -247,6 +263,10 @@ func parseKindHead(res *ParseResult, rest []string, in ParseInput) {
 	case KindCommitment:
 		// Free-text commitment testimony (`/obs commitment call the dentist`).
 		setFree(res, "what", rest)
+	case KindWorkout:
+		parseWorkout(res, rest, in)
+	case KindBodyState:
+		parseBodyState(res, rest, in)
 	default:
 		// A capturable kind with no special head rule: keep the free text.
 		setFree(res, "note", rest)
@@ -470,6 +490,204 @@ func cleanTokens(in []string) []string {
 		}
 	}
 	return out
+}
+
+// parseWorkout sets the workout type and any deterministically-recognizable
+// duration/rpe head fields, keeping all remaining text verbatim in the note
+// (observations.md §3 workout; workout-module.md §"Two new observation kinds").
+// Every field is optional — a bare `/obs workout push` is a valid "I trained"
+// event — so the first token is the type and the rest is scanned for a
+// minute-suffixed duration (`50min`) and an `rpe` marker (`rpe7` / `rpe 7`);
+// an empty head has nothing to record and takes the partial path. body_parts
+// and movements are intentionally not guessed from free text here: those richer
+// fields come from the structured `lucid workout log` flags and the spoken
+// extraction agent, keeping this deterministic micro-log path forgiving rather
+// than brittle. An out-of-range rpe takes the partial path, never clamped
+// (error-states W-4).
+func parseWorkout(res *ParseResult, tokens []string, in ParseInput) {
+	if len(tokens) == 0 {
+		markPartial(res, tokens)
+		return
+	}
+	res.Payload["type"] = tokens[0]
+	rest := tokens[1:]
+	var note []string
+	for i := 0; i < len(rest); i++ {
+		if d, ok := parseDurationToken(rest[i]); ok {
+			res.Payload["duration_min"] = d
+			continue
+		}
+		val, extra, present, ok := parseRPEToken(rest, i, in.SpelledOK)
+		if present {
+			if !ok {
+				// An `rpe` marker with a missing/out-of-range value → partial,
+				// never silently clamped.
+				markPartial(res, tokens)
+				return
+			}
+			res.Payload["rpe"] = val
+			i += extra
+			continue
+		}
+		note = append(note, rest[i])
+	}
+	setNote(res, note)
+}
+
+// parseBodyState sets the named body part and any soreness/pain scales for a
+// body-state observation (observations.md §3 body_state; workout-module.md).
+// The first token is the body_part; a bare leading 0–10 integer reads as
+// soreness (the `/sore <part> 4` voice form), and explicit `sore N` / `pain N`
+// keyword pairs set either scale. A pain value at or above the program
+// threshold is the recommender's back-off signal — recorded here as inventory,
+// never a grade. All scales are 0–10; an out-of-range value takes the partial
+// path, never clamped (error-states W-4). An empty head has nothing to record
+// and takes the partial path.
+func parseBodyState(res *ParseResult, tokens []string, in ParseInput) {
+	if len(tokens) == 0 {
+		markPartial(res, tokens)
+		return
+	}
+	res.Payload["body_part"] = tokens[0]
+	rest := tokens[1:]
+	var note []string
+	for i := 0; i < len(rest); i++ {
+		field, val, extra, present, ok, oor := parseBodyStateScale(rest, i, in.SpelledOK)
+		if present {
+			if oor {
+				markPartial(res, tokens)
+				return
+			}
+			if ok {
+				res.Payload[field] = val
+				i += extra
+				continue
+			}
+			note = append(note, rest[i]) // keyword, no numeric follower → note word
+			continue
+		}
+		bare, barePresent, bareOK := bareSorenessAt(res, note, rest[i], in.SpelledOK)
+		if barePresent {
+			if !bareOK {
+				markPartial(res, tokens)
+				return
+			}
+			res.Payload["soreness"] = bare
+			continue
+		}
+		note = append(note, rest[i])
+	}
+	setNote(res, note)
+}
+
+// parseBodyStateScale reads an explicit `sore N` / `pain N` scale pair at
+// tokens[i]. present reports whether tokens[i] is a soreness/pain keyword;
+// when present, ok reports that a valid 0–10 value followed (field is its
+// payload key, extra the count of following tokens consumed). A keyword with an
+// out-of-range value is present with oor=true so the caller takes the partial
+// path (never clamped); a keyword with a missing or non-numeric follower is
+// present but not ok — the caller treats it as an ordinary note word, so a note
+// like "no pain" never trips the partial path.
+func parseBodyStateScale(tokens []string, i int, spelledOK bool) (field string, val, extra int, present, ok, oor bool) {
+	f, isKeyword := bodyStateScaleField(tokens[i])
+	if !isKeyword {
+		return "", 0, 0, false, false, false
+	}
+	if i+1 >= len(tokens) {
+		return f, 0, 0, true, false, false
+	}
+	v, numeric := parseScaleToken(tokens[i+1], spelledOK)
+	switch {
+	case !numeric:
+		return f, 0, 0, true, false, false
+	case v < 0 || v > 10:
+		return f, 0, 0, true, false, true
+	default:
+		return f, v, 1, true, true, false
+	}
+}
+
+// bareSorenessAt reads a bare leading 0–10 integer as the soreness value — the
+// `/sore <part> 4` voice form — but only before any note text has accumulated
+// and only when soreness is not already set. present reports whether tok is a
+// numeric soreness candidate in that position; ok is false only for an
+// out-of-range value, so the caller takes the partial path (never clamped).
+func bareSorenessAt(res *ParseResult, note []string, tok string, spelledOK bool) (val int, present, ok bool) {
+	if len(note) > 0 {
+		return 0, false, false
+	}
+	if _, has := res.Payload["soreness"]; has {
+		return 0, false, false
+	}
+	v, numeric := parseScaleToken(tok, spelledOK)
+	switch {
+	case !numeric:
+		return 0, false, false
+	case v < 0 || v > 10:
+		return 0, true, false
+	default:
+		return v, true, true
+	}
+}
+
+// bodyStateScaleField maps a body-state scale keyword to its payload field:
+// sore/soreness → soreness, pain → pain. It reports ok=false for anything else.
+func bodyStateScaleField(tok string) (field string, ok bool) {
+	switch strings.ToLower(tok) {
+	case "sore", "soreness":
+		return "soreness", true
+	case "pain":
+		return "pain", true
+	default:
+		return "", false
+	}
+}
+
+// parseDurationToken reads a minute-suffixed duration (`50min`, `50mins`,
+// `50m`) into whole minutes. A bare integer is deliberately not a duration — it
+// belongs to the free-text note — so only an explicit minute suffix matches and
+// the parser never guesses.
+func parseDurationToken(tok string) (int, bool) {
+	low := strings.ToLower(tok)
+	for _, suffix := range []string{"mins", "min", "m"} {
+		if strings.HasSuffix(low, suffix) && len(low) > len(suffix) {
+			if n, err := strconv.Atoi(low[:len(low)-len(suffix)]); err == nil && n > 0 {
+				return n, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// parseRPEToken detects a session-RPE marker at tokens[i] in either the
+// attached `rpe7` or spaced `rpe 7` form. present reports whether an `rpe`
+// marker was seen at all; ok reports whether it carried a valid 0–10 value
+// (a missing or out-of-range value is present-but-not-ok, so the caller takes
+// the partial path rather than clamping — error-states W-4). extra is the count
+// of following tokens consumed (1 for the spaced form, 0 for the attached one).
+func parseRPEToken(tokens []string, i int, spelledOK bool) (val, extra int, present, ok bool) {
+	low := strings.ToLower(tokens[i])
+	if !strings.HasPrefix(low, "rpe") {
+		return 0, 0, false, false
+	}
+	suffix := strings.TrimPrefix(low, "rpe")
+	if suffix == "" {
+		// Spaced form: the value is the next token.
+		if i+1 >= len(tokens) {
+			return 0, 0, true, false
+		}
+		v, numeric := parseScaleToken(tokens[i+1], spelledOK)
+		if !numeric || v < 0 || v > 10 {
+			return 0, 0, true, false
+		}
+		return v, 1, true, true
+	}
+	// Attached form: `rpe7`.
+	v, numeric := parseScaleToken(suffix, spelledOK)
+	if !numeric || v < 0 || v > 10 {
+		return 0, 0, true, false
+	}
+	return v, 0, true, true
 }
 
 // parseSleep sets quality and optional bed/wake times (observations.md §3

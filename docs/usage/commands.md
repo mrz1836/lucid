@@ -734,6 +734,47 @@ lucid ask "what tends to trip me up in group settings?"
 lucid ask what did I decide about mornings --json
 ```
 
+### workout
+
+```
+lucid workout [--json]
+lucid workout log [drop...] [flags]
+```
+
+The optional, **config-gated** workout companion — it recommends today's session,
+records what actually happened, and reviews progress. Off by default; enable it by
+adding a `workout` block to `lucid.json` (an opaque `program` path plus
+`slot_time`, `system_prompt`, `template`) and the `workout`/`body_state` kinds to
+`observations/config.json`. Full guide: [`workout.md`](workout.md).
+
+Bare **`lucid workout`** composes today's recommendation on demand. A deterministic
+core owns the decision — it picks today's card from the program rotation and vetoes
+it against per-body-part recovery windows (no leg day two days running), a pain-flag
+hard stop, and the injury registry — and the model only phrases the already-decided
+plan. Every message carries exactly three offerings (a recommended plan, an easier
+fallback, and a back-off/safety door), a read-only progress panel (streak, frequency,
+skipped days, recent body response), and a fixed *not-medical-advice* line. The pick
+is never the model's: with the provider unreachable the message still renders
+deterministically (only the phrasing warmth is lost). `--json` emits the decided
+`{recommendation, trend}` projection instead of the rendered text.
+
+**`lucid workout log`** captures a completed session two ways — a spoken drop
+(extracted by the model, the voice-first default) or the structured flags
+(`--type --duration --rpe --parts --soreness --pain --notes`) for guided or backfill
+capture. The two forms are mutually exclusive. Each writes a `workout` observation
+(plus one `body_state` reading per soreness/pain flag) to the Ledger; the readings
+are what the recommender reads back for the recovery and pain guardrails.
+
+**Provider-backed** for phrasing (the `provider` block), with a deterministic
+fallback; the recommendation itself and the capture parser are model-free.
+
+```sh
+lucid workout                          # today's recommendation, phrased
+lucid workout --json                   # the decided recommendation + trend
+lucid workout log "did pull, shoulder felt fine, ~50 min"
+lucid workout log --type legs --duration 45 --rpe 7 --soreness quads:5 --pain knee:7
+```
+
 ### Provider configuration (agentic verbs)
 
 `serve`, `reflect`, and `ask` are the only **provider-backed** verbs — they need a

@@ -134,6 +134,28 @@ half-built.
 | C-4 | Ledger context older than the staleness threshold | Never silently mixed in: every Ledger-derived line carries an "as logged &lt;date&gt;" stamp, and a section whose newest event is older than the threshold (default 2 days) gets a `stale` flag on its meta. Live Engine numbers are always current and carry no stamp. | The scaffold with the freshness label. | None. | (none — labeling is the designed behavior) |
 | C-5 | A prompt file, the tripwire verdict, or a live-numbers read fails | Loud, unlike the enrichment reads above: the compose returns an error rather than an empty or half-built send, so the total-miss alert path (companion.md) fires. | The loud total-miss alert. | None. | Restore the file / projection; rerun the window or wait for the next fire. |
 
+### Workout module (config-gated — Mirror-side, model-allowed)
+
+The workout module's full degrade table lives in
+[`workout-module.md`](workout-module.md) §"Error states"; the rows below
+record it in this page's unified format. The dividing principle is the
+companion's — **enrichment reads degrade quietly; the pick, the safety
+line, and the live-number reads stay loud** — so a recommendation is never
+silently half-built and the daily slot never falls silent. Capture always
+honors the drop first (§0, P10).
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| W-1 | `workout.program` path missing/unreadable | Degrade to "no program": render an honest empty recommendation with the safety line, never a crash. | The empty-recommendation scaffold. | None. | Fix the program path; the next fire picks it up. |
+| W-2 | Recent-observation read fails | Non-fatal: fall to the plain-calendar path (the recommender's missing-data rule); the message still composes. | (none) | None. | Transient reads recover next window. |
+| W-3 | Workout extraction returns malformed fields | Retry once stricter, then degrade: store the drop as a `workout` event with `payload.parse: "partial"` and the verbatim note. | "Logged." (with the id) | Event written (partial). | The structured `lucid workout log` flag form is the precise path. |
+| W-4 | Out-of-range scale (`rpe` / `pain` / `soreness` beyond bounds) | Partial path — stored with the invoked kind, never silently clamped. | (ack, id) | Event written (partial). | (none — automatic) |
+| W-5 | Disabled kind used (`workout` / `body_state` not in `kinds_enabled`) | Reject with the enable hint, exactly like every observation kind. | "`workout` isn't enabled — add it to observations/config.json." | None. | Enable the kind. |
+| W-6 | Provider unreachable at the slot / on-demand | Deterministic `Render` of the already-decided recommendation; only the model's warmth is lost — the pick and the safety line stand. | The deterministic scaffold. | None (or the slot receipt on delivery). | (none — the fallback is the recovery) |
+| W-7 | Slot double-fire on a retry | Receipt idempotency (`ReadCompanionReceipt("workout")`): a retry whose message still reads back is skipped. | (none) | Per-window receipt. | (none — automatic) |
+| W-8 | Host asleep past the slot cutoff | Bounded catch-up with a `(late)` note within the window; past the cutoff the send is skipped and the miss is alerted — never a stale midday message hours late. | The late-noted message, or the miss alert. | None. | (none — designed) |
+| W-9 | Total miss (compose / deliver / read-back fails) | Loud best-effort alert to the user channel, then a loud job error into the supervised log. Silence is the one outcome the slot never produces. | The loud miss alert. | None. | Restore the input; rerun the window or wait for the next fire. |
+
 ### Life-archive (excavation — deterministic, agent-free)
 
 The life-archive verbs ([`life-archive.md`](life-archive.md)) are

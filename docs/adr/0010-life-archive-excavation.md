@@ -1,4 +1,4 @@
-# ADR-0009 — Life-archive excavation: build the deferred Mirror surface on the frozen foundation
+# ADR-0010 — Life-archive excavation: build the deferred Mirror surface on the frozen foundation
 
 **Status:** Accepted.
 
