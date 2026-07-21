@@ -74,6 +74,24 @@ adapter-only access, the `people/` key derivation for registry slugs)
 and add two naming kinds: `day_YYYY_MM_DD` for logical-day records and
 `obs_YYYY_MM_DD_<seq>` for observation events.
 
+**Registry writes are now user-facing.** The `registries/` write path
+was storage-only in the original slice — only the sticky-location verb
+auto-created a `place`. The life-archive module
+([`life-archive.md`](life-archive.md)) adds the user-facing verbs
+`lucid injury`, `lucid era`, and `lucid thread`, each merging through the
+existing append-only `update_registry` op (no rewrite; every patch
+appends a `status_history` entry). Their `Fields` follow documented
+conventions on the **frozen** free-form `Fields map[string]any`: the
+injury keys (`onset`, `timeline`, `body_area`, `cause`, `severity`,
+`lasting_effects`, `current_limitations`, `treatments`, `uncertainty`),
+the era range (`start`/`end`), and the thread `intent`/`domains` (with
+**no** progress/percent/streak field — the obliquity guard). Story
+`memory` events add three payload keys (`tone`, `why_it_matters`,
+`follow_up`, beside the existing `text`/`certainty`) and a fixed `refs`
+shape (`era`/`place`/`person`, plus `entry` for an attached photo's raw
+id) — all additive on the frozen event envelope, no new top-level field.
+Full vocabulary and types: [`life-archive.md`](life-archive.md) §2–§4.
+
 ### Naming conventions
 
 | Kind | Convention | Example |

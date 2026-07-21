@@ -54,6 +54,11 @@ own *scope*; the older MVP docs own *conventions*.
 | `/obs where <place>` | Sticky location: writes a `context.location` event; creates/merges the place registry entry. | Event + `registries/places/<key>.json` |
 | `/day [date\|yesterday]` | Read-only day view: engine day record + observations + enrichment + entry ids for one logical day, plus range events spanning it. No date resolves to the current **logical** day (and `yesterday` to the one before it), on the same rollover boundary that files events (§2) — so a 02:00 `/day` shows the day just lived, not an empty new one. | None |
 | `/packet clinician [@<date>\|all]` | Renders the clinician packet projection per [`../observations.md`](../observations.md) §7 and posts only its *path*. Window: since the last packet export; **first-ever export: trailing 90 days**; `@<date>` overrides the window start, `all` exports everything. Header includes any standing `packet.clinical_context` lines from `observations/config.json`, verbatim; regimen derives from the most recent `taken: true` event per distinct med, and a med whose latest event is `taken: false` renders `(last logged: skipped <date>)` rather than disappearing. | Packet under `projections/` + one line appended to `projections/exports.log` (what, window, when, path) |
+| `lucid injury <name> [--status …] [--onset …] [--body-area …] …` | Life-archive registry-write verb: create or amend an `injury` record with the documented `Fields` convention ([`life-archive.md`](life-archive.md) §2). Append-only `status_history`; backdate-aware onset. | `registries/injuries/<key>.json` |
+| `lucid era <name> [--start …] [--end …]` · `lucid thread <name> [--intent …]` | Create or amend an `era` (name + date range) or `thread` (name + intent — **no progress number**, the obliquity guard) registry record ([`life-archive.md`](life-archive.md) §4). | `registries/eras\|threads/<key>.json` |
+| `lucid memory "<text>" [--certainty …] [--era …] [--place …] [--day …] [--attach <path>]` | Capture a backdated story `memory` event with the payload/`refs` convention ([`life-archive.md`](life-archive.md) §3). Optional media reuses `lucid attach`, referenced via `refs.entry`; a text-only story omits it and is never gated. | One `memory` event under `observations/YYYY/MM/…`; `--attach` also writes `media/` + a linked `raw/` entry |
+| `lucid excavate` | **Read-only:** select the next injury/story cluster to excavate and emit its generic prompts ([`life-archive.md`](life-archive.md) §5–§6). Deterministic, agent-free; honest-empty over a thin store, no model call. | None |
+| `lucid recall [--era\|--thread\|--injury <key>]` | **Read-only:** browse the archive by era/thread/injury (bare = an index), each surfaced item cited with its source context ([`life-archive.md`](life-archive.md) §7). | None |
 
 Acks return within one second; no LLM call exists in the path, so
 offline capture works. `logical_date` derivation (rollover for exact
@@ -265,9 +270,16 @@ discovery line exactly once.
 * **Not the correlation engine.** Episodes and correlates
   ([`../observations.md`](../observations.md) §7) are post-MVP
   projections; the MVP ships the series they'll be computed from.
-* **Not excavation sessions or thread views.** The events and
-  registries they need exist now; the surfaces come after the steel
-  thread proves out.
+* **Excavation sessions and thread views now ship** as the life-archive
+  module ([`life-archive.md`](life-archive.md)): the events and
+  registries they needed existed already, and the deferred surfaces have
+  landed on the frozen envelope — the registry-write verbs
+  (`lucid injury`/`era`/`thread`), backdated story capture
+  (`lucid memory`, media via `lucid attach`), deterministic cluster
+  selection (`lucid excavate`), and read-only recall/browse
+  (`lucid recall`). Still **not** in the binary: the live review
+  conversation and its monthly cadence, which stay the harness's, and
+  any model call in a capture/selection/browse path (there is none).
 * **Not agent-visible.** No Reflection over observations in the MVP;
   patterns still come only from the prose thread. Wiring observation
   projections into agent slices requires a future contract diff

@@ -134,6 +134,25 @@ half-built.
 | C-4 | Ledger context older than the staleness threshold | Never silently mixed in: every Ledger-derived line carries an "as logged &lt;date&gt;" stamp, and a section whose newest event is older than the threshold (default 2 days) gets a `stale` flag on its meta. Live Engine numbers are always current and carry no stamp. | The scaffold with the freshness label. | None. | (none — labeling is the designed behavior) |
 | C-5 | A prompt file, the tripwire verdict, or a live-numbers read fails | Loud, unlike the enrichment reads above: the compose returns an error rather than an empty or half-built send, so the total-miss alert path (companion.md) fires. | The loud total-miss alert. | None. | Restore the file / projection; rerun the window or wait for the next fire. |
 
+### Life-archive (excavation — deterministic, agent-free)
+
+The life-archive verbs ([`life-archive.md`](life-archive.md)) are
+deterministic module output like the observation micro-logs — no LLM in
+any path — so their failures follow the observation table's shapes:
+capture never blocks, empty states are honest, and a disk failure
+surfaces immediately (St-1). This subsection owns the rows that surface
+name/gating/empty-store paths; the registry-write disk failures reduce
+to the storage table below.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect |
+|---|---------|-----------------|----------------------|------------------|
+| La-1 | `lucid injury`/`era`/`thread` with a name that cannot derive a key (empty after normalize) | Reject before any write; never guess a key. | "I couldn't derive a registry key from that name — give it a word or two." | None |
+| La-2 | `lucid memory` used while the `memory` kind is disabled | Reject with the enable hint, exactly like a disabled micro-log. | "`memory` isn't enabled — add it to `observations/config.json`." | None |
+| La-3 | `lucid memory` with unparseable or too-thin input (no usable text) | Partial path: store the invoked kind with `payload = {note: <verbatim>, parse: "partial"}` — capture never blocks. | Ack with the id, no evaluative language. | `memory` event written |
+| La-4 | `lucid memory --attach <path>` where the file is missing or unreadable | Reject the attach and write nothing; never silently drop the requested photo to a text-only story (no silent state). Media is optional only when omitted. | "I couldn't read that attachment — check the path and try again. Nothing saved." | None |
+| La-5 | Registry write (`update_registry`) fails — disk full or permission denied | Surface immediately, St-1 pattern; the append-only merge is atomic, so a failed write leaves the record byte-unchanged. | (see St-1) | None (record not merged) |
+| La-6 | `lucid excavate` / `lucid recall` over an empty or thin store | Honest empty result; **no model call** (there is no LLM in either path). | "Nothing to excavate yet." / "Nothing archived under that era yet." | None (read-only) |
+
 ## Storage failures
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |

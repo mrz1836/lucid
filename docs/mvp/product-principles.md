@@ -24,6 +24,15 @@ The MVP entrypoint is [`README.md`](README.md). The exact user loop is in
 > absolute: nothing the Engine or the enrichers do ever touches,
 > scores, or exposes reflective content (architecture P3), and
 > observations are inventory, never obligation.
+>
+> The **life-archive module** ([`life-archive.md`](life-archive.md))
+> extends the Journal role (§1): it turns on the deferred excavation and
+> browse surfaces on the frozen envelope — the registry-write verbs and
+> the read-only selection/recall reads, all deterministic and agent-free
+> — and they too are **inventory, never obligation** (no score, streak,
+> or target; the `thread` verb keeps the structural obliquity guard). The
+> Therapist and Coach deferrals are untouched: excavation captures and
+> browses testimony, it never diagnoses or sets goals.
 
 ## 1. Lucid's five long-term roles are preserved
 

@@ -465,11 +465,17 @@ weight testimony accordingly, and re-remembering later appends a new
 fragment with `refs.prior` naming the old one — recall improves,
 history never rewrites (P2). The weekly Retro's excavation block
 (engine §5) is one fragment per week; `/bootstrap` sessions are bulk
-intake; era-guided excavation sessions ("walk me through that
-kitchen") are a future Mirror surface, off-limits-registry-aware, that
-needs no new foundation — the envelope above already carries
-everything they will produce, including the event-to-event references
-(`refs.prior`, `refs.corrects`) that progressive recall requires.
+intake; and era-guided excavation sessions ("walk me through that
+kitchen") **now ship** as the life-archive module
+([`mvp/life-archive.md`](mvp/life-archive.md)) — an
+off-limits-registry-aware surface that needed no new foundation, exactly
+as promised: the envelope above already carries everything they produce,
+including the event-to-event references (`refs.prior`, `refs.corrects`)
+that progressive recall requires. That module fixes a documented field
+convention for the injury `Fields` and the story `memory` payload/`refs`
+on this frozen envelope, adds the registry-write verbs that were the
+missing surface, and keeps selection and browse deterministic and
+agent-free — no new top-level field, no new subsystem.
 
 **The corpus bet.** All of this compounds toward one asset: a
 lifetime, owner-held, plain-text corpus of what actually happened —

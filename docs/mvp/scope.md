@@ -258,8 +258,19 @@ these amendments:
   enrichers are opt-in and outbound-minimal (coordinates + dates only).
 * **Added:** No medical advice or diagnosis anywhere; health
   projections are data for the user and their care team.
-* **Added:** No agent reads observations or registries in the MVP;
-  correlation and excavation surfaces are post-MVP contract diffs.
+* **Amended:** No **agent** reads observations or registries in the MVP —
+  correlation and any model-driven reflection over observation data
+  remain post-MVP contract diffs (each needs both a contract diff and a
+  per-instance opt-in). But the **deterministic, agent-free** excavation
+  surfaces now land: the life-archive registry-write verbs
+  (`lucid injury`/`era`/`thread`, `lucid memory`), the cluster-selection
+  read (`lucid excavate`), and the read-only recall/browse
+  (`lucid recall`) — see
+  [`observations-module.md`](observations-module.md) and
+  [`life-archive.md`](life-archive.md). They read only through router
+  projection seams and invoke no agent, so the sanctuary boundary is
+  untouched; the live review conversation and its monthly cadence stay
+  the harness's, not the binary's.
 * **Added:** No Scientist tooling — the experiment lifecycle
   ([`../scientist.md`](../scientist.md)) is a manual practice at
   Retro/Gate cadence in this phase; its registry and event kinds ride
