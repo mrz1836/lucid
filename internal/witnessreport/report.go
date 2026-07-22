@@ -62,6 +62,17 @@ type Report struct {
 	Faults    string `json:"faults,omitempty"`
 	Progress  string `json:"progress,omitempty"`
 	Narrative string `json:"narrative,omitempty"`
+
+	// Compose metadata — how the report was reached, set by the model-allowed
+	// compose pass (empty/false in the pure core). UsedLLM records the model
+	// filled the narrative slots; Fallback records the deterministic path fired
+	// (the model was unreachable or returned nothing usable) so the caller can
+	// still alert that only the warmth was lost; SafetyTripped records the
+	// witness-safe output scan caught private detail and the prose was discarded
+	// in favor of the metrics-only report. The numbers still land on every path.
+	UsedLLM       bool `json:"used_llm,omitempty"`
+	Fallback      bool `json:"fallback,omitempty"`
+	SafetyTripped bool `json:"safety_tripped,omitempty"`
 }
 
 // NumbersReader is the honest-numbers seam: the derived metrics projection and

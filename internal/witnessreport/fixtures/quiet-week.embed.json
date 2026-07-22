@@ -1,0 +1,31 @@
+{
+  "title": "Weekly witness report · Week 2026-W29",
+  "color": 15844367,
+  "fields": [
+    {
+      "name": "⛓️ Streak \u0026 adherence",
+      "value": "1-day streak · 100% adherence (2/2 decided) · longest 1",
+      "inline": true
+    },
+    {
+      "name": "📅 This week",
+      "value": "2/2 completed · 2 logged of 7",
+      "inline": true
+    },
+    {
+      "name": "🪞 Faults",
+      "value": "No misses this week — the chain held."
+    },
+    {
+      "name": "🤝 How friends can help",
+      "value": "• Nudge me to log daily — my logging got thin this week."
+    },
+    {
+      "name": "⚠️ Watch-outs",
+      "value": "• Logged only 2 of 7 days this week — accountability risk."
+    }
+  ],
+  "footer": {
+    "text": "Weekly · Monday after Sunday's reflection · numbers are exact, never softened"
+  }
+}
