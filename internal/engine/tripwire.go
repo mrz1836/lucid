@@ -4,8 +4,8 @@ import "time"
 
 // Send channels (engine-module.md §Consent amendment). The user channel is the
 // person's own Lucid channel (bell, L1, storm-lapse notes, the L2-blocked
-// fallback); the witness channel is the witness's confirmed channel (L2,
-// heartbeat) and carries streak/mode/storm state only — never Mirror data.
+// fallback); the witness channel is the witness's confirmed channel (L2) and
+// carries streak/mode/storm state only — never Mirror data.
 const (
 	ChannelUser    = "user"
 	ChannelWitness = "witness"
@@ -14,13 +14,12 @@ const (
 // Send kinds — the fixed template a send renders (engine-module.md §Consent
 // amendment). Every kind maps to a static repo string; no kind is ever
 // composed by a model. L1, L2, and the storm variants carry the pinned
-// sign-off; the bell and heartbeat do not.
+// sign-off; the bell does not.
 const (
 	SendBell       = "bell"
 	SendL1         = "l1"
 	SendL2         = "l2"
 	SendL2Blocked  = "l2_blocked"
-	SendHeartbeat  = "heartbeat"
 	SendStormLapse = "storm_lapse"
 )
 
@@ -32,15 +31,14 @@ const (
 // only place templates live), which keeps the Engine core model-free and
 // import-pure.
 type Send struct {
-	Channel         string
-	Kind            string
-	Storm           bool
-	Floor           string
-	Streak          int
-	Mode            Mode
-	ConfirmedDate   string
-	WitnessName     string
-	EscalationState EscalationState
+	Channel       string
+	Kind          string
+	Storm         bool
+	Floor         string
+	Streak        int
+	Mode          Mode
+	ConfirmedDate string
+	WitnessName   string
 }
 
 // TripwireInput is everything a morning tripwire run reasons over
@@ -49,15 +47,14 @@ type Send struct {
 // profile's clocks. Records is the folded day set keyed by logical_date. The
 // input is pure data: EvaluateTripwire performs no IO and calls no model.
 type TripwireInput struct {
-	Now             time.Time
-	Loc             *time.Location
-	Reference       time.Time
-	Chain           ChainConfig
-	Storm           StormHistory
-	Witness         WitnessContract
-	Records         map[string]DayRecord
-	Streak          int
-	FirstRunOfMonth bool
+	Now       time.Time
+	Loc       *time.Location
+	Reference time.Time
+	Chain     ChainConfig
+	Storm     StormHistory
+	Witness   WitnessContract
+	Records   map[string]DayRecord
+	Streak    int
 }
 
 // TripwireDecision is the pure result of a tripwire run: the sends to emit,
@@ -83,10 +80,8 @@ type TripwireDecision struct {
 // While a storm stands the contact is unchanged but its consequences pause —
 // the fixed storm variants fire, budget/breach are handled by the derived
 // status, never here. Storm bookkeeping (lapse/expire/enter) runs first and is
-// silent except for a lapse note. The monthly heartbeat rides the same run,
-// suppressed when an L2 posts to the witness. Nothing here reads raw/,
-// processed/, or a model — the templates are static and the math is
-// arithmetic.
+// silent except for a lapse note. Nothing here reads raw/, processed/, or a
+// model — the templates are static and the math is arithmetic.
 func EvaluateTripwire(in TripwireInput) TripwireDecision {
 	loc := in.Loc
 	if loc == nil {
@@ -105,7 +100,6 @@ func EvaluateTripwire(in TripwireInput) TripwireDecision {
 	yRec, yHas := in.Records[DateString(DateOf(in.Reference))]
 	completed := yHas && yRec.Completed
 
-	l2ToWitness := false
 	switch {
 	case completed:
 		dec.EscalationState = EscalationNone
@@ -113,34 +107,28 @@ func EvaluateTripwire(in TripwireInput) TripwireDecision {
 		dec.EscalationState = EscalationNone
 	default:
 		var sends []Send
-		dec.EscalationState, sends, l2ToWitness = missEscalation(in, effStorm, stormOn, yRec, yHas, loc)
+		dec.EscalationState, sends = missEscalation(in, effStorm, stormOn, yRec, yHas, loc)
 		dec.Sends = append(dec.Sends, sends...)
 	}
 
-	if in.FirstRunOfMonth && in.Witness.IsConfirmed() && !in.Witness.IsLapsed() && !l2ToWitness {
-		dec.Sends = append(dec.Sends, Send{
-			Channel: ChannelWitness, Kind: SendHeartbeat, Streak: in.Streak, EscalationState: dec.EscalationState,
-		})
-	}
 	return dec
 }
 
 // missEscalation builds the tripwire response to a missed reference day: L2 to
 // the confirmed witness (streak/mode/storm only) after two consecutive misses,
 // an L2-blocked note to the user when the witness is unarmed, or L1 to the user
-// on the first miss. It returns the resulting escalation state, the send(s) to
-// emit, and whether an L2 reached the witness (which suppresses the monthly
-// heartbeat). Splitting it out keeps EvaluateTripwire's dead-man switch flat.
-func missEscalation(in TripwireInput, effStorm StormHistory, stormOn bool, yRec DayRecord, yHas bool, loc *time.Location) (EscalationState, []Send, bool) {
+// on the first miss. It returns the resulting escalation state and the send(s)
+// to emit. Splitting it out keeps EvaluateTripwire's dead-man switch flat.
+func missEscalation(in TripwireInput, effStorm StormHistory, stormOn bool, yRec DayRecord, yHas bool, loc *time.Location) (EscalationState, []Send) {
 	if escalationRun(in.Records, in.Reference, in.Chain.ChainStart, loc) < 2 {
 		return EscalationL1, []Send{{
 			Channel: ChannelUser, Kind: SendL1, Storm: stormOn, Floor: survivalFloor(in.Chain),
-		}}, false
+		}}
 	}
 	if !in.Witness.L2Armed() {
 		return EscalationL2, []Send{{
 			Channel: ChannelUser, Kind: SendL2Blocked, Storm: stormOn, WitnessName: in.Witness.WitnessName,
-		}}, false
+		}}
 	}
 	mode := ModeGreen
 	if yHas && yRec.Mode != "" {
@@ -150,7 +138,7 @@ func missEscalation(in TripwireInput, effStorm StormHistory, stormOn bool, yRec 
 		Channel: ChannelWitness, Kind: SendL2, Storm: stormOn,
 		Streak: in.Streak, Mode: mode, ConfirmedDate: StandingConfirmedDate(effStorm, loc),
 		WitnessName: in.Witness.WitnessName,
-	}}, true
+	}}
 }
 
 // chainStarted reports whether the chain had begun on or before the reference

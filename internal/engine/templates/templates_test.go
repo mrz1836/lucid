@@ -66,20 +66,6 @@ func TestL2Unreachable(t *testing.T) {
 	assert.Contains(t, L2Unreachable(""), "your witness")
 }
 
-// TestHeartbeat: two templates by escalation_state, neither signed.
-func TestHeartbeat(t *testing.T) {
-	allClear := Heartbeat(engine.EscalationNone, 30)
-	assert.Equal(t, "monthly status: all clear — 30-day streak, no open escalation.", allClear)
-	assert.False(t, endsWithSignOff(allClear))
-
-	open := Heartbeat(engine.EscalationL1, 30)
-	assert.Contains(t, open, "an escalation fired this month and remains open")
-	assert.False(t, endsWithSignOff(open))
-
-	// An empty escalation string reads as the all-clear template.
-	assert.Equal(t, allClear, Heartbeat("", 30))
-}
-
 // TestStormLapse is the verbatim lapse note (the witness name substitutes into
 // the `talk to <witness>.` placeholder).
 func TestStormLapse(t *testing.T) {
@@ -91,7 +77,7 @@ func TestStormLapse(t *testing.T) {
 
 // TestRender dispatches each decided Send to its fixed template, and the
 // sign-off rule holds across the render seam: L1, L2, and both storm variants
-// sign off; the heartbeat does not.
+// sign off; the bell and the L2-blocked note do not.
 func TestRender(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -104,7 +90,6 @@ func TestRender(t *testing.T) {
 		{"l2", engine.Send{Kind: engine.SendL2, Streak: 3, Mode: engine.ModeGreen}, "Streak: 3", true},
 		{"l2 storm", engine.Send{Kind: engine.SendL2, Storm: true, ConfirmedDate: "2026-07-14"}, "confirmed 2026-07-14", true},
 		{"l2 blocked", engine.Send{Kind: engine.SendL2Blocked}, "disarmed", false},
-		{"heartbeat", engine.Send{Kind: engine.SendHeartbeat, EscalationState: engine.EscalationNone, Streak: 5}, "all clear", false},
 		{"storm lapse", engine.Send{Kind: engine.SendStormLapse, WitnessName: "J."}, "lapsed", false},
 	}
 	for _, c := range cases {

@@ -70,7 +70,7 @@ func TestTripwireState_MissingIsZero(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, TripwireState{}, s)
 
-	want := TripwireState{LastHeartbeatMonth: "2026-07", LastRunDate: "2026-07-06"}
+	want := TripwireState{LastRunDate: "2026-07-06"}
 	require.NoError(t, a.WriteTripwireState(want))
 	got, err := a.ReadTripwireState()
 	require.NoError(t, err)

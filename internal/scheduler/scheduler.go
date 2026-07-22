@@ -93,22 +93,21 @@ func (sc *Scheduler) RunBell() (SentMessage, error) {
 // and [Scheduler.SelfCheck], which discards it. Gathering it is the whole IO
 // surface of a run; everything downstream is the pure [engine] decision.
 type tripwireContext struct {
-	loc             *time.Location
-	chain           engine.ChainConfig
-	storm           engine.StormHistory
-	witness         engine.WitnessContract
-	tw              storage.TripwireState
-	records         []engine.DayRecord
-	reference       time.Time
-	firstRunOfMonth bool
+	loc       *time.Location
+	chain     engine.ChainConfig
+	storm     engine.StormHistory
+	witness   engine.WitnessContract
+	tw        storage.TripwireState
+	records   []engine.DayRecord
+	reference time.Time
 }
 
 // RunTripwire runs the morning dead-man for yesterday's logical day
 // (engine-module.md §The tripwire). It reads the Ledger, evaluates the pure
 // [engine.EvaluateTripwire] decision, appends any storm bookkeeping, delivers
 // the sends (falling back to a user-channel note when the witness channel is
-// unreachable), persists the escalation_state, and records the run so the
-// monthly heartbeat fires once per calendar month.
+// unreachable), persists the escalation_state, and records the run's date so a
+// second run the same morning is an idempotent no-op.
 func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 	return sc.runTripwire(now, false)
 }
@@ -118,10 +117,10 @@ func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 // (L1, L2-blocked, storm-lapse). When the companion presents the morning
 // window it delivers that verdict itself — appending it byte-for-byte from
 // [Scheduler.TripwireUserVerdict] so a model can never reword the teeth. Every
-// other effect is identical to a live run: the witness L2 and the monthly
-// heartbeat still fire on the witness channel, storm events are still appended,
-// and escalation_state + tripwire state are still persisted. It is a pure
-// suppression of one delivery channel, not a change to the decision.
+// other effect is identical to a live run: the witness L2 still fires on the
+// witness channel, storm events are still appended, and escalation_state +
+// tripwire state are still persisted. It is a pure suppression of one delivery
+// channel, not a change to the decision.
 func (sc *Scheduler) RunTripwirePresented(now time.Time) (Report, error) {
 	return sc.runTripwire(now, true)
 }
@@ -153,8 +152,8 @@ func (sc *Scheduler) SelfCheck(now time.Time) error {
 // [templates.Render], joined in decision order. It returns "" on a
 // completed/normal day (the Engine posts nothing to the user that morning) and
 // on a pure L2 day (the escalation is a witness send). It delivers and persists
-// nothing: the witness L2, the monthly heartbeat, and every state write remain
-// the job of [Scheduler.RunTripwirePresented].
+// nothing: the witness L2 and every state write remain the job of
+// [Scheduler.RunTripwirePresented].
 func (sc *Scheduler) TripwireUserVerdict(now time.Time) (string, error) {
 	tc, err := sc.gatherTripwire(now)
 	if err != nil {
@@ -214,9 +213,6 @@ func (sc *Scheduler) runTripwire(now time.Time, presented bool) (Report, error) 
 	}
 
 	tc.tw.LastRunDate = engine.DateString(engine.DateOf(now.In(tc.loc)))
-	if tc.firstRunOfMonth {
-		tc.tw.LastHeartbeatMonth = now.Format("2006-01")
-	}
 	if err := sc.store.WriteTripwireState(tc.tw); err != nil {
 		return rep, err
 	}
@@ -226,8 +222,8 @@ func (sc *Scheduler) runTripwire(now time.Time, presented bool) (Report, error) 
 // gatherTripwire scaffolds the engine tree and reads everything a morning
 // tripwire run needs for `now`: chain/profile/storm/witness/tripwire state and
 // the folded day records, plus the reference (yesterday's) logical day under
-// the profile governing now's wall date and whether this is the month's first
-// run. It reads only; it delivers and persists nothing.
+// the profile governing now's wall date. It reads only; it delivers and
+// persists nothing.
 func (sc *Scheduler) gatherTripwire(now time.Time) (tripwireContext, error) {
 	loc := now.Location()
 	if err := sc.store.ScaffoldEngine(); err != nil {
@@ -269,7 +265,6 @@ func (sc *Scheduler) gatherTripwire(now time.Time) (tripwireContext, error) {
 	return tripwireContext{
 		loc: loc, chain: chain, storm: storm, witness: witness, tw: tw,
 		records: records, reference: reference,
-		firstRunOfMonth: tw.LastHeartbeatMonth != now.Format("2006-01"),
 	}, nil
 }
 
@@ -278,15 +273,14 @@ func (sc *Scheduler) gatherTripwire(now time.Time) (tripwireContext, error) {
 // path the morning tripwire would.
 func evaluate(now time.Time, tc tripwireContext) engine.TripwireDecision {
 	return engine.EvaluateTripwire(engine.TripwireInput{
-		Now:             now,
-		Loc:             tc.loc,
-		Reference:       tc.reference,
-		Chain:           tc.chain,
-		Storm:           tc.storm,
-		Witness:         tc.witness,
-		Records:         recordsByDate(tc.records),
-		Streak:          engine.ComputeStreaks(tc.records, tc.loc).Current,
-		FirstRunOfMonth: tc.firstRunOfMonth,
+		Now:       now,
+		Loc:       tc.loc,
+		Reference: tc.reference,
+		Chain:     tc.chain,
+		Storm:     tc.storm,
+		Witness:   tc.witness,
+		Records:   recordsByDate(tc.records),
+		Streak:    engine.ComputeStreaks(tc.records, tc.loc).Current,
 	})
 }
 

@@ -29,17 +29,16 @@ const schedulerFlagDB = "db"
 // three already-built halves: the Ledger storage adapter, the concrete
 // Discord-bot [notify.Discord] transport (built entirely from injected env, so
 // the binary stays credential-dumb — ADR-0005), and the go-flywheel job runtime
-// in [schedrun]. The daemon fires the evening bell, the morning tripwire (which
-// also carries the monthly witness heartbeat), and honors bounded missed-fire
-// catch-up on a supervised restart. The write path is agent-free: no model is
-// reachable from here.
+// in [schedrun]. The daemon fires the evening bell and the morning tripwire, and
+// honors bounded missed-fire catch-up on a supervised restart. The write path is
+// agent-free: no model is reachable from here.
 //
 // The parent `scheduler` verb currently exposes only `run`; it exists as a
 // group so later scheduled-job subcommands attach without reshaping the tree.
 func newSchedulerCmd() *cobra.Command {
 	parent := &cobra.Command{
 		Use:   "scheduler",
-		Short: "Run the autonomous Engine scheduler (bell, tripwire, heartbeat)",
+		Short: "Run the autonomous Engine scheduler (bell, tripwire)",
 		Long: `scheduler groups the standalone-install scheduled-job daemon that
 delivers the Engine's autonomous accountability sends. It runs under
 ` + "`hush supervise`" + ` as a launchd sibling of the harness gateway; the
@@ -149,8 +148,8 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 
 	// At least one companion-class node runs beside the teeth. When the companion
 	// presents both user windows the teeth run with their user-channel send
-	// suppressed (the modeless decision, witness L2, heartbeat, and
-	// escalation_state persistence all unchanged); the workout slot never
+	// suppressed (the modeless decision, witness L2, and escalation_state
+	// persistence all unchanged); the workout slot never
 	// suppresses the teeth (it is an additive midday send). They share one
 	// context, so a failure in any node drains the process and the supervisor
 	// restarts the set together — the teeth are never left suppressed-but-silent.

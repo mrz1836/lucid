@@ -170,36 +170,6 @@ func TestEvaluateTripwire_StormVariants(t *testing.T) {
 	})
 }
 
-// TestEvaluateTripwire_Heartbeat: the first run of the month posts the
-// heartbeat to the witness when confirmed and not lapsed.
-func TestEvaluateTripwire_Heartbeat(t *testing.T) {
-	dec := EvaluateTripwire(TripwireInput{
-		Now: ts(2026, 7, 6, 9, 0), Loc: time.UTC, Reference: refDay("2026-07-05"),
-		Chain: startedChain("2026-07-01"), Witness: armedWitness(), Streak: 12,
-		FirstRunOfMonth: true,
-		Records:         recMap(completedDay("2026-07-05", ModeGreen)),
-	})
-	s, ok := findSend(dec.Sends, SendHeartbeat)
-	require.True(t, ok, "the monthly heartbeat should fire")
-	assert.Equal(t, ChannelWitness, s.Channel)
-	assert.Equal(t, EscalationNone, s.EscalationState)
-	assert.Equal(t, 12, s.Streak)
-}
-
-// TestEvaluateTripwire_HeartbeatSuppressedByL2: when an L2 posts to the witness
-// on the same run, the heartbeat is suppressed — the L2 is the month's proof.
-func TestEvaluateTripwire_HeartbeatSuppressedByL2(t *testing.T) {
-	dec := EvaluateTripwire(TripwireInput{
-		Now: ts(2026, 7, 6, 9, 0), Loc: time.UTC, Reference: refDay("2026-07-05"),
-		Chain: startedChain("2026-07-01"), Witness: armedWitness(), FirstRunOfMonth: true,
-		Records: recMap(completedDay("2026-07-03", ModeGreen), missedDay("2026-07-04")),
-	})
-	_, hasHeartbeat := findSend(dec.Sends, SendHeartbeat)
-	assert.False(t, hasHeartbeat, "an L2 to the witness suppresses the heartbeat")
-	_, hasL2 := findSend(dec.Sends, SendL2)
-	assert.True(t, hasL2)
-}
-
 // TestEvaluateTripwire_StormLapseNote: a pending declaration past 72h lapses
 // with a user-channel note and appends the lapse event, with no escalation.
 func TestEvaluateTripwire_StormLapseNote(t *testing.T) {
