@@ -17,7 +17,7 @@ import "regexp"
 // midweek", and its overclaim category ("clearly", "!!") is about the teeth's
 // tone, not privacy. What a witness report must never carry is a different set:
 // a raw journal citation, or an elevated medical / private-relationship detail
-// that belongs in #my-life and not in front of friends (plan A5).
+// that belongs in the private user channel and not in front of the witness audience.
 
 // journalCitationPatterns match the raw-entry / journal citation shapes the
 // private reflection deep-dive emits — entry/observation ids, [[wikilinks]], and
