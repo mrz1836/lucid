@@ -54,10 +54,63 @@ type httpDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// message is the Discord "create message" REST body — a single content field
-// carrying the pre-rendered template text and nothing else.
+// message is the Discord "create message" REST body. The teeth path fills only
+// Content with the pre-rendered template text; the witness-report path fills
+// only Embeds with a pre-built rich embed. Embeds is omitempty so the existing
+// content-only send serializes byte-for-byte as before ({"content":...}).
 type message struct {
-	Content string `json:"content"`
+	Content string  `json:"content"`
+	Embeds  []Embed `json:"embeds,omitempty"`
+}
+
+// EmbedField is one named field of a Discord rich embed. Inline lets Discord
+// lay short fields side by side; it is omitted when false (Discord's default).
+type EmbedField struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+// Embed is the subset of the Discord embed object the witness report renders: a
+// title, a description, a colored sidebar (Color), per-section Fields, and a
+// footer line. Footer is exposed as a plain string here for renderer ergonomics
+// even though Discord's wire format nests it as an object — [Embed.MarshalJSON]
+// bridges that. The notifier composes no text of its own; a caller hands it an
+// already-built Embed value, mirroring the credential-dumb teeth contract.
+type Embed struct {
+	Title       string
+	Description string
+	Color       int
+	Fields      []EmbedField
+	Footer      string
+}
+
+// MarshalJSON renders the Embed as the Discord embed object. Every field maps
+// straight through except Footer, which Discord requires as a nested
+// {"text":...} object rather than a bare string; an empty Footer is omitted
+// entirely so a footerless embed carries no footer key. The omitempty tags keep
+// unset optional fields off the wire.
+func (e Embed) MarshalJSON() ([]byte, error) {
+	type wireFooter struct {
+		Text string `json:"text"`
+	}
+	type wireEmbed struct {
+		Title       string       `json:"title,omitempty"`
+		Description string       `json:"description,omitempty"`
+		Color       int          `json:"color,omitempty"`
+		Fields      []EmbedField `json:"fields,omitempty"`
+		Footer      *wireFooter  `json:"footer,omitempty"`
+	}
+	w := wireEmbed{
+		Title:       e.Title,
+		Description: e.Description,
+		Color:       e.Color,
+		Fields:      e.Fields,
+	}
+	if e.Footer != "" {
+		w.Footer = &wireFooter{Text: e.Footer}
+	}
+	return json.Marshal(w)
 }
 
 // created is the subset of Discord's create-message (and get-message) response
@@ -145,6 +198,38 @@ func (d *Discord) SendReturningID(channel, text string) (string, error) {
 	return c.ID, nil
 }
 
+// SendEmbed POSTs a pre-built rich embed to the real Discord channel behind the
+// logical channel ("user" or "witness"), the embed analog of [Discord.Send].
+// An unknown or unresolved channel is an error, never a mis-send; a non-2xx
+// response surfaces the status and a short body snippet. It composes nothing —
+// the embed value is handed to it fully rendered. This is the teeth path for
+// the witness report: it discards the created message id.
+func (d *Discord) SendEmbed(channel string, e Embed) error {
+	_, err := d.postMessage(channel, message{Embeds: []Embed{e}})
+	return err
+}
+
+// SendEmbedReturningID POSTs the embed exactly like [Discord.SendEmbed] but
+// parses and returns the snowflake id Discord assigns the created message — the
+// embed analog of [Discord.SendReturningID]. The witness-report delivery path
+// uses the id for read-back verification ([Discord.VerifyPresent]) and to
+// persist an idempotent weekly receipt. An empty id in an otherwise-2xx response
+// is an error, so a caller never records a receipt it cannot verify.
+func (d *Discord) SendEmbedReturningID(channel string, e Embed) (string, error) {
+	body, err := d.postMessage(channel, message{Embeds: []Embed{e}})
+	if err != nil {
+		return "", err
+	}
+	var c created
+	if err := json.Unmarshal(body, &c); err != nil {
+		return "", fmt.Errorf("notify: parse create-message response: %w", err)
+	}
+	if c.ID == "" {
+		return "", fmt.Errorf("notify: discord create-message response carried no message id")
+	}
+	return c.ID, nil
+}
+
 // VerifyPresent confirms a previously created message id is actually present in
 // the channel by GETting it from the Discord REST API — the read-back half of
 // the companion's "a real message id reappears in the channel" guarantee. A
@@ -194,14 +279,24 @@ func (d *Discord) VerifyPresent(channel, messageID string) error {
 // (bounded) 2xx response body — the shared transport both [Discord.Send] (teeth,
 // fire-and-forget) and [Discord.SendReturningID] (companion, needs the created
 // id) build on. Its resolve/marshal/request/status behavior and error wording
-// are byte-for-byte what Send used before, so the teeth path is unchanged.
+// are byte-for-byte what Send used before, so the teeth path is unchanged. It is
+// a thin wrapper over [Discord.postMessage] carrying a content-only body.
 func (d *Discord) post(channel, text string) ([]byte, error) {
+	return d.postMessage(channel, message{Content: text})
+}
+
+// postMessage resolves the logical channel, marshals the given message body,
+// POSTs it, and returns the (bounded) 2xx response body. It is the one place a
+// create-message request leaves the machine — the content path ([Discord.post])
+// and the embed path ([Discord.SendEmbed]/[Discord.SendEmbedReturningID]) share
+// it, so resolve/request/status/read behavior is identical for both.
+func (d *Discord) postMessage(channel string, msg message) ([]byte, error) {
 	id, err := d.resolve(channel)
 	if err != nil {
 		return nil, err
 	}
 
-	body, err := json.Marshal(message{Content: text})
+	body, err := json.Marshal(msg)
 	if err != nil {
 		return nil, fmt.Errorf("notify: marshal message: %w", err)
 	}

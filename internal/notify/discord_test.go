@@ -279,3 +279,163 @@ func TestNewDiscordFromEnv(t *testing.T) {
 		assert.Contains(t, err.Error(), envUserChannel)
 	})
 }
+
+// sampleEmbed is a fully populated embed used to assert the wire shape: every
+// optional field is set so the marshaled body exercises Color, Fields (inline
+// and non-inline), and the nested footer object.
+func sampleEmbed() Embed {
+	return Embed{
+		Title:       "Weekly witness report · Week 2026-W30",
+		Description: "streak intact",
+		Color:       0x2ECC71, // 3066993
+		Fields: []EmbedField{
+			{Name: "Streak & adherence", Value: "12 days", Inline: true},
+			{Name: "This week", Value: "5/7 logged"},
+		},
+		Footer: "posted Monday · honest numbers, no fabrication",
+	}
+}
+
+func TestSendEmbed_UserChannelRoutesAuthsAndEmbedBody(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, "")
+
+	err := d.SendEmbed(engine.ChannelUser, sampleEmbed())
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPost, got.method)
+	assert.Equal(t, "/channels/U123/messages", got.path)
+	assert.Equal(t, "Bot tok-abc", got.auth)
+	assert.Equal(t, "application/json", got.ctype)
+	// The pre-built embed is POSTed verbatim: color is the decimal form of the
+	// hex sidebar, the non-inline field drops its inline key, and Footer is
+	// nested as Discord's {"text":...} object rather than a bare string.
+	assert.JSONEq(t, `{
+		"content": "",
+		"embeds": [{
+			"title": "Weekly witness report · Week 2026-W30",
+			"description": "streak intact",
+			"color": 3066993,
+			"fields": [
+				{"name": "Streak & adherence", "value": "12 days", "inline": true},
+				{"name": "This week", "value": "5/7 logged"}
+			],
+			"footer": {"text": "posted Monday · honest numbers, no fabrication"}
+		}]
+	}`, got.body)
+}
+
+func TestSendEmbed_WitnessChannelRoutesToWitnessID(t *testing.T) {
+	d, got := newStubServer(t, http.StatusNoContent, "")
+
+	err := d.SendEmbed(engine.ChannelWitness, sampleEmbed())
+	require.NoError(t, err)
+
+	assert.Equal(t, "/channels/W456/messages", got.path)
+	assert.Contains(t, got.body, `"embeds"`)
+}
+
+func TestSendEmbed_OmitsEmptyOptionalFields(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, "")
+
+	// A title-only embed: color 0, no description, no fields, empty footer all
+	// drop off the wire so a minimal embed carries no stray keys.
+	err := d.SendEmbed(engine.ChannelUser, Embed{Title: "just a title"})
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"content":"","embeds":[{"title":"just a title"}]}`, got.body)
+	assert.NotContains(t, got.body, "footer")
+	assert.NotContains(t, got.body, "color")
+	assert.NotContains(t, got.body, "fields")
+}
+
+func TestSendEmbed_NonSuccessStatusSurfacesError(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusForbidden, `{"message":"Missing Access"}`)
+
+	err := d.SendEmbed(engine.ChannelUser, sampleEmbed())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status")
+	assert.Contains(t, err.Error(), "Missing Access")
+}
+
+func TestSendEmbed_UnknownLogicalChannelErrorsBeforeAnySend(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, "")
+
+	err := d.SendEmbed("nope", sampleEmbed())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown logical channel")
+	assert.Empty(t, got.path) // never touched the network — no mis-send
+}
+
+func TestSendEmbed_UnsetWitnessChannelErrorsNeverMisSends(t *testing.T) {
+	got := &capturedRequest{}
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got.path = r.URL.Path
+	}))
+	t.Cleanup(srv.Close)
+
+	d := New("tok", "U123", "", srv.Client()) // witness ID intentionally empty
+	d.base = srv.URL
+
+	err := d.SendEmbed(engine.ChannelWitness, sampleEmbed())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "witness channel id is not configured")
+	assert.Empty(t, got.path)
+}
+
+func TestSendEmbedReturningID_ParsesCreatedID(t *testing.T) {
+	d, got := newStubServer(t, http.StatusOK, `{"id":"1526225086254682172","channel_id":"U123"}`)
+
+	id, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	require.NoError(t, err)
+	assert.Equal(t, "1526225086254682172", id)
+
+	// Routes and auths exactly like SendEmbed — it only adds parsing the id.
+	assert.Equal(t, http.MethodPost, got.method)
+	assert.Equal(t, "/channels/U123/messages", got.path)
+	assert.Equal(t, "Bot tok-abc", got.auth)
+	assert.Contains(t, got.body, `"title":"Weekly witness report · Week 2026-W30"`)
+}
+
+func TestSendEmbedReturningID_EmptyIDErrors(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, `{}`)
+
+	_, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no message id")
+}
+
+func TestSendEmbedReturningID_MalformedResponseErrors(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, "not-json")
+
+	_, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parse create-message response")
+}
+
+func TestSendEmbedReturningID_PropagatesPostError(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusForbidden, `{"message":"Missing Access"}`)
+
+	_, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status")
+}
+
+// TestContentSend_BodyCarriesNoEmbedsKey pins the byte-for-byte teeth guarantee:
+// the omitempty on message.Embeds keeps the content-only send serializing as
+// {"content":...} with no embeds key, so the fixed-template teeth path is
+// unchanged by the embed addition.
+func TestContentSend_BodyCarriesNoEmbedsKey(t *testing.T) {
+	t.Run("Send", func(t *testing.T) {
+		d, got := newStubServer(t, http.StatusOK, "")
+		require.NoError(t, d.Send(engine.ChannelUser, "the bell rings"))
+		assert.JSONEq(t, `{"content":"the bell rings"}`, got.body)
+		assert.NotContains(t, got.body, "embeds")
+	})
+	t.Run("SendReturningID", func(t *testing.T) {
+		d, got := newStubServer(t, http.StatusOK, `{"id":"42"}`)
+		_, err := d.SendReturningID(engine.ChannelUser, "test fire")
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"content":"test fire"}`, got.body)
+		assert.NotContains(t, got.body, "embeds")
+	})
+}
