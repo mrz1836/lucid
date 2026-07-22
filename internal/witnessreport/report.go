@@ -149,13 +149,15 @@ func buildWatchOuts(r Report) []string {
 	// risk, surfaced honestly rather than hidden.
 	if r.LowSignal {
 		out = append(out, fmt.Sprintf(
-			"Logged only %d of 7 days this week — accountability risk.", r.Week.DaysAccounted))
+			"Logged only %d of 7 days this week — accountability risk.", r.Week.DaysAccounted,
+		))
 	}
 
 	// This week's misses.
 	if r.WeekMisses >= weekMissWatchOut {
 		out = append(out, fmt.Sprintf(
-			"Missed %d of %d decided days this week.", r.WeekMisses, r.Week.Decided))
+			"Missed %d of %d decided days this week.", r.WeekMisses, r.Week.Decided,
+		))
 	}
 
 	// 30-day adherence dip — only once the window has decided days, so a
@@ -163,21 +165,24 @@ func buildWatchOuts(r Report) []string {
 	if r.Adherence.Decided > 0 && r.Adherence.Adherence < adherenceFloor {
 		out = append(out, fmt.Sprintf(
 			"30-day adherence at %d%% — below the %d%% line.",
-			pct(r.Adherence.Adherence), pct(adherenceFloor)))
+			pct(r.Adherence.Adherence), pct(adherenceFloor),
+		))
 	}
 
 	// Error budget spent.
 	if r.ErrorBudget.Exceeded {
 		out = append(out, fmt.Sprintf(
 			"Error budget spent — %d isolated misses against a budget of %d.",
-			r.ErrorBudget.Burn, r.ErrorBudget.Budget))
+			r.ErrorBudget.Burn, r.ErrorBudget.Budget,
+		))
 	}
 
 	// An anchor aging past its mark — surfaced neutrally as worth a check-in.
 	for _, a := range r.Anchors {
 		if a.DaysSince >= agingAnchorMark {
 			out = append(out, fmt.Sprintf(
-				"%d days since %s — worth a check-in.", a.DaysSince, a.Label))
+				"%d days since %s — worth a check-in.", a.DaysSince, a.Label,
+			))
 		}
 	}
 

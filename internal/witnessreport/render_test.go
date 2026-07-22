@@ -17,7 +17,12 @@ import (
 // golden when UPDATE_GOLDEN is set (the standard regenerate-then-review loop).
 // The golden files live under fixtures/ alongside the synthetic day-record
 // inputs, because this repo gitignores testdata/ (the fuzz corpus) and the
-// render contract's expected output must be committed.
+// render contract's expected output must be committed. The embed goldens carry
+// a `.golden` extension, not `.json`: they capture the exact bytes of Go's
+// json.MarshalIndent (HTML-escaped `&`, struct-order keys, 2-space indent),
+// which the repo's JSON formatter (`magex format:check`) would rewrite into its
+// own canonical form — a `.json` golden would fail the byte comparison after
+// every format pass. The `.golden` suffix keeps them out of that glob.
 func checkGolden(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("fixtures", name)
@@ -49,7 +54,7 @@ func TestRender_GoldenByWeek(t *testing.T) {
 	for _, name := range []string{"strong-week", "quiet-week", "miss-heavy-week"} {
 		t.Run(name, func(t *testing.T) {
 			r, _ := buildFromFixture(t, name+".json")
-			checkGolden(t, name+".embed.json", embedJSON(t, RenderEmbed(r)))
+			checkGolden(t, name+".embed.golden", embedJSON(t, RenderEmbed(r)))
 			checkGolden(t, name+".md", RenderMarkdown(r))
 		})
 	}

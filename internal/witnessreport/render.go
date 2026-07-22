@@ -59,7 +59,8 @@ func RenderEmbed(r Report) notify.Embed {
 		e.Description = n
 	}
 
-	e.Fields = append(e.Fields,
+	e.Fields = append(
+		e.Fields,
 		notify.EmbedField{Name: fieldStreak, Value: streakLine(r), Inline: true},
 		notify.EmbedField{Name: fieldThisWeek, Value: thisWeekLine(r), Inline: true},
 		notify.EmbedField{Name: fieldFaults, Value: faultsValue(r)},
