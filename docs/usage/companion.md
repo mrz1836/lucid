@@ -117,8 +117,8 @@ For each window the compose worker:
 On a **missed day** the scaffold is rendered as usual and the Engine's own
 deterministic verdict line is appended **byte-for-byte** below it. The model
 writes the warmth; it never touches the verdict, so a model can never reword
-"you missed". The witness-channel escalation and the monthly heartbeat still fire
-modeless and separate — the companion only presents the user-channel line.
+"you missed". The witness-channel escalation still fires modeless and separate —
+the companion only presents the user-channel line.
 
 ### The message scaffold
 
@@ -297,8 +297,8 @@ The companion degrades in layers and is designed to **never fall silent** — a 
 
 When the companion is enabled it becomes the single user-facing sender for its
 window. The Engine still runs its **full modeless decision** every day — it
-evaluates the tripwire, persists escalation state, fires the witness-channel
-escalation, and sends the monthly heartbeat, all deterministic and untouched. Only
+evaluates the tripwire, persists escalation state, and fires the witness-channel
+escalation, all deterministic and untouched. Only
 its *user-channel* send is suppressed, because the companion presents that line
 (appending the verdict verbatim on a missed day). The dead-man decision stays
 modeless; the companion only dresses its output. Disable the companion and the
