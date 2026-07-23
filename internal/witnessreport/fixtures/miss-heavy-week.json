@@ -1,0 +1,83 @@
+[
+    {
+        "completed": false,
+        "day_id": "day_2026-06-20",
+        "floor_day": false,
+        "logical_date": "2026-06-20",
+        "missed": true,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": false,
+        "day_id": "day_2026-06-22",
+        "floor_day": false,
+        "logical_date": "2026-06-22",
+        "missed": true,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": false,
+        "day_id": "day_2026-07-07",
+        "floor_day": false,
+        "logical_date": "2026-07-07",
+        "missed": true,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": true,
+        "day_id": "day_2026-07-08",
+        "floor_day": false,
+        "logical_date": "2026-07-08",
+        "missed": false,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": false,
+        "day_id": "day_2026-07-09",
+        "floor_day": false,
+        "logical_date": "2026-07-09",
+        "missed": true,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": true,
+        "day_id": "day_2026-07-10",
+        "floor_day": false,
+        "logical_date": "2026-07-10",
+        "missed": false,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": false,
+        "day_id": "day_2026-07-11",
+        "floor_day": false,
+        "logical_date": "2026-07-11",
+        "missed": true,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": true,
+        "day_id": "day_2026-07-12",
+        "floor_day": false,
+        "logical_date": "2026-07-12",
+        "missed": false,
+        "mode": "green",
+        "storm": false
+    },
+    {
+        "completed": false,
+        "day_id": "day_2026-07-13",
+        "floor_day": false,
+        "logical_date": "2026-07-13",
+        "missed": true,
+        "mode": "green",
+        "storm": false
+    }
+]

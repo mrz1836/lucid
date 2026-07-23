@@ -249,7 +249,7 @@ logic today, with no model in the loop.
 | `lucid day [date]` | The joined day view: engine record + observations + enrichment + entries. |
 | `lucid export [series \| packet clinician [@date\|all]]` | Export a CSV series or a clinician packet (zero journal content by default). |
 | `lucid validate` | Read-only architecture-gate sweep (boundary, diagnostic-language, links, schema). |
-| `lucid scheduler run` | The autonomous send daemon: evening bell + morning tripwire + monthly heartbeat. |
+| `lucid scheduler run` | The autonomous send daemon: evening bell + morning tripwire, plus the config-gated companion and weekly witness report. |
 | `lucid version` | Print build metadata (add `--json` for a machine-readable object). |
 | `lucid upgrade` | Self-update in place from a GitHub release (`--check`, `--channel`, `--force`). |
 
@@ -314,7 +314,8 @@ Lucid is two subsystems over one substrate, with a hard boundary between them:
 - Nothing you write is ever scored, streaked, or penalized. Teeth attach to acts
   (did you show up?), never to content.
 - No autonomous messages beyond the pre-committed Engine templates (bell, nudge,
-  witness escalation, monthly heartbeat), and no outbound fetch beyond opted-in,
+  witness escalation) and the opt-in, config-gated Mirror-side sends (the daily
+  companion and the weekly witness report), and no outbound fetch beyond opted-in,
   outbound-minimal enrichers.
 - No diagnosis. The voice is a trusted advisor — warm, honest, humble about
   certainty — offering hypotheses, never verdicts.

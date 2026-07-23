@@ -192,7 +192,7 @@ func TestTripwire_TwoConsecutiveFiresOneL2WitnessNoLeak(t *testing.T) {
 	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 
-	require.Len(t, rep.Sends, 1, "exactly one L2, heartbeat suppressed")
+	require.Len(t, rep.Sends, 1, "exactly one L2 to the witness")
 	assert.Equal(t, engine.ChannelWitness, rep.Sends[0].Channel)
 	assert.Equal(t, engine.SendL2, rep.Sends[0].Kind)
 	assert.Equal(t, 1, n.count(engine.ChannelWitness))
@@ -368,41 +368,22 @@ func TestTripwire_ExpiryAppendsExpired(t *testing.T) {
 	assert.Equal(t, engine.StormExpired, rep.StormEvents[0].Event)
 }
 
-// ── Heartbeat ──────────────────────────────────────────────────────────────
+// ── Completed reference day: no send ─────────────────────────────────────────
 
-// TestTripwire_HeartbeatFirstRunOfMonthOnce: the heartbeat fires on the first
-// run of a calendar month and not again that month.
-func TestTripwire_HeartbeatFirstRunOfMonthOnce(t *testing.T) {
+// TestTripwire_CompletedReferenceDaySendsNothing: a completed reference day
+// resets the ladder and posts nothing at all — with the monthly heartbeat
+// retired, a clean morning is silent on every channel.
+func TestTripwire_CompletedReferenceDaySendsNothing(t *testing.T) {
 	sc, a, n := newSched(t)
 	armWitness(t, a)
 	seed(t, a, completedRec("2026-07-05"), completedRec("2026-07-06"))
 
 	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
-	require.Len(t, rep.Sends, 1)
-	assert.Equal(t, engine.SendHeartbeat, rep.Sends[0].Kind)
-	assert.Contains(t, rep.Sends[0].Text, "all clear")
-	assert.False(t, strings.HasSuffix(rep.Sends[0].Text, templates.SignOff), "the heartbeat does not sign off")
-
-	// A later run the same month posts no second heartbeat.
-	rep, err = sc.RunTripwire(at(2026, 7, 7, 9, 0))
-	require.NoError(t, err)
-	assert.Empty(t, rep.Sends, "the heartbeat fires once per month")
-	assert.Equal(t, 1, n.count(engine.ChannelWitness))
-}
-
-// TestTripwire_HeartbeatSuppressedByL2: an L2 to the witness on the first run
-// of the month suppresses the heartbeat — the L2 is the month's proof of life.
-func TestTripwire_HeartbeatSuppressedByL2(t *testing.T) {
-	sc, a, n := newSched(t)
-	armWitness(t, a)
-	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false))
-
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
-	require.NoError(t, err)
-	require.Len(t, rep.Sends, 1)
-	assert.Equal(t, engine.SendL2, rep.Sends[0].Kind)
-	assert.Equal(t, 1, n.count(engine.ChannelWitness), "only the L2, no heartbeat")
+	assert.Empty(t, rep.Sends, "a completed reference day is silent")
+	assert.Zero(t, n.count(engine.ChannelWitness), "nothing to the witness")
+	assert.Zero(t, n.count(engine.ChannelUser), "nothing to the user")
+	assert.Equal(t, engine.EscalationNone, rep.Escalation)
 }
 
 // ── Send-free verdict + companion presentation ───────────────────────────────
@@ -511,22 +492,6 @@ func TestRunTripwirePresented_StillFiresWitnessL2(t *testing.T) {
 	assert.Equal(t, 1, n.count(engine.ChannelWitness), "the witness L2 still fires in presented mode")
 	assert.Zero(t, n.count(engine.ChannelUser))
 	assert.Equal(t, engine.EscalationL2, rep.Escalation)
-}
-
-// TestRunTripwirePresented_HeartbeatStillFires: the monthly heartbeat is a
-// witness send, so presentation does not suppress it — the first run of the
-// month still posts the heartbeat to the witness.
-func TestRunTripwirePresented_HeartbeatStillFires(t *testing.T) {
-	sc, a, n := newSched(t)
-	armWitness(t, a)
-	seed(t, a, completedRec("2026-07-05"), completedRec("2026-07-06"))
-
-	rep, err := sc.RunTripwirePresented(at(2026, 7, 6, 9, 0))
-	require.NoError(t, err)
-	require.Len(t, rep.Sends, 1)
-	assert.Equal(t, engine.SendHeartbeat, rep.Sends[0].Kind)
-	assert.Equal(t, 1, n.count(engine.ChannelWitness), "the heartbeat still fires in presented mode")
-	assert.Zero(t, n.count(engine.ChannelUser))
 }
 
 // TestRunTripwirePresented_StormLapseSuppressedFromUser: a storm lapse is a

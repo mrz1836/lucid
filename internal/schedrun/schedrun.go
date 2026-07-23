@@ -1,6 +1,6 @@
 // Package schedrun is the production driver for the Engine's scheduled jobs:
 // the standalone-install runtime that fires the evening bell and the morning
-// tripwire (which also carries the monthly heartbeat) on the chain's own clocks.
+// tripwire on the chain's own clocks.
 // It wraps the pure [scheduler] decision in a durable go-flywheel job runtime
 // (ADR-0004): periodics reconciled by slug from chain.json, per-bucket
 // idempotency, and bounded missed-fire catch-up so a daemon killed mid-evening
@@ -75,9 +75,9 @@ type Options struct {
 
 	// SuppressUserChannel hands the user-facing windows to the companion. When
 	// set, the tripwire worker runs [scheduler.Scheduler.RunTripwirePresented]
-	// (the witness L2 + monthly heartbeat still fire and escalation_state still
-	// persists — only the user-channel L1/L2-blocked/storm-lapse send is
-	// withheld) and the evening bell periodic is reconciled inactive, so the
+	// (the witness L2 still fires and escalation_state still persists — only the
+	// user-channel L1/L2-blocked/storm-lapse send is withheld) and the evening
+	// bell periodic is reconciled inactive, so the
 	// companion is the single user send per window. When unset (the default) the
 	// scheduler behaves exactly as before: bell and tripwire both deliver to the
 	// user. It threads only a bool into this write path — no model is reachable.
@@ -108,9 +108,9 @@ func (w bellWorker) Work(_ context.Context, _ *flywheel.Job[bellArgs]) (flywheel
 	return flywheel.Result{}, nil
 }
 
-// tripwireWorker fires the morning tripwire (which also carries the monthly
-// heartbeat). It holds a clock so the reference day is deterministic under test
-// and the store so it can honor the per-day idempotency guard. When presented
+// tripwireWorker fires the morning tripwire. It holds a clock so the reference
+// day is deterministic under test and the store so it can honor the per-day
+// idempotency guard. When presented
 // is set the companion owns the user-channel verdict, so the worker runs the
 // presented variant that withholds the Engine's own user send.
 type tripwireWorker struct {

@@ -9,10 +9,9 @@ import (
 )
 
 // tripwireFile is the scheduler's bookkeeping file under engine/. It records
-// what the tripwire has already done (the last heartbeat month, the last run
-// date) — state the day records cannot carry because the dead-man fires on
-// their absence. It is deliberately not part of the derived status.json
-// projection.
+// what the tripwire has already done (the last run date) — state the day
+// records cannot carry because the dead-man fires on their absence. It is
+// deliberately not part of the derived status.json projection.
 const tripwireFile = "tripwire.json" //nolint:gosec // G101 false positive: a filename, not a credential
 
 // witnessPath / tripwirePath resolve the two engine-tree files the tripwire
@@ -70,12 +69,12 @@ func (a *Adapter) AppendStormEvents(events ...engine.StormEvent) error {
 }
 
 // TripwireState is engine/tripwire.json: the scheduler's small durable memory
-// of what it has already posted. LastHeartbeatMonth (YYYY-MM) drives the
-// "first run of each calendar month" heartbeat; LastRunDate (YYYY-MM-DD) lets
-// the run stay idempotent within a morning.
+// of what it has already posted. LastRunDate (YYYY-MM-DD) lets the run stay
+// idempotent within a morning. A legacy last_heartbeat_month key from an
+// earlier build is simply ignored on read (the monthly heartbeat is retired —
+// the weekly witness report absorbs the all-clear).
 type TripwireState struct {
-	LastHeartbeatMonth string `json:"last_heartbeat_month"`
-	LastRunDate        string `json:"last_run_date"`
+	LastRunDate string `json:"last_run_date"`
 }
 
 // ReadTripwireState reads engine/tripwire.json. A missing file is not an

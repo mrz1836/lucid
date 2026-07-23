@@ -345,8 +345,8 @@ func classifyDB(in DBInput, name string, required bool) (DBReport, []Check) {
 }
 
 // classifyTeethPeriodics checks the teeth job DB. The morning tripwire (which
-// also carries the witness heartbeat and the verdict read) is always required
-// active. The evening bell is required active only when the companion is
+// also carries the verdict read) is always required active. The evening bell is
+// required active only when the companion is
 // disabled; when the companion is enabled it deliberately owns the evening send
 // and the bell is suppressed, so an inactive bell is the correct, healthy state
 // (never an error). Missing-but-required or inactive-required slugs are errors.

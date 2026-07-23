@@ -6,9 +6,9 @@
 // against the SIGBUS class of in-place binary mutation bugs.
 //
 // The pattern is the house self-upgrade (ADR-0007), cloned from `hush`
-// and `atlas`. On a supervised host the scheduler drives the bell,
-// tripwire, and heartbeat jobs; the atomic swap guarantees an upgrade
-// never corrupts a running scheduler mid-execution.
+// and `atlas`. On a supervised host the scheduler drives the bell and
+// tripwire jobs; the atomic swap guarantees an upgrade never corrupts a
+// running scheduler mid-execution.
 //
 // The package is intentionally self-contained: every external seam
 // (release-source lookup, HTTP client, exec path, current version) is

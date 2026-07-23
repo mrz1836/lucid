@@ -137,31 +137,71 @@ type WorkoutConfig struct {
 	Model        string `json:"model"`
 }
 
+// Witness-report delivery modes. Preview posts the composed weekly report to the
+// operator's own user channel — the safe default during the trust-building
+// period; Auto posts it to the friend-facing witness channel. Flipping preview →
+// auto is a one-key config change, never a code change (product decision Q8-C).
+const (
+	WitnessReportModePreview = "preview"
+	WitnessReportModeAuto    = "auto"
+)
+
+// WitnessReportConfig configures the weekly witness report — the Mirror-side,
+// model-allowed job that composes and delivers a friend-facing weekly
+// accountability report to the witness channel (witness-report.md). Like the
+// companion and workout blocks it is credential-dumb: it carries no channel id and
+// no token (those stay env-only — LUCID_USER_CHANNEL_ID / LUCID_WITNESS_CHANNEL_ID
+// / LUCID_HARNESS_TOKEN), only the explicit opaque prompt-file paths the compose
+// worker reads. Enabled gates the whole feature: the default zero value is false,
+// so an unconfigured Ledger runs the pure Engine teeth (and any companion) exactly
+// as before. Mode selects the delivery target — preview (the operator's own
+// channel, the safe default) or auto (the witness channel) — so graduating from a
+// private preview to a friend-facing post is a config change, not a rebuild. Time
+// (HH:MM, local) and Weekday (0=Sunday … 1=Monday … 6=Saturday) set the weekly
+// fire mark; the report posts Monday morning after Sunday's reflection window by
+// default. SystemPrompt and Template are the two required opaque prompt files (the
+// operator's witness-report voice), read directly on their explicit paths and
+// never dir-walked, so the block is the whole firewall seam. AsksFile is the
+// optional curated friend-asks override; empty leaves the report's auto-drafted
+// asks in place. Model optionally overrides provider.model for the compose call;
+// empty inherits the provider default (data-model.md §"lucid.json").
+type WitnessReportConfig struct {
+	Enabled      bool   `json:"enabled"`
+	Mode         string `json:"mode"`
+	Time         string `json:"time"`
+	Weekday      int    `json:"weekday"`
+	SystemPrompt string `json:"system_prompt"`
+	Template     string `json:"template"`
+	AsksFile     string `json:"asks_file"`
+	Model        string `json:"model"`
+}
+
 // Config is the in-memory representation of lucid.json. Field order
 // matches the documented schema so a marshaled default file reads
 // identically to data-model.md §"lucid.json".
 type Config struct {
-	Version                  int             `json:"version"`
-	Home                     string          `json:"home"`
-	RawDir                   string          `json:"raw_dir"`
-	ProcessedDir             string          `json:"processed_dir"`
-	InsightsDir              string          `json:"insights_dir"`
-	PeopleDir                string          `json:"people_dir"`
-	SessionsDir              string          `json:"sessions_dir"`
-	ReflectionsDir           string          `json:"reflections_dir"`
-	WordlistPath             string          `json:"wordlist_path"`
-	RecentWindow             int             `json:"recent_window"`
-	RecentWindowMax          int             `json:"recent_window_max"`
-	IntakeMaxQuestions       int             `json:"intake_max_questions"`
-	AskInsightsCap           int             `json:"ask_insights_cap"`
-	AskReflectionsCap        int             `json:"ask_reflections_cap"`
-	ProposalPause            ProposalPause   `json:"proposal_pause"`
-	PersonDominanceThreshold float64         `json:"person_dominance_threshold"`
-	AgentVersions            AgentVersions   `json:"agent_versions"`
-	BootstrapMode            bool            `json:"bootstrap_mode"`
-	Provider                 ProviderConfig  `json:"provider"`
-	Companion                CompanionConfig `json:"companion"`
-	Workout                  WorkoutConfig   `json:"workout"`
+	Version                  int                 `json:"version"`
+	Home                     string              `json:"home"`
+	RawDir                   string              `json:"raw_dir"`
+	ProcessedDir             string              `json:"processed_dir"`
+	InsightsDir              string              `json:"insights_dir"`
+	PeopleDir                string              `json:"people_dir"`
+	SessionsDir              string              `json:"sessions_dir"`
+	ReflectionsDir           string              `json:"reflections_dir"`
+	WordlistPath             string              `json:"wordlist_path"`
+	RecentWindow             int                 `json:"recent_window"`
+	RecentWindowMax          int                 `json:"recent_window_max"`
+	IntakeMaxQuestions       int                 `json:"intake_max_questions"`
+	AskInsightsCap           int                 `json:"ask_insights_cap"`
+	AskReflectionsCap        int                 `json:"ask_reflections_cap"`
+	ProposalPause            ProposalPause       `json:"proposal_pause"`
+	PersonDominanceThreshold float64             `json:"person_dominance_threshold"`
+	AgentVersions            AgentVersions       `json:"agent_versions"`
+	BootstrapMode            bool                `json:"bootstrap_mode"`
+	Provider                 ProviderConfig      `json:"provider"`
+	Companion                CompanionConfig     `json:"companion"`
+	Workout                  WorkoutConfig       `json:"workout"`
+	WitnessReport            WitnessReportConfig `json:"witness_report"`
 	// FrameworkStack is the ordered standing-consent list — one interpretation
 	// lens id per line the user has admitted to their stack at calibration or a
 	// quarterly Charter amendment (docs/frameworks.md §3). A lens in the stack
@@ -224,6 +264,18 @@ func Default() Config {
 		// teeth and companion until an operator points the program/prompt paths
 		// at their own files and flips enabled true.
 		Workout: WorkoutConfig{},
+		// The weekly witness report ships off (enabled false) with its safe
+		// behavioral defaults pre-filled so the seam is discoverable: preview
+		// mode (posts to the operator's own channel, never friends), a Monday
+		// (weekday 1) 09:00 fire mark landing after Sunday's reflection, and
+		// empty opaque paths. A fresh Ledger runs only the existing teeth and
+		// companion until an operator points the prompt paths at their own files
+		// and flips enabled true; graduating preview → auto is then one key.
+		WitnessReport: WitnessReportConfig{
+			Mode:    WitnessReportModePreview,
+			Time:    "09:00",
+			Weekday: 1,
+		},
 		// The frameworks layer ships off: no lens is stacked or consented, so
 		// LensConsented is false for every id and the reflection voice stays
 		// baseline until an operator amends the Charter stack. Non-nil empties
@@ -354,6 +406,9 @@ func (c Config) Validate() error {
 	if err := c.Workout.validate(); err != nil {
 		return err
 	}
+	if err := c.WitnessReport.validate(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -433,6 +488,43 @@ func (c WorkoutConfig) validate() error {
 	}
 	if !validClockHM(c.SlotTime) {
 		return fmt.Errorf("config: workout.slot_time %q must be a valid HH:MM when workout.enabled is true", c.SlotTime)
+	}
+	return nil
+}
+
+// validate reports whether the witness-report block is structurally usable. Like
+// the companion and workout blocks the feature is off by default, so a
+// zero-valued block always validates; but once enabled, the two required opaque
+// prompt-file paths (system_prompt, template) must be non-empty, mode must be
+// preview|auto, the fire time must be a valid HH:MM local clock, and weekday must
+// be a real cron day (0=Sunday … 6=Saturday), or the config is rejected at load
+// rather than silently posting to the wrong channel or building a bogus weekly
+// cron. asks_file is optional (an unset curated-asks override is valid) and the
+// optional model override is unconstrained — an unknown model surfaces at compose
+// time from the provider, exactly as provider.model does. There is no clip rule;
+// no witness-report bound is documented as coercible.
+func (c WitnessReportConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	paths := map[string]string{
+		"witness_report.system_prompt": c.SystemPrompt,
+		"witness_report.template":      c.Template,
+	}
+	for name, v := range paths {
+		if v == "" {
+			return fmt.Errorf("config: %s must not be empty when witness_report.enabled is true", name)
+		}
+	}
+	if c.Mode != WitnessReportModePreview && c.Mode != WitnessReportModeAuto {
+		return fmt.Errorf("config: witness_report.mode %q must be %q or %q when witness_report.enabled is true",
+			c.Mode, WitnessReportModePreview, WitnessReportModeAuto)
+	}
+	if !validClockHM(c.Time) {
+		return fmt.Errorf("config: witness_report.time %q must be a valid HH:MM when witness_report.enabled is true", c.Time)
+	}
+	if c.Weekday < 0 || c.Weekday > 6 {
+		return fmt.Errorf("config: witness_report.weekday %d must be 0 (Sunday) to 6 (Saturday) when witness_report.enabled is true", c.Weekday)
 	}
 	return nil
 }

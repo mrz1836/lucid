@@ -446,6 +446,161 @@ func TestValidate_WorkoutDisabledIgnoresPaths(t *testing.T) {
 	assert.NoError(t, c.Validate())
 }
 
+// TestDefault_WitnessReportBlock pins the shipped witness-report default: the
+// feature is off (enabled false) with its safe behavioral defaults pre-filled —
+// preview mode, a Monday (weekday 1) 09:00 fire mark, and every opaque path empty
+// — so a fresh Ledger runs only the existing teeth and companion until an operator
+// opts in (data-model.md §"lucid.json"; witness-report.md).
+func TestDefault_WitnessReportBlock(t *testing.T) {
+	w := Default().WitnessReport
+	assert.False(t, w.Enabled, "witness report ships disabled")
+	assert.Equal(t, WitnessReportModePreview, w.Mode, "the safe default is preview (own channel, never friends)")
+	assert.Equal(t, "09:00", w.Time)
+	assert.Equal(t, 1, w.Weekday, "Monday")
+	assert.Empty(t, w.SystemPrompt)
+	assert.Empty(t, w.Template)
+	assert.Empty(t, w.AsksFile, "curated-asks override empty → auto-drafted asks stand")
+	assert.Empty(t, w.Model, "model override empty → inherits provider.model")
+}
+
+// TestWitnessReport_MarshalsDocumentedShape asserts a marshaled default config
+// carries the witness_report block with the documented keys, off by default, and —
+// like the companion, workout, and provider blocks — never leaks a token or
+// channel id into lucid.json (those stay env-only).
+func TestWitnessReport_MarshalsDocumentedShape(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+
+	var m struct {
+		WitnessReport struct {
+			Enabled      bool   `json:"enabled"`
+			Mode         string `json:"mode"`
+			Time         string `json:"time"`
+			Weekday      int    `json:"weekday"`
+			SystemPrompt string `json:"system_prompt"`
+			Template     string `json:"template"`
+			AsksFile     string `json:"asks_file"`
+			Model        string `json:"model"`
+		} `json:"witness_report"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.False(t, m.WitnessReport.Enabled)
+	assert.Equal(t, WitnessReportModePreview, m.WitnessReport.Mode)
+	assert.Equal(t, "09:00", m.WitnessReport.Time)
+	assert.Equal(t, 1, m.WitnessReport.Weekday)
+
+	s := string(b)
+	assert.Contains(t, s, `"witness_report":`)
+	assert.Contains(t, s, `"mode":`)
+	assert.Contains(t, s, `"weekday":`)
+	assert.Contains(t, s, `"asks_file":`)
+	// No token or channel id ever lands in the config.
+	assert.NotContains(t, s, "harness_token")
+	assert.NotContains(t, s, "channel_id")
+}
+
+// TestWitnessReport_RoundTripEnabled proves a fully-configured witness_report
+// block survives a marshal/unmarshal cycle byte-identically in value — the mode,
+// the fire mark, the opaque paths, the curated-asks override, and the optional
+// model override.
+func TestWitnessReport_RoundTripEnabled(t *testing.T) {
+	c := Default()
+	c.WitnessReport = WitnessReportConfig{
+		Enabled:      true,
+		Mode:         WitnessReportModeAuto,
+		Time:         "08:30",
+		Weekday:      1,
+		SystemPrompt: "/opt/lucid/witness/system_prompt.md",
+		Template:     "/opt/lucid/witness/template.md",
+		AsksFile:     "/opt/lucid/witness/asks.md",
+		Model:        "sonnet",
+	}
+	b, err := c.Marshal()
+	require.NoError(t, err)
+
+	got, err := Unmarshal(b)
+	require.NoError(t, err)
+	assert.Equal(t, c, got)
+	assert.Equal(t, "sonnet", got.WitnessReport.Model)
+	assert.Equal(t, WitnessReportModeAuto, got.WitnessReport.Mode)
+	assert.Equal(t, "/opt/lucid/witness/asks.md", got.WitnessReport.AsksFile)
+}
+
+// TestValidate_WitnessReportEnabledRequiresPaths is the witness-report validate
+// rule: an enabled report missing either required prompt path, carrying an unknown
+// mode, a bad time, or an out-of-range weekday is a hard error, while the full set
+// (with or without a model override or curated asks file) validates.
+func TestValidate_WitnessReportEnabledRequiresPaths(t *testing.T) {
+	full := WitnessReportConfig{
+		Enabled:      true,
+		Mode:         WitnessReportModePreview,
+		Time:         "09:00",
+		Weekday:      1,
+		SystemPrompt: "s.md",
+		Template:     "t.md",
+	}
+	failures := map[string]func(*WitnessReportConfig){
+		"missing system_prompt": func(w *WitnessReportConfig) { w.SystemPrompt = "" },
+		"missing template":      func(w *WitnessReportConfig) { w.Template = "" },
+		"empty mode":            func(w *WitnessReportConfig) { w.Mode = "" },
+		"unknown mode":          func(w *WitnessReportConfig) { w.Mode = "broadcast" },
+		"empty time":            func(w *WitnessReportConfig) { w.Time = "" },
+		"non-clock time":        func(w *WitnessReportConfig) { w.Time = "morning" },
+		"hour out of range":     func(w *WitnessReportConfig) { w.Time = "24:00" },
+		"minute out of range":   func(w *WitnessReportConfig) { w.Time = "09:75" },
+		"weekday below range":   func(w *WitnessReportConfig) { w.Weekday = -1 },
+		"weekday above range":   func(w *WitnessReportConfig) { w.Weekday = 7 },
+	}
+	for name, mutate := range failures {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			c.WitnessReport = full
+			mutate(&c.WitnessReport)
+			assert.Error(t, c.Validate())
+		})
+	}
+
+	t.Run("full block validates", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport = full
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("auto mode validates", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport = full
+		c.WitnessReport.Mode = WitnessReportModeAuto
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("model override does not require a known name", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport = full
+		c.WitnessReport.Model = "some-future-model"
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("asks_file is optional", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport = full // asks_file empty
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("sunday and saturday weekdays validate", func(t *testing.T) {
+		for _, day := range []int{0, 6} {
+			c := Default()
+			c.WitnessReport = full
+			c.WitnessReport.Weekday = day
+			assert.NoError(t, c.Validate(), "weekday %d should validate", day)
+		}
+	})
+}
+
+// TestValidate_WitnessReportDisabledIgnoresConfig confirms that while disabled
+// (the default), empty paths and even a bogus mode/time are tolerated — the block
+// is inert, so it never blocks a load.
+func TestValidate_WitnessReportDisabledIgnoresConfig(t *testing.T) {
+	c := Default()
+	c.WitnessReport = WitnessReportConfig{Enabled: false, Mode: "nonsense", Time: "bad"}
+	assert.NoError(t, c.Validate())
+}
+
 func TestValidate_Good(t *testing.T) {
 	require.NoError(t, Default().Validate())
 }

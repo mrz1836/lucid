@@ -486,10 +486,11 @@ secret.
 
 Run the autonomous accountability daemon: a durable **go-flywheel**
 scheduler ([ADR-0004](../adr/0004-core-dependencies.md)) that fires the
-evening bell, the morning tripwire (the L1/L2 escalation ladder), and the
-monthly witness heartbeat on the active chain profile's clocks
-(`bell_time`, `tripwire_time`) — the only autonomous messages Lucid
-sends, each a pre-committed Engine template, never model-authored. The
+evening bell and the morning tripwire (the L1/L2 escalation ladder) on the
+active chain profile's clocks (`bell_time`, `tripwire_time`) — pre-committed
+Engine templates, never model-authored. The retired monthly heartbeat is
+absorbed by the weekly [witness report](witness-report.md), which runs beside
+the teeth alongside the daily [companion](companion.md) when configured. The
 jobs are durable: a daemon killed mid-evening still fires the missed
 tripwire on its next supervised start (bounded missed-fire catch-up). The
 path is deterministic and agent-free — no LLM, ever. It is meant to run
@@ -978,9 +979,10 @@ embellished, or celebrated):
 | `/person <name>` | `lucid person <name>` |
 | `/bootstrap` · `/bootstrap done` | `lucid bootstrap [done]` |
 
-The scheduled sends — the bell, the morning tripwire (L1/L2), and the monthly
-witness heartbeat — are the scheduler's, not a command's: pre-committed
-templates, the only autonomous messages Lucid sends. See
+The scheduled teeth sends — the bell and the morning tripwire (L1/L2) — are the
+scheduler's, not a command's: pre-committed templates. The config-gated
+Mirror-side sends (the daily companion and the weekly witness report, which
+replaced the retired monthly heartbeat) run beside them. See
 [`../mvp/engine-module.md`](../mvp/engine-module.md).
 
 ## Environment variables
@@ -991,6 +993,7 @@ templates, the only autonomous messages Lucid sends. See
 | `UPDATE_CHANNEL` | Default release channel for `lucid upgrade` (`stable` \| `beta` \| `edge`); `--channel` overrides it. |
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `lucid scheduler run` posts with (a Discord bot token). Injected at spawn — vaulted in `hush` and never committed (ADR-0005); the binary reads it only from the environment. |
 | `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
-| `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2, monthly heartbeat). Injected, never committed. |
+| `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2 escalation, weekly witness report). Injected, never committed. |
 | `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable teeth job-store path; `--db` (on `run`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
 | `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status`; `--companion-db` overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
+| `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |

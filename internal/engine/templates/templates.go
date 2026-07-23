@@ -1,11 +1,11 @@
 // Package templates holds the Engine's fixed send copy (engine-module.md
 // §Consent amendment). Every string here is static and pre-committed — the
-// bell, the L1 nudge, the L2 witness escalation, the monthly heartbeat, and
-// the storm variants. No template is ever composed by a model; this package
-// imports only the standard library and the Engine's pure types, so the "no
-// LLM in the tripwire path" guarantee holds by construction (a guard test
-// asserts it). The scheduler renders an [engine.Send] through [Render]; the
-// Engine core stays free of any rendering so it never touches this text.
+// bell, the L1 nudge, the L2 witness escalation, and the storm variants. No
+// template is ever composed by a model; this package imports only the standard
+// library and the Engine's pure types, so the "no LLM in the tripwire path"
+// guarantee holds by construction (a guard test asserts it). The scheduler
+// renders an [engine.Send] through [Render]; the Engine core stays free of any
+// rendering so it never touches this text.
 package templates
 
 import (
@@ -16,9 +16,8 @@ import (
 
 // SignOff is the fixed final line on L1, L2, and both storm variants
 // (engine-module.md §Consent amendment "Self-identification"): the escalation
-// points at something the user wrote into force at Day 0. The bell prompt and
-// the heartbeat carry no sign-off — one names a chain, the other reports
-// status; neither stings.
+// points at something the user wrote into force at Day 0. The bell prompt
+// carries no sign-off — it names a chain, it does not sting.
 const SignOff = "— the form letter, pre-committed at Day 0."
 
 // Bell renders the evening bell prompt naming the chain (engine-module.md
@@ -80,18 +79,6 @@ func L2Unreachable(witness string) string {
 	return fmt.Sprintf("L2 fired but couldn't reach %s — you owe the message.", orWitness(witness))
 }
 
-// Heartbeat renders the monthly present-state snapshot (engine-module.md
-// §Consent amendment) — one of two fixed templates selected by
-// escalation_state at send time. Never a month summary; no sign-off.
-func Heartbeat(escalationState engine.EscalationState, streak int) string {
-	if escalationState == engine.EscalationNone || escalationState == "" {
-		return fmt.Sprintf("monthly status: all clear — %d-day streak, no open escalation.", streak)
-	}
-	return fmt.Sprintf(
-		"monthly status: %d-day streak; an escalation fired this month and remains open — you have already seen it.", streak,
-	)
-}
-
 // StormLapse renders the user-channel note when a storm declaration goes
 // unconfirmed past the 72-hour window (engine-module.md §Error states,
 // verbatim user message). No new send class — same channel, same consent as
@@ -118,8 +105,6 @@ func Render(s engine.Send) string {
 		return L2(s.Streak, s.Mode)
 	case engine.SendL2Blocked:
 		return L2Blocked(s.Storm)
-	case engine.SendHeartbeat:
-		return Heartbeat(s.EscalationState, s.Streak)
 	case engine.SendStormLapse:
 		return StormLapse(s.WitnessName)
 	default:
