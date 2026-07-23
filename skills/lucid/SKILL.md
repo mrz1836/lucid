@@ -58,14 +58,33 @@ its output. Acknowledge *after* the binary persists, never before.
 | `/reflect [gate]` | weekly recall (never proposes) | router recall intent (provider-backed) |
 | `/ask <question>` | grounded, cited Q&A | router grounded-answer intent (provider-backed) |
 | `/person <name>` | deterministic person join | `lucid person <name>` (no model) |
-| `/bootstrap` / `/bootstrap done` | historical-entry mode | `lucid bootstrap [done]` |
 | `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs <kind> …` | observation micro-log | `lucid obs <kind> …` |
 | `/obs where <place>` | sticky stated location | `lucid obs where <place>` |
 | `/day [date]` | read-only day view | `lucid day [date]` |
 | `/packet clinician [@<date>\|all]` | clinician packet export | `lucid export packet clinician …` (post only the path) |
+| `/stats [--last N \| --from --to]` | Ledger volume (counts only) | `lucid stats [--last N \| --from --to]` — read-only, counts only, no journal content |
+| `/metrics` | derived practice metrics | `lucid metrics` — streak / adherence (trailing 30d) / days-since-anchor, read-only |
+| `/reflect week` | Sunday weekly recall deep-dive | `lucid reflect week` — read-only weekly deep-dive, never writes |
+| `/excavate` | select the next memory cluster to excavate | `lucid excavate` — read-only, never writes |
+| `/companion [morning\|night]` | compose one companion message on demand | `lucid companion fire --mode <morning\|night>` — dry-run by default; scheduled sends stay scheduler-owned |
+| `/witness` | compose the weekly witness report on demand | `lucid witness report` — dry-run by default; scheduled send scheduler-owned |
 
-Commands beyond this list are out of scope for the MVP. The skill never
-invents a command, an agent, or a field.
+### Excluded from the chat command map — reason
+
+Every other current `lucid` verb is **excluded from the chat command map** on
+purpose, each for a documented reason — the MVP translator surfaces only the
+conversational verbs; the rest are reached by their documented CLI forms:
+
+* **Deeper life-archive verbs** — `recall`, `memory`, `era`, `injury`,
+  `thread`, `workout`: driven by their documented CLI forms; not surfaced as
+  chat shortcuts in the MVP translator.
+* **Pure-infra verbs** — `init`, `upgrade`, `version`, `completion`, `serve`,
+  `bootstrap`, `validate`: setup / maintenance / protocol surfaces, not
+  conversational commands. (`serve` drives the interactive `/checkin` flow
+  above; `bootstrap` toggles historical-entry mode — both reached by their CLI
+  form, not a chat verb of their own.)
+
+The skill never invents a command, an agent, or a field.
 
 ## Natural-language translation (voice-first)
 
