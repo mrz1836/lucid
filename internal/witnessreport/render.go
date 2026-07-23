@@ -105,7 +105,7 @@ func RenderMarkdown(r Report) string {
 	}
 	b.WriteString("\n\n_")
 	b.WriteString(footerNote)
-	b.WriteString("_")
+	b.WriteString("_\n")
 	return b.String()
 }
 
