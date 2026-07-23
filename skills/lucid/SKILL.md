@@ -58,14 +58,33 @@ its output. Acknowledge *after* the binary persists, never before.
 | `/reflect [gate]` | weekly recall (never proposes) | router recall intent (provider-backed) |
 | `/ask <question>` | grounded, cited Q&A | router grounded-answer intent (provider-backed) |
 | `/person <name>` | deterministic person join | `lucid person <name>` (no model) |
-| `/bootstrap` / `/bootstrap done` | historical-entry mode | `lucid bootstrap [done]` |
 | `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs <kind> …` | observation micro-log | `lucid obs <kind> …` |
 | `/obs where <place>` | sticky stated location | `lucid obs where <place>` |
 | `/day [date]` | read-only day view | `lucid day [date]` |
 | `/packet clinician [@<date>\|all]` | clinician packet export | `lucid export packet clinician …` (post only the path) |
+| `/stats [--last N \| --from --to]` | Ledger volume (counts only) | `lucid stats [--last N \| --from --to]` — read-only, counts only, no journal content |
+| `/metrics` | derived practice metrics | `lucid metrics` — streak / adherence (trailing 30d) / days-since-anchor, read-only |
+| `/reflect week` | Sunday weekly recall deep-dive | `lucid reflect week` — read-only weekly deep-dive, never writes |
+| `/excavate` | select the next memory cluster to excavate | `lucid excavate` — read-only, never writes |
+| `/companion [morning\|night]` | compose one companion message on demand | `lucid companion fire --mode <morning\|night>` — dry-run by default; scheduled sends stay scheduler-owned |
+| `/witness` | compose the weekly witness report on demand | `lucid witness report` — dry-run by default; scheduled send scheduler-owned |
 
-Commands beyond this list are out of scope for the MVP. The skill never
-invents a command, an agent, or a field.
+### Excluded from the chat command map — reason
+
+Every other current `lucid` verb is **excluded from the chat command map** on
+purpose, each for a documented reason — the MVP translator surfaces only the
+conversational verbs; the rest are reached by their documented CLI forms:
+
+* **Deeper life-archive verbs** — `recall`, `memory`, `era`, `injury`,
+  `thread`, `workout`: driven by their documented CLI forms; not surfaced as
+  chat shortcuts in the MVP translator.
+* **Pure-infra verbs** — `init`, `upgrade`, `version`, `completion`, `serve`,
+  `bootstrap`, `validate`: setup / maintenance / protocol surfaces, not
+  conversational commands. (`serve` drives the interactive `/checkin` flow
+  above; `bootstrap` toggles historical-entry mode — both reached by their CLI
+  form, not a chat verb of their own.)
+
+The skill never invents a command, an agent, or a field.
 
 ## Natural-language translation (voice-first)
 
@@ -122,10 +141,21 @@ every guarantee holds exactly as it does on the command line:
 **Coverage.** The voice-first layer maps the everyday verbs plus the live
 practice-lifecycle verbs `storm`, `anchor`, `profile`, and `metrics` (each a
 documented verb in the [command reference](../../docs/usage/commands.md)). The
-three **provider-backed** Mirror verbs — `/checkin`, `/reflect`, and `/ask` — are
-**not yet wired** into this layer; their natural-language phrasing is
-**deliberately deferred** until they ship, so drive them by their documented
-forms until then.
+three **provider-backed** Mirror verbs are **shipped** and driven by their
+documented forms: `/ask` runs `lucid ask <question…>` (grounded, cited Q&A over
+your validated insights); `/reflect` runs `lucid reflect [gate]` (recall that
+never proposes a new pattern); `/checkin` runs through the interactive `serve`
+flow (`lucid serve`, the stdin/JSON check-in protocol). The Sunday weekly
+reflection deep-dive is `lucid reflect week` — a read-only pass over the past
+week that never writes (its nested `apply`, the only write path, goes through the
+resonance gate and is not a chat-mapped verb).
+
+**Companion, on demand.** The morning and night companion messages are composed
+by Lucid's model provider from your own opaque prompt files and the chain's
+honest live numbers — never fabricated. They fire automatically inside `lucid
+scheduler run` on the bell and tripwire marks; `/companion [morning|night]`
+composes one on demand via `lucid companion fire --mode <morning|night>` (dry-run
+by default, so a preview sends nothing). Delivery stays scheduler-owned.
 
 ## Media attachments
 
@@ -147,12 +177,15 @@ backfilled later) still finishes the night.
 
 ## Scheduled sends stay scheduler-owned
 
-The bell, the morning tripwire, and the monthly heartbeat are the only
-autonomous messages, and they are the scheduler's — pre-committed templates
-posted by the harness's native scheduler (or the standalone `go-flywheel`
-path), never composed or initiated by this skill. The enrichment job likewise
-runs on its own schedule and posts nothing. This skill only handles
-user-initiated commands.
+The autonomous messages are the scheduler's, never composed or initiated by this
+skill: the bell and the morning tripwire (pre-committed templates), plus the
+morning/night companion messages and the weekly witness report (composed by the
+provider from the user's own opaque prompt files and the chain's honest live
+numbers, never fabricated). All are posted by the harness's native scheduler (or
+the standalone `go-flywheel` path). The `companion fire` and `witness report`
+verbs above only ever preview these on demand; delivery stays scheduler-owned.
+The enrichment job likewise runs on its own schedule and posts nothing. This
+skill only handles user-initiated commands.
 
 ## Scheduler health (read-only diagnostics)
 
