@@ -128,10 +128,10 @@ func backOffOffering(rec Recommendation) string {
 	return detail
 }
 
-// renderProgress renders the read-only trend panel — the streak (from the Engine
-// chain), the frequency direction, the skipped-day count, and the recent body
-// response. It is a compact glance, never a grade; the body-response line is
-// omitted when there is nothing logged.
+// renderProgress renders the read-only trend panel — the workout streak (counted
+// from logged workout days), the frequency direction, the skipped-day count, and
+// the recent body response. It is a compact glance, never a grade; the
+// body-response line is omitted when there is nothing logged.
 func renderProgress(tr Trend) string {
 	var b strings.Builder
 	b.WriteString(emojiProgress)
@@ -145,8 +145,8 @@ func renderProgress(tr Trend) string {
 	return b.String()
 }
 
-// streakLine frames the Engine chain's streak — the build during the early ramp,
-// the count once it holds — never a hollow "0-day streak".
+// streakLine frames the workout streak — the build during the early ramp, the
+// count once it holds — never a hollow "0-day streak".
 func streakLine(streak int) string {
 	if streak <= 0 {
 		return "Building — no active streak yet"
