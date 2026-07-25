@@ -144,6 +144,25 @@ func TestRecommendRecoveredFocusIsNotVetoed(t *testing.T) {
 	assert.Empty(t, got.Vetoes)
 }
 
+// TestRecommendAnchorDayDoesNotOpenRecoveryWindow proves the daily floor is not a
+// session: a completed anchor logged yesterday names no body parts, so the
+// recovery guardrail finds nothing to protect and today's legs card still stands.
+// Closing a day for the streak never costs the next day's card.
+func TestRecommendAnchorDayDoesNotOpenRecoveryWindow(t *testing.T) {
+	t.Parallel()
+
+	got := Recommend(RecommendInput{
+		Program: ExampleProgram(),
+		Now:     mustTime(t, mondayNoon),
+		// A completed daily anchor yesterday — the marker, no parts, no type.
+		RecentWorkouts: []observations.Event{anchorEvent("2026-07-19T18:00:00Z")},
+		Loc:            time.UTC,
+	})
+
+	assert.Equal(t, "legs", got.Primary.ID, "an anchor day never vetoes the next day's focus")
+	assert.Empty(t, got.Vetoes)
+}
+
 // TestRecommendLightLoadDoesNotOpenRecoveryWindow proves a light session never
 // opens a recovery debt: an easy legs session yesterday does not veto today's
 // legs card.
@@ -505,6 +524,17 @@ func workoutEvent(occurredAt, typ string, bodyParts []string, rpe int) observati
 		Kind:       observations.KindWorkout,
 		OccurredAt: occurredAt,
 		Payload:    payload,
+	}
+}
+
+// anchorEvent builds the daily-anchor form of a KindWorkout event: the marker
+// alone, with no type and no body parts, which is exactly why it opens no
+// recovery window.
+func anchorEvent(occurredAt string) observations.Event {
+	return observations.Event{
+		Kind:       observations.KindWorkout,
+		OccurredAt: occurredAt,
+		Payload:    map[string]any{"anchor": true},
 	}
 }
 

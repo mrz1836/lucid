@@ -365,8 +365,10 @@ func buildWorkoutLogRequest(cmd *cobra.Command, in workoutLogFlags) (router.Work
 // parseAnchorItemFlags folds the repeatable --anchor-item values into per-item
 // anchor counts. Each value is `name:count` (a bare `name` records the item with
 // no count — the honest shape when the user did the movement without counting).
-// Repeated names merge with the last count winning, so a corrected re-entry does
-// not double-record the item. Unlike the 0–10 body-state scales a count is an
+// Repeated names merge under the first spelling with the last *stated* count
+// winning, so a corrected re-entry does not double-record the item and a bare
+// re-entry does not erase a number already given — the same merge the per-part
+// soreness/pain flags use. Unlike the 0–10 body-state scales a count is an
 // ordinary tally, bounded only by being a non-negative whole number.
 func parseAnchorItemFlags(raw []string) ([]router.AnchorCount, error) {
 	byName := map[string]*router.AnchorCount{}
@@ -394,7 +396,9 @@ func parseAnchorItemFlags(raw []string) ([]router.AnchorCount, error) {
 		}
 		key := strings.ToLower(name)
 		if prev, seen := byName[key]; seen {
-			*prev = item
+			if item.HasCount {
+				prev.Count, prev.HasCount = item.Count, true
+			}
 			continue
 		}
 		stored := item

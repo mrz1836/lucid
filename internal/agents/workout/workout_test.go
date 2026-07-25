@@ -167,6 +167,122 @@ func TestExtract_PainFlagsAndNotesOnly(t *testing.T) {
 	assert.Nil(t, res.RPE)
 }
 
+// --- The daily anchor -------------------------------------------------------
+
+const anchorExtraction = `{
+  "type": "",
+  "duration_min": 0,
+  "rpe": null,
+  "body_parts": [],
+  "soreness": [],
+  "pain_flags": [],
+  "anchor": true,
+  "anchor_items": [{"name": "squats", "count": 55}, {"name": "core", "count": 50}],
+  "notes": null
+}`
+
+// TestExtract_AnchorWithCounts is the spoken anchor path: the marker plus the
+// per-item counts the drop gave, and no session fields — the daily floor is not a
+// session, so it names no body parts and opens no recovery window downstream.
+func TestExtract_AnchorWithCounts(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{reply(anchorExtraction)}}
+	res := workout.Extract(context.Background(), input("did my daily anchor, 55 squats and 50 core"), p)
+
+	assert.False(t, res.Degraded)
+	assert.True(t, res.Anchor)
+	require.Len(t, res.AnchorItems, 2)
+	assert.Equal(t, workout.AnchorCount{Name: "squats", Count: 55, HasCount: true}, res.AnchorItems[0])
+	assert.Equal(t, workout.AnchorCount{Name: "core", Count: 50, HasCount: true}, res.AnchorItems[1])
+	assert.Empty(t, res.Type)
+	assert.Empty(t, res.BodyParts)
+	assert.Equal(t, 1, p.Calls())
+}
+
+// TestExtract_AnchorOnlyIsContent proves a bare "did my anchor" is a complete
+// capture: the reply carries nothing but the marker, yet it passes the all-empty
+// check instead of degrading and throwing the drop back to the raw note.
+func TestExtract_AnchorOnlyIsContent(t *testing.T) {
+	payload := `{"type":"","duration_min":0,"rpe":null,"body_parts":[],"soreness":[],"pain_flags":[],"anchor":true,"anchor_items":[],"notes":null}`
+	p := &provider.Fake{Script: []provider.Exchange{reply(payload)}}
+	res := workout.Extract(context.Background(), input("did my anchor today"), p)
+
+	assert.False(t, res.Degraded)
+	assert.True(t, res.Anchor)
+	assert.Empty(t, res.AnchorItems)
+	assert.Equal(t, 1, p.Calls())
+}
+
+// TestExtract_AnchorItemsImplyTheMarker proves counts alone report the floor:
+// naming items is itself saying the anchor was done, so the marker is set even
+// when the model left the flag off — and the reply counts as content.
+func TestExtract_AnchorItemsImplyTheMarker(t *testing.T) {
+	payload := `{"type":"","duration_min":0,"rpe":null,"body_parts":[],"soreness":[],"pain_flags":[],"anchor":false,"anchor_items":[{"name":"squats","count":55}],"notes":null}`
+	p := &provider.Fake{Script: []provider.Exchange{reply(payload)}}
+	res := workout.Extract(context.Background(), input("55 squats today"), p)
+
+	assert.False(t, res.Degraded)
+	assert.True(t, res.Anchor, "naming an anchor item reports the floor was done")
+	require.Len(t, res.AnchorItems, 1)
+	assert.Equal(t, 55, res.AnchorItems[0].Count)
+}
+
+// TestExtract_AnchorItemWithoutCount records an item the user did not count as
+// uncounted rather than as a fabricated zero — the same never-invent discipline
+// the nil scales follow.
+func TestExtract_AnchorItemWithoutCount(t *testing.T) {
+	payload := `{"type":"","duration_min":0,"rpe":null,"body_parts":[],"soreness":[],"pain_flags":[],"anchor":true,"anchor_items":[{"name":"squats","count":null},{"name":"  ","count":null}],"notes":null}`
+	p := &provider.Fake{Script: []provider.Exchange{reply(payload)}}
+	res := workout.Extract(context.Background(), input("did the anchor, squats but I lost count"), p)
+
+	assert.False(t, res.Degraded)
+	require.Len(t, res.AnchorItems, 1, "the blank-named entry is dropped as noise")
+	assert.Equal(t, "squats", res.AnchorItems[0].Name)
+	assert.False(t, res.AnchorItems[0].HasCount)
+	assert.Equal(t, 0, res.AnchorItems[0].Count)
+}
+
+// TestExtract_NegativeAnchorCountRejected: a count is an ordinary tally with no
+// 0-10 ceiling, but a negative one is an invented value — the attempt fails and
+// the agent retries stricter rather than clamping it.
+func TestExtract_NegativeAnchorCountRejected(t *testing.T) {
+	payload := `{"type":"","duration_min":0,"rpe":null,"body_parts":[],"soreness":[],"pain_flags":[],"anchor":true,"anchor_items":[{"name":"squats","count":-5}],"notes":null}`
+	p := &provider.Fake{Script: []provider.Exchange{reply(payload), reply(payload)}}
+	res := workout.Extract(context.Background(), input("drop"), p)
+
+	assert.True(t, res.Degraded)
+	assert.Equal(t, 2, p.Calls())
+}
+
+// TestExtract_LargeAnchorCountAccepted proves an anchor count is not held to the
+// 0-10 reading scales: 60 core reps is an ordinary tally, not an out-of-range
+// value.
+func TestExtract_LargeAnchorCountAccepted(t *testing.T) {
+	payload := `{"type":"","duration_min":0,"rpe":null,"body_parts":[],"soreness":[],"pain_flags":[],"anchor":true,"anchor_items":[{"name":"core","count":60}],"notes":null}`
+	p := &provider.Fake{Script: []provider.Exchange{reply(payload)}}
+	res := workout.Extract(context.Background(), input("60 core"), p)
+
+	assert.False(t, res.Degraded)
+	require.Len(t, res.AnchorItems, 1)
+	assert.Equal(t, 60, res.AnchorItems[0].Count)
+}
+
+// TestExtract_AnchorPromptStaysGeneric proves the instruction describes the daily
+// anchor as a concept and asks for the user's own words — it hardcodes no item
+// vocabulary, which lives only in the operator's program (the OSS/personal
+// boundary).
+func TestExtract_AnchorPromptStaysGeneric(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{reply(anchorExtraction)}}
+	workout.Extract(context.Background(), input("did my daily anchor"), p)
+
+	require.Len(t, p.Requests, 1)
+	system := p.Requests[0].System
+	assert.Contains(t, system, "anchor_items")
+	assert.Contains(t, system, "daily anchor")
+	for _, personal := range []string{"squats", "push-up", "pushup", "PT app"} {
+		assert.NotContainsf(t, system, personal, "the prompt must name no program-specific item (%s)", personal)
+	}
+}
+
 // TestExtract_TrimsAndDropsBlanks trims string fields and drops blank list
 // entries so downstream never sees whitespace tokens.
 func TestExtract_TrimsAndDropsBlanks(t *testing.T) {
