@@ -189,11 +189,13 @@ func renderWorkoutFire(out io.Writer, o workout.Outcome) error {
 }
 
 // workoutRecommendationJSON is the --json projection of the on-demand surface:
-// the decided pick and the read-only trend, exactly the deterministic core's
-// output so a harness reads the same recommendation the message renders.
+// the decided pick, the read-only trend, and today's daily anchor, exactly the
+// deterministic core's output so a harness reads the same recommendation the
+// message renders.
 type workoutRecommendationJSON struct {
 	Recommendation workout.Recommendation `json:"recommendation"`
 	Trend          workout.Trend          `json:"trend"`
+	Anchor         workout.Anchor         `json:"anchor"`
 }
 
 // runWorkout composes and prints the on-demand recommendation + trend. The
@@ -223,6 +225,7 @@ func runWorkout(cmd *cobra.Command) error {
 		return writeJSON(cmd.OutOrStdout(), workoutRecommendationJSON{
 			Recommendation: res.Recommendation,
 			Trend:          res.Trend,
+			Anchor:         res.Anchor,
 		})
 	}
 	if res.Fallback {

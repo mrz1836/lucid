@@ -20,9 +20,9 @@ import (
 
 // WorkoutResult is the on-demand `lucid workout` surface: the rendered
 // recommendation + trend message a person reads (Text), the deterministic
-// Recommendation / Trend projection a script reads (--json), and how the compose
-// resolved — model-phrased (UsedLLM), deterministic fallback (Fallback), or the
-// recent-slice read degraded (EnrichmentDegraded).
+// Recommendation / Trend / Anchor projection a script reads (--json), and how the
+// compose resolved — model-phrased (UsedLLM), deterministic fallback (Fallback),
+// or the recent-slice read degraded (EnrichmentDegraded).
 type WorkoutResult struct {
 	Text               string
 	UsedLLM            bool
@@ -30,6 +30,7 @@ type WorkoutResult struct {
 	EnrichmentDegraded bool
 	Recommendation     workout.Recommendation
 	Trend              workout.Trend
+	Anchor             workout.Anchor
 }
 
 // Workout composes the on-demand workout recommendation at now. The deterministic
@@ -62,6 +63,7 @@ func (r *Router) Workout(ctx context.Context, now time.Time, p provider.Provider
 		EnrichmentDegraded: res.EnrichmentDegraded,
 		Recommendation:     res.Recommendation,
 		Trend:              res.Trend,
+		Anchor:             res.Anchor,
 	}, nil
 }
 

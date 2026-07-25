@@ -39,7 +39,7 @@ const emojiCoach = "💬"
 // instruction, not user-facing copy: Lucid has already decided the plan and will
 // render the card below, so the model must phrase, never restate, restructure, or
 // override.
-const contextHeader = "CONTEXT — Lucid has already decided today's session and will render the header, the three options, the progress panel, and the reason below. Do NOT restate them, do NOT add, drop, or change any option, and do NOT give medical or diagnostic advice — read this only to ground your phrasing."
+const contextHeader = "CONTEXT — Lucid has already decided today's session and will render the header, the three options, the daily anchor, and the progress panel below. Do NOT restate them, do NOT add, drop, or change any option, and do NOT give medical or diagnostic advice — read this only to ground your phrasing."
 
 // slotInstruction tells the model to return only the bounded phrasing slot: a
 // short, warm, non-commanding note. Everything structural is Lucid's, so the
@@ -129,8 +129,8 @@ func New(d Deps) *Composer {
 // Fallback records the deterministic-only path fired (the provider was
 // unreachable or returned nothing usable), so the caller can still note that only
 // warmth was lost. EnrichmentDegraded records that the recent-observation / injury
-// read failed, so the pick fell to the plain-calendar path. Recommendation and
-// Trend are the decided projection, surfaced verbatim for the --json output.
+// read failed, so the pick fell to the plain-calendar path. Recommendation, Trend,
+// and Anchor are the decided projection, surfaced verbatim for the --json output.
 type Result struct {
 	Text               string
 	UsedLLM            bool
@@ -138,6 +138,7 @@ type Result struct {
 	EnrichmentDegraded bool
 	Recommendation     Recommendation
 	Trend              Trend
+	Anchor             Anchor
 }
 
 // Compose builds the on-demand workout message at now. It reads the configured
@@ -182,7 +183,8 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 		Now:       now,
 		Loc:       loc,
 	})
-	res := Result{Recommendation: rec, Trend: tr, EnrichmentDegraded: degraded}
+	anchor := BuildAnchor(prog, now, loc)
+	res := Result{Recommendation: rec, Trend: tr, Anchor: anchor, EnrichmentDegraded: degraded}
 
 	systemPrompt, err := readPromptFile(c.workout.SystemPrompt)
 	if err != nil {
@@ -201,11 +203,11 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 	resp, err := prov.Complete(ctx, provider.Request{
 		Intent:   intentDaily,
 		System:   systemPrompt,
-		Messages: []provider.Message{{Role: provider.RoleUser, Content: composeBody(tmpl, rec, tr)}},
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: composeBody(tmpl, rec, tr, anchor)}},
 	})
 	if err != nil {
 		if errors.Is(err, provider.ErrTimeout) || errors.Is(err, provider.ErrUnavailable) {
-			res.Text = Render(rec, tr, now)
+			res.Text = Render(rec, tr, anchor, now)
 			res.Fallback = true
 			return res, nil
 		}
@@ -216,11 +218,11 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 	if note == "" {
 		// The model returned nothing usable — render the deterministic scaffold
 		// rather than deliver an empty phrasing slot.
-		res.Text = Render(rec, tr, now)
+		res.Text = Render(rec, tr, anchor, now)
 		res.Fallback = true
 		return res, nil
 	}
-	res.Text = renderWithNote(note, rec, tr, now)
+	res.Text = renderWithNote(note, rec, tr, anchor, now)
 	res.UsedLLM = true
 	return res, nil
 }
@@ -288,13 +290,13 @@ func (c *Composer) providerConfig() config.ProviderConfig {
 // the decided plan (so the model grounds its note without restating it), and the
 // slot instruction. The model returns only the phrasing slot; Lucid renders the
 // scaffold.
-func composeBody(tmpl string, rec Recommendation, tr Trend) string {
+func composeBody(tmpl string, rec Recommendation, tr Trend, anchor Anchor) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimRight(tmpl, "\n"))
 	b.WriteString("\n\n")
 	b.WriteString(contextHeader)
 	b.WriteString("\n\n")
-	b.WriteString(planDigest(rec, tr))
+	b.WriteString(planDigest(rec, tr, anchor))
 	b.WriteString("\n\n")
 	b.WriteString(slotInstruction)
 	return b.String()
@@ -304,7 +306,9 @@ func composeBody(tmpl string, rec Recommendation, tr Trend) string {
 // the model to ground on — never the rendered scaffold (the model must not
 // restate it). It reuses the same deterministic offering/trend helpers the
 // message renders from, so the digest and the delivered card can never drift.
-func planDigest(rec Recommendation, tr Trend) string {
+// The deterministic reason is grounding only — it tells the model *why* today's
+// pick is what it is so the note lands, and it renders no visible "Why" region.
+func planDigest(rec Recommendation, tr Trend, anchor Anchor) string {
 	lines := []string{
 		"Today's pick: " + cardOffering(rec.Primary),
 		"Easier option: " + cardOffering(rec.Fallback),
@@ -313,8 +317,30 @@ func planDigest(rec Recommendation, tr Trend) string {
 	if reason := strings.TrimSpace(rec.Reason); reason != "" {
 		lines = append(lines, "Why: "+reason)
 	}
+	if line := anchorDigest(anchor); line != "" {
+		lines = append(lines, "Daily anchor: "+line)
+	}
 	lines = append(lines, "Progress: "+strings.Join(progressDigest(tr), "; "))
 	return strings.Join(lines, "\n")
+}
+
+// anchorDigest renders today's floor as a compact model-facing phrase, reusing
+// the render helper so the digest numbers match the rendered line exactly. A
+// program with no anchor items contributes no digest line.
+func anchorDigest(a Anchor) string {
+	if len(a.Items) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(a.Items))
+	for _, item := range a.Items {
+		if line := anchorItemLine(item); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s (week %d)", strings.Join(parts, ", "), a.Week)
 }
 
 // progressDigest renders the trend as compact model-facing phrases, reusing the
@@ -333,8 +359,8 @@ func progressDigest(tr Trend) []string {
 // model contributes the note and nothing else, and it can never restructure the
 // card or add a fourth door. An empty note falls back to
 // the pure spine.
-func renderWithNote(note string, rec Recommendation, tr Trend, now time.Time) string {
-	spine := Render(rec, tr, now)
+func renderWithNote(note string, rec Recommendation, tr Trend, anchor Anchor, now time.Time) string {
+	spine := Render(rec, tr, anchor, now)
 	note = strings.TrimSpace(note)
 	if note == "" {
 		return spine

@@ -72,10 +72,7 @@ const (
 func writeWorkoutConfig(t *testing.T) config.WorkoutConfig {
 	t.Helper()
 	dir := t.TempDir()
-	progPath := filepath.Join(dir, "program.json")
-	b, err := json.Marshal(ExampleProgram())
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(progPath, b, 0o600))
+	progPath := writeProgram(t, ExampleProgram())
 
 	sys := filepath.Join(dir, "system_prompt.md")
 	tmpl := filepath.Join(dir, "daily_template.md")
@@ -89,6 +86,18 @@ func writeWorkoutConfig(t *testing.T) config.WorkoutConfig {
 		SystemPrompt: sys,
 		Template:     tmpl,
 	}
+}
+
+// writeProgram marshals a program under a temp dir and returns the explicit path
+// the config points at, so a test composes over a tweaked synthetic program
+// without any personal file ever entering a test (product-principles §9).
+func writeProgram(t *testing.T, prog Program) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "program.json")
+	b, err := json.Marshal(prog)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+	return path
 }
 
 // fakeBuilder returns a ProviderBuilder that always yields the given fake, so the
@@ -144,6 +153,86 @@ func TestComposeLLMPathPhrasesTheDecidedPick(t *testing.T) {
 	require.Len(t, req.Messages, 1)
 	assert.Contains(t, req.Messages[0].Content, tmplContent, "the operator template frames the call")
 	assert.Contains(t, req.Messages[0].Content, "Today's pick:", "the decided plan is handed to the model")
+}
+
+// TestComposeSurfacesTheDailyAnchor proves the anchor is projected from the loaded
+// program, rendered into the delivered card, carried on the Result for --json, and
+// handed to the model as grounding. The synthetic program starts 2026-01-05 and
+// defines targets only through week 2, so a compose far past that start renders
+// the held week-2 numbers under the live week index — the ramp plateaus, it never
+// resets.
+func TestComposeSurfacesTheDailyAnchor(t *testing.T) {
+	t.Parallel()
+
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: "Take the door that fits today."}}}
+	res, err := New(baseDeps(t, &fakeObs{}, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+
+	assert.Equal(t, 29, res.Anchor.Week, "the week counts from the program's start_date")
+	require.Len(t, res.Anchor.Items, 3, "the Result carries the projection --json reads")
+	assert.Equal(t, AnchorLine{Name: "squats", Target: 55}, res.Anchor.Items[0], "week 2's override holds past its week")
+
+	assert.Contains(t, res.Text, emojiAnchor+" **Daily Anchor** · squats 55 · core 50 · easy push-ups 25 (accumulate) — week 29")
+	assert.Contains(t, fake.Requests[0].Messages[0].Content, "Daily anchor: squats 55, core 50, easy push-ups 25 (accumulate) (week 29)",
+		"the model grounds on today's floor without restating it")
+}
+
+// TestComposeAnchorlessProgramDropsTheRegion proves a program with no daily_anchor
+// composes a clean card: the region is dropped entirely rather than rendering a
+// hollow label, and the model is handed no anchor grounding line.
+func TestComposeAnchorlessProgramDropsTheRegion(t *testing.T) {
+	t.Parallel()
+
+	prog := ExampleProgram()
+	prog.DailyAnchor = DailyAnchor{}
+	deps := baseDeps(t, &fakeObs{}, fakeInjuries{}, &provider.Fake{Script: []provider.Exchange{{Content: "note"}}})
+	deps.Workout.Program = writeProgram(t, prog)
+
+	res, err := New(deps).Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+
+	assert.Empty(t, res.Anchor.Items)
+	assert.NotContains(t, res.Text, "Daily Anchor", "no anchor items renders no anchor region")
+}
+
+// TestAnchorDigestDropsUnrenderableItems proves the grounding line matches the
+// rendered region exactly: items the card cannot render (an unnamed one) never
+// reach the model, and a floor of nothing but those contributes no digest line at
+// all rather than a bare week label.
+func TestAnchorDigestDropsUnrenderableItems(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "PT app 6 (week 4)", anchorDigest(Anchor{Week: 4, Items: []AnchorLine{
+		{Name: "PT app", Target: 6}, {Target: 99},
+	}}))
+	assert.Empty(t, anchorDigest(Anchor{Week: 4, Items: []AnchorLine{{Target: 99}}}))
+	assert.Empty(t, anchorDigest(Anchor{Week: 4}))
+}
+
+// TestComposeCarriesNoWhyRegion proves the removed region stays removed on every
+// delivery path — model-phrased and deterministic fallback alike — while the
+// deterministic reason still reaches the model as grounding and still rides the
+// Result for --json. The pick is explained to the model, never argued at the user.
+func TestComposeCarriesNoWhyRegion(t *testing.T) {
+	t.Parallel()
+
+	for name, script := range map[string]provider.Exchange{
+		"phrased":  {Content: "Whatever fits today is the right call."},
+		"fallback": {Err: provider.ErrUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fake := &provider.Fake{Script: []provider.Exchange{script}}
+			res, err := New(baseDeps(t, &fakeObs{}, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
+			require.NoError(t, err)
+
+			assert.NotContains(t, res.Text, "**Why**", "the delivered card carries no Why region")
+			require.NotEmpty(t, res.Recommendation.Reason, "the deterministic reason still exists for --json")
+			assert.NotContains(t, res.Text, res.Recommendation.Reason, "the reason never renders as prose")
+			assert.Contains(t, fake.Requests[0].Messages[0].Content, "Why: "+res.Recommendation.Reason,
+				"the model still grounds on why today's pick is what it is")
+		})
+	}
 }
 
 // TestComposeModelNeverChangesPick proves the invariant: legs loaded yesterday
@@ -205,7 +294,7 @@ func TestComposeFallsBackOnProviderDown(t *testing.T) {
 			assert.False(t, res.UsedLLM)
 			assert.NotContains(t, res.Text, emojiCoach, "no model note on the deterministic path")
 			assert.NotContains(t, res.Text, "not medical advice")
-			assert.Equal(t, Render(res.Recommendation, res.Trend, now), res.Text, "the fallback is exactly the deterministic Render")
+			assert.Equal(t, Render(res.Recommendation, res.Trend, res.Anchor, now), res.Text, "the fallback is exactly the deterministic Render")
 		})
 	}
 }
@@ -222,7 +311,7 @@ func TestComposeFallsBackOnEmptyReply(t *testing.T) {
 
 	assert.True(t, res.Fallback)
 	assert.False(t, res.UsedLLM)
-	assert.Equal(t, Render(res.Recommendation, res.Trend, now), res.Text)
+	assert.Equal(t, Render(res.Recommendation, res.Trend, res.Anchor, now), res.Text)
 }
 
 // --- enrichment + windows ---------------------------------------------------
