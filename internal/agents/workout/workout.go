@@ -59,13 +59,25 @@ type BodyState struct {
 	Pain     *int
 }
 
+// AnchorCount is one daily-anchor item the drop named, with the count when the
+// drop gave one. HasCount separates "55 squats" from "did my squats" so an
+// unstated count is carried as unstated rather than as a fabricated zero. The
+// item names come from whatever the user said — the agent knows no anchor
+// vocabulary, which lives only in the operator's program.
+type AnchorCount struct {
+	Name     string
+	Count    int
+	HasCount bool
+}
+
 // Result is the extraction's structured payload. RPE is nil when the drop gave
 // no session RPE. Soreness holds the quantified per-part readings; PainFlags
 // names parts the drop called out as painful without a number (the router
 // records those at a conservative flag level so the recommender's pain hard stop
-// can protect the part). Degraded marks the honest-failure paths (empty text, or
-// unusable model output twice) so the router preserves the raw drop rather than
-// dropping the capture.
+// can protect the part). Anchor marks a drop that reported the daily anchor and
+// AnchorItems carries any per-item counts it offered. Degraded marks the
+// honest-failure paths (empty text, or unusable model output twice) so the router
+// preserves the raw drop rather than dropping the capture.
 type Result struct {
 	Type         string
 	DurationMin  int
@@ -73,6 +85,8 @@ type Result struct {
 	BodyParts    []string
 	Soreness     []BodyState
 	PainFlags    []string
+	Anchor       bool
+	AnchorItems  []AnchorCount
 	Notes        string
 	AgentVersion string
 	Degraded     bool
@@ -86,6 +100,8 @@ type extraction struct {
 	BodyParts   []string           `json:"body_parts"`
 	Soreness    []bodyStatePayload `json:"soreness"`
 	PainFlags   []string           `json:"pain_flags"`
+	Anchor      bool               `json:"anchor"`
+	AnchorItems []anchorPayload    `json:"anchor_items"`
 	Notes       *string            `json:"notes"`
 }
 
@@ -93,6 +109,13 @@ type bodyStatePayload struct {
 	Part     string `json:"part"`
 	Soreness *int   `json:"soreness"`
 	Pain     *int   `json:"pain"`
+}
+
+// anchorPayload is one parsed daily-anchor item: the movement the drop named and
+// its count, null when the drop gave none.
+type anchorPayload struct {
+	Name  string `json:"name"`
+	Count *int   `json:"count"`
 }
 
 // Extract runs the Workout Extraction agent over one spoken drop and returns the
@@ -141,14 +164,20 @@ func extractOnce(ctx context.Context, text string, p provider.Provider, strict b
 
 // validExtraction enforces the rules that make an extraction usable: every scale
 // value is in 0–10, every body-state reading names a part and carries at least
-// one value, every pain flag names a part, and the reply is not all-empty (a
-// reply with nothing extracted is a failed attempt, not a valid empty capture).
+// one value, every pain flag names a part, every stated anchor count is a real
+// (non-negative) number, and the reply is not all-empty (a reply with nothing
+// extracted is a failed attempt, not a valid empty capture).
 func validExtraction(ext extraction) bool {
 	if ext.RPE != nil && !inScale(*ext.RPE) {
 		return false
 	}
 	if ext.DurationMin < 0 {
 		return false
+	}
+	for _, item := range ext.AnchorItems {
+		if item.Count != nil && *item.Count < 0 {
+			return false
+		}
 	}
 	for _, bs := range ext.Soreness {
 		if strings.TrimSpace(bs.Part) == "" {
@@ -179,22 +208,54 @@ func hasContent(ext extraction) bool {
 		ext.RPE != nil ||
 		len(ext.Soreness) > 0 ||
 		len(trimmed(ext.PainFlags)) > 0 ||
+		ext.Anchor ||
+		len(toAnchorCounts(ext.AnchorItems)) > 0 ||
 		notesValue(ext.Notes) != ""
 }
 
 // toResult maps a validated extraction to the agent [Result], trimming string
 // fields and copying the pointer scales through untouched.
 func toResult(ext extraction, version string) Result {
+	items := toAnchorCounts(ext.AnchorItems)
 	return Result{
-		Type:         strings.TrimSpace(ext.Type),
-		DurationMin:  ext.DurationMin,
-		RPE:          ext.RPE,
-		BodyParts:    trimmed(ext.BodyParts),
-		Soreness:     toBodyStates(ext.Soreness),
-		PainFlags:    trimmed(ext.PainFlags),
+		Type:        strings.TrimSpace(ext.Type),
+		DurationMin: ext.DurationMin,
+		RPE:         ext.RPE,
+		BodyParts:   trimmed(ext.BodyParts),
+		Soreness:    toBodyStates(ext.Soreness),
+		PainFlags:   trimmed(ext.PainFlags),
+		// Naming an item is itself a report that the floor was done, so counts
+		// imply the marker even when the model left the flag off.
+		Anchor:       ext.Anchor || len(items) > 0,
+		AnchorItems:  items,
 		Notes:        notesValue(ext.Notes),
 		AgentVersion: version,
 	}
+}
+
+// toAnchorCounts maps the parsed anchor items to [AnchorCount]s, dropping any
+// with a blank name (a stray empty entry is noise, not a malformed reply) and
+// carrying a null count through as "no count stated" rather than as a zero.
+func toAnchorCounts(in []anchorPayload) []AnchorCount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]AnchorCount, 0, len(in))
+	for _, item := range in {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		ac := AnchorCount{Name: name}
+		if item.Count != nil {
+			ac.Count, ac.HasCount = *item.Count, true
+		}
+		out = append(out, ac)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // toBodyStates maps parsed body-state payloads to [BodyState]s, dropping any
@@ -253,9 +314,17 @@ func extractSystem(strict bool) string {
 	b.WriteString("(each a body part with a 0-10 soreness and/or 0-10 pain when a number is given), ")
 	b.WriteString("and any body part the note calls painful without a number. Do not diagnose, do ")
 	b.WriteString("not give advice, and do not invent numbers that were not said. Put anything else ")
-	b.WriteString("worth keeping in notes. Reply ONLY with JSON: ")
+	b.WriteString("worth keeping in notes. ")
+	b.WriteString("The note may also report the daily anchor — the small set of movements the user ")
+	b.WriteString("does every day, which they refer to as their anchor, daily anchor, or baseline. ")
+	b.WriteString("Set anchor true when the note says they did it, and list each movement they ")
+	b.WriteString("named in anchor_items with the count they gave (null when they gave none), using ")
+	b.WriteString("their own words for the name. If the note reports only the anchor and no separate ")
+	b.WriteString("session, leave type and body_parts empty: the anchor is a daily floor, not a ")
+	b.WriteString("session. Reply ONLY with JSON: ")
 	b.WriteString(`{"type":"","duration_min":0,"rpe":null,"body_parts":[],`)
-	b.WriteString(`"soreness":[{"part":"","soreness":null,"pain":null}],"pain_flags":[],"notes":null}.`)
+	b.WriteString(`"soreness":[{"part":"","soreness":null,"pain":null}],"pain_flags":[],`)
+	b.WriteString(`"anchor":false,"anchor_items":[{"name":"","count":null}],"notes":null}.`)
 	b.WriteString(" Use null for any value the note did not state; use [] for a list with nothing to add.")
 	if strict {
 		b.WriteString(" Your previous reply was not valid JSON or invented a value. Reply with the JSON ")

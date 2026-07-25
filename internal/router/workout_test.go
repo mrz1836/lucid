@@ -163,6 +163,152 @@ func TestWorkoutLog_ProvenanceStamped(t *testing.T) {
 	assert.Equal(t, "assistant", prov["agent"])
 }
 
+// --- The daily anchor -------------------------------------------------------
+
+// anchorItems reads the per-item anchor inventory back off a stored event, where
+// it has round-tripped through JSON as a list of objects.
+func anchorItems(t *testing.T, ev observations.Event) []map[string]any {
+	t.Helper()
+	raw, ok := ev.Payload["anchor_items"].([]any)
+	require.Truef(t, ok, "expected an anchor_items list, got %T", ev.Payload["anchor_items"])
+	out := make([]map[string]any, 0, len(raw))
+	for _, entry := range raw {
+		item, itemOK := entry.(map[string]any)
+		require.Truef(t, itemOK, "expected an anchor item object, got %T", entry)
+		out = append(out, item)
+	}
+	return out
+}
+
+// TestWorkoutLog_AnchorOnlyWritesMarker: a bare "did the anchor" writes one
+// workout event carrying the marker — content, not the empty/partial path — and
+// no body parts, so it opens no recovery window (AC-6, AC-8, AC-9).
+func TestWorkoutLog_AnchorOnlyWritesMarker(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout)
+	res, err := r.WorkoutLog(WorkoutLogRequest{Anchor: true, Now: nowEDT()})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.WorkoutID)
+
+	w := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	require.NoError(t, w.Validate())
+	assert.Equal(t, observations.KindWorkout, w.Kind)
+	assert.Equal(t, true, w.Payload["anchor"])
+	assert.NotContains(t, w.Payload, "parse", "an anchor is content, never a partial capture")
+	assert.NotContains(t, w.Payload, "body_parts", "the daily floor is not a session")
+	assert.NotContains(t, w.Payload, "anchor_items")
+	assert.Contains(t, res.Ack, "Logged workout as `")
+}
+
+// TestWorkoutLog_AnchorItemsRecordedAsInventory: stated counts ride the event as
+// per-item inventory, and an item the user did not count is recorded without one
+// rather than as a fabricated zero.
+func TestWorkoutLog_AnchorItemsRecordedAsInventory(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout)
+	res, err := r.WorkoutLog(WorkoutLogRequest{
+		Anchor: true,
+		AnchorItems: []AnchorCount{
+			{Name: "squats", Count: 55, HasCount: true},
+			{Name: "core", Count: 50, HasCount: true},
+			{Name: "easy push-ups"},
+		},
+		Now: nowEDT(),
+	})
+	require.NoError(t, err)
+
+	w := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	require.NoError(t, w.Validate())
+	items := anchorItems(t, w)
+	require.Len(t, items, 3)
+	assert.Equal(t, "squats", items[0]["name"])
+	assert.EqualValues(t, 55, items[0]["count"])
+	assert.Equal(t, "core", items[1]["name"])
+	assert.EqualValues(t, 50, items[1]["count"])
+	assert.Equal(t, "easy push-ups", items[2]["name"])
+	assert.NotContains(t, items[2], "count", "an uncounted item is recorded as uncounted")
+}
+
+// TestWorkoutLog_AnchorItemsImplyTheMarker: naming counts is itself a report that
+// the floor was done, so the marker lands even when the flag was not set — and a
+// blank item name is dropped rather than written as a nameless entry.
+func TestWorkoutLog_AnchorItemsImplyTheMarker(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout)
+	res, err := r.WorkoutLog(WorkoutLogRequest{
+		AnchorItems: []AnchorCount{{Name: "squats", Count: 55, HasCount: true}, {Name: "   "}},
+		Now:         nowEDT(),
+	})
+	require.NoError(t, err)
+
+	w := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	assert.Equal(t, true, w.Payload["anchor"])
+	assert.NotContains(t, w.Payload, "parse")
+	require.Len(t, anchorItems(t, w), 1)
+}
+
+// TestWorkoutLog_AnchorAlongsideSessionKeepsBothRecords: logging the anchor and a
+// real session in one capture keeps the session's own fields — the session is a
+// real load and still opens its recovery window; only the anchor adds no parts of
+// its own.
+func TestWorkoutLog_AnchorAlongsideSessionKeepsBothRecords(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout)
+	res, err := r.WorkoutLog(WorkoutLogRequest{
+		Type: "legs", BodyParts: []string{"legs"}, Anchor: true, Now: nowEDT(),
+	})
+	require.NoError(t, err)
+
+	w := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	assert.Equal(t, true, w.Payload["anchor"])
+	assert.Equal(t, "legs", w.Payload["type"])
+	assert.Contains(t, w.Payload, "body_parts")
+}
+
+// TestWorkoutRequestEmpty_AnchorIsContent covers the empty-check directly: an
+// anchor (or a named item) makes a request non-empty, which is what keeps a
+// spoken anchor-only drop from falling back to the raw note.
+func TestWorkoutRequestEmpty_AnchorIsContent(t *testing.T) {
+	assert.True(t, workoutRequestEmpty(WorkoutLogRequest{}))
+	assert.False(t, workoutRequestEmpty(WorkoutLogRequest{Anchor: true}))
+	assert.False(t, workoutRequestEmpty(WorkoutLogRequest{AnchorItems: []AnchorCount{{Name: "squats"}}}))
+	assert.True(t, workoutRequestEmpty(WorkoutLogRequest{AnchorItems: []AnchorCount{{Name: "  "}}}),
+		"a blank-named item carries nothing")
+}
+
+const workoutAnchorReply = `{
+  "type": "",
+  "duration_min": 0,
+  "rpe": null,
+  "body_parts": [],
+  "soreness": [],
+  "pain_flags": [],
+  "anchor": true,
+  "anchor_items": [{"name": "squats", "count": 55}, {"name": "core", "count": 50}],
+  "notes": null
+}`
+
+// TestWorkoutLogFromText_AnchorExtractsAndWrites: a spoken anchor drop writes the
+// marker and its counts through the same deterministic capture, and is not lost
+// to the raw-note fallback (AC-7).
+func TestWorkoutLogFromText_AnchorExtractsAndWrites(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout, observations.KindBodyState)
+	p := &provider.Fake{Script: []provider.Exchange{{Content: workoutAnchorReply}}}
+	res, err := r.WorkoutLogFromText(context.Background(), WorkoutLogTextRequest{
+		Text: "did my daily anchor, 55 squats and 50 core",
+		Now:  nowEDT(),
+	}, p)
+	require.NoError(t, err)
+	assert.False(t, res.Degraded)
+	assert.Equal(t, 1, p.Calls())
+	assert.Empty(t, res.BodyStateIDs)
+
+	w := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	require.NoError(t, w.Validate())
+	assert.Equal(t, true, w.Payload["anchor"])
+	assert.NotContains(t, w.Payload, "note", "the drop was extracted, not preserved raw")
+	items := anchorItems(t, w)
+	require.Len(t, items, 2)
+	assert.Equal(t, "squats", items[0]["name"])
+	assert.EqualValues(t, 55, items[0]["count"])
+}
+
 const workoutExtractReply = `{
   "type": "pull",
   "duration_min": 50,

@@ -3,11 +3,12 @@ package workout
 // This file owns the workout module's **trend / progress projection**. It is a
 // read-only fold over the Ledger's workout and body-state events plus the Engine
 // metrics — nothing here is ever written back onto an event (the P3 sanctuary
-// rule: observations stay inventory, never a score). The streak is the Engine
-// chain's, read straight from engine.Metrics; the frequency, skipped-day count,
-// and body-response are counted from the two new kinds. The projection computes
-// honestly with zero data (an empty trend) and with sparse data, and it makes
-// zero model calls and zero disk reads — the caller passes the bounded slices in.
+// rule: observations stay inventory, never a score). The streak is the workout
+// record's own, counted on read from the logged workout days; only adherence is
+// read from engine.Metrics. The frequency, skipped-day count, and body-response
+// are counted from the two new kinds. The projection computes honestly with zero
+// data (an empty trend) and with sparse data, and it makes zero model calls and
+// zero disk reads — the caller passes the bounded slices in.
 // See docs/mvp/workout-module.md §"The trend / progress projection".
 
 import (
@@ -49,10 +50,11 @@ type BodySignal struct {
 	AsOf     string `json:"as_of,omitempty"`
 }
 
-// Trend is the read-only progress projection the surface shows: the Engine
-// chain's streak/adherence, the frequency read (this week vs the week before with
-// a direction), the skipped-day count over the window, and the recent
-// body-response per part. It is computed on demand and never stored.
+// Trend is the read-only progress projection the surface shows: the workout
+// streak (counted from logged workout days) and the Engine chain's adherence, the
+// frequency read (this week vs the week before with a direction), the skipped-day
+// count over the window, and the recent body-response per part. It is computed on
+// demand and never stored.
 type Trend struct {
 	Streak       int          `json:"streak"`
 	Adherence    float64      `json:"adherence"`
@@ -67,8 +69,8 @@ type Trend struct {
 
 // TrendInput is everything BuildTrend folds into the projection: the bounded
 // recent workout and body-state slices (recency is the caller's concern, exactly
-// like RecommendInput), the Engine metrics carrying the chain streak/adherence,
-// the current instant, the local location, and an optional window override
+// like RecommendInput), the Engine metrics carrying the chain adherence, the
+// current instant, the local location, and an optional window override
 // (WindowDays ≤ 0 → the four-week default). Nothing here is mutated.
 type TrendInput struct {
 	Workouts   []observations.Event
@@ -81,12 +83,14 @@ type TrendInput struct {
 
 // BuildTrend computes the read-only progress projection. It is pure — zero model
 // calls, zero disk I/O — and stores nothing back onto any event (P3 sanctuary).
-// The streak and adherence are copied straight from the Engine fold (never
-// recomputed as a score on workout events); the session counts and skipped-day
-// count are derived from the distinct logical days the workout events fall on;
-// the body-response is the most-recent body_state reading per part in range. With
-// no events it yields an honest empty trend (zero sessions, the whole window
-// skipped, no body signals) rather than a crash or a fabricated number.
+// The streak is the workout record's own, counted from the logged workout days
+// (see workoutStreak) rather than borrowed from the Engine chain; adherence is
+// still copied straight from the Engine fold (never recomputed as a score on
+// workout events); the session counts and skipped-day count are derived from the
+// distinct logical days the workout events fall on; the body-response is the
+// most-recent body_state reading per part in range. With no events it yields an
+// honest empty trend (a zero streak, zero sessions, the whole window skipped, no
+// body signals) rather than a crash or a fabricated number.
 func BuildTrend(in TrendInput) Trend {
 	loc := in.Loc
 	if loc == nil {
@@ -104,7 +108,7 @@ func BuildTrend(in TrendInput) Trend {
 	sessions := daysInBucket(days, today, 0, window-1)
 
 	return Trend{
-		Streak:       in.Metrics.CurrentStreak,
+		Streak:       workoutStreak(days, today),
 		Adherence:    in.Metrics.Adherence.Adherence,
 		WindowDays:   window,
 		Sessions:     sessions,
@@ -148,6 +152,43 @@ func daysInBucket(days map[string]time.Time, today time.Time, lo, hi int) int {
 		}
 	}
 	return n
+}
+
+// workoutStreak counts the current run of consecutive logical days that carry a
+// logged workout — the surface's own honest number, never the Engine chain's
+// (the chain defends the night close-out, a different practice). A day closes on
+// either a completed daily anchor or a full session, since both are written as a
+// workout event and so land in the same day set.
+//
+// Today in progress is not a break: the run anchors on today when today already
+// carries a workout, and otherwise on yesterday — a day is never scored against
+// the user before it is over. A gap of two or more days ends the run, and no
+// logged workout day at all yields 0, which the panel renders as the build rather
+// than a hollow "0-day streak". Future-dated days (distance < 0) are ignored so a
+// log ahead of the clock cannot inflate the count.
+func workoutStreak(days map[string]time.Time, today time.Time) int {
+	present := make(map[int]struct{}, len(days))
+	for _, day := range days {
+		if ds := engine.DaysSince(day, today); ds >= 0 {
+			present[ds] = struct{}{}
+		}
+	}
+
+	start := 0
+	if _, ok := present[start]; !ok {
+		start = 1 // today is still in progress — anchor the run on yesterday
+		if _, ok := present[start]; !ok {
+			return 0
+		}
+	}
+
+	n := 0
+	for d := start; ; d++ {
+		if _, ok := present[d]; !ok {
+			return n
+		}
+		n++
+	}
 }
 
 // frequencyDirection reads this week's session count against the prior week's — a

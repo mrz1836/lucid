@@ -29,8 +29,8 @@ const (
 const (
 	emojiHeader    = "🏋️"
 	emojiOfferings = "🎯"
+	emojiAnchor    = "⚓"
 	emojiProgress  = "📈"
-	emojiReason    = "💡"
 )
 
 // The three offering labels — exactly three doors, always: the recommended plan,
@@ -42,19 +42,25 @@ const (
 	labelBackOff     = "Back off"
 )
 
-// Render turns an already-decided Recommendation and its Trend into the final
-// Discord message. It is pure and byte-stable: the same inputs always render the
-// identical bytes, which is what makes the readability contract testable. The
-// region order is fixed — header, the three offerings, the progress panel, then
-// the one-line reason — with each non-empty region joined by blank lines. An
-// empty region (a blank reason) is dropped so the message never carries dangling
-// structural chrome.
-func Render(rec Recommendation, tr Trend, now time.Time) string {
+// Render turns an already-decided Recommendation, its Trend, and today's Anchor
+// into the final Discord message. It is pure and byte-stable: the same inputs
+// always render the identical bytes, which is what makes the readability
+// contract testable. The region order is fixed — header, the three offerings,
+// the daily anchor, then the progress panel — with each non-empty region joined
+// by blank lines. An empty region (a program with no anchor items) is dropped so
+// the message never carries dangling structural chrome.
+//
+// There is deliberately **no "Why" region**: a guardrail veto, a recovery
+// downshift, or a pain hard stop still changes which card is recommended — and
+// still surfaces through the back-off door, Recommendation.Reason, and
+// Recommendation.Vetoes in --json — it simply no longer argues its case in prose
+// (docs/mvp/workout-module.md §"The message scaffold").
+func Render(rec Recommendation, tr Trend, anchor Anchor, now time.Time) string {
 	regions := []string{
 		renderHeader(now),
 		renderOfferings(rec),
+		renderAnchor(anchor),
 		renderProgress(tr),
-		renderReason(rec.Reason),
 	}
 	groups := make([]string, 0, len(regions))
 	for _, r := range regions {
@@ -122,10 +128,10 @@ func backOffOffering(rec Recommendation) string {
 	return detail
 }
 
-// renderProgress renders the read-only trend panel — the streak (from the Engine
-// chain), the frequency direction, the skipped-day count, and the recent body
-// response. It is a compact glance, never a grade; the body-response line is
-// omitted when there is nothing logged.
+// renderProgress renders the read-only trend panel — the workout streak (counted
+// from logged workout days), the frequency direction, the skipped-day count, and
+// the recent body response. It is a compact glance, never a grade; the
+// body-response line is omitted when there is nothing logged.
 func renderProgress(tr Trend) string {
 	var b strings.Builder
 	b.WriteString(emojiProgress)
@@ -139,8 +145,8 @@ func renderProgress(tr Trend) string {
 	return b.String()
 }
 
-// streakLine frames the Engine chain's streak — the build during the early ramp,
-// the count once it holds — never a hollow "0-day streak".
+// streakLine frames the workout streak — the build during the early ramp, the
+// count once it holds — never a hollow "0-day streak".
 func streakLine(streak int) string {
 	if streak <= 0 {
 		return "Building — no active streak yet"
@@ -197,14 +203,44 @@ func bodyResponseLine(signals []BodySignal) string {
 	return "Body: " + strings.Join(parts, " · ")
 }
 
-// renderReason renders the deterministic one-line reason under its header. An
-// empty reason drops the whole region (Render omits it).
-func renderReason(reason string) string {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
+// renderAnchor renders the daily floor as one ` · `-joined line — each item with
+// the count that applies to the current program week, then the derived week
+// itself, so the ramp is visible as it happens. It is inventory, not a grade: the
+// numbers are shown and compared to nothing. A program that defines no anchor
+// items renders "" and Render drops the whole region rather than printing an
+// empty label.
+func renderAnchor(a Anchor) string {
+	if len(a.Items) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s **Why** — %s", emojiReason, reason)
+	parts := make([]string, 0, len(a.Items))
+	for _, item := range a.Items {
+		if line := anchorItemLine(item); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s **Daily Anchor** · %s — week %d", emojiAnchor, strings.Join(parts, " · "), a.Week)
+}
+
+// anchorItemLine renders one anchor item — its name, its current-week target
+// when the program gives one, and its mode in parentheses ("accumulate" marks a
+// movement done in small sets through the day). An unnamed item renders "" so
+// the line never carries a bare number.
+func anchorItemLine(item AnchorLine) string {
+	name := strings.TrimSpace(item.Name)
+	if name == "" {
+		return ""
+	}
+	if item.Target > 0 {
+		name += fmt.Sprintf(" %d", item.Target)
+	}
+	if mode := strings.TrimSpace(item.Mode); mode != "" {
+		name += fmt.Sprintf(" (%s)", mode)
+	}
+	return name
 }
 
 // bulletLine prefixes a panel line with the bullet mark.

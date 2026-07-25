@@ -454,13 +454,15 @@ func downshiftCard(prog Program) Card {
 }
 
 // restCard is the generic recovery/mobility session used when a program has no
-// recovery card of its own.
+// recovery card of its own. The movements are active — mobility through a range
+// you control, not passive end-range stretching, which a loose joint does not
+// need and can be destabilized by.
 func restCard() Card {
 	return Card{
 		ID:        "rest",
 		Name:      "Recovery + mobility",
 		Load:      LoadNone,
-		Movements: []string{"gentle mobility", "easy walk", "light stretching"},
+		Movements: []string{"gentle mobility", "easy walk", "joint-control drills"},
 	}
 }
 

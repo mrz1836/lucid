@@ -248,6 +248,109 @@ func TestWorkout_Log_BarePainFlag(t *testing.T) {
 	assert.EqualValues(t, router.PainFlagLevel, states[0].Payload["pain"])
 }
 
+// --- The daily anchor -------------------------------------------------------
+
+// singleWorkout reads back the one workout event a capture wrote.
+func singleWorkout(t *testing.T, home string) observations.Event {
+	t.Helper()
+	workouts := eventsOfKind(readObsEvents(t, home), observations.KindWorkout)
+	require.Len(t, workouts, 1)
+	return workouts[0]
+}
+
+// TestWorkout_Log_AnchorCLI: --anchor alone logs today's daily floor — one
+// workout event carrying the marker, no session fields, no body parts.
+func TestWorkout_Log_AnchorCLI(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log", "--anchor")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Logged workout as `")
+
+	w := singleWorkout(t, home)
+	assert.Equal(t, true, w.Payload["anchor"])
+	assert.NotContains(t, w.Payload, "body_parts")
+	assert.NotContains(t, w.Payload, "parse", "an anchor is content, not a partial capture")
+}
+
+// TestWorkout_Log_AnchorItemsCLI: repeatable --anchor-item records the counts the
+// user has, a bare item records no count, and the flag implies the marker.
+func TestWorkout_Log_AnchorItemsCLI(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log",
+		"--anchor-item", "squats:55", "--anchor-item", "core:50", "--anchor-item", "easy push-ups")
+	require.NoError(t, err)
+
+	w := singleWorkout(t, home)
+	assert.Equal(t, true, w.Payload["anchor"], "naming items reports the floor was done")
+	raw, ok := w.Payload["anchor_items"].([]any)
+	require.True(t, ok)
+	require.Len(t, raw, 3)
+
+	first, ok := raw[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "squats", first["name"])
+	assert.EqualValues(t, 55, first["count"])
+
+	third, ok := raw[2].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "easy push-ups", third["name"], "a multi-word item is one value, never comma-split")
+	assert.NotContains(t, third, "count")
+}
+
+// TestWorkout_Log_AnchorMixedWithSpokenRejected: --anchor is a content flag, so
+// combining it with a spoken drop is rejected exactly like any other — spoken or
+// structured, never both.
+func TestWorkout_Log_AnchorMixedWithSpokenRejected(t *testing.T) {
+	enableWorkoutKinds(t)
+	for _, args := range [][]string{
+		{"workout", "log", "--anchor", "did", "my", "anchor"},
+		{"workout", "log", "--anchor-item", "squats:55", "--text", "did my anchor"},
+	} {
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not both")
+	}
+}
+
+// TestWorkout_Log_AnchorItemBadCountRejected: a non-numeric or negative count is
+// a usage error, never clamped and never silently dropped.
+func TestWorkout_Log_AnchorItemBadCountRejected(t *testing.T) {
+	enableWorkoutKinds(t)
+	cases := map[string]string{
+		"squats:many": "must be a number",
+		"squats:-5":   "must be zero or more",
+		":55":         "is missing an item name",
+	}
+	for value, want := range cases {
+		t.Run(value, func(t *testing.T) {
+			_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log", "--anchor-item", value)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), want)
+		})
+	}
+}
+
+// TestParseAnchorItemFlags covers the splitter directly: a bare name carries no
+// count, a repeated name merges under its first spelling with the last stated
+// count winning, blanks are dropped, and an explicit zero is a stated count. A
+// count of 55 is an ordinary tally, not an out-of-range 0-10 reading.
+func TestParseAnchorItemFlags(t *testing.T) {
+	got, err := parseAnchorItemFlags([]string{"squats:55", " core ", "", "Squats:60", "planks:0"})
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	assert.Equal(t, router.AnchorCount{Name: "squats", Count: 60, HasCount: true}, got[0],
+		"a repeated item merges under its first spelling, last stated count winning")
+	assert.Equal(t, router.AnchorCount{Name: "core"}, got[1])
+	assert.Equal(t, router.AnchorCount{Name: "planks", Count: 0, HasCount: true}, got[2],
+		"an explicit zero is a stated count, not an absent one")
+
+	kept, err := parseAnchorItemFlags([]string{"squats:55", "squats"})
+	require.NoError(t, err)
+	require.Len(t, kept, 1)
+	assert.Equal(t, router.AnchorCount{Name: "squats", Count: 55, HasCount: true}, kept[0],
+		"a bare re-entry never erases a count already given")
+}
+
 // TestWorkout_Log_DisabledKindRejectedCLI: on a fresh Ledger (workout kind not
 // enabled) the CLI surfaces the enable hint and writes nothing.
 func TestWorkout_Log_DisabledKindRejectedCLI(t *testing.T) {

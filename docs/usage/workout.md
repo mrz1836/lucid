@@ -80,19 +80,37 @@ byte-stable, mobile-friendly scaffold (bullets, no markdown tables):
 - **Three offerings** — exactly a **Recommended** plan, an **Easier** fallback, and
   a **Back off** door (the pain-signal safety option when one is warranted, else a
   plain "a lighter day is fine" line, so there is always a lowest-effort door).
-- **Progress** — streak (from the Engine chain), frequency direction, skipped-day
-  count, and recent body response — a compact glance, never a grade.
-- **Why** — the deterministic one-liner: why this card today, or why it downshifted.
+- **Daily Anchor** — today's floor and this week's numbers on one line
+  (`⚓ Daily Anchor · squats 50 · core 40 · easy push-ups 20 (accumulate) — week 1`).
+  Each item shows the target for the **current program week**, counted from the
+  program's `start_date`, so a ramp is visible as it happens; `(accumulate)` marks a
+  movement your program says is done in small sets through the day. The line is
+  dropped entirely if your program has no `daily_anchor`.
+- **Progress** — the workout streak, frequency direction, skipped-day count, and
+  recent body response — a compact glance, never a grade.
+
+There is no "Why" line: a recovery veto or a pain hard stop changes *which card is
+recommended* (and shows up in `--json`), it just doesn't argue its case at you.
 
 The model contributes only the leading note; everything else is Lucid's and renders
 identically with the provider down (then the note is simply absent). `--json` emits
-the decided `{recommendation, trend}` projection instead of the rendered text, so a
-harness reads the same pick the message shows.
+the decided `{recommendation, trend, anchor}` projection instead of the rendered
+text, so a harness reads the same pick the message shows.
 
 ```sh
 lucid workout          # today's recommendation, phrased
 lucid workout --json   # the decided recommendation + trend as JSON
 ```
+
+### The streak is your workout record, not the chain's
+
+The streak on this panel counts **your logged workout days** — it is not the night
+chain's streak borrowed from the Engine. A day closes when you log a completed daily
+anchor **or** a session; either one is "did real work today". Today still in progress
+never breaks it, a gap of two or more days ends it, and with nothing logged it reads
+**"Building — no active streak yet"** rather than showing a number you haven't
+earned. Nothing is written back onto an event: the count is recomputed on read, and
+the anchor targets are shown, never scored.
 
 ## Logging a completed session
 
@@ -120,6 +138,26 @@ soreness/pain flag (a bare `--pain knee` records an unquantified flag so the
 recommender can still protect it). Those readings are exactly what the recovery and
 pain guardrails read back on the next recommendation. Capture is inventory only —
 the acknowledgement names what was written and nothing more (no score, no grade).
+
+### Logging the daily anchor
+
+The daily anchor goes through the same verb — `lucid anchor` is the *milestone*
+anchor (a sobriety or gate date), a different thing entirely:
+
+```sh
+lucid workout log --anchor                                  # did the anchor today
+lucid workout log --anchor --anchor-item squats:55 --anchor-item core:50
+lucid workout log "did my daily anchor, 55 squats and 50 core"   # spoken, same result
+```
+
+Saying you did it is enough — that closes the day for the streak. `--anchor-item
+name:count` (repeatable) records the counts when you have them, so you can watch the
+ramp later; nothing compares them to the week's target and nothing marks a day short.
+A bare `--anchor-item squats` records the item with no count. Like every other content
+flag, `--anchor` can't be combined with a spoken drop — it's spoken *or* structured.
+
+An anchor is not a session: it writes no body parts, so it opens no recovery window
+and never changes tomorrow's card.
 
 ## The daily slot
 

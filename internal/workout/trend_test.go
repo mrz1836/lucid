@@ -16,11 +16,13 @@ import (
 // counts backward from this instant.
 const trendNow = "2026-07-20T12:00:00Z"
 
-// --- Streak / adherence come straight from the Engine fold. ---
+// --- Adherence comes from the Engine fold; the streak does not. ---
 
-// TestBuildTrendStreakFromMetrics proves the streak and adherence are copied from
-// the Engine metrics, never recomputed as a score on workout events.
-func TestBuildTrendStreakFromMetrics(t *testing.T) {
+// TestBuildTrendAdherenceFromMetricsStreakIsNot proves adherence is still copied
+// from the Engine metrics while the streak is the workout record's own: a live
+// Engine chain streak with no logged workout day yields 0, never a borrowed
+// number.
+func TestBuildTrendAdherenceFromMetricsStreakIsNot(t *testing.T) {
 	t.Parallel()
 
 	tr := BuildTrend(TrendInput{
@@ -29,8 +31,100 @@ func TestBuildTrendStreakFromMetrics(t *testing.T) {
 		Loc:     time.UTC,
 	})
 
-	assert.Equal(t, 7, tr.Streak, "streak is the Engine chain's, copied from metrics")
 	assert.InDelta(t, 0.8, tr.Adherence, 1e-9, "adherence is copied from the Engine fold")
+	assert.Equal(t, 0, tr.Streak, "the workout streak is never borrowed from the Engine chain")
+}
+
+// --- The real workout streak, counted from logged days. ---
+
+// TestBuildTrendWorkoutStreak covers the streak the panel shows: zero with no
+// logged day, today counted when today carries a workout, yesterday keeping the
+// run alive while today is still in progress, a two-day gap ending it, and an
+// anchor-only day closing a day exactly like a full session.
+func TestBuildTrendWorkoutStreak(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		workouts []observations.Event
+		want     int
+		reason   string
+	}{{
+		name:   "no logged workout day is an honest zero",
+		want:   0,
+		reason: "nothing logged yields 0, which the panel renders as the build",
+	}, {
+		name:     "a workout today counts today",
+		workouts: []observations.Event{workoutOn("2026-07-20")},
+		want:     1,
+		reason:   "today carries a workout, so the run anchors on today",
+	}, {
+		name: "a run ending today counts every consecutive day",
+		workouts: []observations.Event{
+			workoutOn("2026-07-20"),
+			workoutOn("2026-07-19"),
+			workoutOn("2026-07-18"),
+		},
+		want:   3,
+		reason: "three consecutive days ending today",
+	}, {
+		name:     "yesterday alone keeps the run alive — today is in progress",
+		workouts: []observations.Event{workoutOn("2026-07-19")},
+		want:     1,
+		reason:   "a day is not scored against the user before it is over",
+	}, {
+		name: "a run ending yesterday still holds",
+		workouts: []observations.Event{
+			workoutOn("2026-07-19"),
+			workoutOn("2026-07-18"),
+		},
+		want:   2,
+		reason: "the run anchors on yesterday when today is still open",
+	}, {
+		name:     "a two-day gap ends the run",
+		workouts: []observations.Event{workoutOn("2026-07-18"), workoutOn("2026-07-17")},
+		want:     0,
+		reason:   "neither today nor yesterday carries a workout",
+	}, {
+		name: "an older run does not resume after a break",
+		workouts: []observations.Event{
+			workoutOn("2026-07-20"),
+			// 07-19 missing — the run stops here
+			workoutOn("2026-07-18"),
+			workoutOn("2026-07-17"),
+		},
+		want:   1,
+		reason: "only the consecutive run ending today counts",
+	}, {
+		name:     "an anchor-only day closes the day like a session",
+		workouts: []observations.Event{anchorOn("2026-07-20"), anchorOn("2026-07-19")},
+		want:     2,
+		reason:   "a completed daily anchor is a workout event, so it closes the day",
+	}, {
+		name:     "an anchor and a session on one day count once",
+		workouts: []observations.Event{anchorOn("2026-07-20"), workoutOn("2026-07-20")},
+		want:     1,
+		reason:   "the streak counts distinct days, not events",
+	}, {
+		name:     "a future-dated workout cannot start a run",
+		workouts: []observations.Event{workoutOn("2026-07-22")},
+		want:     0,
+		reason:   "a log ahead of the clock never inflates the streak",
+	}}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := BuildTrend(TrendInput{
+				Workouts: tc.workouts,
+				Metrics:  engine.Metrics{CurrentStreak: 99}, // must never leak into the streak
+				Now:      mustTime(t, trendNow),
+				Loc:      time.UTC,
+			})
+			assert.Equal(t, tc.want, tr.Streak, tc.reason)
+		})
+	}
 }
 
 // --- Missing data: an honest empty trend. ---
@@ -287,6 +381,17 @@ func workoutOn(date string) observations.Event {
 		Kind:       observations.KindWorkout,
 		OccurredAt: date + "T12:00:00Z",
 		Payload:    map[string]any{"type": "session"},
+	}
+}
+
+// anchorOn builds the daily-anchor form of a KindWorkout event: the same kind,
+// marked with the anchor payload flag and carrying no body parts, so it closes a
+// day for the streak without opening a recovery window.
+func anchorOn(date string) observations.Event {
+	return observations.Event{
+		Kind:       observations.KindWorkout,
+		OccurredAt: date + "T12:00:00Z",
+		Payload:    map[string]any{"anchor": true},
 	}
 }
 
