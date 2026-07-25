@@ -376,7 +376,7 @@ func ExampleProgram() Program {
 			},
 			{
 				ID: "recovery", Name: "Recovery + mobility", Focus: nil, Load: LoadNone,
-				Movements: []string{"gentle mobility", "easy walk", "light stretching"},
+				Movements: []string{"gentle mobility", "easy walk", "joint-control drills"},
 			},
 		},
 		RecoveryHours: map[string]int{"back": 48, "chest": 48, "legs": 48, "core": 24, "shoulders": 48},
