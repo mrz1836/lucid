@@ -17,15 +17,17 @@ import (
 // spoken form is the positional drop or --text. They are declared as constants
 // so the "spoken vs structured, not both" guard can enumerate them in one place.
 const (
-	flagWType      = "type"
-	flagWMovements = "movements"
-	flagWDuration  = "duration"
-	flagWRPE       = "rpe"
-	flagWParts     = "parts"
-	flagWSoreness  = "soreness"
-	flagWPain      = "pain"
-	flagWNotes     = "notes"
-	flagWText      = "text"
+	flagWType       = "type"
+	flagWMovements  = "movements"
+	flagWDuration   = "duration"
+	flagWRPE        = "rpe"
+	flagWParts      = "parts"
+	flagWSoreness   = "soreness"
+	flagWPain       = "pain"
+	flagWAnchor     = "anchor"
+	flagWAnchorItem = "anchor-item"
+	flagWNotes      = "notes"
+	flagWText       = "text"
 )
 
 // Flags on `lucid workout fire`. --deliver actually sends; the default is a
@@ -241,18 +243,23 @@ func runWorkout(cmd *cobra.Command) error {
 // newWorkoutLogCmd wires `lucid workout log`: capture a completed session two
 // ways. A spoken drop (positional text or --text) is extracted by the Workout
 // Extraction agent — the voice-first default. The structured flags
-// (--type/--duration/--rpe/--parts/--soreness/--pain/--notes) are the precise
-// alternative for guided or backfill capture. The two forms are mutually
-// exclusive so a mixed invocation never silently drops half the input.
+// (--type/--duration/--rpe/--parts/--soreness/--pain/--anchor/--anchor-item/
+// --notes) are the precise alternative for guided or backfill capture. The two
+// forms are mutually exclusive so a mixed invocation never silently drops half
+// the input. The daily anchor rides this same verb (the top-level `lucid anchor`
+// is the milestone anchor, a different concept) so there is exactly one workout
+// capture verb.
 //
 //	lucid workout log "did pull, shoulder felt fine, ~50 min"
 //	lucid workout log --type push --duration 45 --rpe 7 --parts chest,shoulders
 //	lucid workout log --type legs --soreness quads:5 --pain knee:7
+//	lucid workout log --anchor --anchor-item squats:55 --anchor-item core:50
 func newWorkoutLogCmd() *cobra.Command {
 	var (
-		typ, notes, text                 string
-		duration, rpe                    int
-		parts, movements, soreness, pain []string
+		typ, notes, text                              string
+		duration, rpe                                 int
+		parts, movements, soreness, pain, anchorItems []string
+		anchor                                        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "log [drop...]",
@@ -276,6 +283,7 @@ func newWorkoutLogCmd() *cobra.Command {
 			req, err := buildWorkoutLogRequest(cmd, workoutLogFlags{
 				typ: typ, movements: movements, duration: duration, rpe: rpe,
 				parts: parts, notes: notes, soreness: soreness, pain: pain,
+				anchor: anchor, anchorItems: anchorItems,
 			})
 			if err != nil {
 				return err
@@ -296,6 +304,8 @@ func newWorkoutLogCmd() *cobra.Command {
 	f.StringSliceVar(&parts, flagWParts, nil, "Body parts trained (comma-separated)")
 	f.StringSliceVar(&soreness, flagWSoreness, nil, "Per-part soreness as part:level, e.g. quads:5")
 	f.StringSliceVar(&pain, flagWPain, nil, "Per-part pain as part:level, or a bare part to flag it")
+	f.BoolVar(&anchor, flagWAnchor, false, "Log today's daily anchor as done")
+	f.StringArrayVar(&anchorItems, flagWAnchorItem, nil, "Daily-anchor item as name:count, or a bare name (repeatable)")
 	f.StringVar(&notes, flagWNotes, "", "Free-text note kept verbatim on the record")
 	f.StringVar(&text, flagWText, "", "Spoken drop to extract instead of structured flags")
 	registerProvenanceFlags(cmd)
@@ -305,10 +315,11 @@ func newWorkoutLogCmd() *cobra.Command {
 // workoutLogFlags carries the structured `log` flag values into the request
 // builder, keeping the RunE closure small.
 type workoutLogFlags struct {
-	typ                              string
-	movements, parts, soreness, pain []string
-	duration, rpe                    int
-	notes                            string
+	typ                                           string
+	movements, parts, soreness, pain, anchorItems []string
+	duration, rpe                                 int
+	anchor                                        bool
+	notes                                         string
 }
 
 // buildWorkoutLogRequest validates the structured flags and assembles the
@@ -320,6 +331,7 @@ func buildWorkoutLogRequest(cmd *cobra.Command, in workoutLogFlags) (router.Work
 		Movements:   in.movements,
 		DurationMin: in.duration,
 		BodyParts:   in.parts,
+		Anchor:      in.anchor,
 		Notes:       in.notes,
 		Now:         clockNow(),
 		Harness:     obsHarness(cmd),
@@ -342,7 +354,58 @@ func buildWorkoutLogRequest(cmd *cobra.Command, in workoutLogFlags) (router.Work
 		return router.WorkoutLogRequest{}, err
 	}
 	req.BodyStates = states
+	items, err := parseAnchorItemFlags(in.anchorItems)
+	if err != nil {
+		return router.WorkoutLogRequest{}, err
+	}
+	req.AnchorItems = items
 	return req, nil
+}
+
+// parseAnchorItemFlags folds the repeatable --anchor-item values into per-item
+// anchor counts. Each value is `name:count` (a bare `name` records the item with
+// no count — the honest shape when the user did the movement without counting).
+// Repeated names merge with the last count winning, so a corrected re-entry does
+// not double-record the item. Unlike the 0–10 body-state scales a count is an
+// ordinary tally, bounded only by being a non-negative whole number.
+func parseAnchorItemFlags(raw []string) ([]router.AnchorCount, error) {
+	byName := map[string]*router.AnchorCount{}
+	var order []string
+	for _, value := range raw {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		head, tail, hasColon := strings.Cut(value, ":")
+		name := strings.TrimSpace(head)
+		if name == "" {
+			return nil, fmt.Errorf("lucid workout log: --%s %q is missing an item name", flagWAnchorItem, value)
+		}
+		item := router.AnchorCount{Name: name}
+		if tail = strings.TrimSpace(tail); hasColon && tail != "" {
+			n, err := strconv.Atoi(tail)
+			if err != nil {
+				return nil, fmt.Errorf("lucid workout log: --%s count in %q must be a number", flagWAnchorItem, value)
+			}
+			if n < 0 {
+				return nil, fmt.Errorf("lucid workout log: --%s count in %q must be zero or more", flagWAnchorItem, value)
+			}
+			item.Count, item.HasCount = n, true
+		}
+		key := strings.ToLower(name)
+		if prev, seen := byName[key]; seen {
+			*prev = item
+			continue
+		}
+		stored := item
+		byName[key] = &stored
+		order = append(order, key)
+	}
+	out := make([]router.AnchorCount, 0, len(order))
+	for _, key := range order {
+		out = append(out, *byName[key])
+	}
+	return out, nil
 }
 
 // runWorkoutLogFromText runs the spoken capture path: build the model backend
@@ -372,7 +435,10 @@ func runWorkoutLogFromText(cmd *cobra.Command, r *router.Router, text string) er
 // set, so a spoken drop combined with structured flags is rejected rather than
 // silently dropping one form.
 func workoutContentFlagsChanged(cmd *cobra.Command) bool {
-	for _, name := range []string{flagWType, flagWMovements, flagWDuration, flagWRPE, flagWParts, flagWSoreness, flagWPain, flagWNotes} {
+	for _, name := range []string{
+		flagWType, flagWMovements, flagWDuration, flagWRPE, flagWParts,
+		flagWSoreness, flagWPain, flagWAnchor, flagWAnchorItem, flagWNotes,
+	} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}
