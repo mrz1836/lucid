@@ -30,13 +30,26 @@ type BodyStateInput struct {
 	Pain     *int
 }
 
+// AnchorCount is one daily-anchor item as the user reported it: the item's name
+// and, when they gave one, the count they did. HasCount separates "I did 55" from
+// "I did squats" — an unstated count is recorded as unstated rather than as a
+// fabricated zero, the same discipline the body-state pointers follow. The count
+// is inventory: nothing compares it to the program's week target (§0).
+type AnchorCount struct {
+	Name     string
+	Count    int
+	HasCount bool
+}
+
 // WorkoutLogRequest is one completed-session capture from the structured path
 // (`lucid workout log --type … --parts …`). Every field is optional — a bare
-// `--type push` is a valid "I trained" record — so the router writes only the
-// stated fields, and an entirely empty request still captures a partial workout
-// event (capture never blocks). RPE is nil when unstated. Harness/Agent/Model/
-// Channel are the optional relay provenance stamped into payload.provenance,
-// exactly as an observation capture stamps it.
+// `--type push` is a valid "I trained" record, and so is a bare Anchor ("did the
+// anchor") — so the router writes only the stated fields, and an entirely empty
+// request still captures a partial workout event (capture never blocks). RPE is
+// nil when unstated. Anchor marks the event as a completed daily anchor and
+// AnchorItems carries any per-item counts. Harness/Agent/Model/Channel are the
+// optional relay provenance stamped into payload.provenance, exactly as an
+// observation capture stamps it.
 type WorkoutLogRequest struct {
 	Type        string
 	Movements   []string
@@ -44,6 +57,8 @@ type WorkoutLogRequest struct {
 	RPE         *int
 	BodyParts   []string
 	BodyStates  []BodyStateInput
+	Anchor      bool
+	AnchorItems []AnchorCount
 	Notes       string
 	Now         time.Time
 	Harness     string
@@ -188,6 +203,12 @@ func workoutParseResult(req WorkoutLogRequest, now time.Time) observations.Parse
 	if bp := trimStrings(req.BodyParts); len(bp) > 0 {
 		payload["body_parts"] = bp
 	}
+	if anchored, items := anchorPayload(req); anchored {
+		payload["anchor"] = true
+		if len(items) > 0 {
+			payload["anchor_items"] = items
+		}
+	}
 	if n := strings.TrimSpace(req.Notes); n != "" {
 		payload["note"] = n
 	}
@@ -204,6 +225,34 @@ func workoutParseResult(req WorkoutLogRequest, now time.Time) observations.Parse
 		Refs:       map[string]any{},
 		Partial:    partial,
 	}
+}
+
+// anchorPayload folds a request's daily-anchor fields into the marker and the
+// per-item inventory the workout event carries (frozen envelope: a marker inside
+// payload, never a new top-level field or a third kind). Naming any item is itself
+// a report that the floor was done, so counts imply the marker. Each item is
+// recorded with its count when one was given and without it when none was, so a
+// bare item name stays honest inventory rather than a fabricated zero — and
+// nothing here compares a count to the program's week target (§0).
+//
+// An anchor contributes no body parts of its own: it is the daily floor, not a
+// session, so the recovery guardrail finds nothing to protect and the next day's
+// card is unaffected. Parts still ride along when the same capture also states a
+// session's, which is a real load and should open a real window.
+func anchorPayload(req WorkoutLogRequest) (bool, []map[string]any) {
+	items := make([]map[string]any, 0, len(req.AnchorItems))
+	for _, item := range req.AnchorItems {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		entry := map[string]any{"name": name}
+		if item.HasCount {
+			entry["count"] = item.Count
+		}
+		items = append(items, entry)
+	}
+	return req.Anchor || len(items) > 0, items
 }
 
 // bodyStateParseResult builds a body_state event for one reading. It reports
@@ -233,14 +282,17 @@ func bodyStateParseResult(bs BodyStateInput, now time.Time) (observations.ParseR
 // workoutLogFromExtraction folds an extraction into the structured request the
 // router writes. Quantified soreness/pain readings become body-state inputs;
 // a pain flag with no number and no existing reading records at PainFlagLevel so
-// the recommender can protect the part. A fully-degraded extraction (no fields)
-// keeps the raw drop as the note, so a spoken capture is never lost.
+// the recommender can protect the part; a named daily anchor rides through as the
+// marker plus whatever counts the drop offered. A fully-degraded extraction (no
+// fields) keeps the raw drop as the note, so a spoken capture is never lost.
 func workoutLogFromExtraction(ext workout.Result, req WorkoutLogTextRequest) WorkoutLogRequest {
 	out := WorkoutLogRequest{
 		Type:        ext.Type,
 		DurationMin: ext.DurationMin,
 		RPE:         ext.RPE,
 		BodyParts:   ext.BodyParts,
+		Anchor:      ext.Anchor,
+		AnchorItems: anchorCounts(ext.AnchorItems),
 		Notes:       ext.Notes,
 		Now:         req.Now,
 		Harness:     req.Harness,
@@ -266,7 +318,12 @@ func workoutLogFromExtraction(ext workout.Result, req WorkoutLogTextRequest) Wor
 
 // workoutRequestEmpty reports whether a request carries no session fields — the
 // signal to fall back to the raw drop so a degraded spoken capture is not lost.
+// A daily anchor is content: "did the anchor" is a complete capture on its own,
+// so an anchor-only request never takes the empty/partial path.
 func workoutRequestEmpty(req WorkoutLogRequest) bool {
+	if anchored, _ := anchorPayload(req); anchored {
+		return false
+	}
 	return strings.TrimSpace(req.Type) == "" &&
 		req.DurationMin == 0 &&
 		req.RPE == nil &&
@@ -274,6 +331,20 @@ func workoutRequestEmpty(req WorkoutLogRequest) bool {
 		len(trimStrings(req.Movements)) == 0 &&
 		strings.TrimSpace(req.Notes) == "" &&
 		len(req.BodyStates) == 0
+}
+
+// anchorCounts maps the extraction agent's anchor items to the router's own,
+// keeping the "a count was stated" distinction the agent already made rather than
+// collapsing an unstated count to zero.
+func anchorCounts(in []workout.AnchorCount) []AnchorCount {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]AnchorCount, 0, len(in))
+	for _, item := range in {
+		out = append(out, AnchorCount{Name: item.Name, Count: item.Count, HasCount: item.HasCount})
+	}
+	return out
 }
 
 // hasBodyStatePart reports whether a part already has a body-state reading, so a
