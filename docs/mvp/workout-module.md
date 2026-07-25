@@ -32,12 +32,17 @@ three lines the companion draws:
    writes only the warmth around it (the [`../adr/0009-workout-companion.md`](../adr/0009-workout-companion.md)
    decision). A model can never talk the user into leg day twice in a
    row, because it never owns the pick.
-2. **The streak is the Engine chain's, not a score on an event.** The
-   workout and body-state observations carry no streak, quota, target,
-   or grade (§0). The adherence/streak the surface shows is read from
-   the Engine chain ([`engine-module.md`](engine-module.md) `status.json`
-   / `metrics`); the trend is a **read-only projection**, never written
-   back onto an event.
+2. **The streak is a projection, not a score on an event.** The workout
+   and body-state observations carry no streak, quota, target, or grade
+   (§0) — not in the schema, not in an ack. The progress panel's workout
+   streak is **counted on read** from the logical days that carry a logged
+   workout (a completed daily anchor *or* a session), and adherence is read
+   from the Engine chain ([`engine-module.md`](engine-module.md)
+   `status.json` / `metrics`). Both are **read-only projections**, computed
+   on demand and never written back onto an event. Counting days is not
+   teeth: there is no quota, no makeup obligation, and no escalation —
+   a workout practice that earns teeth becomes an Engine link through a
+   Gate, a separate deliberate act.
 3. **It surfaces, it never nags.** The recommendation rides one
    configurable daily slot and an on-demand command. A skipped day is a
    skipped day: no "you didn't work out", no makeup obligation, no
@@ -58,12 +63,13 @@ model phrasing the companion already sanctioned.
    The `workout` and `body_state` kinds carry no streak, quota, target,
    score, or escalation — not in the schema, not in any ack, not in the
    daily message. An ack is "logged" plus the id.
-2. **The streak comes from the Engine chain.** The trend projection
-   reads streak/adherence from the Engine fold
-   ([`engine-module.md`](engine-module.md) `metrics` / `status.json`); it
-   stores nothing back. If a workout practice ever deserves teeth it
-   becomes an Engine link through a Gate (§0), a separate deliberate act
-   — the recommender never grows teeth of its own.
+2. **The trend stores nothing back.** The projection counts the workout
+   streak from the logged workout days it is handed, and reads adherence
+   from the Engine fold ([`engine-module.md`](engine-module.md) `metrics` /
+   `status.json`); it stores nothing back, and no count ever becomes a
+   field on an event. If a workout practice ever deserves teeth it becomes
+   an Engine link through a Gate (§0), a separate deliberate act — the
+   recommender never grows teeth of its own.
 3. **Sanctuary boundaries hold, in both directions.** The two new kinds
    live under `~/.lucid/observations/`; no agent context slice includes
    the observation, registry, or engine trees, nor any projection over
@@ -213,12 +219,12 @@ Field semantics, binding:
 | Field | Meaning |
 |-------|---------|
 | `program_id`, `label` | Stable id + human label. |
-| `start_date` | Civil `YYYY-MM-DD` the program is anchored to. The week index (`daily_anchor.targets_by_week`) and any dated calendar override count from here at the chain's rollover boundary. Absent → week 1 always. |
+| `start_date` | Civil `YYYY-MM-DD` the program is anchored to. The week index (`daily_anchor.targets_by_week`) and any dated calendar override count from here at the chain's rollover boundary. Absent or unparseable → week 1 always; a `now` on or before `start_date` is week 1 (never week 0 or negative). |
 | `goals`, `equipment`, `session_minutes` | Free-text context the phrasing call may read; the recommender uses `equipment`/`session_minutes` only to veto a card the operator cannot run. |
 | `rotation[]` | The weekly rotation: one card id per weekday. This is the default calendar; a program may also carry an optional dated `calendar[]` (`{date, card}`) that overrides the weekday rotation for specific days. |
 | `cards[]` | The session library. Each card has an `id`, `name`, `focus[]` (the body parts it loads — the key the recovery guardrail reads), a `load` (`light`/`moderate`/`hard`), `movements[]`, and an optional `easier` variant used as the message's fallback offering. A `recovery`/`mobility` card carries `load: "none"`. |
 | `recovery_hours` | Per-body-part minimum hours before that part may take a **non-light** load again. The recovery guardrail (below) reads this. |
-| `daily_anchor` | The "something every day" floor — inventory only, never a target the system grades. `items[]` are the anchor movements; `mode: "accumulate"` marks a movement done in small sets through the day; `targets_by_week` overrides item targets for a given 1-indexed program week. |
+| `daily_anchor` | The "something every day" floor — **surfaced on the card, never graded**. `items[]` are the anchor movements; each `target` is the count the card *shows* for today, not a bar the system scores the user against; `mode: "accumulate"` marks a movement done in small sets through the day; `targets_by_week` overrides item targets for a given 1-indexed program week (§"The daily-anchor projection"). Completion is self-reported inventory: the surface records that the anchor was done, and any counts given with it, and compares them to nothing. |
 | `guardrails` | `avoid_movements[]` and `provocative_positions[]` are never recommended; `no_strengthen[]` names parts the program deliberately does not load. All three are generic slots the operator fills with their real specifics. |
 | `pain_flag_threshold` | The `body_state.pain` value (0–10) at or above which the recommender emits a hard-stop and downshifts (default 5). |
 
@@ -237,7 +243,7 @@ new top-level field.
 
 | Kind | Payload (schema 1) | Convention |
 |------|--------------------|------------|
-| `workout` | `type`, `movements?`, `duration_min?`, `rpe?`, `body_parts?`, `note?` | `type` free text (the card name or a free description); `rpe` 0–10 (session RPE, the standard effort scale); `body_parts[]` free text matched to the program's `focus` vocabulary when unambiguous. All optional — a bare `type` is a valid event ("I trained"). |
+| `workout` | `type`, `movements?`, `duration_min?`, `rpe?`, `body_parts?`, `anchor?`, `anchor_items?`, `note?` | `type` free text (the card name or a free description); `rpe` 0–10 (session RPE, the standard effort scale); `body_parts[]` free text matched to the program's `focus` vocabulary when unambiguous. `anchor: true` marks the event as a completed daily anchor and `anchor_items` carries the per-item counts when the user gave any (§"Capture"). All optional — a bare `type` is a valid event ("I trained"), and so is a bare `anchor` ("did the anchor"). |
 | `body_state` | `body_part`, `soreness?`, `pain?`, `note?` | `body_part` free text, matched to the injury registry when unambiguous; `soreness` 0–10 (ordinary training soreness); `pain` 0–10 (the clinical NRS, the same scale as `pain`) — the signal the hard-stop reads. A `pain` at or above the program threshold is a back-off signal, never a grade. |
 
 These are **capturable** kinds: both aliases route the one
@@ -268,10 +274,15 @@ Recommendation{
   Primary  Card          // today's recommended plan
   Fallback Card          // the easier variant — always present
   HardStop *SafetyOption // set only when a pain signal warrants backing off
-  Reason   string        // one deterministic line: why this card today
+  Reason   string        // one deterministic line: why this card today (not rendered)
   Vetoes   []string      // cards/parts vetoed this run and why (for tests + --json)
 }
 ```
+
+`Reason` and `Vetoes` are the decision's **audit trail**, not message copy: they
+are asserted by the recommender's table tests and emitted by `--json` so a
+harness can read *why* the pick landed where it did. Neither is rendered — the
+message carries no prose "Why" region (§"The message scaffold").
 
 **Rules** (deterministic, in order):
 
@@ -311,14 +322,66 @@ Recommendation{
 Every path yields a Primary, a Fallback, and a Reason; `HardStop` is the
 only optional field. The core makes zero model calls on every path.
 
+## The daily-anchor projection
+
+`BuildAnchor` is the second **pure** projection — zero model calls, zero
+disk I/O — turning the loaded program plus `now` into the anchor the card
+shows today:
+
+```text
+Anchor{
+  Week  int          // 1-indexed program week, derived from start_date
+  Items []AnchorLine // {Name, Target, Mode} — one per daily_anchor item
+}
+```
+
+**Week derivation.** The program week is counted from `start_date` at the
+Ledger's rollover boundary (`LogicalBaseDate`, the same civil-day resolution
+every other surface uses), so the week advances at the boundary rather than
+at midnight-local:
+
+1. No `start_date`, or one that does not parse → **week 1**.
+2. `now` on or before `start_date` → **week 1**; the index never goes below 1.
+3. Otherwise `week = ⌊days since start ÷ 7⌋ + 1`, so days 0–6 are week 1,
+   days 7–13 are week 2, and so on.
+
+**Target selection.** For each item the effective target is the one named by
+the **highest** `targets_by_week` entry whose week index is ≤ the current
+week, falling back to the item's own `target` when no entry names it. Two
+consequences, both intended: an undefined intermediate week **inherits** the
+last defined one (a program may specify weeks 1 and 3 and skip 2), and a
+program that runs past its last defined week **holds** at that last target
+instead of falling back to the base or off a cliff. A ramp that ends is a
+plateau, not a reset.
+
+The projection carries no completion state and no comparison. It answers
+only "what does today's floor look like" — the card shows it, and §"Capture"
+records what the user says they did, side by side, ungraded.
+
 ## The trend / progress projection
 
 `BuildTrend` is a **read-only projection** over the Ledger plus the
 Engine fold — nothing is written back onto any event (P3 sanctuary):
 
-* **Streak / adherence** — read from the Engine `metrics`
-  (`CurrentStreak` / the chain fold), never recomputed as a score on
-  workout events.
+* **Workout streak** — the consecutive run of recent logical days that
+  carry a logged workout, counted on read from the `workout` events the
+  caller passes in. It is the surface's own honest number, **not** the
+  Engine chain's `CurrentStreak`: the chain defends the night close-out, a
+  different practice, and borrowing its count printed a number the workout
+  record had not earned. Three rules make it honest:
+  * **A day closes on a completed daily anchor *or* a logged session.**
+    Both are a `workout` event, so both land in the same day set; the
+    low-friction anchor is the ordinary way a day closes, and a session
+    day counts on its own even when the anchor was never logged separately.
+  * **Today in progress is not a break.** The count anchors on today when
+    today already carries a workout, and otherwise on yesterday — a day is
+    not scored against the user before it is over. A gap of two or more
+    days ends the run.
+  * **Zero is zero.** No logged workout day yields `0`, which the panel
+    renders as "Building — no active streak yet". The surface never shows
+    a borrowed or fabricated number in its place.
+* **Adherence** — still read from the Engine `metrics` (the chain fold),
+  never recomputed as a score on workout events.
 * **Volume / frequency trend** — sessions per week and a simple
   direction (up / flat / down) from the recent `workout` events.
 * **Skipped days** — logical days in range with no `workout` event,
@@ -344,13 +407,46 @@ voice-first stance this follows):
   no storage handle. The router then writes the durable events.
 * **Structured `lucid workout log` (guided / precise backfill).** A
   deterministic command with flags (`--type --duration --rpe --parts
-  --soreness --pain --notes`) and a positional/`--text` free-text form
-  that routes to extraction. No LLM in the flag path.
+  --soreness --pain --notes --anchor --anchor-item`) and a
+  positional/`--text` free-text form that routes to extraction. No LLM in
+  the flag path.
 
 Both paths write `KindWorkout` (and, when soreness/pain are present,
 `KindBodyState`) events through the router's deterministic capture, which
 writes the durable record **first** — a failure leaves nothing
 half-written on disk.
+
+**The daily anchor is captured through the same verb.** `lucid anchor`
+already means the *milestone* anchor (a sobriety or gate date); the daily
+floor is a different concept and stays under `workout`, so there is exactly
+one workout capture verb and no collision:
+
+* **Structured** — `lucid workout log --anchor` records that today's anchor
+  was done. Repeatable `--anchor-item name:count` adds the counts when the
+  user has them (`--anchor-item squats:55 --anchor-item core:50`); a bare
+  `--anchor-item squats` records the item with no count. `--anchor` is
+  **content**, so an anchor-only log is a complete event, not the empty
+  partial path — and, like every other content flag, it may not be combined
+  with a spoken drop (spoken *or* structured, never both).
+* **Spoken** — the same free-text drop, the voice-first default: "did my
+  daily anchor, 55 squats and 50 core" extracts the anchor marker and any
+  per-item counts. The extraction stays generic — it recognizes that a
+  daily anchor was named, never a hardcoded list of item names, which live
+  only in the operator's program.
+
+Both write **one** `KindWorkout` event carrying `payload.anchor: true`, plus
+`payload.anchor_items` when counts were given (frozen envelope: a marker in
+`payload`, never a new top-level field or a third kind). Two properties
+follow, and both are deliberate:
+
+* **A self-report closes the day.** Saying the anchor was done is enough for
+  the day to count toward the streak; per-item counts are recorded as
+  inventory when offered and required for nothing. Grading an off-by-five-reps
+  day as a total miss would be a score on an event, which §0 forbids — and a
+  ramp is watchable without being graded.
+* **An anchor opens no recovery window.** An anchor event carries no
+  `body_parts`, so the recovery guardrail sees nothing to protect and the
+  next day's card is unaffected. The daily floor is not a session.
 
 ## Surfaces — a configurable slot and an on-demand command
 
@@ -388,14 +484,28 @@ tables** — a chat surface renders them as raw text):
      third choice **only** when a pain signal warrants it; on an ordinary
      day this line is the deterministic recovery/mobility option so there
      is always a "less is fine" door.
-* **Trend panel** — the read-only projection: streak (from the chain),
-  frequency direction, skipped-day count, recent body response — a
-  compact panel, never a grade.
-* **Reason** — the deterministic one-liner: why this card today (or why
-  it was downshifted).
+* **Daily Anchor** — today's floor and this week's numbers, one line:
+  `{emoji} **Daily Anchor** · squats 50 · core 40 · easy push-ups 20
+  (accumulate) — week 1`. Each item carries its current-week target and
+  an `(accumulate)` marker when the program says the movement is done in
+  small sets through the day; the trailing `— week N` is the derived
+  program week, so a ramp is visible as it happens rather than guessed at.
+  The region is **dropped entirely** when the program carries no
+  `daily_anchor.items` — a program without a floor shows no empty label.
+* **Trend panel** — the read-only projection: the workout streak, frequency
+  direction, skipped-day count, recent body response — a compact panel,
+  never a grade.
+
+There is **no "Why" region.** A guardrail veto, a recovery downshift, or a
+pain hard stop still changes *which card is recommended* and still shows up
+in the back-off door and in `--json`; what it no longer does is print a
+prose line explaining itself. The three doors are the message: the pick is
+already deterministic, and a sentence justifying it to the user each day was
+chrome, not signal.
+
 The model's phrasing rides in a bounded slot; everything else — the panel,
-the ordering, and the three-offering structure — is Lucid's, and renders
-identically with the model down.
+the anchor line, the ordering, and the three-offering structure — is
+Lucid's, and renders identically with the model down.
 
 The render is held to the voice constraints every Lucid surface obeys:
 hypothesis/offer framing, and **no** coaching-imperative or
@@ -450,11 +560,17 @@ emits a `HardStop` and downshifts), and **missing data** (no recent
 events → plain-calendar fallback). `Recommend` makes zero model calls and
 touches no disk on every path.
 
-**Phase 15 — Trend + render.**
+**Phase 15 — Trend + anchor + render.**
 `BuildTrend` computes with zero and sparse data, stores nothing back, and
-reads the streak from the Engine fold; `Render` is byte-stable, shows
-exactly three offerings, uses no markdown tables, fits under a minute of
-reading, and the guard test asserts zero
+counts the workout streak from logged workout days — zero with no data,
+alive on a yesterday-only log, reset across a two-day gap, closed by an
+anchor-only day exactly like a session day. `BuildAnchor` derives the
+program week from `start_date` (pre-start and absent → week 1, the ramp
+advances, a week past the last defined entry holds) and selects each item's
+effective target. `Render` is byte-stable, shows exactly three offerings,
+renders the anchor region (and drops it when the program has no anchor
+items), carries **no** `**Why**` region on any path, uses no markdown
+tables, fits under a minute of reading, and the guard test asserts zero
 blocklist/coaching-imperative tokens.
 
 **Phase 16 — Capture (structured + spoken).**
@@ -462,7 +578,11 @@ blocklist/coaching-imperative tokens.
 `body_state`) event from both the flag form and the free-text form; the
 extraction agent validates via `provider.Fake` (clean extract,
 malformed → degrade, empty text → zero calls) and imports no Ledger
-package.
+package. `--anchor` writes a `workout` event carrying `payload.anchor`
+(with `payload.anchor_items` when counts are given), a spoken anchor drop
+extracts the same marker, an anchor-only request never takes the empty
+partial path, an anchor combined with a spoken drop is rejected, and an
+anchor event opens no recovery window.
 
 **Phase 17 — Surfaces (command + slot).**
 `lucid workout` prints a rendered recommendation + trend and still renders
@@ -478,8 +598,9 @@ cutoff, and alerts loudly on a total miss.
   is the model phrasing the companion already sanctioned. A workout
   practice that earns teeth becomes an Engine link through a Gate.
 * **Not a score on the body.** `workout` and `body_state` are inventory;
-  the streak is the chain's; the trend is a read-only projection. Nothing
-  grades a session or the body (§0, P3).
+  the trend — streak included — is a read-only projection counted on
+  demand and stored nowhere. Nothing grades a session, an anchor count, or
+  the body (§0, P3).
 * **Not device integration.** No wearables, no heart-rate import, no rep
   counting from a sensor — body parts, soreness, and effort are typed by
   a human, exactly like every observation.

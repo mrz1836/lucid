@@ -753,11 +753,12 @@ core owns the decision — it picks today's card from the program rotation and v
 it against per-body-part recovery windows (no leg day two days running), a pain-flag
 hard stop, and the injury registry — and the model only phrases the already-decided
 plan. Every message carries exactly three offerings (a recommended plan, an easier
-fallback, and a back-off/safety door), a read-only progress panel (streak, frequency,
-skipped days, recent body response), and a fixed *not-medical-advice* line. The pick
-is never the model's: with the provider unreachable the message still renders
+fallback, and a back-off/safety door), today's **daily anchor** with its current
+program-week targets (dropped when the program defines no anchor), and a read-only
+progress panel (workout streak, frequency, skipped days, recent body response). The
+pick is never the model's: with the provider unreachable the message still renders
 deterministically (only the phrasing warmth is lost). `--json` emits the decided
-`{recommendation, trend}` projection instead of the rendered text.
+`{recommendation, trend, anchor}` projection instead of the rendered text.
 
 **`lucid workout log`** captures a completed session two ways — a spoken drop
 (extracted by the model, the voice-first default) or the structured flags
@@ -765,6 +766,9 @@ deterministically (only the phrasing warmth is lost). `--json` emits the decided
 capture. The two forms are mutually exclusive. Each writes a `workout` observation
 (plus one `body_state` reading per soreness/pain flag) to the Ledger; the readings
 are what the recommender reads back for the recovery and pain guardrails.
+`--anchor` (with optional repeatable `--anchor-item name:count`) logs the **daily
+anchor** through the same verb — a self-report is enough, counts are inventory when
+given, and an anchor writes no body parts so it opens no recovery window.
 
 **Provider-backed** for phrasing (the `provider` block), with a deterministic
 fallback; the recommendation itself and the capture parser are model-free.
@@ -774,6 +778,7 @@ lucid workout                          # today's recommendation, phrased
 lucid workout --json                   # the decided recommendation + trend
 lucid workout log "did pull, shoulder felt fine, ~50 min"
 lucid workout log --type legs --duration 45 --rpe 7 --soreness quads:5 --pain knee:7
+lucid workout log --anchor --anchor-item squats:55   # today's daily anchor
 ```
 
 ### Provider configuration (agentic verbs)
