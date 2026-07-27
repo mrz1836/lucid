@@ -144,16 +144,17 @@ func seedStatusJobDB(t *testing.T, path string, specs ...flywheel.PeriodicSpec) 
 }
 
 // seedHealthyDBs seeds the teeth and companion job DBs and both delivery receipts
-// for a fully-healthy companion at statusMorning: tripwire active + bell
-// suppressed (the companion owns the night send), morning + night companion
-// periodics active, and verified receipts whose morning date matches the most
-// recent elapsed window.
+// for a fully-healthy companion at statusMorning: tripwire active, bell suppressed
+// with its evening backstop armed (the companion owns the night send), morning +
+// night companion periodics active, and verified receipts whose morning date
+// matches the most recent elapsed window.
 func seedHealthyDBs(t *testing.T, home, schedulerDB, companionDB string) {
 	t.Helper()
 	seedStatusJobDB(
 		t, schedulerDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: false},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugBellFallback, Kind: "lucid_bell_fallback", Cron: "0 23 * * *", Queue: "lucid", Active: true},
 	)
 	seedStatusJobDB(
 		t, companionDB,
@@ -214,6 +215,32 @@ func TestSchedulerStatus_Healthy_ExitOK(t *testing.T) {
 	assert.Contains(t, out, "Host:")
 	// An Unknown host is shown but does not flip the verdict.
 	assert.Contains(t, out, "daemon: unknown")
+}
+
+// TestSchedulerStatus_ParkedPeriodic_NamesRemedy: the report a parked send
+// produces is actionable on its own. A tripwire switched off in the job store
+// exits 2 and prints an error line naming the slug and the exact repair command,
+// while the deliberately-suppressed bell in the same store reads as intended
+// rather than as a second fault.
+func TestSchedulerStatus_ParkedPeriodic_NamesRemedy(t *testing.T) {
+	home, schedulerDB, companionDB := seedScheduler(t, true, "PROMPT BODY")
+	seedHealthyDBs(t, home, schedulerDB, companionDB)
+	// Park the morning dead-man the way a real outage would leave it.
+	seedStatusJobDB(t, schedulerDB, flywheel.PeriodicSpec{
+		Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: false,
+	})
+	withClock(t, statusMorning())
+	withHostProbe(t, unknownHost()...)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "status")
+	require.Error(t, err)
+	assert.Equal(t, 2, exitCodeForError(err))
+	assert.Contains(t, out, "Scheduler status: ERROR")
+	assert.Contains(t, out, schedstatus.SlugTripwire)
+	assert.Contains(t, out, "lucid scheduler reconcile --slug "+schedstatus.SlugTripwire,
+		"the fault names the command that repairs it")
+	assert.Contains(t, out, "suppressed by companion (intended)",
+		"the suppressed bell is legible as intended, not as a fault")
 }
 
 // TestSchedulerStatus_CompanionDisabled_Warn: a disabled companion with healthy

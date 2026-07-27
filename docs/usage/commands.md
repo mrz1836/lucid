@@ -579,7 +579,8 @@ aggregates local state only and is **credential-dumb and agent-free**: it sends
 nothing, renews no secret, reads no prompt body, and runs no model. It reports the
 companion enabled/disabled state and its provider backend/model, each configured
 prompt path (existence only), the chain bell and tripwire marks, the teeth and
-companion periodics (cron, active flag, next run, last enqueue), the last companion
+companion periodics (cron, active flag, next run, last enqueue, and — for one that
+is deliberately off — the reason), the last companion
 delivery receipt per window, a bounded recent-run failure summary, and a
 best-effort host/supervisor probe — then rolls every check into one **verdict** and
 exits on it. Run it before the morning (`06:00`) and night (`19:00`) windows to

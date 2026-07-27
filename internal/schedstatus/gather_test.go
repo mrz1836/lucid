@@ -209,7 +209,10 @@ func TestGather_AssemblesEndToEnd(t *testing.T) {
 	seedJobDB(
 		t, teeth,
 		flywheel.PeriodicSpec{Slug: SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
+		// The companion owns the evening, so the bell is suppressed and its
+		// backstop is the armed one — the daemon's own healthy shape.
 		flywheel.PeriodicSpec{Slug: SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: false},
+		flywheel.PeriodicSpec{Slug: SlugBellFallback, Kind: "lucid_bell_fallback", Cron: "0 23 * * *", Queue: "lucid", Active: true},
 	)
 	seedJobDB(
 		t, comp,

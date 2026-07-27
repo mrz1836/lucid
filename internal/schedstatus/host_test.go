@@ -193,6 +193,7 @@ func healthyInputs() Inputs {
 		Teeth: DBInput{Path: "/t.db", Periodics: []PeriodicStatus{
 			{Slug: SlugTripwire, Present: true, Active: true},
 			{Slug: SlugBell, Present: true, Active: false},
+			{Slug: SlugBellFallback, Present: true, Active: true},
 		}},
 		CompanionJobs: DBInput{Path: "/c.db", Periodics: []PeriodicStatus{
 			{Slug: SlugCompanionMorning, Present: true, Active: true},

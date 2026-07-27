@@ -46,10 +46,30 @@ const (
 // signal anyway.
 const (
 	SlugBell             = "lucid-bell"
+	SlugBellFallback     = "lucid-bell-fallback"
 	SlugTripwire         = "lucid-tripwire"
 	SlugCompanionMorning = "lucid-companion-morning"
 	SlugCompanionNight   = "lucid-companion-night"
 )
+
+// The two repair levers a fault line names, so a report is actionable without a
+// second lookup: a parked periodic is re-armed through the binary
+// (usage/commands.md §"scheduler reconcile" — the durable job store is never
+// hand-edited), and a periodic the store has no row for at all is seeded by one
+// daemon start.
+const (
+	cmdReconcile = "lucid scheduler reconcile"
+	cmdRun       = "lucid scheduler run"
+)
+
+// staleCursorGrace is how far behind an *active* periodic's next run may fall
+// before the report reads its cursor as stuck rather than merely due. It mirrors
+// the identical constant in internal/schedrun, so `status` and `reconcile` agree
+// about what "parked" means: a live scheduler advances a fired periodic past now
+// on its next tick, and a stopped host leaves every cursor behind, so only a full
+// day behind — an entire daily occurrence elapsed with nothing advancing it —
+// reads as stuck.
+const staleCursorGrace = 24 * time.Hour
 
 // dateLayout is the logical-day format companion receipts are stamped with
 // (YYYY-MM-DD), the same basis the miss check compares an elapsed window's
@@ -99,11 +119,18 @@ type ChainMarks struct {
 // DB (or a synthetic placeholder for a required-but-absent slug). Present is
 // false when the slug is expected but not registered — the case that flips a
 // required periodic to a missing-periodic error.
+//
+// Its Note field is set by classification rather than by the gatherer: it
+// carries the short reason an *intended-inactive* periodic is off (a
+// companion-suppressed bell), so a deliberately-quiet send reads as designed
+// rather than as a fault. It is empty for every periodic whose state speaks for
+// itself.
 type PeriodicStatus struct {
 	Slug        string    `json:"slug"`
 	Cron        string    `json:"cron,omitempty"`
 	Active      bool      `json:"active"`
 	Present     bool      `json:"present"`
+	Note        string    `json:"note,omitempty"`
 	NextRun     time.Time `json:"next_run,omitzero"`
 	LastEnqueue time.Time `json:"last_enqueue,omitzero"`
 }
@@ -237,7 +264,11 @@ func worst(groups ...[]Check) CheckState {
 //   - missing companion job DB (companion off)             -> not a fault (expected)
 //   - enabled companion with a missing prompt file         -> error
 //   - required periodic inactive/missing (companion on)    -> error
-//   - teeth bell inactive while the companion owns the send-> not a fault (suppressed)
+//   - intended-active teeth periodic parked (off, or its
+//     cursor stuck a full day behind)                      -> error, naming the repair command
+//   - teeth bell inactive while the companion owns the send-> not a fault (suppressed, intended)
+//   - evening backstop inactive while the companion owns
+//     the send                                             -> error, naming the repair command
 //   - latest receipt present but unverified                -> warn
 //   - most-recent elapsed window with no/stale receipt     -> error
 //   - host: daemon down / not supervised                   -> error (from probe)
@@ -272,7 +303,7 @@ func Assemble(in Inputs, now time.Time) Report {
 
 	// Periodic checks only make sense once the DB actually read.
 	if r.Teeth.State == Ok {
-		checks = append(checks, classifyTeethPeriodics(&r.Teeth, in.Companion.Enabled)...)
+		checks = append(checks, classifyTeethPeriodics(&r.Teeth, in.Companion.Enabled, now)...)
 	}
 	if in.Companion.Enabled && r.CompanionJobs.State == Ok {
 		checks = append(checks, classifyCompanionPeriodics(&r.CompanionJobs)...)
@@ -344,54 +375,170 @@ func classifyDB(in DBInput, name string, required bool) (DBReport, []Check) {
 	}
 }
 
-// classifyTeethPeriodics checks the teeth job DB. The morning tripwire (which
-// also carries the verdict read) is always required active. The evening bell is
-// required active only when the companion is
-// disabled; when the companion is enabled it deliberately owns the evening send
-// and the bell is suppressed, so an inactive bell is the correct, healthy state
-// (never an error). Missing-but-required or inactive-required slugs are errors.
-func classifyTeethPeriodics(rep *DBReport, companionEnabled bool) []Check {
-	checks := requireActive(rep, SlugTripwire, Error, "morning tripwire")
-	if companionEnabled {
-		// Bell is expected suppressed; ensure it is shown but never fault it.
-		requireActive(rep, SlugBell, "", "evening bell (suppressed — companion owns the evening send)")
-		return checks
+// teethExpectation is one teeth periodic paired with what configuration says
+// about it: the label a human reads, whether it is *intended active*, and — for
+// the two evening periodics that legitimately take turns — the note explaining
+// why it is off, so a deliberately-quiet send reads as designed.
+//
+// The want flags mirror internal/schedrun's intended-active guard exactly
+// (usage/commands.md §"The intended-active guard"), which is what lets a fault
+// line promise `reconcile` will fix it: this report and that repair pass derive
+// the same answer from the same configuration.
+type teethExpectation struct {
+	slug       string
+	label      string
+	want       bool
+	offNote    string
+	absentNote string
+}
+
+// teethExpectations resolves what each teeth periodic should be doing for the
+// current evening-window ownership. The morning tripwire is unconditional — it is
+// the escalation ladder's dead-man. The bell and its backstop move in opposite
+// directions: whichever one is not delivering the evening is intended inactive,
+// never parked.
+func teethExpectations(companionEnabled bool) []teethExpectation {
+	return []teethExpectation{
+		{slug: SlugTripwire, label: "morning tripwire", want: true},
+		{
+			slug: SlugBell, label: "evening bell", want: !companionEnabled,
+			offNote:    "suppressed by companion (intended)",
+			absentNote: "not registered — the companion owns the evening send (intended)",
+		},
+		{
+			slug: SlugBellFallback, label: "evening backstop", want: companionEnabled,
+			offNote:    "stood down — the bell itself owns the evening send (intended)",
+			absentNote: "not registered — the bell itself owns the evening send (intended)",
+		},
 	}
-	return append(checks, requireActive(rep, SlugBell, Error, "evening bell")...)
+}
+
+// classifyTeethPeriodics checks the teeth job DB against those expectations. An
+// intended-active periodic that is parked — switched off, or with its cursor
+// stuck a full day behind — is the silent failure the whole repair path exists
+// for, so it is an error whose detail names the exact command that fixes it. An
+// intended-inactive periodic is reported Ok with the reason it is off, never as a
+// fault.
+func classifyTeethPeriodics(rep *DBReport, companionEnabled bool, now time.Time) []Check {
+	expectations := teethExpectations(companionEnabled)
+	checks := make([]Check, 0, len(expectations))
+	for _, exp := range expectations {
+		checks = append(checks, classifyTeethPeriodic(rep, exp, now)...)
+	}
+	return checks
+}
+
+// classifyTeethPeriodic classifies one teeth periodic and annotates its row. A
+// slug the store has no row for is appended as a Present:false placeholder so it
+// renders visibly rather than vanishing from the list.
+func classifyTeethPeriodic(rep *DBReport, exp teethExpectation, now time.Time) []Check {
+	name := "periodic." + exp.slug
+	i, found := indexOfPeriodic(rep.Periodics, exp.slug)
+	if !found {
+		rep.Periodics = append(rep.Periodics, PeriodicStatus{Slug: exp.slug, Present: false, Note: exp.absentNote})
+		if !exp.want {
+			return intendedInactiveCheck(name, exp.label, exp.slug, exp.absentNote)
+		}
+		return []Check{{
+			Name:  name,
+			State: Error,
+			Detail: fmt.Sprintf("%s (%s) is not registered — start the daemon once to seed it; %s",
+				exp.label, exp.slug, remedy(cmdRun, "")),
+		}}
+	}
+
+	p := rep.Periodics[i]
+	if !exp.want {
+		// An intended-inactive periodic that is nevertheless active is left
+		// unannotated: the row already reads "active", and this report classifies
+		// state rather than adjudicating which sender owns the window.
+		if p.Active {
+			return nil
+		}
+		rep.Periodics[i].Note = exp.offNote
+		return intendedInactiveCheck(name, exp.label, exp.slug, exp.offNote)
+	}
+
+	switch {
+	case !p.Active:
+		return []Check{{
+			Name:  name,
+			State: Error,
+			Detail: fmt.Sprintf("%s (%s) is inactive — the send will never fire again; %s",
+				exp.label, exp.slug, remedy(cmdReconcile, exp.slug)),
+		}}
+	case stuckCursor(p, now):
+		return []Check{{
+			Name:  name,
+			State: Error,
+			Detail: fmt.Sprintf("%s (%s) is active but its next run is stuck at %s — nothing is advancing it; %s",
+				exp.label, exp.slug, p.NextRun.Format(timeLayout), remedy(cmdReconcile, exp.slug)),
+		}}
+	default:
+		return nil
+	}
+}
+
+// intendedInactiveCheck is the positive "off on purpose" signal: an Ok check
+// carrying the reason, so the state is visible in the JSON check list without
+// ever lowering the verdict. A blank note yields no check.
+func intendedInactiveCheck(name, label, slug, note string) []Check {
+	if note == "" {
+		return nil
+	}
+	return []Check{{
+		Name:   name,
+		State:  Ok,
+		Detail: fmt.Sprintf("%s (%s) is %s", label, slug, note),
+	}}
+}
+
+// stuckCursor reports whether an active periodic's next run has fallen far
+// enough behind that nothing is advancing it (see staleCursorGrace). A periodic
+// with no recorded cursor is never called stuck — an unknown next run is not
+// evidence of a frozen one.
+func stuckCursor(p PeriodicStatus, now time.Time) bool {
+	if p.NextRun.IsZero() {
+		return false
+	}
+	return p.NextRun.Before(now.Add(-staleCursorGrace))
+}
+
+// remedy renders the repair instruction a fault line ends with, narrowed to one
+// slug when the command accepts it.
+func remedy(cmd, slug string) string {
+	if slug == "" {
+		return "run: " + cmd
+	}
+	return "run: " + cmd + " --slug " + slug
 }
 
 // classifyCompanionPeriodics checks the companion job DB's morning and night
-// periodics, both required active whenever the companion is enabled.
+// periodics, both required active whenever the companion is enabled. They live in
+// the companion's own job store, which the teeth repair lever does not own, so
+// their faults name no reconcile command.
 func classifyCompanionPeriodics(rep *DBReport) []Check {
-	checks := requireActive(rep, SlugCompanionMorning, Error, "morning companion")
-	return append(checks, requireActive(rep, SlugCompanionNight, Error, "night companion")...)
+	checks := requireActive(rep, SlugCompanionMorning, "morning companion")
+	return append(checks, requireActive(rep, SlugCompanionNight, "night companion")...)
 }
 
-// requireActive locates slug among the report's periodics. A missing slug is
-// recorded as a Present:false placeholder so it renders visibly; a present slug
-// that is inactive is flagged. When missState is empty the slug is informational
-// (e.g. a deliberately-suppressed bell): it is still shown, but never produces a
-// verdict-lowering check.
-func requireActive(rep *DBReport, slug string, missState CheckState, label string) []Check {
+// requireActive locates slug among the report's periodics and faults it when the
+// store does not have it running. A missing slug is recorded as a Present:false
+// placeholder so it renders visibly; a present slug that is inactive is flagged.
+func requireActive(rep *DBReport, slug, label string) []Check {
 	p, found := findPeriodic(rep.Periodics, slug)
 	switch {
 	case !found:
 		rep.Periodics = append(rep.Periodics, PeriodicStatus{Slug: slug, Present: false})
-		if missState == "" {
-			return nil
-		}
 		return []Check{{
 			Name:   "periodic." + slug,
-			State:  missState,
+			State:  Error,
 			Detail: fmt.Sprintf("%s (%s) is not registered", label, slug),
 		}}
 	case !p.Active:
-		if missState == "" {
-			return nil
-		}
 		return []Check{{
 			Name:   "periodic." + slug,
-			State:  missState,
+			State:  Error,
 			Detail: fmt.Sprintf("%s (%s) is inactive", label, slug),
 		}}
 	default:
@@ -508,12 +655,21 @@ func parseHM(hm string) (hour, minute int, ok bool) {
 // findPeriodic returns the periodic with the given slug and whether it was
 // found. It only considers entries actually present in the DB.
 func findPeriodic(ps []PeriodicStatus, slug string) (PeriodicStatus, bool) {
-	for _, p := range ps {
-		if p.Slug == slug && p.Present {
-			return p, true
-		}
+	if i, ok := indexOfPeriodic(ps, slug); ok {
+		return ps[i], true
 	}
 	return PeriodicStatus{}, false
+}
+
+// indexOfPeriodic returns the position of the present periodic with the given
+// slug, so a classifier can annotate the row in place rather than a copy.
+func indexOfPeriodic(ps []PeriodicStatus, slug string) (int, bool) {
+	for i := range ps {
+		if ps[i].Slug == slug && ps[i].Present {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // receiptFor returns the present receipt for a window, or false when none.
