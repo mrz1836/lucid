@@ -88,6 +88,55 @@ func (sc *Scheduler) RunBell() (SentMessage, error) {
 	return SentMessage{Channel: engine.ChannelUser, Kind: engine.SendBell, Text: text}, nil
 }
 
+// companionWindowNight names the companion's evening fire window — the receipt
+// file the backstop reads to learn whether tonight's user send already landed.
+// It is duplicated here rather than imported: the companion package imports this
+// one, so the dependency may only point that way.
+const companionWindowNight = "night"
+
+// RunBellFallback posts the evening backstop: the same pre-committed bell
+// template, fired under a new deterministic condition (engine-module.md §"The
+// evening backstop is a send condition, not a send"). When the companion is
+// enabled it owns the evening user window and the bell periodic is suppressed,
+// so that window has exactly one sender; if that sender's delivery fails
+// outright the window would pass in silence. This fires once the companion can
+// no longer post, and only when it left no delivery receipt for now's logical
+// day.
+//
+// It adds no fourth send class and no new consent: the text is the bell
+// template on the bell's own consent record, so a bell disabled in chain.json
+// silences the backstop exactly as it silences the bell. The gate is one
+// engine-tree receipt read — the record the companion writes only after a
+// verified delivery — so at most one evening send lands per day: either the
+// companion delivered and this is a no-op, or it did not and the backstop
+// speaks. A receipt from an earlier day is stale and does not gate tonight. No
+// Mirror content is read and no model sits in the path. Like [Scheduler.RunBell]
+// it returns a message whose Text is empty on every no-op.
+func (sc *Scheduler) RunBellFallback(now time.Time) (SentMessage, error) {
+	if err := sc.store.ScaffoldEngine(); err != nil {
+		return SentMessage{}, fmt.Errorf("scheduler: prepare engine tree: %w", err)
+	}
+	chain, err := sc.store.ReadChainConfig()
+	if err != nil {
+		return SentMessage{}, err
+	}
+	if !chain.Bell.Enabled {
+		return SentMessage{}, nil
+	}
+	rec, ok, err := sc.store.ReadCompanionReceipt(companionWindowNight)
+	if err != nil {
+		return SentMessage{}, fmt.Errorf("scheduler: read companion night receipt: %w", err)
+	}
+	if ok && rec.Date == engine.DateString(engine.DateOf(now)) && rec.MessageID != "" {
+		return SentMessage{}, nil
+	}
+	text := templates.Bell(chain.Label)
+	if err := sc.notify.Send(engine.ChannelUser, text); err != nil {
+		return SentMessage{}, fmt.Errorf("scheduler: send bell backstop: %w", err)
+	}
+	return SentMessage{Channel: engine.ChannelUser, Kind: engine.SendBell, Text: text}, nil
+}
+
 // tripwireContext is the resolved Ledger state one tripwire run reasons over —
 // the read path shared by [Scheduler.RunTripwire], which acts on the decision,
 // and [Scheduler.SelfCheck], which discards it. Gathering it is the whole IO

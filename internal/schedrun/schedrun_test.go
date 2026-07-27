@@ -2,13 +2,19 @@ package schedrun
 
 import (
 	"context"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,6 +254,286 @@ func TestRun_BellPeriodicFiresToUser(t *testing.T) {
 	assert.Contains(t, msg.text, "Journal. Dock. Read.", "the bell names the chain")
 }
 
+// ── The evening backstop ─────────────────────────────────────────────────────
+
+// upsertBackstop declares the backstop periodic at upsertClock with the mark the
+// production reconcile derives (23:00 = the companion's 22:00 cut-off plus the
+// grace), so a later Tick makes it due.
+func upsertBackstop(t *testing.T, r *rig, upsertClock time.Time) {
+	t.Helper()
+	require.NoError(t, flywheel.UpsertPeriodic(ctxAt(upsertClock), r.db, flywheel.PeriodicSpec{
+		Slug: slugBellFallback, Kind: kindBellFallback, Cron: "0 23 * * *", Queue: queueName, Active: true,
+	}))
+}
+
+// seedNightReceipt writes the record the companion persists after a verified
+// night delivery — the exact gate the backstop reads.
+func seedNightReceipt(t *testing.T, a *storage.Adapter, date string) {
+	t.Helper()
+	require.NoError(t, a.WriteCompanionReceipt(storage.CompanionReceipt{
+		Date: date, Window: "night", MessageID: "msg-1", ChannelID: engine.ChannelUser,
+		Verified: true, DeliveredAt: date + "T19:00:05Z",
+	}))
+}
+
+// TestRun_BellFallbackFiresWhenCompanionLeftNoReceipt is the gap this backstop
+// exists to close, driven end to end: the companion owns the evening, its
+// delivery never landed (no receipt for the day), and the backstop periodic
+// comes due past the cut-off. The bell template goes out — late, but the
+// accountability window is not silently skipped.
+func TestRun_BellFallbackFiresWhenCompanionLeftNoReceipt(t *testing.T) {
+	workerNow := at(2026, 7, 5, 23, 5)
+	r := newRig(t, models.NewFixedClock(workerNow))
+	upsertBackstop(t, r, at(2026, 7, 5, 20, 0))
+
+	tickCtx := ctxAt(workerNow)
+	n, err := r.sched.Tick(tickCtx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "the due backstop enqueues exactly once")
+	require.NoError(t, r.runner.RunUntilIdle(tickCtx))
+
+	require.Equal(t, 1, r.notif.count(engine.ChannelUser), "the missed evening is spoken for")
+	msg, _ := r.notif.first(engine.ChannelUser)
+	assert.Contains(t, msg.text, "Journal. Dock. Read.", "the backstop sends the ordinary bell, not a new message")
+}
+
+// TestRun_BellFallbackNoOpsWhenCompanionDelivered is the double-send guard: the
+// companion delivered its night message and left the verified receipt, so the
+// backstop still runs on schedule and still decides — and decides to stay quiet.
+// At most one evening send per day, by construction.
+func TestRun_BellFallbackNoOpsWhenCompanionDelivered(t *testing.T) {
+	workerNow := at(2026, 7, 5, 23, 5)
+	r := newRig(t, models.NewFixedClock(workerNow))
+	seedNightReceipt(t, r.store, "2026-07-05")
+	upsertBackstop(t, r, at(2026, 7, 5, 20, 0))
+
+	tickCtx := ctxAt(workerNow)
+	n, err := r.sched.Tick(tickCtx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "the backstop still fires — the receipt is read at run time, not at schedule time")
+	require.NoError(t, r.runner.RunUntilIdle(tickCtx))
+
+	assert.Zero(t, r.notif.count(engine.ChannelUser), "the evening was already spoken for; the backstop stands down")
+
+	jobs, err := flywheel.ListJobs(tickCtx, r.db, flywheel.ListJobsParams{Kind: kindBellFallback})
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	assert.Equal(t, string(flywheel.StateSucceeded), jobs[0].State, "a no-op is a success, not a failure to retry")
+}
+
+// TestRun_CompanionDisabledLeavesTheEveningToTheBell: with the companion off the
+// reconcile arms the real bell and leaves the backstop inactive, so a tick past
+// both marks produces exactly one evening send — the bell's. Nothing is
+// double-sent by the two evening definitions coexisting.
+func TestRun_CompanionDisabledLeavesTheEveningToTheBell(t *testing.T) {
+	workerNow := at(2026, 7, 5, 23, 30)
+	r := newRig(t, models.NewFixedClock(workerNow))
+	require.NoError(t, upsertPeriodics(ctxAt(at(2026, 7, 5, 12, 0)), r.db, r.store, false))
+
+	tickCtx := ctxAt(workerNow)
+	_, err := r.sched.Tick(tickCtx)
+	require.NoError(t, err)
+	require.NoError(t, r.runner.RunUntilIdle(tickCtx))
+
+	assert.Equal(t, 1, r.notif.count(engine.ChannelUser), "one evening send, from the bell alone")
+
+	jobs, err := flywheel.ListJobs(tickCtx, r.db, flywheel.ListJobsParams{Kind: kindBellFallback})
+	require.NoError(t, err)
+	assert.Empty(t, jobs, "an inactive backstop is never scanned, so it never enqueues")
+}
+
+// TestBellFallbackWorker_SurfacesRunError covers the backstop worker's error
+// branch: a corrupt chain.json fails the run rather than being read as a quiet
+// evening.
+func TestBellFallbackWorker_SurfacesRunError(t *testing.T) {
+	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 23, 5)))
+	require.NoError(t, os.WriteFile(filepath.Join(r.store.Home(), "engine", "chain.json"), []byte("{not json"), 0o600))
+
+	w := bellFallbackWorker{sc: scheduler.New(r.store, r.notif), clock: models.NewFixedClock(at(2026, 7, 5, 23, 5))}
+	_, err := w.Work(ctxAt(at(2026, 7, 5, 23, 5)), &flywheel.Job[bellFallbackArgs]{})
+	require.Error(t, err)
+}
+
+// ── Clock-mark arithmetic ────────────────────────────────────────────────────
+
+// TestBellFallbackMinutes tables the backstop mark: the companion's night
+// cut-off plus the grace, clamped so it never lands earlier than the bell it
+// backs up.
+func TestBellFallbackMinutes(t *testing.T) {
+	cases := []struct {
+		name string
+		bell string
+		want string
+	}{
+		{name: "default bell", bell: "19:00", want: "23:00"},
+		{name: "bell at the cut-off", bell: "22:00", want: "23:00"},
+		{name: "bell exactly at the backstop", bell: "23:00", want: "23:00"},
+		{name: "bell past the cut-off clamps up", bell: "23:30", want: "23:30"},
+		{name: "midnight bell", bell: "00:00", want: "23:00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bellMin, err := markMinutes(tc.bell)
+			require.NoError(t, err)
+			wantMin, err := markMinutes(tc.want)
+			require.NoError(t, err)
+			assert.Equal(t, wantMin, bellFallbackMinutes(bellMin))
+		})
+	}
+}
+
+// TestBellFallbackMinutes_StaysOnTheBellsCalendarDay guards the one arithmetic
+// mistake that would quietly break the gate: the backstop reads the companion's
+// receipt for the day its own fire lands on, so a mark that wrapped past
+// midnight would compare tonight's fire against tomorrow's (absent) receipt and
+// send every night. Whatever the bell, the backstop stays before midnight.
+func TestBellFallbackMinutes_StaysOnTheBellsCalendarDay(t *testing.T) {
+	for bellMin := 0; bellMin < minutesPerDay; bellMin++ {
+		got := bellFallbackMinutes(bellMin)
+		require.GreaterOrEqual(t, got, bellMin, "the backstop never precedes the bell (bell %d)", bellMin)
+		require.Less(t, got, minutesPerDay, "the backstop never wraps past midnight (bell %d)", bellMin)
+	}
+}
+
+// TestCronFromMinutes covers the minutes-to-cron rendering the evening marks are
+// scheduled through.
+func TestCronFromMinutes(t *testing.T) {
+	assert.Equal(t, "0 0 * * *", cronFromMinutes(0))
+	assert.Equal(t, "30 21 * * *", cronFromMinutes(21*60+30))
+	assert.Equal(t, "59 23 * * *", cronFromMinutes(minutesPerDay-1))
+}
+
+// TestCompanionNightCutoffMatchesCompanion locks the one constant this package
+// duplicates. The backstop's whole no-race argument is that it fires only after
+// the companion has stopped trying, so if the companion's night cut-off moves
+// and this copy does not, the two silently overlap again — the exact double-send
+// window the mark was derived to avoid. The value is read out of the companion's
+// own source rather than imported, because that package reaches a provider and
+// this one is the agent-free write path.
+func TestCompanionNightCutoffMatchesCompanion(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filepath.Join("..", "companion", "run.go"), nil, 0)
+	require.NoError(t, err)
+
+	var literal string
+	ast.Inspect(f, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok || len(spec.Names) != 1 || spec.Names[0].Name != "nightCutoff" || len(spec.Values) != 1 {
+			return true
+		}
+		if lit, isLit := spec.Values[0].(*ast.BasicLit); isLit {
+			literal, _ = strconv.Unquote(lit.Value)
+		}
+		return false
+	})
+	require.NotEmpty(t, literal, "the companion still declares a nightCutoff constant")
+
+	got, err := markMinutes(literal)
+	require.NoError(t, err)
+	assert.Equal(t, companionNightCutoffMin, got,
+		"the backstop's copy of the companion night cut-off (%s) has drifted — move both together", literal)
+}
+
+// ── A failed delivery never parks its definition ─────────────────────────────
+
+// deadlineNotifier fails every send with a wrapped context.DeadlineExceeded —
+// the shape a POST to a chat endpoint returns when the network path is down
+// mid-outage. It counts the calls so a test can prove every retry really tried
+// to deliver rather than short-circuiting somewhere above the notifier.
+type deadlineNotifier struct{ attempts atomic.Int64 }
+
+// Send always times out. The runner classifies a deadline-exceeded error as a
+// retriable timeout (not a permanent failure), so the job walks its whole retry
+// ladder before it is discarded.
+func (n *deadlineNotifier) Send(_, _ string) error {
+	n.attempts.Add(1)
+	return fmt.Errorf("post to channel: %w", context.DeadlineExceeded)
+}
+
+// steppingClock advances a fixed step on every read. Each failed attempt is
+// rescheduled behind an exponential backoff, so a fixed clock would strand the
+// retryable job in the future forever and RunUntilIdle would poll until the test
+// timed out. Stepping past the backoff cap on every read lets the whole ladder
+// drain back to back without a single real sleep. The counter is atomic because
+// the runner reads the clock from its dispatch and lease-heartbeat goroutines.
+type steppingClock struct {
+	base  time.Time
+	step  time.Duration
+	reads atomic.Int64
+}
+
+// newSteppingClock returns a clock whose first read is base+step.
+func newSteppingClock(base time.Time, step time.Duration) *steppingClock {
+	return &steppingClock{base: base, step: step}
+}
+
+// Now returns the next step on the ladder.
+func (c *steppingClock) Now(context.Context) time.Time {
+	return c.base.Add(time.Duration(c.reads.Add(1)) * c.step)
+}
+
+// findPeriodic looks up one definition by slug in a ListPeriodics result.
+func findPeriodic(views []flywheel.PeriodicView, slug string) (flywheel.PeriodicView, bool) {
+	for _, v := range views {
+		if v.Slug == slug {
+			return v, true
+		}
+	}
+	return flywheel.PeriodicView{}, false
+}
+
+// TestBellDiscardDoesNotParkPeriodic locks the durability invariant every
+// recovery path here rests on: a transient delivery outage is confined to the
+// job it broke. The bell fires, every delivery attempt times out, and the job
+// exhausts its retries into `discarded` — yet the parent definition is still
+// active with its cursor advanced past the fired bucket, so tomorrow's send is
+// still armed. Without this lock a single unreachable evening could silently and
+// permanently disable a daily send, recoverable only by hand-editing the job DB.
+// If a future change ever deactivates a definition on discard (an observer, an
+// upstream state-machine change), this test fails.
+func TestBellDiscardDoesNotParkPeriodic(t *testing.T) {
+	bucket := at(2026, 7, 5, 19, 0)
+	notif := &deadlineNotifier{}
+	r := newRigWith(t, models.NewFixedClock(bucket), notif)
+
+	// Declare the bell an hour before its mark, so the 19:00 bucket is its next fire.
+	require.NoError(t, flywheel.UpsertPeriodic(ctxAt(at(2026, 7, 5, 18, 0)), r.db, flywheel.PeriodicSpec{
+		Slug: slugBell, Kind: kindBell, Cron: "0 19 * * *", Queue: queueName, Active: true,
+	}))
+
+	n, err := r.sched.Tick(ctxAt(at(2026, 7, 5, 19, 5)))
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "the due bell enqueues exactly once")
+
+	// Drain the retry ladder with an unreachable endpoint: every attempt times out.
+	runCtx := models.WithClock(context.Background(), newSteppingClock(at(2026, 7, 5, 19, 5), 5*time.Minute))
+	require.NoError(t, r.runner.RunUntilIdle(runCtx))
+
+	jobs, err := flywheel.ListJobs(runCtx, r.db, flywheel.ListJobsParams{Kind: kindBell})
+	require.NoError(t, err)
+	require.Len(t, jobs, 1, "the outage produces one send job, not a job per retry")
+	job := jobs[0]
+	require.Equal(t, string(flywheel.StateDiscarded), job.State, "the send exhausts its attempts and discards")
+	require.Greater(t, job.Attempt, 1, "the outage was retried, not failed once")
+	assert.Equal(t, int64(job.Attempt), notif.attempts.Load(), "every attempt was a real delivery attempt")
+
+	runs, err := flywheel.ListRuns(runCtx, r.db, job.ID, flywheel.ListRunsParams{Limit: job.Attempt})
+	require.NoError(t, err)
+	require.Len(t, runs, job.Attempt, "one audit row per attempt")
+	for _, run := range runs {
+		assert.Equal(t, string(flywheel.OutcomeTimeout), run.Outcome, "a deadline-exceeded send records as a timeout")
+	}
+
+	// The invariant: the discard stayed inside the job.
+	views, err := flywheel.ListPeriodics(runCtx, r.db)
+	require.NoError(t, err)
+	bell, ok := findPeriodic(views, slugBell)
+	require.True(t, ok, "the bell definition survives the discard")
+	assert.True(t, bell.Active, "a discarded send never deactivates its parent definition")
+	assert.True(t, bell.NextRunAt.After(bucket),
+		"the cursor advanced past the fired bucket, got %s", bell.NextRunAt)
+}
+
 // ── Missed-fire catch-up, bounded (AC-3) ─────────────────────────────────────
 
 // TestRun_MissedFireCatchUpBoundedToOne is the "killed mid-evening still fires
@@ -351,7 +637,8 @@ func TestTripwireWorker_PresentedSuppressesUserSend(t *testing.T) {
 // TestUpsertPeriodics_SuppressDeactivatesBell: when the companion owns the user
 // windows the evening bell periodic is reconciled inactive (so it never fires)
 // while the morning tripwire stays active — one night send, owned by the
-// companion.
+// companion. The evening backstop is armed in the same pass: handing the window
+// to a single sender is only safe if something is watching for its silence.
 func TestUpsertPeriodics_SuppressDeactivatesBell(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	ctx := ctxAt(at(2026, 7, 5, 12, 0))
@@ -365,12 +652,15 @@ func TestUpsertPeriodics_SuppressDeactivatesBell(t *testing.T) {
 		active[v.Slug] = v.Active
 	}
 	assert.False(t, active[slugBell], "the bell is deactivated when the companion presents the night window")
+	assert.True(t, active[slugBellFallback], "the backstop is armed whenever the companion owns the evening")
 	assert.True(t, active[slugTripwire], "the tripwire stays active")
 }
 
 // TestUpsertPeriodics_SuppressTogglesBellBackOn: reconciling suppressed then
 // un-suppressed flips the bell inactive and back to active on the next boot —
-// the reconcile makes the live state match the config every time.
+// the reconcile makes the live state match the config every time. The backstop
+// tracks the inverse: it stands down as soon as the real bell is firing again,
+// so the evening never has two teeth senders armed at once.
 func TestUpsertPeriodics_SuppressTogglesBellBackOn(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	ctx := ctxAt(at(2026, 7, 5, 12, 0))
@@ -380,12 +670,13 @@ func TestUpsertPeriodics_SuppressTogglesBellBackOn(t *testing.T) {
 
 	views, err := flywheel.ListPeriodics(ctx, r.db)
 	require.NoError(t, err)
-	require.Len(t, views, 2, "no duplicate definitions across a toggle")
+	require.Len(t, views, 3, "no duplicate definitions across a toggle")
+	active := map[string]bool{}
 	for _, v := range views {
-		if v.Slug == slugBell {
-			assert.True(t, v.Active, "the bell re-activates when suppression is disabled")
-		}
+		active[v.Slug] = v.Active
 	}
+	assert.True(t, active[slugBell], "the bell re-activates when suppression is disabled")
+	assert.False(t, active[slugBellFallback], "the backstop stands down once the real bell owns the evening again")
 }
 
 // TestRun_SuppressUserChannelDeactivatesBell proves Options.SuppressUserChannel
@@ -412,16 +703,15 @@ func TestRun_SuppressUserChannelDeactivatesBell(t *testing.T) {
 		}
 		defer closeGorm(db)
 		views, lerr := flywheel.ListPeriodics(context.Background(), db)
-		if lerr != nil || len(views) != 2 {
+		if lerr != nil || len(views) != 3 {
 			return false
 		}
+		active := map[string]bool{}
 		for _, v := range views {
-			if v.Slug == slugBell {
-				return !v.Active
-			}
+			active[v.Slug] = v.Active
 		}
-		return false
-	}, 5*time.Second, 25*time.Millisecond, "Run reconciles the bell inactive under SuppressUserChannel")
+		return !active[slugBell] && active[slugBellFallback]
+	}, 5*time.Second, 25*time.Millisecond, "Run reconciles the bell inactive and the backstop armed under SuppressUserChannel")
 
 	cancel()
 	select {
@@ -435,8 +725,9 @@ func TestRun_SuppressUserChannelDeactivatesBell(t *testing.T) {
 // ── Periodic registration from chain marks (AC-2) ────────────────────────────
 
 // TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks: reconciling from
-// the default chain marks (19:00 bell, 06:00 tripwire) registers both durable
-// periodics with the expected daily cron expressions.
+// the default chain marks (19:00 bell, 06:00 tripwire) registers the durable
+// periodics with the expected daily cron expressions. The backstop rides the
+// companion's 22:00 night cut-off plus the grace, not an offset from the bell.
 func TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	ctx := ctxAt(at(2026, 7, 5, 12, 0))
@@ -448,10 +739,10 @@ func TestUpsertPeriodics_RegistersBellAndTripwireFromChainMarks(t *testing.T) {
 	crons := map[string]string{}
 	for _, v := range views {
 		crons[v.Slug] = v.Cron
-		assert.True(t, v.Active, "periodic %s is active", v.Slug)
 		assert.Equal(t, queueName, v.Queue)
 	}
 	assert.Equal(t, "0 19 * * *", crons[slugBell], "bell fires at 19:00")
+	assert.Equal(t, "0 23 * * *", crons[slugBellFallback], "the backstop fires at the 22:00 cut-off plus the grace")
 	assert.Equal(t, "0 6 * * *", crons[slugTripwire], "tripwire fires at 06:00")
 }
 
@@ -466,7 +757,7 @@ func TestUpsertPeriodics_IsIdempotentAcrossRestart(t *testing.T) {
 
 	views, err := flywheel.ListPeriodics(ctx, r.db)
 	require.NoError(t, err)
-	assert.Len(t, views, 2, "no duplicate definitions after a restart reconcile")
+	assert.Len(t, views, 3, "no duplicate definitions after a restart reconcile")
 }
 
 // ── cronFromHM ───────────────────────────────────────────────────────────────
@@ -552,8 +843,8 @@ func TestRun_ReconcilesThenDrainsCleanly(t *testing.T) {
 		}
 		defer closeGorm(db)
 		views, lerr := flywheel.ListPeriodics(context.Background(), db)
-		return lerr == nil && len(views) == 2
-	}, 5*time.Second, 25*time.Millisecond, "Run reconciles the bell and tripwire periodics")
+		return lerr == nil && len(views) == 3
+	}, 5*time.Second, 25*time.Millisecond, "Run reconciles the bell, backstop, and tripwire periodics")
 
 	cancel()
 	select {
@@ -628,6 +919,18 @@ func TestUpsertPeriodics_RejectsMalformedClockMark(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestUpsertPeriodics_SurfacesJobStoreError: an unusable job store fails the
+// reconcile loudly instead of leaving the daemon running with no periodics — a
+// silently empty schedule is the failure this whole change exists to prevent.
+func TestUpsertPeriodics_SurfacesJobStoreError(t *testing.T) {
+	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
+	closeGorm(r.db)
+
+	err := upsertPeriodics(ctxAt(at(2026, 7, 5, 12, 0)), r.db, r.store, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "upsert bell periodic")
+}
+
 // TestRun_SurfacesEngineScaffoldError covers Run's scaffold-engine error branch:
 // the job DB opens and migrates, but a Ledger whose home is a regular file
 // cannot scaffold its engine tree.
@@ -677,6 +980,10 @@ func TestWorkers_SurfaceStoreErrors(t *testing.T) {
 
 	_, err := bellWorker{sc: sc}.Work(context.Background(), &flywheel.Job[bellArgs]{})
 	require.Error(t, err, "the bell worker surfaces a store failure")
+
+	bf := bellFallbackWorker{sc: sc, clock: models.NewFixedClock(at(2026, 7, 5, 23, 5))}
+	_, err = bf.Work(ctxAt(at(2026, 7, 5, 23, 5)), &flywheel.Job[bellFallbackArgs]{})
+	require.Error(t, err, "the backstop worker surfaces a store failure")
 
 	tw := tripwireWorker{sc: sc, clock: models.NewFixedClock(at(2026, 7, 6, 9, 5)), store: broken}
 	_, err = tw.Work(ctxAt(at(2026, 7, 6, 9, 5)), &flywheel.Job[tripwireArgs]{})

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,12 +11,14 @@ import (
 
 	"github.com/glebarez/sqlite"
 	flywheel "github.com/mrz1836/go-flywheel"
+	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/schedstatus"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -31,6 +34,30 @@ func setSchedulerEnv(t *testing.T) {
 	// Guard the resolveDBPath fallback: never let an unset --db reach the real
 	// OS user-config dir during a test.
 	t.Setenv("LUCID_SCHEDULER_DB", filepath.Join(t.TempDir(), "fallback.db"))
+}
+
+// slugsIn lists the periodic slugs a job store holds, or nil while the store is
+// still being created — the poll predicate the daemon drain tests wait on before
+// they signal a stop.
+func slugsIn(path string) []string {
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: gormlogger.Discard})
+	if err != nil {
+		return nil
+	}
+	defer func() {
+		if sqlDB, e := db.DB(); e == nil {
+			_ = sqlDB.Close()
+		}
+	}()
+	views, lerr := flywheel.ListPeriodics(context.Background(), db)
+	if lerr != nil {
+		return nil
+	}
+	slugs := make([]string, 0, len(views))
+	for _, v := range views {
+		slugs = append(slugs, v.Slug)
+	}
+	return slugs
 }
 
 // TestScheduler_TreeExposesRun proves the `scheduler` group and its `run` child
@@ -150,8 +177,8 @@ func TestSchedulerRun_GracefulStopDrainsClean(t *testing.T) {
 			}
 		}()
 		views, lerr := flywheel.ListPeriodics(context.Background(), db)
-		return lerr == nil && len(views) == 2
-	}, 10*time.Second, 25*time.Millisecond, "the daemon reconciles the bell and tripwire periodics")
+		return lerr == nil && len(views) == 3
+	}, 10*time.Second, 25*time.Millisecond, "the daemon reconciles the bell, backstop, and tripwire periodics")
 
 	cancel()
 	select {
@@ -211,23 +238,15 @@ func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
 	go func() { done <- runScheduler(ctx, &stderr, dbPath) }()
 
 	// The workout node reconciles its single daily periodic into its own job DB —
-	// proof the config gate started it beside the teeth.
+	// proof the config gate started it beside the teeth. Both nodes must be up
+	// before the cancel: the two start concurrently, and the workout node reaches
+	// its (single, smaller) store first often enough that canceling on its
+	// periodic alone would routinely interrupt the teeth mid-startup and surface a
+	// context-canceled error where this test asserts a clean drain.
 	require.Eventually(t, func() bool {
-		db, err := gorm.Open(sqlite.Open(workoutDB), &gorm.Config{Logger: gormlogger.Discard})
-		if err != nil {
-			return false
-		}
-		defer func() {
-			if sqlDB, e := db.DB(); e == nil {
-				_ = sqlDB.Close()
-			}
-		}()
-		views, lerr := flywheel.ListPeriodics(context.Background(), db)
-		if lerr != nil {
-			return false
-		}
-		return len(views) == 1 && views[0].Slug == "lucid-workout-daily"
+		return len(slugsIn(workoutDB)) == 1 && len(slugsIn(dbPath)) == 3
 	}, 15*time.Second, 25*time.Millisecond, "the daemon starts the workout slot node beside the teeth")
+	assert.Equal(t, []string{"lucid-workout-daily"}, slugsIn(workoutDB), "the slot node reconciles its own daily periodic")
 
 	cancel()
 	select {
@@ -236,4 +255,195 @@ func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("scheduler run did not return after cancellation")
 	}
+}
+
+// ── scheduler reconcile ──────────────────────────────────────────────────────
+
+// reconcileJSON mirrors the documented `lucid scheduler reconcile --json` shape:
+// what was re-armed, and how many definitions were inspected.
+type reconcileJSON struct {
+	Reconciled []struct {
+		Slug        string `json:"slug"`
+		WasActive   bool   `json:"was_active"`
+		NextRun     string `json:"next_run"`
+		FiresMissed bool   `json:"fires_missed"`
+	} `json:"reconciled"`
+	Scanned int `json:"scanned"`
+}
+
+// seedReconcileEnv points the command at an isolated Ledger whose companion owns
+// the evening window, plus a teeth job store holding the three production
+// definitions with the tripwire parked — the exact shape the repair lever exists
+// for: one send switched off, one deliberately suppressed, one healthy.
+func seedReconcileEnv(t *testing.T) string {
+	t.Helper()
+	_, schedulerDB, _ := seedScheduler(t, true, "PROMPT\n")
+	seedStatusJobDB(
+		t, schedulerDB,
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: false},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: false},
+		flywheel.PeriodicSpec{Slug: "lucid-bell-fallback", Kind: "lucid_bell_fallback", Cron: "0 23 * * *", Queue: "lucid", Active: true},
+	)
+	return schedulerDB
+}
+
+// readPeriodicActive reads the active flags back out of a job store on disk.
+func readPeriodicActive(t *testing.T, path string) map[string]bool {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: gormlogger.Discard})
+	require.NoError(t, err)
+	defer func() {
+		if sqlDB, cerr := db.DB(); cerr == nil {
+			_ = sqlDB.Close()
+		}
+	}()
+	views, err := flywheel.ListPeriodics(context.Background(), db)
+	require.NoError(t, err)
+	active := map[string]bool{}
+	for _, v := range views {
+		active[v.Slug] = v.Active
+	}
+	return active
+}
+
+// TestSchedulerReconcile_TreeExposesReconcile proves the `reconcile` child is
+// registered under the `scheduler` parent and carries its three flags.
+func TestSchedulerReconcile_TreeExposesReconcile(t *testing.T) {
+	root := newRootCmd(BuildInfo{Version: "dev"})
+
+	cmd, _, err := root.Find([]string{"scheduler", "reconcile"})
+	require.NoError(t, err)
+	assert.Equal(t, "reconcile", cmd.Name())
+	assert.NotNil(t, cmd.Flags().Lookup(reconcileFlagSlug), "reconcile exposes --slug")
+	assert.NotNil(t, cmd.Flags().Lookup(reconcileFlagNoFire), "reconcile exposes --no-fire")
+	assert.NotNil(t, cmd.Flags().Lookup(schedulerFlagDB), "reconcile exposes --db")
+}
+
+// TestSchedulerReconcile_RejectsArgs: `scheduler reconcile` is a no-args verb —
+// the periodic is named with --slug, not positionally.
+func TestSchedulerReconcile_RejectsArgs(t *testing.T) {
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile", "extra")
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+}
+
+// TestSchedulerReconcile_ReArmsParkedSendAndSpareTheSuppressedBell is the
+// command's whole point, end to end through the tree: the parked send comes back,
+// and the bell the companion deliberately owns is left suppressed rather than
+// "repaired" into a second evening message.
+func TestSchedulerReconcile_ReArmsParkedSendAndSparesTheSuppressedBell(t *testing.T) {
+	schedulerDB := seedReconcileEnv(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, schedstatus.SlugTripwire, "the report names what it repaired")
+	assert.Contains(t, out, schedulerDB, "and the store it repaired it in")
+	assert.NotContains(t, out, schedstatus.SlugBell+":", "the suppressed bell is not touched")
+
+	active := readPeriodicActive(t, schedulerDB)
+	assert.True(t, active[schedstatus.SlugTripwire], "the parked send is armed again")
+	assert.False(t, active[schedstatus.SlugBell], "the companion still owns the evening")
+	assert.True(t, active["lucid-bell-fallback"], "the healthy backstop is untouched")
+}
+
+// TestSchedulerReconcile_HealthyStoreSaysSo: a repair lever that printed nothing
+// on a healthy store would be indistinguishable from one that failed silently.
+func TestSchedulerReconcile_HealthyStoreSaysSo(t *testing.T) {
+	schedulerDB := seedReconcileEnv(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Nothing parked")
+
+	active := readPeriodicActive(t, schedulerDB)
+	assert.False(t, active[schedstatus.SlugBell], "a second pass still leaves the suppressed bell alone")
+}
+
+// TestSchedulerReconcile_JSON pins the machine-readable shape automation gates
+// on: what was re-armed, whether its missed send is still coming, and how many
+// definitions were inspected.
+func TestSchedulerReconcile_JSON(t *testing.T) {
+	seedReconcileEnv(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile", "--json")
+	require.NoError(t, err)
+
+	var doc reconcileJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &doc))
+	assert.Equal(t, 3, doc.Scanned)
+	require.Len(t, doc.Reconciled, 1)
+	assert.Equal(t, schedstatus.SlugTripwire, doc.Reconciled[0].Slug)
+	assert.False(t, doc.Reconciled[0].WasActive)
+	assert.NotEmpty(t, doc.Reconciled[0].NextRun)
+}
+
+// TestSchedulerReconcile_SlugNarrowsTheRepair: an operator acting on a status
+// line repairs the send it named and nothing else.
+func TestSchedulerReconcile_SlugNarrowsTheRepair(t *testing.T) {
+	seedReconcileEnv(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile",
+		"--slug", schedstatus.SlugTripwire, "--json")
+	require.NoError(t, err)
+
+	var doc reconcileJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &doc))
+	assert.Equal(t, 1, doc.Scanned, "only the named definition is inspected")
+	require.Len(t, doc.Reconciled, 1)
+	assert.Equal(t, schedstatus.SlugTripwire, doc.Reconciled[0].Slug)
+}
+
+// TestSchedulerReconcile_NoFireSkipsTheMissedSend covers the opt-out end to end:
+// the send is armed again, but the occurrence it missed is not delivered late.
+func TestSchedulerReconcile_NoFireSkipsTheMissedSend(t *testing.T) {
+	schedulerDB := seedReconcileEnv(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile", "--no-fire", "--json")
+	require.NoError(t, err)
+
+	var doc reconcileJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &doc))
+	require.Len(t, doc.Reconciled, 1)
+	assert.False(t, doc.Reconciled[0].FiresMissed, "the missed occurrence is skipped")
+
+	assert.True(t, readPeriodicActive(t, schedulerDB)[schedstatus.SlugTripwire], "it is still armed")
+}
+
+// TestSchedulerReconcile_ReportsAStuckCursorAndTheLateSend covers the other
+// parked shape in the human report: a definition left a full day behind, whose
+// missed send is still coming. The report has to say both — what was wrong, and
+// that a late send is about to arrive — or the operator is surprised by it.
+func TestSchedulerReconcile_ReportsAStuckCursorAndTheLateSend(t *testing.T) {
+	_, schedulerDB, _ := seedScheduler(t, true, "PROMPT\n")
+	stale := models.WithClock(context.Background(), models.NewFixedClock(time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)))
+	db, err := gorm.Open(sqlite.Open(schedulerDB), &gorm.Config{Logger: gormlogger.Discard})
+	require.NoError(t, err)
+	require.NoError(t, flywheel.Migrate(db))
+	require.NoError(t, flywheel.UpsertPeriodic(stale, db, flywheel.PeriodicSpec{
+		Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true,
+	}))
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, "was active with a stuck next run", "the report names what was wrong")
+	assert.Contains(t, out, "the missed occurrence fires on the next tick", "and warns that a late send is coming")
+}
+
+// TestSchedulerReconcile_MissingStoreIsNamed: pointed at a store that does not
+// exist, the command says so instead of reporting a clean scan over nothing —
+// a missing store means the daemon has never run here.
+func TestSchedulerReconcile_MissingStoreIsNamed(t *testing.T) {
+	seedScheduler(t, true, "PROMPT\n")
+	absent := filepath.Join(t.TempDir(), "absent", "flywheel.db")
+
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile", "--db", absent)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), absent)
+	assert.Contains(t, stderr, "lucid: scheduler:", "the failure is named, not left to a bare exit code")
+	assert.Contains(t, stderr, absent, "and it names the store it looked for")
 }

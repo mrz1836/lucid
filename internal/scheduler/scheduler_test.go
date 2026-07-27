@@ -148,6 +148,137 @@ func TestRunBell_DisabledSendsNothing(t *testing.T) {
 	assert.Zero(t, n.count(engine.ChannelUser))
 }
 
+// ── Evening backstop ────────────────────────────────────────────────────────
+
+// nightReceipt writes a companion night delivery receipt for a logical date,
+// exactly as a verified companion send would.
+func nightReceipt(t *testing.T, a *storage.Adapter, date, messageID string) {
+	t.Helper()
+	require.NoError(t, a.WriteCompanionReceipt(storage.CompanionReceipt{
+		Date: date, Window: "night", MessageID: messageID,
+		ChannelID: engine.ChannelUser, Verified: true,
+		DeliveredAt: date + "T21:05:00Z",
+	}))
+}
+
+// TestRunBellFallback_NoReceiptSends: the companion left no receipt at all, so
+// the evening would otherwise pass in silence — the backstop posts the bell
+// template verbatim.
+func TestRunBellFallback_NoReceiptSends(t *testing.T) {
+	sc, _, n := newSched(t)
+
+	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.NoError(t, err)
+	assert.Equal(t, engine.ChannelUser, msg.Channel)
+	assert.Equal(t, engine.SendBell, msg.Kind, "the backstop is the bell, not a fourth send class")
+	assert.Contains(t, msg.Text, "Journal. Dock. Read.")
+	assert.False(t, strings.HasSuffix(msg.Text, templates.SignOff), "the bell does not sign off")
+	assert.Equal(t, 1, n.count(engine.ChannelUser))
+
+	// Byte-for-byte the ordinary bell — one template, one voice, one consent.
+	scBell, _, _ := newSched(t)
+	bell, err := scBell.RunBell()
+	require.NoError(t, err)
+	assert.Equal(t, bell.Text, msg.Text)
+}
+
+// TestRunBellFallback_TodaysReceiptIsNoOp: the companion already delivered
+// tonight, so the backstop stands down — at most one evening send per day.
+func TestRunBellFallback_TodaysReceiptIsNoOp(t *testing.T) {
+	sc, a, n := newSched(t)
+	nightReceipt(t, a, "2026-07-06", "1234567890")
+
+	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.NoError(t, err)
+	assert.Empty(t, msg.Text, "a delivered evening is never doubled")
+	assert.Empty(t, msg.Channel)
+	assert.Zero(t, n.count(engine.ChannelUser))
+}
+
+// TestRunBellFallback_StaleReceiptSends: only today's logical day gates the
+// backstop — yesterday's receipt is stale and does not cover tonight.
+func TestRunBellFallback_StaleReceiptSends(t *testing.T) {
+	sc, a, n := newSched(t)
+	nightReceipt(t, a, "2026-07-05", "1234567890")
+
+	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.NoError(t, err)
+	assert.Contains(t, msg.Text, "Journal. Dock. Read.")
+	assert.Equal(t, 1, n.count(engine.ChannelUser))
+}
+
+// TestRunBellFallback_ReceiptWithoutMessageIDSends: a receipt carrying no
+// delivered message id proves nothing landed, so the window is still open.
+func TestRunBellFallback_ReceiptWithoutMessageIDSends(t *testing.T) {
+	sc, a, n := newSched(t)
+	nightReceipt(t, a, "2026-07-06", "")
+
+	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.NoError(t, err)
+	assert.Contains(t, msg.Text, "Journal. Dock. Read.")
+	assert.Equal(t, 1, n.count(engine.ChannelUser))
+}
+
+// TestRunBellFallback_DisabledBellSendsNothing: the backstop rides the bell's
+// own consent record — bell.enabled false silences it exactly as it silences
+// the bell, receipt or no receipt.
+func TestRunBellFallback_DisabledBellSendsNothing(t *testing.T) {
+	sc, a, n := newSched(t)
+	chain, err := a.ReadChainConfig()
+	require.NoError(t, err)
+	chain.Bell.Enabled = false
+	require.NoError(t, a.WriteChainConfig(chain))
+
+	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.NoError(t, err)
+	assert.Empty(t, msg.Text)
+	assert.Zero(t, n.count(engine.ChannelUser))
+}
+
+// TestRunBellFallback_SendFailureSurfaces: a delivery failure is reported to the
+// caller (the job store retries it) rather than swallowed as a silent success.
+func TestRunBellFallback_SendFailureSurfaces(t *testing.T) {
+	sc, _, n := newSched(t)
+	n.failOn[engine.ChannelUser] = true
+
+	_, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bell backstop")
+}
+
+// TestRunBellFallback_CorruptReceiptErrorsRatherThanDoubleSends: an unreadable
+// receipt is not evidence that the evening is open. The backstop surfaces the
+// parse failure — as the companion does on the same read — rather than assuming
+// nothing landed and posting on top of a delivered message.
+func TestRunBellFallback_CorruptReceiptErrorsRatherThanDoubleSends(t *testing.T) {
+	sc, a, n := newSched(t)
+	nightReceipt(t, a, "2026-07-06", "1234567890") // creates engine/companion/
+	path := filepath.Join(a.Home(), "engine", "companion", "receipt_night.json")
+	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
+
+	_, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "night receipt")
+	assert.Zero(t, n.count(engine.ChannelUser), "an unreadable gate never becomes a send")
+}
+
+// TestRunBellFallback_RepeatedRunsAfterDeliveryStayQuiet: the backstop is not
+// self-suppressing — it writes no receipt of its own — but once the companion's
+// receipt exists for the day, every later run is a no-op.
+func TestRunBellFallback_RepeatedRunsAfterDeliveryStayQuiet(t *testing.T) {
+	sc, a, n := newSched(t)
+
+	_, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	require.NoError(t, err)
+	require.Equal(t, 1, n.count(engine.ChannelUser))
+
+	nightReceipt(t, a, "2026-07-06", "1234567890")
+	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 45))
+	require.NoError(t, err)
+	assert.Empty(t, msg.Text)
+	assert.Equal(t, 1, n.count(engine.ChannelUser), "no second evening send")
+}
+
 // ── Tripwire escalation ladder ──────────────────────────────────────────────
 
 // TestTripwire_CompletedNoSend: a completed yesterday sends nothing.

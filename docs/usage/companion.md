@@ -292,6 +292,10 @@ The companion degrades in layers and is designed to **never fall silent** — a 
   If even that channel is unreachable, the job returns a loud error that fails the
   scheduled job and lands in the supervised daemon log. Silence is the one outcome
   the companion never produces.
+- **A missed night window** (any of the above ending in no delivery): the teeth
+  [evening backstop](#how-it-coexists-with-the-engine-teeth) posts the ordinary
+  pre-committed Bell after the cut-off, so the accountability window itself is not
+  lost — only its warmth.
 
 ## How it coexists with the Engine teeth
 
@@ -303,6 +307,17 @@ its *user-channel* send is suppressed, because the companion presents that line
 (appending the verdict verbatim on a missed day). The dead-man decision stays
 modeless; the companion only dresses its output. Disable the companion and the
 teeth send for themselves again, byte-for-byte as before.
+
+**The evening backstop.** Owning the window means owning the risk of missing it:
+if the night send fails outright — the host was off past the `22:00` cut-off, the
+channel was unreachable all evening — the evening would pass in silence. So the
+teeth keep one backstop. A dedicated periodic (`lucid-bell-fallback`) fires
+*after* the companion can no longer post, and sends the ordinary pre-committed
+Bell **only if** there is no verified `night` delivery receipt for that logical
+day. If the companion delivered — on time or late — the backstop stands down. At
+most one evening send per day, either way. It runs only while the companion is
+enabled; disable the companion and the real Bell resumes at `bell_time`. Full
+behavior: [`commands.md`](commands.md#the-evening-backstop-lucid-bell-fallback).
 
 ## Operational notes
 

@@ -21,9 +21,21 @@ import (
 	"github.com/mrz1836/lucid/internal/workout"
 )
 
-// schedulerFlagDB is the `--db` flag on `lucid scheduler run`. Centralized so
-// the test can read the value back via cmd.Flags().GetString.
-const schedulerFlagDB = "db"
+// Flag names shared by the `scheduler` subcommands. schedulerFlagDB is the
+// `--db` job-store override carried by both `run` and `reconcile` (same
+// resolution in both, so an operator points either at the same store); the
+// reconcile pair narrows and softens the repair. Centralized so a test can read
+// the values back via cmd.Flags().
+const (
+	schedulerFlagDB     = "db"
+	reconcileFlagSlug   = "slug"
+	reconcileFlagNoFire = "no-fire"
+)
+
+// reconcileTimeLayout formats a re-armed periodic's next run in the human
+// report — minute resolution with the zone named, the same layout
+// `scheduler status` prints its next-run column in, so the two read alike.
+const reconcileTimeLayout = "2006-01-02 15:04 MST"
 
 // newSchedulerCmd wires `lucid scheduler run` — the composition root for the
 // autonomous accountability daemon (ADR-0004, build-plan Stage 6). It joins
@@ -34,8 +46,10 @@ const schedulerFlagDB = "db"
 // honors bounded missed-fire catch-up on a supervised restart. The write path is
 // agent-free: no model is reachable from here.
 //
-// The parent `scheduler` verb currently exposes only `run`; it exists as a
-// group so later scheduled-job subcommands attach without reshaping the tree.
+// The parent `scheduler` verb groups three children — `run` (the daemon),
+// `status` (its read-only health surface), and `reconcile` (the sanctioned
+// repair for a parked send) — so later scheduled-job subcommands attach without
+// reshaping the tree.
 func newSchedulerCmd() *cobra.Command {
 	parent := &cobra.Command{
 		Use:   "scheduler",
@@ -51,6 +65,11 @@ sends themselves are the pre-committed Engine templates and nothing else.`,
 	// inspects local state and reports a verdict, never sending or touching a
 	// secret. See internal/cli/scheduler_status.go.
 	parent.AddCommand(newSchedulerStatusCmd())
+	// `reconcile` is the repair verb that completes the pair: `status` names a
+	// parked send, `reconcile` re-arms it — so the durable job store is never
+	// hand-edited (ADR-0007: state the binary owns is repaired only through the
+	// binary).
+	parent.AddCommand(newSchedulerReconcileCmd())
 	return parent
 }
 
@@ -86,6 +105,134 @@ binary. The job store is disposable machinery kept outside the ~/.lucid Ledger
 	}
 	cmd.Flags().String(schedulerFlagDB, "", "Override the disposable job-store path (default: LUCID_SCHEDULER_DB or a flywheel.db under the OS user-config dir, outside ~/.lucid)")
 	return cmd
+}
+
+// newSchedulerReconcileCmd builds the `reconcile` child: the sanctioned lever
+// that re-arms a **parked** scheduled send — one the configuration says should
+// be running, while the durable job store has it switched off or its cursor
+// frozen in the past. That is the state a transient delivery outage can leave
+// behind, and it is silent: nothing is broken, a send simply never comes again.
+//
+// `run` performs the same pass at startup, so a restart normally repairs drift
+// on its own; this is the on-demand lever for when bouncing the daemon is not
+// wanted, and the command `scheduler status` names when it reports a parked
+// periodic. It is credential-dumb and sends nothing itself: it re-arms the
+// periodic, and the daemon's next tick does the sending.
+func newSchedulerReconcileCmd() *cobra.Command {
+	var slug, dbPath string
+	var noFire bool
+	cmd := &cobra.Command{
+		Use:   "reconcile",
+		Short: "Re-arm a parked scheduled send (the sanctioned repair)",
+		Long: `reconcile re-arms a parked periodic: one the configuration says
+should be running, while the job store has it inactive or its next run stuck in
+the past so the due scan never reaches it again.
+
+Whether a send should be running is derived from configuration per slug — the
+morning tripwire always, the evening bell when the companion is disabled, the
+evening backstop when it is enabled — so the pass never fights a deliberate
+setting: a bell suppressed because the companion owns the evening send is left
+suppressed. Re-arming leaves the stale cursor in place, so the occurrence that
+was missed is delivered late rather than never; --no-fire skips it and resumes
+at the next scheduled one.
+
+It is safe to run any time: idempotent, it creates no periodic, edits no cron
+expression, moves no healthy periodic's next run, and sends nothing itself.`,
+		Args: cobra.NoArgs,
+		Example: `  # Repair everything parked.
+  lucid scheduler reconcile
+
+  # Just the morning dead-man.
+  lucid scheduler reconcile --slug lucid-tripwire
+
+  # Re-arm, but skip the send that was missed.
+  lucid scheduler reconcile --no-fire`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runSchedulerReconcile(cmd, slug, dbPath, noFire)
+		},
+	}
+	cmd.Flags().StringVar(&slug, reconcileFlagSlug, "", "Reconcile one periodic instead of all of them (an unknown slug is a no-op)")
+	cmd.Flags().BoolVar(&noFire, reconcileFlagNoFire, false, "Re-arm without delivering the missed occurrence: reset the cursor to the next scheduled run")
+	cmd.Flags().StringVar(&dbPath, schedulerFlagDB, "", "Override the durable job-store path (default: LUCID_SCHEDULER_DB or a flywheel.db under the OS user-config dir, outside ~/.lucid)")
+	return cmd
+}
+
+// runSchedulerReconcile is the wiring the cobra layer delegates to: boot the
+// router for the one configuration input the guard needs (who owns the evening
+// window), resolve the job store exactly as the daemon does, run the pass, and
+// report it. The store is opened inside [schedrun.ReconcileStore] so the command
+// layer never touches a database directly and the daemon's own path resolution
+// stays the single source of the store's location.
+//
+// A failure is named on stderr as "lucid: scheduler: <message>" before it is
+// returned, mirroring `run`: the root silences cobra's own error printing, and a
+// repair lever that exited non-zero without saying what it could not repair
+// would be the same silence it exists to end.
+func runSchedulerReconcile(cmd *cobra.Command, slug, dbFlag string, noFire bool) error {
+	r, err := bootedRouter(cmd)
+	if err != nil {
+		return reconcileError(cmd, err)
+	}
+	dbPath, err := schedrun.DefaultDBPath(dbFlag)
+	if err != nil {
+		return reconcileError(cmd, err)
+	}
+	report, err := schedrun.ReconcileStore(cmd.Context(), dbPath, schedrun.ReconcileOptions{
+		CompanionEnabled: r.Config().Companion.Enabled,
+		NoFire:           noFire,
+		Slug:             slug,
+	})
+	if err != nil {
+		return reconcileError(cmd, err)
+	}
+	return emit(cmd, report, reconcileLines(report, dbPath))
+}
+
+// reconcileError prints one "lucid: scheduler: <message>" line to stderr and
+// returns the error unchanged, so the exit code and the explanation always
+// travel together.
+func reconcileError(cmd *cobra.Command, err error) error {
+	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "lucid: scheduler: %s\n", err)
+	return err
+}
+
+// reconcileLines renders the pass as the calm, human-first output the command
+// prints by default. It always names the resolved job store — a path drift is
+// the difference between repairing the daemon's schedule and repairing nothing —
+// and says plainly when there was nothing to repair, so a healthy run reads as
+// an answer rather than as silence.
+func reconcileLines(report schedrun.ReconcileReport, dbPath string) []string {
+	lines := []string{
+		fmt.Sprintf("Job store: %s", dbPath),
+		fmt.Sprintf("Scanned: %d periodic(s)", report.Scanned),
+	}
+	if len(report.Reconciled) == 0 {
+		return append(lines, "Nothing parked — no periodic needed re-arming.")
+	}
+	lines = append(lines, fmt.Sprintf("Re-armed: %d", len(report.Reconciled)))
+	for _, p := range report.Reconciled {
+		lines = append(lines, fmt.Sprintf("  %s: %s; next run %s%s",
+			p.Slug, wasState(p.WasActive), p.NextRun.Format(reconcileTimeLayout), missedSuffix(p.FiresMissed)))
+	}
+	return lines
+}
+
+// wasState names the state the periodic was repaired from, so the report says
+// what was actually wrong rather than only that something was.
+func wasState(wasActive bool) string {
+	if wasActive {
+		return "was active with a stuck next run"
+	}
+	return "was inactive"
+}
+
+// missedSuffix marks whether the occurrence that was missed is still coming, so
+// the operator knows whether to expect a late send.
+func missedSuffix(firesMissed bool) string {
+	if firesMissed {
+		return " (the missed occurrence fires on the next tick)"
+	}
+	return ""
 }
 
 // runScheduler is the pure wiring the cobra layer delegates to: open storage,

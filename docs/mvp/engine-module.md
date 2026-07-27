@@ -116,6 +116,22 @@ they remember writing into force. The bell prompt and heartbeat carry
 no sign-off — one names a chain, the other reports status; neither
 stings.
 
+**The evening backstop is a send condition, not a send.** When the
+config-gated daily companion is enabled it presents the evening user
+window and the bell periodic is suppressed, so the window has exactly
+one sender. If that sender's delivery fails outright, the window would
+pass in silence — so a dedicated backstop periodic
+(`lucid-bell-fallback`,
+[`../usage/commands.md`](../usage/commands.md#the-evening-backstop-lucid-bell-fallback))
+fires the **bell template above, verbatim**, once the companion can no
+longer post, and only when the companion left no verified delivery
+receipt for that logical day. This adds **no fourth send class and no
+new consent**: it is the L0/ignition bell, on the bell's own consent
+record (`chain.json` `bell.enabled`), fired under a new deterministic
+condition. `bell.enabled: false` silences it exactly as it silences the
+bell. The gate reads one engine-tree receipt — no Mirror content, no
+model, no new template — so the ceiling below holds unchanged.
+
 Binding rules: these are the **only** autonomous sends in the MVP; all
 three use fixed templates with no LLM in the path; L2 cannot be
 enabled until `witness.json` has `confirmed_at`; disabling any of them
@@ -573,6 +589,43 @@ profile's `bell_time`).
 template names the floor chain for tonight and nothing else — no
 makeup work exists anywhere in the system.
 
+### Durability of the schedule itself
+
+The sends above defend the chain; this section defends the sends. A
+scheduled send is driven by a **periodic** — a durable row naming its
+slug, its cron, whether it is active, and when it next runs. Three rules
+bind that row, because a scheduled send that quietly stops existing is
+worse than one that visibly fails (P10: the record serves the practice):
+
+1. **A failed delivery never parks its periodic.** A send job that
+   exhausts its retries — a delivery timeout, an unreachable channel — is
+   discarded as a *job*. Its parent periodic stays active and its cursor
+   advances to the next occurrence, so tonight's transport failure costs
+   tonight's send and nothing more. Locked by a regression test, because
+   the failure it prevents is silent: a transient outage that disabled a
+   daily accountability send would surface only as a send that never
+   came again.
+2. **A parked periodic self-heals on startup.** `lucid scheduler run`
+   reconciles on every boot: a periodic that is *intended active* (see
+   the guard table in
+   [`../usage/commands.md`](../usage/commands.md#scheduler-reconcile))
+   but found inactive, or with its next run stuck in the past, is
+   re-armed and the missed occurrence fires. The guard is derived from
+   configuration per slug, so the pass never re-arms a periodic that is
+   *intended inactive* — a companion-suppressed bell stays suppressed,
+   and `bell.enabled: false` stays off. On a healthy store it changes
+   nothing.
+3. **Repair goes through the binary.** `lucid scheduler reconcile` is
+   the same pass on demand, and is the only sanctioned repair for a
+   parked send. The job store is disposable machinery
+   ([ADR-0004](../adr/0004-core-dependencies.md)), never the record, and
+   is never hand-edited — the same discipline the Ledger's derived
+   `status.json` follows.
+
+The **evening backstop** (§"Consent amendment") completes the set: rules
+1–3 keep a *periodic* alive, and the backstop keeps the evening *window*
+from falling silent when the companion owns it and its delivery fails.
+
 ## Error states (extends [`error-states.md`](error-states.md))
 
 | Trigger | Behavior | User message | Disk effect | Recovery |
@@ -591,6 +644,11 @@ makeup work exists anywhere in the system.
 | `/profile` naming an undefined profile | Reject | "No profile by that name — profiles are defined in chain.json, at a Retro (engine §2)." | None | Retro defines it |
 | `status.json` corrupt/missing | Rebuild silently | — | Regenerated from `days/` | By design (P2) |
 | Harness down at bell time | Nothing | — | None | **The chain runs anyway** — phone alarm is the Phase-0 fallback; a text-to-self is a valid record, backfilled via `/closeout backfill` (P10) |
+| A scheduled send's delivery fails (transport timeout, channel unreachable) until its retries are exhausted | Discard the **job**; the parent periodic stays active and its next run advances | (none — the send simply did not land; `scheduler status` reports the missed window) | Job store only; no Ledger effect | Automatic — the next occurrence fires normally. Tonight's record is repaired with `/closeout backfill` (P10) |
+| A periodic is *intended active* but found parked (inactive, or next run stuck in the past) | Re-arm on the next `scheduler run` startup; the missed occurrence fires | `scheduler status` reports an error line naming the slug **and** the repair command | Job store only | `lucid scheduler reconcile [--slug <slug>]` — never a hand edit of the job store |
+| A periodic is *intended inactive* (companion-suppressed bell, `bell.enabled: false`) | Left inactive by every reconcile pass | `scheduler status` reports "suppressed by companion (intended)" — OK, not a fault | None | (none — this is designed behavior, not a failure) |
+| Companion owns the evening window and left no verified `night` receipt for the logical day by the backstop mark | Evening backstop fires the bell template verbatim | The ordinary bell prompt (late) | Job store only | (none — the backstop *is* the recovery) |
+| Companion already delivered a verified `night` receipt for the logical day | Backstop is a no-op — at most one evening send per day | (none) | None | (none — designed) |
 
 ## Acceptance criteria (build phases 8–10)
 

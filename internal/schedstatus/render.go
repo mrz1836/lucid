@@ -107,7 +107,9 @@ func dbLines(label string, db DBReport) []string {
 }
 
 // periodicLine renders one periodic: its slug, active/inactive/missing marker,
-// cron, and next-run / last-enqueue timestamps.
+// cron, next-run / last-enqueue timestamps, and — when classification set one —
+// the note explaining why it is deliberately off, so a suppressed send reads as
+// intended right where a reader sees it is inactive.
 func periodicLine(p PeriodicStatus) string {
 	state := "active"
 	switch {
@@ -116,8 +118,18 @@ func periodicLine(p PeriodicStatus) string {
 	case !p.Active:
 		state = "inactive"
 	}
-	return fmt.Sprintf("  %-24s %-8s cron=%s next=%s last=%s",
-		p.Slug, state, orDash(p.Cron), fmtTime(p.NextRun), fmtTime(p.LastEnqueue))
+	return fmt.Sprintf("  %-24s %-8s cron=%s next=%s last=%s%s",
+		p.Slug, state, orDash(p.Cron), fmtTime(p.NextRun), fmtTime(p.LastEnqueue), noteSuffix(p.Note))
+}
+
+// noteSuffix renders " [<note>]" when a periodic carries a classification note,
+// else "". It brackets rather than em-dashes the note so it cannot be misread as
+// part of the timestamp it follows (an unset timestamp is itself an em dash).
+func noteSuffix(note string) string {
+	if note == "" {
+		return ""
+	}
+	return " [" + note + "]"
 }
 
 // receiptLine renders one window's last delivery receipt, or a "no receipt yet"

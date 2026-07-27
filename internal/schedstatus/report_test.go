@@ -1,6 +1,7 @@
 package schedstatus
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -23,14 +24,17 @@ func okPrompts() []PromptPath {
 	}
 }
 
-// okTeeth builds a healthy teeth job DB. The bell is active only when the
-// companion is disabled; when the companion is enabled the bell is deliberately
-// suppressed (inactive), which is the correct state and must not fault.
+// okTeeth builds a healthy teeth job DB. The bell and its evening backstop take
+// turns: with the companion enabled the bell is deliberately suppressed and the
+// backstop is armed to catch a companion that never delivers; with the companion
+// disabled the bell fires itself and the backstop stands down. Either way the
+// inactive one is the correct state and must not fault.
 func okTeeth(companionEnabled bool, now time.Time) DBInput {
 	return DBInput{
 		Path: "/var/lucid/flywheel.db",
 		Periodics: []PeriodicStatus{
 			{Slug: SlugBell, Cron: "0 19 * * *", Active: !companionEnabled, Present: true, NextRun: now.Add(6 * time.Hour)},
+			{Slug: SlugBellFallback, Cron: "0 23 * * *", Active: companionEnabled, Present: true, NextRun: now.Add(10 * time.Hour)},
 			{Slug: SlugTripwire, Cron: "0 6 * * *", Active: true, Present: true, NextRun: now.Add(18 * time.Hour)},
 		},
 	}
@@ -81,6 +85,51 @@ func healthyDisabled(now time.Time) Inputs {
 		CompanionJobs: DBInput{Path: "/var/lucid/companion.db", Missing: true},
 		Host:          []Check{{Name: "host.daemon", State: Ok, Detail: "running"}},
 	}
+}
+
+// parkTeeth switches one teeth periodic off by slug — the exact state a parked
+// send is in — so a case reads as what it is testing and never depends on
+// fixture ordering.
+func parkTeeth(in *Inputs, slug string) {
+	for i := range in.Teeth.Periodics {
+		if in.Teeth.Periodics[i].Slug == slug {
+			in.Teeth.Periodics[i].Active = false
+			return
+		}
+	}
+}
+
+// setTripwireCursor moves the tripwire's next run — the knob that separates a
+// merely-due periodic from one whose cursor is frozen.
+func setTripwireCursor(in *Inputs, next time.Time) {
+	for i := range in.Teeth.Periodics {
+		if in.Teeth.Periodics[i].Slug == SlugTripwire {
+			in.Teeth.Periodics[i].NextRun = next
+			return
+		}
+	}
+}
+
+// checkFor returns the check with the given name, or false when the report has
+// none — how the legibility tests assert on one classification without depending
+// on check ordering.
+func checkFor(r Report, name string) (Check, bool) {
+	for _, c := range r.Checks {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return Check{}, false
+}
+
+// periodicFor returns the reported teeth periodic row for a slug.
+func periodicFor(r Report, slug string) (PeriodicStatus, bool) {
+	for _, p := range r.Teeth.Periodics {
+		if p.Slug == slug {
+			return p, true
+		}
+	}
+	return PeriodicStatus{}, false
 }
 
 func TestAssembleVerdictMatrix(t *testing.T) {
@@ -150,10 +199,46 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			name: "inactive tripwire is an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
-				in.Teeth.Periodics[1].Active = false // tripwire off
+				parkTeeth(&in, SlugTripwire)
 				return in
 			},
 			verdict: Error,
+		},
+		{
+			name: "inactive evening backstop while the companion owns the send is an error",
+			build: func() Inputs {
+				in := healthyEnabled(now)
+				parkTeeth(&in, SlugBellFallback)
+				return in
+			},
+			verdict: Error,
+		},
+		{
+			name: "inactive evening backstop while the companion is disabled is not an error",
+			build: func() Inputs {
+				// healthyDisabled already stands the backstop down; prove ok
+				// (the warn is the disabled companion, not the backstop).
+				return healthyDisabled(now)
+			},
+			verdict: Warn,
+		},
+		{
+			name: "a teeth cursor stuck a full day behind is an error",
+			build: func() Inputs {
+				in := healthyEnabled(now)
+				setTripwireCursor(&in, now.Add(-36*time.Hour))
+				return in
+			},
+			verdict: Error,
+		},
+		{
+			name: "a merely-due teeth cursor is not an error",
+			build: func() Inputs {
+				in := healthyEnabled(now)
+				setTripwireCursor(&in, now.Add(-30*time.Minute))
+				return in
+			},
+			verdict: Ok,
 		},
 		{
 			name: "inactive bell while companion owns the evening send is not an error",
@@ -303,6 +388,180 @@ func TestAssembleAggregatesRunFailures(t *testing.T) {
 	require.Equal(t, 2, r.Runs.FailureCount)
 	require.Len(t, r.Runs.Failures, 2)
 	require.Equal(t, string(Ok), r.Verdict, "recent failures alone must not lower the verdict")
+}
+
+// TestParkedTeethPeriodicNamesRemedy proves the whole point of the parked-send
+// report: a periodic that is intended active but switched off is an error whose
+// detail names the slug *and* the exact command that repairs it, so the report is
+// actionable without a second lookup.
+func TestParkedTeethPeriodicNamesRemedy(t *testing.T) {
+	now := fixedNow()
+	in := healthyEnabled(now)
+	parkTeeth(&in, SlugTripwire)
+
+	r := Assemble(in, now)
+	require.Equal(t, string(Error), r.Verdict)
+
+	c, ok := checkFor(r, "periodic."+SlugTripwire)
+	require.True(t, ok, "the parked periodic produces its own named check")
+	require.Equal(t, Error, c.State)
+	require.Contains(t, c.Detail, SlugTripwire, "the line names the parked periodic")
+	require.Contains(t, c.Detail, "run: lucid scheduler reconcile --slug "+SlugTripwire,
+		"the line names the exact repair command")
+
+	// And it reaches the reader through the closing issues block.
+	out := strings.Join(r.TextLines(), "\n")
+	require.Contains(t, out, "[error] ")
+	require.Contains(t, out, "lucid scheduler reconcile --slug "+SlugTripwire)
+}
+
+// TestStuckCursorNamesRemedy covers the second half of parked: an *active*
+// periodic whose cursor froze a full day behind is reported with the same remedy,
+// while one that has merely just come due is left alone — a running daemon
+// between its mark and its next poll is never called broken.
+func TestStuckCursorNamesRemedy(t *testing.T) {
+	now := fixedNow()
+
+	stuck := healthyEnabled(now)
+	setTripwireCursor(&stuck, now.Add(-36*time.Hour))
+	r := Assemble(stuck, now)
+	require.Equal(t, string(Error), r.Verdict)
+	c, ok := checkFor(r, "periodic."+SlugTripwire)
+	require.True(t, ok)
+	require.Equal(t, Error, c.State)
+	require.Contains(t, c.Detail, "stuck")
+	require.Contains(t, c.Detail, "run: lucid scheduler reconcile --slug "+SlugTripwire)
+
+	due := healthyEnabled(now)
+	setTripwireCursor(&due, now.Add(-30*time.Minute))
+	r = Assemble(due, now)
+	require.Equal(t, string(Ok), r.Verdict, "a merely-due cursor is not parked")
+	_, ok = checkFor(r, "periodic."+SlugTripwire)
+	require.False(t, ok, "a healthy periodic produces no check at all")
+
+	// A periodic with no recorded cursor is not evidence of a frozen one.
+	unknown := healthyEnabled(now)
+	setTripwireCursor(&unknown, time.Time{})
+	require.Equal(t, string(Ok), Assemble(unknown, now).Verdict)
+}
+
+// TestSuppressedBellIsIntendedOK is the inverse reading: a bell that is inactive
+// because the companion owns the evening send is a healthy, intended state. It is
+// reported Ok with the reason — never an error, and never silently — both in the
+// check list and on the periodic's own row.
+func TestSuppressedBellIsIntendedOK(t *testing.T) {
+	now := fixedNow()
+	r := Assemble(healthyEnabled(now), now)
+	require.Equal(t, string(Ok), r.Verdict)
+	require.Equal(t, 0, r.ExitCode(), "the healthy exit code is unchanged")
+
+	c, ok := checkFor(r, "periodic."+SlugBell)
+	require.True(t, ok, "the suppressed bell is reported, not omitted")
+	require.Equal(t, Ok, c.State, "an intended-inactive periodic is never a fault")
+	require.Contains(t, c.Detail, "suppressed by companion (intended)")
+
+	p, ok := periodicFor(r, SlugBell)
+	require.True(t, ok)
+	require.Equal(t, "suppressed by companion (intended)", p.Note)
+
+	out := strings.Join(r.TextLines(), "\n")
+	require.Contains(t, out, "suppressed by companion (intended)", "the reason renders beside the row")
+	require.NotContains(t, out, "Issues:", "an intended state is not an issue")
+}
+
+// TestParkedBackstopNamesRemedy: while the companion owns the evening window its
+// backstop is what guarantees the window is never silently missed, so a parked
+// backstop is an error naming its own repair command.
+func TestParkedBackstopNamesRemedy(t *testing.T) {
+	now := fixedNow()
+	in := healthyEnabled(now)
+	parkTeeth(&in, SlugBellFallback)
+
+	r := Assemble(in, now)
+	require.Equal(t, string(Error), r.Verdict)
+	c, ok := checkFor(r, "periodic."+SlugBellFallback)
+	require.True(t, ok)
+	require.Equal(t, Error, c.State)
+	require.Contains(t, c.Detail, SlugBellFallback)
+	require.Contains(t, c.Detail, "run: lucid scheduler reconcile --slug "+SlugBellFallback)
+}
+
+// TestBackstopStoodDownIsIntendedOK: with the companion disabled the real bell
+// fires and the backstop is deliberately inactive — reported with its reason, and
+// the only fault is the disabled companion itself.
+func TestBackstopStoodDownIsIntendedOK(t *testing.T) {
+	now := fixedNow()
+	r := Assemble(healthyDisabled(now), now)
+	require.Equal(t, string(Warn), r.Verdict, "the disabled companion is the warn, not the backstop")
+
+	c, ok := checkFor(r, "periodic."+SlugBellFallback)
+	require.True(t, ok)
+	require.Equal(t, Ok, c.State)
+	require.Contains(t, c.Detail, "stood down")
+
+	p, ok := periodicFor(r, SlugBellFallback)
+	require.True(t, ok)
+	require.Contains(t, p.Note, "stood down")
+}
+
+// TestAbsentTeethPeriodicPointsAtTheDaemon: a slug the store has no row for
+// cannot be re-armed — there is nothing to re-arm — so the fault points at the
+// one thing that seeds it, a daemon start. An absent *intended-inactive* periodic
+// stays a non-fault with its reason.
+func TestAbsentTeethPeriodicPointsAtTheDaemon(t *testing.T) {
+	now := fixedNow()
+	in := healthyEnabled(now)
+	in.Teeth.Periodics = in.Teeth.Periodics[:2] // drop the tripwire row entirely
+
+	r := Assemble(in, now)
+	require.Equal(t, string(Error), r.Verdict)
+	c, ok := checkFor(r, "periodic."+SlugTripwire)
+	require.True(t, ok)
+	require.Equal(t, Error, c.State)
+	require.Contains(t, c.Detail, "not registered")
+	require.Contains(t, c.Detail, "run: lucid scheduler run")
+
+	// The absent slug still renders, so it is visible rather than simply gone.
+	p, ok := periodicFor(r, SlugTripwire)
+	require.True(t, ok)
+	require.False(t, p.Present)
+	require.Contains(t, strings.Join(r.TextLines(), "\n"), "MISSING")
+
+	// An absent bell while the companion owns the evening is not a fault.
+	noBell := healthyEnabled(now)
+	noBell.Teeth.Periodics = noBell.Teeth.Periodics[1:]
+	r = Assemble(noBell, now)
+	require.Equal(t, string(Ok), r.Verdict)
+	c, ok = checkFor(r, "periodic."+SlugBell)
+	require.True(t, ok)
+	require.Equal(t, Ok, c.State)
+	require.Contains(t, c.Detail, "(intended)")
+}
+
+// TestMissedEveningWindowStaysLegible: the evening window's own miss check is
+// untouched by the backstop work. At 20:00 the night window has elapsed, so a
+// night receipt still stamped with yesterday is a real miss — reported as an
+// error naming the window and the date it last delivered.
+func TestMissedEveningWindowStaysLegible(t *testing.T) {
+	evening := time.Date(2026, 7, 16, 20, 0, 0, 0, time.UTC)
+	in := healthyEnabled(evening)
+
+	r := Assemble(in, evening)
+	require.Equal(t, string(Error), r.Verdict)
+	c, ok := checkFor(r, "companion.receipt.night")
+	require.True(t, ok, "the elapsed evening window is classified")
+	require.Equal(t, Error, c.State)
+	require.Contains(t, c.Detail, "night")
+	require.Contains(t, c.Detail, "stale receipt")
+
+	// A delivered evening clears it, and the suppressed bell still reads as intended.
+	delivered := healthyEnabled(evening)
+	delivered.Receipts[1].Date = evening.Format(dateLayout)
+	r = Assemble(delivered, evening)
+	require.Equal(t, string(Ok), r.Verdict)
+	c, ok = checkFor(r, "periodic."+SlugBell)
+	require.True(t, ok)
+	require.Equal(t, Ok, c.State)
 }
 
 // TestAssembleNeverRun is the never-initialized scaffold: no job DBs, no
