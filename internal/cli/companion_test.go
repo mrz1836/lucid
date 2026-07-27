@@ -227,9 +227,10 @@ func TestRunScheduler_CompanionEnabled_WiresSuppression(t *testing.T) {
 	}
 }
 
-// bellSuppressed reports whether the teeth job DB has both periodics with the
-// bell reconciled inactive (companion owns the night user send) and the tripwire
-// active.
+// bellSuppressed reports whether the teeth job DB has all three periodics with
+// the evening handed to the companion: the bell reconciled inactive (the
+// companion owns the night user send), its backstop armed to catch a companion
+// that never delivers, and the tripwire active.
 func bellSuppressed(t *testing.T, dbPath string) bool {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
@@ -238,14 +239,14 @@ func bellSuppressed(t *testing.T, dbPath string) bool {
 	}
 	defer closeGorm(t, db)
 	views, err := flywheel.ListPeriodics(context.Background(), db)
-	if err != nil || len(views) != 2 {
+	if err != nil || len(views) != 3 {
 		return false
 	}
 	active := map[string]bool{}
 	for _, v := range views {
 		active[v.Slug] = v.Active
 	}
-	return !active["lucid-bell"] && active["lucid-tripwire"]
+	return !active["lucid-bell"] && active["lucid-bell-fallback"] && active["lucid-tripwire"]
 }
 
 // companionPeriodics returns how many periodics the companion job DB carries.

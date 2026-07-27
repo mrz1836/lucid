@@ -150,8 +150,8 @@ func TestSchedulerRun_GracefulStopDrainsClean(t *testing.T) {
 			}
 		}()
 		views, lerr := flywheel.ListPeriodics(context.Background(), db)
-		return lerr == nil && len(views) == 2
-	}, 10*time.Second, 25*time.Millisecond, "the daemon reconciles the bell and tripwire periodics")
+		return lerr == nil && len(views) == 3
+	}, 10*time.Second, 25*time.Millisecond, "the daemon reconciles the bell, backstop, and tripwire periodics")
 
 	cancel()
 	select {
