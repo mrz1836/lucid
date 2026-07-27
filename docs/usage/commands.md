@@ -688,6 +688,12 @@ bell suppressed because the companion owns the evening send is *intended
 inactive*, so `reconcile` leaves it inactive and says so. It re-arms what was
 parked; it never re-enables what you turned off.
 
+**What counts as stuck.** An active periodic whose next run has just passed is
+*due*, not parked — the scheduler advances its cursor past now on the next tick.
+Only a cursor a full day behind (an entire daily occurrence elapsed with nothing
+advancing it) reads as stuck, so a running daemon between its mark and its next
+poll is never mistaken for a broken one.
+
 **The missed occurrence fires.** Re-arming leaves the stale cursor in place, so
 the next tick delivers the send that was missed — late, but delivered. Pass
 `--no-fire` to skip it and resume from the next scheduled occurrence instead.

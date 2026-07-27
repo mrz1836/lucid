@@ -196,9 +196,15 @@ func (w tripwireWorker) Work(ctx context.Context, _ *flywheel.Job[tripwireArgs])
 }
 
 // Run opens the disposable job DB, migrates it, registers the bell, backstop,
-// and tripwire workers, reconciles their periodics from chain.json's clocks, and
-// runs the flywheel node until ctx is canceled (SIGINT/SIGTERM upstream). It
-// returns nil on a clean drain.
+// and tripwire workers, reconciles their periodics from chain.json's clocks,
+// re-arms any that were left parked, and runs the flywheel node until ctx is
+// canceled (SIGINT/SIGTERM upstream). It returns nil on a clean drain.
+//
+// The startup re-arm is the schedule's own durability guarantee: a periodic that
+// should be running but is found switched off or with a frozen cursor is
+// repaired on the spot and its missed occurrence fires, so an outage costs at
+// most one restart rather than a send that silently never comes again
+// (engine-module.md §"Durability of the schedule itself").
 func Run(ctx context.Context, opts Options) error {
 	if opts.Store == nil {
 		return errNoStore
@@ -238,7 +244,19 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("schedrun: scaffold engine: %w", err)
 	}
 	if err = upsertPeriodics(ctx, db, opts.Store, opts.SuppressUserChannel); err != nil {
-		return err
+		return startupErr(ctx, err)
+	}
+
+	// Seeding declares the schedule; this pass repairs it. They are not the same
+	// job: an upsert restores each periodic's active flag but deliberately
+	// preserves its cursor, so a periodic whose next run was left frozen in the
+	// past would come back up still unreachable by the due scan. Running the same
+	// pass `lucid scheduler reconcile` exposes — rather than a second, boot-only
+	// notion of "parked" — is what keeps the daemon and the command agreeing on
+	// what a healthy schedule looks like. It is a no-op on a healthy store, and
+	// the intended-active guard means it never re-arms a suppressed bell.
+	if _, err = Reconcile(ctx, db, ReconcileOptions{CompanionEnabled: opts.SuppressUserChannel}); err != nil {
+		return startupErr(ctx, err)
 	}
 
 	sc := scheduler.New(opts.Store, opts.Notifier)
@@ -264,6 +282,22 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("schedrun: build node: %w", err)
 	}
 	return node.Run(ctx)
+}
+
+// startupErr grades a failure from the boot sequence: a stop signal that lands
+// mid-startup aborts the in-flight DB work with a context error, and that is an
+// ordinary shutdown, not a failure. Reporting it as one would put a spurious
+// error line in the supervised log every time the daemon is stopped or restarted
+// during its first moments — the drain path a supervisor exercises constantly.
+// A genuine startup failure (a malformed clock mark, an unusable job store) has
+// no canceled context and still surfaces.
+//
+//nolint:nilerr // discarding the error is the point: a canceled boot is a stop request, and node.Run reports the same clean nil for a canceled drain
+func startupErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
 
 // buildRegistry registers the bell, backstop, and tripwire workers over one
