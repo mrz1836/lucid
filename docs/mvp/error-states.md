@@ -175,6 +175,27 @@ to the storage table below.
 | La-5 | Registry write (`update_registry`) fails — disk full or permission denied | Surface immediately, St-1 pattern; the append-only merge is atomic, so a failed write leaves the record byte-unchanged. | (see St-1) | None (record not merged) |
 | La-6 | `lucid excavate` / `lucid recall` over an empty or thin store | Honest empty result; **no model call** (there is no LLM in either path). | "Nothing to excavate yet." / "Nothing archived under that era yet." | None (read-only) |
 
+### Scheduler daemon (the send schedule — deterministic, agent-free)
+
+The rows above cover a *message* that fails. These cover the **schedule**
+that carries it: the durable periodics that drive the bell, the tripwire,
+and the evening backstop. The full behavior lives in
+[`engine-module.md`](engine-module.md) §"Durability of the schedule
+itself"; the rows below record it in this page's unified format. The
+dividing principle follows "no silent state" above, sharpened by P10: a
+send that fails is loud and recoverable, but a send that quietly stops
+being *scheduled* is the one failure the user would never see — so every
+path here either self-heals or names its remedy. No LLM is reachable
+from any of it.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| Sc-1 | A scheduled send's delivery fails until its retries are exhausted (transport timeout, channel unreachable) | The **job** is discarded; the parent periodic stays active and its next run advances. A transport failure costs one send, never the schedule. | (none directly — `lucid scheduler status` reports the missed window as an error) | Job store only; the Ledger is untouched. | Automatic (the next occurrence fires); the day's record is repaired with `/closeout backfill`. |
+| Sc-2 | A periodic that is *intended active* is found parked — inactive, or with its next run stuck in the past | Re-armed by the reconcile pass `lucid scheduler run` performs at startup; the missed occurrence fires. Idempotent on a healthy store. | `scheduler status` reports an error naming the slug **and** the exact repair command. | Job store only. | `lucid scheduler reconcile [--slug <slug>]` on demand — never a hand edit of the job store. |
+| Sc-3 | A periodic that is *intended inactive* is inactive (companion-suppressed bell; `bell.enabled: false`) | Left alone by every reconcile pass — the guard is derived from configuration per slug, so repair never fights a deliberate setting. | `scheduler status` reports it as *suppressed by companion (intended)* — OK, never a fault. | None. | (none — this is designed behavior, not a failure) |
+| Sc-4 | The companion owns the evening window and left no verified `night` receipt for that logical day by the backstop mark | The evening backstop fires the pre-committed bell template verbatim, so the window is not silent. | The ordinary bell prompt, late. | Job store only. | (none — the backstop *is* the recovery) |
+| Sc-5 | The companion already delivered a verified `night` receipt for that logical day | The backstop is a no-op: at most one evening send per day, by construction. | (none) | None. | (none — designed) |
+
 ## Storage failures
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |

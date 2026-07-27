@@ -93,6 +93,18 @@ future agent unless a contract explicitly overrides them.
   the registries and `memory` events **only through router projection
   seams** — never a raw sanctuary tree, never an agent slice. They add no
   agent input and widen no contract's inputs; the denylist stands whole.
+  The scheduler's own surfaces sit on that same module side: the
+  `lucid scheduler` verb tree — `run`, `status`, and `reconcile`, the
+  sanctioned repair for a parked send
+  ([`../usage/commands.md`](../usage/commands.md#scheduler-reconcile),
+  [ADR-0007](../adr/0007-cli-conventions.md)) — and the evening backstop
+  that fires the pre-committed bell template when the companion's night
+  delivery left no receipt ([`engine-module.md`](engine-module.md)
+  §"Durability of the schedule itself"). All of it is deterministic and
+  **agent-free**: it invokes no agent, reads no Mirror tree, and reaches
+  only engine-tree state (chain config, the companion's delivery receipt)
+  plus the disposable job store. It adds no agent input, no contract
+  input, and no new send class.
 
 These rules are non-negotiable. Every contract below assumes them.
 

@@ -44,6 +44,20 @@ this build is explicitly meant to mature.
   `--force`, `--channel`, and the `UPDATE_CHANNEL` convention
   (stable | beta | edge) carry over. This adds one verb to the
   ADR-0003 command spine, recorded here.
+* **`lucid scheduler`, the daemon verb tree — `run | status |
+  reconcile`:** the house pattern of a long-running process paired with
+  read-only inspection, extended by one repair verb. `run` is the
+  daemon, `status` its credential-dumb health read, and `reconcile` the
+  sanctioned lever that re-arms a parked periodic
+  ([`../usage/commands.md`](../usage/commands.md#scheduler-reconcile),
+  [`../mvp/engine-module.md`](../mvp/engine-module.md) §"Durability of
+  the schedule itself"). The convention `reconcile` establishes: **state
+  the binary owns is repaired only through the binary.** The durable job
+  store is disposable machinery ([ADR-0004](0004-core-dependencies.md)),
+  never the record — but "disposable" is not "hand-editable", and a
+  runbook step that says *edit the job store directly* is a missing verb.
+  Every diagnostic a graded `status` reports should name the command that
+  fixes it. These verbs sit beside the ADR-0003 spine, recorded here.
 * **Output discipline:** human-first output by default; a
   machine-readable mode on the commands scripts need (`status`,
   `day`, `export`, `validate`), so automation never scrapes prose.
