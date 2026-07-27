@@ -2,6 +2,7 @@ package schedrun
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,6 +248,106 @@ func TestRun_BellPeriodicFiresToUser(t *testing.T) {
 	require.Equal(t, 1, r.notif.count(engine.ChannelUser))
 	msg, _ := r.notif.first(engine.ChannelUser)
 	assert.Contains(t, msg.text, "Journal. Dock. Read.", "the bell names the chain")
+}
+
+// ── A failed delivery never parks its definition ─────────────────────────────
+
+// deadlineNotifier fails every send with a wrapped context.DeadlineExceeded —
+// the shape a POST to a chat endpoint returns when the network path is down
+// mid-outage. It counts the calls so a test can prove every retry really tried
+// to deliver rather than short-circuiting somewhere above the notifier.
+type deadlineNotifier struct{ attempts atomic.Int64 }
+
+// Send always times out. The runner classifies a deadline-exceeded error as a
+// retriable timeout (not a permanent failure), so the job walks its whole retry
+// ladder before it is discarded.
+func (n *deadlineNotifier) Send(_, _ string) error {
+	n.attempts.Add(1)
+	return fmt.Errorf("post to channel: %w", context.DeadlineExceeded)
+}
+
+// steppingClock advances a fixed step on every read. Each failed attempt is
+// rescheduled behind an exponential backoff, so a fixed clock would strand the
+// retryable job in the future forever and RunUntilIdle would poll until the test
+// timed out. Stepping past the backoff cap on every read lets the whole ladder
+// drain back to back without a single real sleep. The counter is atomic because
+// the runner reads the clock from its dispatch and lease-heartbeat goroutines.
+type steppingClock struct {
+	base  time.Time
+	step  time.Duration
+	reads atomic.Int64
+}
+
+// newSteppingClock returns a clock whose first read is base+step.
+func newSteppingClock(base time.Time, step time.Duration) *steppingClock {
+	return &steppingClock{base: base, step: step}
+}
+
+// Now returns the next step on the ladder.
+func (c *steppingClock) Now(context.Context) time.Time {
+	return c.base.Add(time.Duration(c.reads.Add(1)) * c.step)
+}
+
+// findPeriodic looks up one definition by slug in a ListPeriodics result.
+func findPeriodic(views []flywheel.PeriodicView, slug string) (flywheel.PeriodicView, bool) {
+	for _, v := range views {
+		if v.Slug == slug {
+			return v, true
+		}
+	}
+	return flywheel.PeriodicView{}, false
+}
+
+// TestBellDiscardDoesNotParkPeriodic locks the durability invariant every
+// recovery path here rests on: a transient delivery outage is confined to the
+// job it broke. The bell fires, every delivery attempt times out, and the job
+// exhausts its retries into `discarded` — yet the parent definition is still
+// active with its cursor advanced past the fired bucket, so tomorrow's send is
+// still armed. Without this lock a single unreachable evening could silently and
+// permanently disable a daily send, recoverable only by hand-editing the job DB.
+// If a future change ever deactivates a definition on discard (an observer, an
+// upstream state-machine change), this test fails.
+func TestBellDiscardDoesNotParkPeriodic(t *testing.T) {
+	bucket := at(2026, 7, 5, 19, 0)
+	notif := &deadlineNotifier{}
+	r := newRigWith(t, models.NewFixedClock(bucket), notif)
+
+	// Declare the bell an hour before its mark, so the 19:00 bucket is its next fire.
+	require.NoError(t, flywheel.UpsertPeriodic(ctxAt(at(2026, 7, 5, 18, 0)), r.db, flywheel.PeriodicSpec{
+		Slug: slugBell, Kind: kindBell, Cron: "0 19 * * *", Queue: queueName, Active: true,
+	}))
+
+	n, err := r.sched.Tick(ctxAt(at(2026, 7, 5, 19, 5)))
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "the due bell enqueues exactly once")
+
+	// Drain the retry ladder with an unreachable endpoint: every attempt times out.
+	runCtx := models.WithClock(context.Background(), newSteppingClock(at(2026, 7, 5, 19, 5), 5*time.Minute))
+	require.NoError(t, r.runner.RunUntilIdle(runCtx))
+
+	jobs, err := flywheel.ListJobs(runCtx, r.db, flywheel.ListJobsParams{Kind: kindBell})
+	require.NoError(t, err)
+	require.Len(t, jobs, 1, "the outage produces one send job, not a job per retry")
+	job := jobs[0]
+	require.Equal(t, string(flywheel.StateDiscarded), job.State, "the send exhausts its attempts and discards")
+	require.Greater(t, job.Attempt, 1, "the outage was retried, not failed once")
+	assert.Equal(t, int64(job.Attempt), notif.attempts.Load(), "every attempt was a real delivery attempt")
+
+	runs, err := flywheel.ListRuns(runCtx, r.db, job.ID, flywheel.ListRunsParams{Limit: job.Attempt})
+	require.NoError(t, err)
+	require.Len(t, runs, job.Attempt, "one audit row per attempt")
+	for _, run := range runs {
+		assert.Equal(t, string(flywheel.OutcomeTimeout), run.Outcome, "a deadline-exceeded send records as a timeout")
+	}
+
+	// The invariant: the discard stayed inside the job.
+	views, err := flywheel.ListPeriodics(runCtx, r.db)
+	require.NoError(t, err)
+	bell, ok := findPeriodic(views, slugBell)
+	require.True(t, ok, "the bell definition survives the discard")
+	assert.True(t, bell.Active, "a discarded send never deactivates its parent definition")
+	assert.True(t, bell.NextRunAt.After(bucket),
+		"the cursor advanced past the fired bucket, got %s", bell.NextRunAt)
 }
 
 // ── Missed-fire catch-up, bounded (AC-3) ─────────────────────────────────────
