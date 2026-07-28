@@ -155,6 +155,63 @@ func TestDeepDive_DegradesAfterMalformed(t *testing.T) {
 	assert.Nil(t, res.Candidate)
 }
 
+// TestDeepDive_WindowLabelFramesTheSlice proves a catch-up read is handed to the
+// model as the span it actually covers, not as a single ISO week. Without this
+// the model is shown a fortnight of entries under "ISO WEEK: 2026-W30" and
+// narrates "this week" over all of it — every window field could be correct and
+// the read the user sees would still be wrong.
+func TestDeepDive_WindowLabelFramesTheSlice(t *testing.T) {
+	fake := &provider.Fake{Script: []provider.Exchange{deepReply("")}}
+	in := richDeepInput()
+	in.Window = "2026-07-13 to 2026-07-26 (14 days)"
+
+	DeepDive(context.Background(), in, fake)
+
+	require.Len(t, fake.Requests, 1)
+	req := fake.Requests[0]
+	require.Len(t, req.Messages, 1)
+	slice := req.Messages[0].Content
+
+	assert.Contains(t, slice, "WINDOW: 2026-07-13 to 2026-07-26 (14 days)")
+	assert.NotContains(t, slice, "ISO WEEK:", "the window replaces the week label, never sits beside it")
+	assert.NotContains(t, req.System, "the past week", "the instruction names the span, not a week")
+}
+
+// TestDeepDive_FallsBackToISOWeekLabel proves the window label is additive: a
+// caller that sets no window still gets today's ISO-week framing verbatim, so
+// nothing that knows only the week changes meaning.
+func TestDeepDive_FallsBackToISOWeekLabel(t *testing.T) {
+	fake := &provider.Fake{Script: []provider.Exchange{deepReply("")}}
+
+	DeepDive(context.Background(), richDeepInput(), fake)
+
+	require.Len(t, fake.Requests, 1)
+	req := fake.Requests[0]
+	require.Len(t, req.Messages, 1)
+
+	assert.Contains(t, req.Messages[0].Content, "ISO WEEK: 2026-W27")
+	assert.NotContains(t, req.Messages[0].Content, "WINDOW:")
+	assert.Contains(t, req.System, "the past week")
+}
+
+// TestDeepDive_WindowLabelCarriesNoLedgerPath guards the sanctuary rule at the
+// agent boundary: the window is a date range and nothing else. A Ledger path in
+// an agent-facing string is what CheckSanctuaryTree exists to catch, and this
+// keeps a later "helpful" addition from smuggling one in through the label.
+func TestDeepDive_WindowLabelCarriesNoLedgerPath(t *testing.T) {
+	fake := &provider.Fake{Script: []provider.Exchange{deepReply("")}}
+	in := richDeepInput()
+	in.Window = "2026-07-13 to 2026-07-26 (14 days)"
+
+	DeepDive(context.Background(), in, fake)
+
+	require.Len(t, fake.Requests, 1)
+	for _, forbidden := range []string{"engine/", "observations/", "registries/", ".lucid"} {
+		assert.NotContains(t, fake.Requests[0].Messages[0].Content, forbidden)
+		assert.NotContains(t, fake.Requests[0].System, forbidden)
+	}
+}
+
 // TestDeepDive_DegradesOnTransportError proves a transport error on both
 // attempts degrades to the fallback (never returns an error).
 func TestDeepDive_DegradesOnTransportError(t *testing.T) {

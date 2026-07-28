@@ -8,6 +8,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/agents/reflection"
 	"github.com/mrz1836/lucid/internal/agents/safety"
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/frameworks"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/provider"
@@ -24,10 +25,15 @@ const commandReflectWeek = "/reflect week"
 // lens the CLI resolved from config over the embedded framework registry (nil
 // for the baseline, lens-neutral voice). The router owns every Ledger read and
 // builds the projection-only week bundle.
+//
+// Window is the caller's range request. Its zero value is the catch-up read —
+// everything since the last reflection — so a caller that asks for nothing gets
+// the complete span rather than a fixed calendar week.
 type ReflectWeekRequest struct {
 	Now        time.Time
 	Provider   provider.Provider
 	ActiveLens *frameworks.Lens
+	Window     ReflectWindowOptions
 }
 
 // ReflectWeekPattern is the Safety-gated candidate pattern the deep-dive
@@ -41,20 +47,32 @@ type ReflectWeekPattern struct {
 }
 
 // ReflectWeekResult is the read-only weekly deep-dive: the ISO-week label, the
-// six Discord-friendly narrative sections (each line already gated through
-// Safety), the optional Safety-gated candidate pattern, and the "<id>
-// v<version>" applied-lens label when a lens framed the run. Nothing here is
-// persisted — the surface writes no insight, reflection, or raw file.
+// resolved window's facts, the six Discord-friendly narrative sections (each
+// line already gated through Safety), the optional Safety-gated candidate
+// pattern, and the "<id> v<version>" applied-lens label when a lens framed the
+// run. Nothing here is persisted — the surface writes no insight, reflection, or
+// raw file.
+//
+// ISOWeek labels the window's END day, so a downstream consumer that keys on it
+// keeps working across a multi-week catch-up read. WindowStart, WindowEnd and
+// DaysCovered state the span that was actually read; Capped and UncoveredDays
+// state the shortfall a long gap deferred, so the surface can say so out loud
+// rather than quietly reading less than the user thinks.
 type ReflectWeekResult struct {
-	ISOWeek     string
-	Summary     string
-	Wins        []string
-	Misses      []string
-	BodyPain    []string
-	HabitChange []string
-	NextWeek    []string
-	Pattern     *ReflectWeekPattern
-	AppliedLens string
+	ISOWeek       string
+	WindowStart   time.Time
+	WindowEnd     time.Time
+	DaysCovered   int
+	Capped        bool
+	UncoveredDays int
+	Summary       string
+	Wins          []string
+	Misses        []string
+	BodyPain      []string
+	HabitChange   []string
+	NextWeek      []string
+	Pattern       *ReflectWeekPattern
+	AppliedLens   string
 }
 
 // ReflectWeek executes the read-only weekly deep-dive. It assembles the
@@ -70,10 +88,10 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 	now := whenOr(req.Now)
 
 	// The window is resolved once, here, and handed to the bundle: the assembler
-	// no longer derives its own bounds. The ISO-week mode keeps this read's
-	// behavior exactly as it was; threading the caller's range request through
-	// the request struct follows.
-	win, err := r.resolveReflectWindow(now, ReflectWindowOptions{Mode: ReflectWindowWeek})
+	// no longer derives its own bounds. Resolving it reads the reflected-through
+	// cursor, which is a pure read — a Ledger with no cursor yields a first-run
+	// window and no file is created, so this surface stays read-only.
+	win, err := r.resolveReflectWindow(now, req.Window)
 	if err != nil {
 		return ReflectWeekResult{}, fmt.Errorf("reflectweek: resolve window: %w", err)
 	}
@@ -94,6 +112,7 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 
 	dd := reflection.DeepDive(ctx, reflection.DeepDiveInput{
 		ISOWeek:             bundle.ISOWeek,
+		Window:              weekWindowLabel(bundle),
 		Numbers:             weekNumbers(bundle),
 		Entries:             toDeepEntries(bundle.RawDigest),
 		Signals:             toDeepSignals(bundle.Observations),
@@ -104,14 +123,22 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 		AgentVersion:        r.cfg.AgentVersions.Reflection,
 	}, req.Provider)
 
+	// The window facts are COPIED from the bundle, never recomputed here: a
+	// second derivation is how the narrative header and the JSON payload start
+	// disagreeing about what was covered.
 	res := ReflectWeekResult{
-		ISOWeek:     bundle.ISOWeek,
-		Summary:     r.gateLine(ctx, dd.Summary, req.Provider),
-		Wins:        r.gateLines(ctx, dd.Wins, req.Provider),
-		Misses:      r.gateLines(ctx, dd.Misses, req.Provider),
-		BodyPain:    r.gateLines(ctx, dd.BodyPain, req.Provider),
-		HabitChange: r.gateLines(ctx, dd.HabitChange, req.Provider),
-		NextWeek:    r.gateLines(ctx, dd.NextWeek, req.Provider),
+		ISOWeek:       bundle.ISOWeek,
+		WindowStart:   bundle.WindowStart,
+		WindowEnd:     bundle.WindowEnd,
+		DaysCovered:   bundle.DaysCovered,
+		Capped:        bundle.Capped,
+		UncoveredDays: bundle.UncoveredDays,
+		Summary:       r.gateLine(ctx, dd.Summary, req.Provider),
+		Wins:          r.gateLines(ctx, dd.Wins, req.Provider),
+		Misses:        r.gateLines(ctx, dd.Misses, req.Provider),
+		BodyPain:      r.gateLines(ctx, dd.BodyPain, req.Provider),
+		HabitChange:   r.gateLines(ctx, dd.HabitChange, req.Provider),
+		NextWeek:      r.gateLines(ctx, dd.NextWeek, req.Provider),
 	}
 	if dd.AppliedLens != nil {
 		res.AppliedLens = *dd.AppliedLens
@@ -126,6 +153,18 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 		}
 	}
 	return res, nil
+}
+
+// weekWindowLabel renders the span the deep-dive is reading as the truthful
+// header of its authorized slice — "2026-07-13 to 2026-07-26 (14 days)". It
+// names dates only: no Ledger path may appear in an agent-facing string.
+func weekWindowLabel(b WeekBundle) string {
+	unit := "days"
+	if b.DaysCovered == 1 {
+		unit = "day"
+	}
+	return fmt.Sprintf("%s to %s (%d %s)",
+		engine.DateString(b.WindowStart), engine.DateString(b.WindowEnd), b.DaysCovered, unit)
 }
 
 // proposalPausePassive reports whether the silent proposal pause is currently

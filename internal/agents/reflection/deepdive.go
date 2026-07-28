@@ -68,13 +68,22 @@ type DeepLens struct {
 }
 
 // DeepDiveInput is the authorized slice for one weekly deep-dive: the ISO-week
-// label, the honest pre-rendered metric lines (the router formats them from the
-// projections so the agent never recomputes an Engine number), the week's
-// citable raw entries, its body signals, the accepted-insight window for
-// continuity, the active lens (nil for the baseline voice), the rejected and
-// unanswered shape-tag denylists, and the agent version to stamp.
+// label, the window label, the honest pre-rendered metric lines (the router
+// formats them from the projections so the agent never recomputes an Engine
+// number), the week's citable raw entries, its body signals, the
+// accepted-insight window for continuity, the active lens (nil for the baseline
+// voice), the rejected and unanswered shape-tag denylists, and the agent version
+// to stamp.
+//
+// Window is the truthful span being read ("2026-07-13 to 2026-07-26 (14 days)")
+// and takes precedence over ISOWeek in the slice. A reflection that catches up
+// on a skipped week covers several weeks, and announcing that span as one ISO
+// week would invite the model to narrate "this week" over a fortnight of
+// entries. It is optional: an empty Window falls back to the ISO-week line, so
+// a caller that only knows the week is unaffected.
 type DeepDiveInput struct {
 	ISOWeek             string
+	Window              string
 	Numbers             []string
 	Entries             []DeepEntry
 	Signals             []DeepSignal
@@ -257,12 +266,21 @@ func cleanLines(lines []string) []string {
 }
 
 // deepDiveSlice renders the week as the single user message in the authorized
-// slice — the entirety of what the deep-dive sees. It shows the honest numbers,
-// each raw entry id-anchored so the model can cite it, the body signals, the
-// accepted insights for continuity, and, when set, the active lens by name.
+// slice — the entirety of what the deep-dive sees. It opens with the span being
+// read, then shows the honest numbers, each raw entry id-anchored so the model
+// can cite it, the body signals, the accepted insights for continuity, and, when
+// set, the active lens by name.
+//
+// The opening line is the window when the caller resolved one, and the ISO week
+// otherwise: a catch-up read spanning several weeks must never be handed to the
+// model under a single week's label.
 func deepDiveSlice(in DeepDiveInput) []provider.Message {
 	var b strings.Builder
-	b.WriteString("ISO WEEK: " + in.ISOWeek + "\n\n")
+	if in.Window != "" {
+		b.WriteString("WINDOW: " + in.Window + "\n\n")
+	} else {
+		b.WriteString("ISO WEEK: " + in.ISOWeek + "\n\n")
+	}
 
 	b.WriteString("HONEST NUMBERS\n")
 	for _, n := range in.Numbers {
@@ -296,9 +314,18 @@ func deepDiveSlice(in DeepDiveInput) []provider.Message {
 // clean of every blocklist phrase so the prompt itself passes the diagnostic
 // "zero hits" source sweep (internal/validate). strict adds the retry emphasis
 // and, when present, restates the shapes not to re-propose.
+//
+// The opening sentence names the span rather than "the past week" whenever a
+// window is set, for the same reason the slice does: a catch-up read told it is
+// summarizing a week will narrate one, however many weeks it was handed.
 func deepDiveSystem(in DeepDiveInput, strict bool) string {
 	var b strings.Builder
-	b.WriteString("You are Lucid's Reflection agent composing a weekly deep-dive of the past week. ")
+	b.WriteString("You are Lucid's Reflection agent composing a deep-dive of ")
+	if in.Window != "" {
+		b.WriteString("the span named at the top of the slice below. ")
+	} else {
+		b.WriteString("the past week. ")
+	}
 	b.WriteString("Read the honest numbers, the raw entries, the body signals, and the already-validated ")
 	b.WriteString("insights below, then write a calm, tentative reflection. Ground every observation in ")
 	b.WriteString("the material shown, quote or paraphrase the user's own words, use hypothesis framing, ")

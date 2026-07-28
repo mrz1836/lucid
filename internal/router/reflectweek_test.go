@@ -177,6 +177,86 @@ func TestReflectWeek_PauseSuppressesCandidate(t *testing.T) {
 	assert.True(t, st.PausedUntil.Equal(until), "the pause is read-only, never rewritten")
 }
 
+// reflectionReceiptPath is the reflected-through cursor's on-disk location under
+// a test Ledger — the file whose ABSENCE proves the read stayed read-only.
+func reflectionReceiptPath(home string) string {
+	return filepath.Join(home, "engine", "reflection", "receipt.json")
+}
+
+// TestReflectWeek_ReadLeavesNoReflectionCursor is the read-only guarantee at its
+// sharpest point. Resolving the window now READS the reflected-through cursor,
+// so the one way this change could break the contract is by creating that file
+// on a Ledger that has none. It must not: only an explicit close or a completed
+// apply advances the cursor, and a read that stamped it would silently mark the
+// days done — exactly the drop the catch-up window exists to prevent.
+func TestReflectWeek_ReadLeavesNoReflectionCursor(t *testing.T) {
+	r, a, home := reflectWeekRouter(t)
+	citeID := seedWeek(t, a)
+
+	// Warm the projections so the file count isolates ReflectWeek alone.
+	_, err := r.BuildWeekBundle(weekOf(), weekWindow(t, r, weekOf()))
+	require.NoError(t, err)
+	before := countTreeFiles(t, home)
+
+	fake := &provider.Fake{Script: []provider.Exchange{
+		deepWeekReply("One possible pattern: preparation as a way to feel safe.", "prep-as-safety", citeID),
+	}}
+	_, err = r.ReflectWeek(context.Background(), ReflectWeekRequest{Now: weekOf(), Provider: fake})
+	require.NoError(t, err)
+
+	assert.NoFileExists(t, reflectionReceiptPath(home), "the read never stamps the reflected-through cursor")
+	assert.NoDirExists(t, filepath.Dir(reflectionReceiptPath(home)), "nor creates its directory")
+	assert.Equal(t, before, countTreeFiles(t, home), "the read writes no file at all")
+
+	// And it is repeatable: a second read resolves the same window, because the
+	// first one did not move the cursor out from under it.
+	_, _, err = a.ReadReflectionReceipt()
+	require.NoError(t, err)
+}
+
+// TestReflectWeek_CarriesResolvedWindowFacts proves the window the router
+// resolved reaches the result verbatim — the surface layer reports what was
+// actually read rather than re-deriving it and drifting.
+func TestReflectWeek_CarriesResolvedWindowFacts(t *testing.T) {
+	r, a, _ := reflectWeekRouter(t)
+	citeID := seedWeek(t, a)
+
+	fake := &provider.Fake{Script: []provider.Exchange{
+		deepWeekReply("One possible pattern: preparation as a way to feel safe.", "prep-as-safety", citeID),
+	}}
+	res, err := r.ReflectWeek(context.Background(), ReflectWeekRequest{
+		Now:      weekOf(),
+		Provider: fake,
+		Window:   ReflectWindowOptions{Mode: ReflectWindowDays, Days: 14},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, 14, res.DaysCovered)
+	assert.Equal(t, "2026-06-19", res.WindowStart.Format("2006-01-02"))
+	assert.Equal(t, "2026-07-02", res.WindowEnd.Format("2006-01-02"))
+	assert.Equal(t, "2026-W27", res.ISOWeek, "the label names the window's END week")
+	assert.False(t, res.Capped, "an explicit range override is never capped")
+	assert.Zero(t, res.UncoveredDays)
+}
+
+// TestReflectWeek_DefaultWindowIsTheCatchUpRead proves the request's zero value
+// resolves to the since-last-reflection window rather than a fixed calendar
+// week: with no cursor the read reaches back to the earliest logged entry.
+func TestReflectWeek_DefaultWindowIsTheCatchUpRead(t *testing.T) {
+	r, a, _ := reflectWeekRouter(t)
+	citeID := seedWeek(t, a)
+
+	fake := &provider.Fake{Script: []provider.Exchange{
+		deepWeekReply("One possible pattern: preparation as a way to feel safe.", "prep-as-safety", citeID),
+	}}
+	res, err := r.ReflectWeek(context.Background(), ReflectWeekRequest{Now: weekOf(), Provider: fake})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-07-01", res.WindowStart.Format("2006-01-02"), "the first-run window starts at the earliest entry")
+	assert.Equal(t, "2026-07-02", res.WindowEnd.Format("2006-01-02"))
+	assert.Equal(t, 2, res.DaysCovered)
+}
+
 // TestReflectWeek_AppliedLensLabel proves a consented lens frames the run and
 // its "<id> v<version>" label reaches the result (AC-6 label path).
 func TestReflectWeek_AppliedLensLabel(t *testing.T) {
