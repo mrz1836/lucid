@@ -167,6 +167,125 @@ func (a *Adapter) ReadRaw(id string) (RawDocument, error) {
 	return RawDocument{ID: id, Fields: fields, Body: strings.TrimSpace(string(body))}, nil
 }
 
+// EarliestRawDate returns the civil date (YYYY-MM-DD) of the oldest raw
+// entry in the Ledger, or ("", false, nil) when nothing has been captured
+// yet — an empty or absent raw tree is not an error. It is the anchor for a
+// first-ever weekly reflection, which has no reflected-through cursor to
+// start from and so reads from the beginning of the record.
+//
+// It reads directory names only: a raw id encodes its own recorded date
+// (raw_YYYY_MM_DD_HH_MM), so no file body is ever opened. Every shard is
+// visited rather than descending into the lexically first one, so a
+// hand-misfiled entry cannot hide behind an earlier-looking shard path. A
+// name that is not a well-formed raw id is skipped, not an error: a stray
+// file in the tree must never break a read.
+func (a *Adapter) EarliestRawDate() (string, bool, error) {
+	root := filepath.Join(a.home, rawDirName)
+	years, err := readSubdirNames(root)
+	if err != nil {
+		return "", false, err
+	}
+	earliest := ""
+	for _, year := range years {
+		months, merr := readSubdirNames(filepath.Join(root, year))
+		if merr != nil {
+			return "", false, merr
+		}
+		for _, month := range months {
+			date, derr := earliestRawDateInShard(filepath.Join(root, year, month))
+			if derr != nil {
+				return "", false, derr
+			}
+			if date != "" && (earliest == "" || date < earliest) {
+				earliest = date
+			}
+		}
+	}
+	if earliest == "" {
+		return "", false, nil
+	}
+	return earliest, true, nil
+}
+
+// earliestRawDateInShard returns the oldest date encoded by a well-formed raw
+// id in one raw/YYYY/MM shard, or "" when the shard holds none. A shard that
+// vanished between the directory walk and this read is empty, not an error;
+// any other read failure surfaces.
+func earliestRawDateInShard(shard string) (string, error) {
+	entries, err := os.ReadDir(shard)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("storage: read raw shard %q: %w", shard, err)
+	}
+	earliest := ""
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), rawExt) {
+			continue
+		}
+		date, ok := rawDateFromID(strings.TrimSuffix(e.Name(), rawExt))
+		if !ok {
+			continue
+		}
+		if earliest == "" || date < earliest {
+			earliest = date
+		}
+	}
+	return earliest, nil
+}
+
+// readSubdirNames lists the subdirectory names of dir, treating an absent
+// dir as empty rather than an error — a Ledger that has never captured
+// anything has no raw/ tree at all. os.ReadDir returns entries sorted by
+// filename, so the shard walk is deterministic.
+func readSubdirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("storage: read raw dir %q: %w", dir, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
+// rawDateFromID extracts the civil date (YYYY-MM-DD) a raw id encodes,
+// reporting false for anything that is not a well-formed raw id. Because the
+// components are zero-padded, the rendered date sorts lexically in
+// chronological order — which is what lets [Adapter.EarliestRawDate] compare
+// dates with a plain string comparison.
+func rawDateFromID(id string) (string, bool) {
+	parts := strings.Split(id, "_")
+	if len(parts) < 6 || parts[0] != "raw" {
+		return "", false
+	}
+	year, month, day := parts[1], parts[2], parts[3]
+	if !isDigits(year, 4) || !isDigits(month, 2) || !isDigits(day, 2) {
+		return "", false
+	}
+	return year + "-" + month + "-" + day, true
+}
+
+// isDigits reports whether s is exactly n ASCII digits.
+func isDigits(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // entryHeading is the fixed Markdown section header renderRawDoc writes
 // above every raw body. It is presentation, not content.
 const entryHeading = "# Entry"
