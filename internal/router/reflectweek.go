@@ -69,7 +69,16 @@ type ReflectWeekResult struct {
 func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (ReflectWeekResult, error) {
 	now := whenOr(req.Now)
 
-	bundle, err := r.BuildWeekBundle(now)
+	// The window is resolved once, here, and handed to the bundle: the assembler
+	// no longer derives its own bounds. The ISO-week mode keeps this read's
+	// behavior exactly as it was; threading the caller's range request through
+	// the request struct follows.
+	win, err := r.resolveReflectWindow(now, ReflectWindowOptions{Mode: ReflectWindowWeek})
+	if err != nil {
+		return ReflectWeekResult{}, fmt.Errorf("reflectweek: resolve window: %w", err)
+	}
+
+	bundle, err := r.BuildWeekBundle(now, win)
 	if err != nil {
 		return ReflectWeekResult{}, fmt.Errorf("reflectweek: build week bundle: %w", err)
 	}

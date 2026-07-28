@@ -10,11 +10,13 @@ import (
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
-// weekBundleWindowDays is the accepted-insight recall horizon the week bundle
-// carries. It is the same rolling seven-day window `/reflect` surfaces
-// (reflect.go recallWindowDays), so the weekly deep-dive reads exactly the
-// insight slice the weekly recall does — not the ISO-week bounds, which key the
-// bundle's day rows.
+// weekBundleWindowDays is the FLOOR on the accepted-insight recall horizon the
+// week bundle carries — no longer the horizon itself. It is the same rolling
+// seven-day window `/reflect` surfaces (reflect.go recallWindowDays), so a short
+// read still sees exactly the insight slice the weekly recall does. A catch-up
+// window reaching further back widens the slice to match, so a multi-week
+// deep-dive relates the span to every insight confirmed inside it; a window
+// shorter than seven days never narrows below this floor.
 const weekBundleWindowDays = 7
 
 // RawEntryDigest is one raw entry in the week bundle: its id, the day it groups
@@ -40,10 +42,19 @@ type RawEntryDigest struct {
 // message bodies (they are not persisted and are out of scope). It is a pure
 // read: nothing is written beyond the idempotent tree scaffolds the read verbs
 // already perform.
+//
+// ISOWeek labels the window's END day, so a multi-week catch-up read still
+// carries a stable ISO-week key for anything downstream that groups by one.
+// DaysCovered, Capped and UncoveredDays are copied from the resolved window so
+// every surface reports the same coverage — including the shortfall a capped
+// window deferred.
 type WeekBundle struct {
 	ISOWeek          string
 	WindowStart      time.Time
 	WindowEnd        time.Time
+	DaysCovered      int
+	Capped           bool
+	UncoveredDays    int
 	Metrics          engine.Metrics
 	Status           engine.Status
 	Stats            []StatsDay
@@ -52,16 +63,21 @@ type WeekBundle struct {
 	AcceptedInsights []storage.Insight
 }
 
-// BuildWeekBundle assembles the projection-only week bundle for the ISO week
-// containing `now`. It reads the honest numbers through the Metrics/Status
-// projections (never recomputed — identity.md: the Mirror copies projection
-// numbers, it does not derive them), walks each logical day of the ISO week
-// through the sanctioned `ReadDayView` join to fold the raw digest, the day's
-// own observation events, and the per-day volume row (the exact loop shape
-// `lucid stats` uses, so a day's counts match `lucid day`), and reads the
-// accepted insights validated in the rolling recall window. No sanctuary tree is
-// read directly; nothing is written.
-func (r *Router) BuildWeekBundle(now time.Time) (WeekBundle, error) {
+// BuildWeekBundle assembles the projection-only week bundle for the resolved
+// window `win`. The window is an INPUT, not something derived here: the caller
+// resolves it once (resolveReflectWindow) and every surface reads that same
+// value, so a catch-up read spanning several weeks is bounded identically
+// wherever it is reported.
+//
+// It reads the honest numbers through the Metrics/Status projections (never
+// recomputed — identity.md: the Mirror copies projection numbers, it does not
+// derive them), walks each logical day of the window through the sanctioned
+// `ReadDayView` join to fold the raw digest, the day's own observation events,
+// and the per-day volume row (the exact loop shape `lucid stats` uses, so a
+// day's counts match `lucid day`), and reads the accepted insights validated
+// across the window or the seven-day floor, whichever reaches further back. No
+// sanctuary tree is read directly; nothing is written.
+func (r *Router) BuildWeekBundle(now time.Time, win ReflectWindow) (WeekBundle, error) {
 	now = whenOr(now)
 	loc := now.Location()
 	if err := r.prepareObservations(); err != nil {
@@ -83,19 +99,25 @@ func (r *Router) BuildWeekBundle(now time.Time) (WeekBundle, error) {
 		return WeekBundle{}, fmt.Errorf("weekbundle: read status: %w", err)
 	}
 
-	start, end := isoweek.Bounds(now)
+	start, end := win.Start, win.End
 	bundle := WeekBundle{
-		ISOWeek:      isoweek.Label(now),
-		WindowStart:  start,
-		WindowEnd:    end,
-		Metrics:      metricsRes.Metrics,
-		Status:       statusRes.Status,
-		Stats:        make([]StatsDay, 0, 7),
-		RawDigest:    make([]RawEntryDigest, 0),
-		Observations: make([]observations.Event, 0),
+		// The ISO week of the window's END day: on a single-week read this is the
+		// week itself, and on a catch-up read it names the week the reflection
+		// closes in rather than inventing a label for a multi-week span.
+		ISOWeek:       isoweek.Label(end),
+		WindowStart:   start,
+		WindowEnd:     end,
+		DaysCovered:   win.Days,
+		Capped:        win.Capped,
+		UncoveredDays: win.UncoveredDays,
+		Metrics:       metricsRes.Metrics,
+		Status:        statusRes.Status,
+		Stats:         make([]StatsDay, 0, win.Days),
+		RawDigest:     make([]RawEntryDigest, 0),
+		Observations:  make([]observations.Event, 0),
 	}
 
-	// Per logical day of the ISO week, read the sanctioned `/day` join and fold
+	// Per logical day of the window, read the sanctioned `/day` join and fold
 	// it into the digest, the observation slice, and the per-day volume row. This
 	// is the same read `lucid stats` performs (stats.go): a user-invoked
 	// projection joining across trees, not an agent reading the sanctuary tree.
@@ -134,11 +156,15 @@ func (r *Router) BuildWeekBundle(now time.Time) (WeekBundle, error) {
 		})
 	}
 
-	// Accepted insights validated in the rolling recall window — the same
-	// projection `/reflect` surfaces (ReadInsightsWindow reads the insights tree,
-	// never the sanctuary engine|observations|registries trees). A nil result is
-	// normalized to an empty slice so an empty week is an empty-but-valid bundle.
-	insights, err := r.store.ReadInsightsWindow(now.Add(-weekBundleWindowDays*24*time.Hour), 0)
+	// Accepted insights validated across the window or the rolling recall floor,
+	// whichever reaches further back — the same projection `/reflect` surfaces
+	// (ReadInsightsWindow reads the insights tree, never the sanctuary
+	// engine|observations|registries trees). Taking the earlier of the two
+	// instants rather than the larger of two day counts keeps it correct for the
+	// override modes, whose window does not end today. A nil result is normalized
+	// to an empty slice so an empty week is an empty-but-valid bundle.
+	insightsFrom := earlierOf(now.Add(-weekBundleWindowDays*24*time.Hour), start)
+	insights, err := r.store.ReadInsightsWindow(insightsFrom, 0)
 	if err != nil {
 		return WeekBundle{}, fmt.Errorf("weekbundle: read accepted insights: %w", err)
 	}

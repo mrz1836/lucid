@@ -86,7 +86,7 @@ func TestReflectWeek_RichSurfacesSectionsAndPatternReadOnly(t *testing.T) {
 	// Warm the sanctioned projections so the engine-status cache the read path
 	// materializes on first call is already present; the file count then isolates
 	// exactly what ReflectWeek writes (nothing).
-	_, err := r.BuildWeekBundle(weekOf())
+	_, err := r.BuildWeekBundle(weekOf(), weekWindow(t, r, weekOf()))
 	require.NoError(t, err)
 
 	before := countTreeFiles(t, home)
@@ -117,7 +117,7 @@ func TestReflectWeek_EmptyStoreNoModelCall(t *testing.T) {
 	r, _, home := reflectWeekRouter(t)
 
 	// Warm the projection cache first (see the rich case), then isolate ReflectWeek.
-	_, err := r.BuildWeekBundle(weekOf())
+	_, err := r.BuildWeekBundle(weekOf(), weekWindow(t, r, weekOf()))
 	require.NoError(t, err)
 
 	before := countTreeFiles(t, home)
