@@ -146,7 +146,8 @@ func (r *Router) defaultReflectBounds(now time.Time) (start, end time.Time, sour
 			// guessing a start date: a silently wrong cursor is exactly how a
 			// day goes missing.
 			return time.Time{}, time.Time{}, "", fmt.Errorf(
-				"reflectwindow: parse reflected_through %q: %w", receipt.ReflectedThrough, perr)
+				"reflectwindow: parse reflected_through %q: %w", receipt.ReflectedThrough, perr,
+			)
 		}
 		// Start at the beginning of the logical day the user closed on — read in
 		// the zone they closed in — so an entry logged later that same evening is
@@ -164,7 +165,8 @@ func (r *Router) defaultReflectBounds(now time.Time) (start, end time.Time, sour
 		day, perr := time.ParseInLocation(reflectWindowDateLayout, earliest, loc)
 		if perr != nil {
 			return time.Time{}, time.Time{}, "", fmt.Errorf(
-				"reflectwindow: parse earliest logged date %q: %w", earliest, perr)
+				"reflectwindow: parse earliest logged date %q: %w", earliest, perr,
+			)
 		}
 		return notAfter(day, startOfCivilDay(now)), endOfCivilDay(now), reflectSourceFirstRun, nil
 	}
