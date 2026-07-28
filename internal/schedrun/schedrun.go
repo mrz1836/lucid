@@ -262,10 +262,13 @@ func Run(ctx context.Context, opts Options) error {
 	sc := scheduler.New(opts.Store, opts.Notifier)
 	reg := buildRegistry(sc, clock, opts.Store, opts.SuppressUserChannel)
 
+	// One Driver instance shared by the runner and the scheduler: flywheel wants
+	// the two halves of a node speaking to the store through the same driver.
+	driver := flywheel.NewSQLiteDriver(db)
 	node, err := flywheel.NewNode(flywheel.NodeConfig{
 		Runners: []flywheel.RunnerConfig{{
 			DB:       db,
-			Driver:   flywheel.NewSQLiteDriver(db),
+			Driver:   driver,
 			Registry: reg,
 			Queues:   []string{queueName},
 			// SQLite is single-writer: one runner claiming every class.
@@ -275,6 +278,7 @@ func Run(ctx context.Context, opts Options) error {
 		Scheduler: &flywheel.SchedulerConfig{
 			DB:          db,
 			Client:      flywheel.NewClient(db),
+			Driver:      driver,
 			BackfillCap: backfillCap,
 		},
 	})

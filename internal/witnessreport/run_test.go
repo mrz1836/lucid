@@ -463,11 +463,13 @@ func newRig(t *testing.T, clock models.Clock) *rig {
 	r := &Runner{compose: comp, deliver: del, store: store, mode: config.WitnessReportModePreview, weekday: 1, markHM: "09:00"}
 	reg := buildRegistry(r, clock)
 
-	sched := flywheel.NewSchedulerWithConfig(flywheel.SchedulerConfig{
-		DB: db, Client: flywheel.NewClient(db), BackfillCap: backfillCap,
+	driver := flywheel.NewSQLiteDriver(db)
+	sched, err := flywheel.NewSchedulerWithConfig(flywheel.SchedulerConfig{
+		DB: db, Client: flywheel.NewClient(db), Driver: driver, BackfillCap: backfillCap,
 	})
+	require.NoError(t, err)
 	runner, err := flywheel.NewRunner(flywheel.RunnerConfig{
-		DB: db, Driver: flywheel.NewSQLiteDriver(db), Registry: reg,
+		DB: db, Driver: driver, Registry: reg,
 		Queues: []string{queueName}, ClaimAnyClass: true, Concurrency: 1,
 	})
 	require.NoError(t, err)

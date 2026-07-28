@@ -118,11 +118,13 @@ func newRigWith(t *testing.T, workerClock models.Clock, notif scheduler.Notifier
 	sc := scheduler.New(store, notif)
 	reg := buildRegistry(sc, workerClock, store, false)
 
-	sched := flywheel.NewSchedulerWithConfig(flywheel.SchedulerConfig{
-		DB: db, Client: flywheel.NewClient(db), BackfillCap: backfillCap,
+	driver := flywheel.NewSQLiteDriver(db)
+	sched, err := flywheel.NewSchedulerWithConfig(flywheel.SchedulerConfig{
+		DB: db, Client: flywheel.NewClient(db), Driver: driver, BackfillCap: backfillCap,
 	})
+	require.NoError(t, err)
 	runner, err := flywheel.NewRunner(flywheel.RunnerConfig{
-		DB: db, Driver: flywheel.NewSQLiteDriver(db), Registry: reg,
+		DB: db, Driver: driver, Registry: reg,
 		Queues: []string{queueName}, ClaimAnyClass: true, Concurrency: 1,
 	})
 	require.NoError(t, err)
