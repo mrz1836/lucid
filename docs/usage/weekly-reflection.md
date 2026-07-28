@@ -1,11 +1,12 @@
 # The weekly reflection (`lucid reflect week`)
 
 `lucid reflect week` is the **read-only weekly deep-dive**: once a week it reads
-the past week's projections, frames a calm, hypothesis-first reflection through
-your active interpretive lens, and surfaces at most one tentative pattern for you
-to accept, refine, or set aside. It is a mirror for the whole week, distinct from
-the daily rhythm and from `lucid reflect`, which only recalls insights you have
-already validated.
+the projections for **everything since your last reflection**, frames a calm,
+hypothesis-first reflection through your active interpretive lens, and surfaces
+at most one tentative pattern for you to accept, refine, or set aside. It is a
+mirror for the whole stretch — a skipped week is caught up on the next run rather
+than dropped — distinct from the daily rhythm and from `lucid reflect`, which
+only recalls insights you have already validated.
 
 This page covers what the deep-dive reads, the frameworks/lens layer it can be
 framed through, the two commands (`reflect week` and `reflect week apply`), and
@@ -39,14 +40,47 @@ gate every proposal passes.
 ## Usage
 
 ```
-lucid reflect week            # Discord-friendly text
-lucid reflect week --json     # machine-readable projection
+lucid reflect week                      # Discord-friendly text
+lucid reflect week --json               # machine-readable projection
+lucid reflect week --week               # only this ISO week
+lucid reflect week --since 2026-07-13   # from an explicit day forward
+lucid reflect week --days 10            # the last 10 logical days
 ```
 
-The command takes no positional arguments. It is provider-backed (it composes the
-narrative through the `provider` block in `lucid.json`), but an **empty or thin
-week never spends a model call** — with nothing to read it prints a calm fallback
-and returns.
+The command takes no positional arguments — the range overrides below are flags.
+It is provider-backed (it composes the narrative through the `provider` block in
+`lucid.json`), but an **empty or thin window never spends a model call** — with
+nothing to read it prints a calm fallback and returns.
+
+### The window it reads
+
+The deep-dive reads **everything since your last reflection**, not a fixed
+calendar week:
+
+- **Default** — from the day of your last [`close`](#closing-a-reflection) (or
+  your last completed `apply`) through the end of today.
+- **First-ever run** — from your earliest logged entry through the end of today,
+  subject to the [cap](#the-catch-up-cap).
+- **A skipped week is caught up, not dropped.** Miss a Sunday and those days are
+  still un-reflected, so the next run reads them. That is this page's core
+  promise: no logged day silently falls outside the window.
+- **The day you closed on is re-read, not half-dropped.** The window starts at
+  the *start* of the day your last close landed on, so an entry logged at 22:00
+  after a 20:00 close is still read. You may see a day twice; you will never
+  lose one.
+
+#### Range overrides
+
+| Flag | The window it reads |
+|------|---------------------|
+| *(none)* | Everything since your last close — the catch-up default. |
+| `--week` | Monday 00:00 → Sunday 23:59:59 of the ISO week containing today (the behavior before catch-up windows). |
+| `--since <YYYY-MM-DD>` | From that day 00:00 through the end of today. |
+| `--days N` | The last `N` logical days, ending today. |
+
+The three flags are **mutually exclusive** — passing two is an error, never a
+silent precedence. `--since` and `--days` are deliberate requests, so they
+**bypass the cap**; the default window and `--week` are capped.
 
 ### Text output
 
@@ -105,25 +139,29 @@ record id or `wrote` flag. `pattern` is `null` when no candidate surfaced;
 
 ## The week bundle
 
-The deep-dive reads a **projection-only** bundle for the ISO week containing
-today. Every field is assembled through a sanctuary-safe read — the numbers are
-copied verbatim from the projections, never recomputed:
+The deep-dive reads a **projection-only** bundle for the
+[resolved window](#the-window-it-reads). Every field is assembled through a
+sanctuary-safe read — the numbers are copied verbatim from the projections,
+never recomputed:
 
-- **Honest numbers** — current and longest streak, this week's raw-entry and
+- **Honest numbers** — current and longest streak, the window's raw-entry and
   body-signal totals, and the count of accepted insights in the recall window,
   from the same `metrics` / `status` projections `lucid metrics --json` and
   `lucid status --json` expose.
-- **Per-day volume** — the raw-entry and observation counts per logical day of
-  the week, from the sanctioned `/day` join (the same read `lucid stats` uses),
+- **Per-day volume** — the raw-entry and observation counts per logical day in
+  the window, from the sanctioned `/day` join (the same read `lucid stats` uses),
   so a day's counts match `lucid day`.
-- **Raw-entry digest** — your own words for each entry in the week, resolved by
+- **Raw-entry digest** — your own words for each entry in the window, resolved by
   id through the `/day` projection so the deep-dive can cite an entry it grounds a
   hypothesis in.
-- **Body signals** — the kind and logical day of each observation in the week
+- **Body signals** — the kind and logical day of each observation in the window
   (which kind was recorded when — never the value payload).
-- **Accepted insights** — the insights validated in the rolling recall window,
-  carried for continuity so the deep-dive relates the week to what you have
-  already confirmed rather than re-proposing it.
+- **Accepted insights** — the insights validated in the last
+  **`max(7 days, reflection window)`**, carried for continuity so the deep-dive
+  relates the window to what you have already confirmed rather than re-proposing
+  it. The slice widens with a catch-up window and never narrows below the
+  seven-day floor, so a three-week read sees the insights you confirmed across
+  those three weeks.
 
 Companion message bodies are **not** included: they are not persisted, and are
 out of scope for the weekly read.
