@@ -101,7 +101,8 @@ func TestIsUsageError(t *testing.T) {
 	// cobra's MarkFlagsMutuallyExclusive message — an impossible flag
 	// combination is a misuse, not a failed run.
 	assert.True(t, isUsageError(errors.New(
-		"if any flags in the group [week since days] are set none of the others can be; [days week] were all set")))
+		"if any flags in the group [week since days] are set none of the others can be; [days week] were all set",
+	)))
 }
 
 func TestUnknownCommand_IsUsageError(t *testing.T) {
