@@ -180,20 +180,27 @@ type WitnessReportConfig struct {
 // matches the documented schema so a marshaled default file reads
 // identically to data-model.md §"lucid.json".
 type Config struct {
-	Version                  int                 `json:"version"`
-	Home                     string              `json:"home"`
-	RawDir                   string              `json:"raw_dir"`
-	ProcessedDir             string              `json:"processed_dir"`
-	InsightsDir              string              `json:"insights_dir"`
-	PeopleDir                string              `json:"people_dir"`
-	SessionsDir              string              `json:"sessions_dir"`
-	ReflectionsDir           string              `json:"reflections_dir"`
-	WordlistPath             string              `json:"wordlist_path"`
-	RecentWindow             int                 `json:"recent_window"`
-	RecentWindowMax          int                 `json:"recent_window_max"`
-	IntakeMaxQuestions       int                 `json:"intake_max_questions"`
-	AskInsightsCap           int                 `json:"ask_insights_cap"`
-	AskReflectionsCap        int                 `json:"ask_reflections_cap"`
+	Version            int    `json:"version"`
+	Home               string `json:"home"`
+	RawDir             string `json:"raw_dir"`
+	ProcessedDir       string `json:"processed_dir"`
+	InsightsDir        string `json:"insights_dir"`
+	PeopleDir          string `json:"people_dir"`
+	SessionsDir        string `json:"sessions_dir"`
+	ReflectionsDir     string `json:"reflections_dir"`
+	WordlistPath       string `json:"wordlist_path"`
+	RecentWindow       int    `json:"recent_window"`
+	RecentWindowMax    int    `json:"recent_window_max"`
+	IntakeMaxQuestions int    `json:"intake_max_questions"`
+	AskInsightsCap     int    `json:"ask_insights_cap"`
+	AskReflectionsCap  int    `json:"ask_reflections_cap"`
+	// ReflectWeekMaxDays is the ceiling on the weekly deep-dive's
+	// since-last-reflection catch-up window, in days. The unit that matters is
+	// weeks — the thing being caught up on is a weekly sit-down — so the
+	// default is five of them (35 days), not a rounder 30. Past the ceiling the
+	// read covers the most recent span and says so; an explicit --since or
+	// --days is a deliberate request and bypasses it entirely.
+	ReflectWeekMaxDays       int                 `json:"reflect_week_max_days"`
 	ProposalPause            ProposalPause       `json:"proposal_pause"`
 	PersonDominanceThreshold float64             `json:"person_dominance_threshold"`
 	AgentVersions            AgentVersions       `json:"agent_versions"`
@@ -236,6 +243,7 @@ func Default() Config {
 		IntakeMaxQuestions: 4,
 		AskInsightsCap:     50,
 		AskReflectionsCap:  12,
+		ReflectWeekMaxDays: 35,
 		ProposalPause: ProposalPause{
 			UnansweredThreshold: 3,
 			PauseDays:           14,
@@ -396,6 +404,9 @@ func (c Config) Validate() error {
 	}
 	if c.AskReflectionsCap < 1 {
 		return fmt.Errorf("config: ask_reflections_cap must be >= 1, got %d", c.AskReflectionsCap)
+	}
+	if c.ReflectWeekMaxDays < 1 {
+		return fmt.Errorf("config: reflect_week_max_days must be >= 1, got %d", c.ReflectWeekMaxDays)
 	}
 	if err := c.Provider.validate(); err != nil {
 		return err

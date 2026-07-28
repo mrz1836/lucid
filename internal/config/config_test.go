@@ -22,6 +22,7 @@ func TestDefault_MatchesDocumentedSchema(t *testing.T) {
 	assert.Equal(t, 4, c.IntakeMaxQuestions)
 	assert.Equal(t, 50, c.AskInsightsCap)
 	assert.Equal(t, 12, c.AskReflectionsCap)
+	assert.Equal(t, 35, c.ReflectWeekMaxDays)
 	assert.Equal(t, 3, c.ProposalPause.UnansweredThreshold)
 	assert.Equal(t, 14, c.ProposalPause.PauseDays)
 	assert.InDelta(t, 0.5, c.PersonDominanceThreshold, 1e-9)
@@ -41,6 +42,28 @@ func TestDefault_JQContract(t *testing.T) {
 	assert.EqualValues(t, 1, m["version"])
 	assert.EqualValues(t, 14, m["recent_window_max"])
 	assert.EqualValues(t, 50, m["ask_insights_cap"])
+}
+
+// TestDefault_ReflectWeekCap pins the weekly deep-dive's catch-up ceiling: five
+// weeks, and it reaches the on-disk lucid.json under the documented key so an
+// operator can raise or lower it by hand. Kept separate from the jq-contract
+// test above, which mirrors a fixed acceptance-criteria predicate.
+func TestDefault_ReflectWeekCap(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.EqualValues(t, 35, m["reflect_week_max_days"], "the catch-up ceiling is five weeks")
+}
+
+// TestValidate_ReflectWeekCapAccepted proves the >= 1 check is a floor, not a
+// pin: a hand-edited ceiling of one day is unusual but legal, so a user who
+// wants an aggressively short window is not blocked by the validator.
+func TestValidate_ReflectWeekCapAccepted(t *testing.T) {
+	c := Default()
+	c.ReflectWeekMaxDays = 1
+	assert.NoError(t, c.Validate())
 }
 
 func TestMirrorDirs_SixInOrder(t *testing.T) {
@@ -637,16 +660,18 @@ func TestValidate_ProviderKnownBackends(t *testing.T) {
 
 func TestValidate_Failures(t *testing.T) {
 	tests := map[string]func(*Config){
-		"bad version":            func(c *Config) { c.Version = 2 },
-		"empty raw_dir":          func(c *Config) { c.RawDir = "" },
-		"empty processed_dir":    func(c *Config) { c.ProcessedDir = "" },
-		"empty insights_dir":     func(c *Config) { c.InsightsDir = "" },
-		"empty people_dir":       func(c *Config) { c.PeopleDir = "" },
-		"empty sessions_dir":     func(c *Config) { c.SessionsDir = "" },
-		"empty reflections_dir":  func(c *Config) { c.ReflectionsDir = "" },
-		"bad recent_window_max":  func(c *Config) { c.RecentWindowMax = 0 },
-		"bad ask_insights_cap":   func(c *Config) { c.AskInsightsCap = 0 },
-		"bad ask_reflectionscap": func(c *Config) { c.AskReflectionsCap = 0 },
+		"bad version":                    func(c *Config) { c.Version = 2 },
+		"empty raw_dir":                  func(c *Config) { c.RawDir = "" },
+		"empty processed_dir":            func(c *Config) { c.ProcessedDir = "" },
+		"empty insights_dir":             func(c *Config) { c.InsightsDir = "" },
+		"empty people_dir":               func(c *Config) { c.PeopleDir = "" },
+		"empty sessions_dir":             func(c *Config) { c.SessionsDir = "" },
+		"empty reflections_dir":          func(c *Config) { c.ReflectionsDir = "" },
+		"bad recent_window_max":          func(c *Config) { c.RecentWindowMax = 0 },
+		"bad ask_insights_cap":           func(c *Config) { c.AskInsightsCap = 0 },
+		"bad ask_reflectionscap":         func(c *Config) { c.AskReflectionsCap = 0 },
+		"zero reflect_week_max_days":     func(c *Config) { c.ReflectWeekMaxDays = 0 },
+		"negative reflect_week_max_days": func(c *Config) { c.ReflectWeekMaxDays = -1 },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
