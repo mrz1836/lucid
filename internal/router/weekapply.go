@@ -76,7 +76,45 @@ func (r *Router) ApplyWeekProposal(ctx context.Context, req ApplyWeekProposalReq
 		Provider:    req.Provider,
 		Responder:   scriptedApplyResponder{proposal: req.Response, rule: req.Rule},
 	}
-	return r.handleProposal(ctx, prop, current, vreq, now, pauseState)
+	res, err := r.handleProposal(ctx, prop, current, vreq, now, pauseState)
+	if err != nil {
+		return res, err
+	}
+
+	// An answered apply is engagement with the reflection, so it advances the
+	// reflected-through cursor as a convenience — the user need not also close.
+	// A cursor write that fails must NOT mask a successful persist: the insight
+	// is already on disk, and reporting a failure here would tell the user their
+	// accepted pattern was lost when it was not. It degrades to a surfaced flag
+	// instead, and the worst case is that the next reflection re-reads days the
+	// user already sat with — the same cheap, visible cost the whole cursor
+	// design prefers over a silently dropped day.
+	if reflectionEngaged(req.Response.Kind) {
+		if cerr := r.advanceReflectionCursor(now, reflectionSourceApply); cerr != nil {
+			res.CursorStalled = true
+		}
+	}
+	return res, nil
+}
+
+// reflectionEngaged reports whether a proposal response counts as engaging with
+// the reflection, and so advances the reflected-through cursor. Accepting,
+// refining, and rejecting are all answers — the user read the pattern and said
+// something about it. Letting it pass is the abandoned case and advances
+// nothing, so those days are re-read rather than marked reflected.
+//
+// It switches on the response kind rather than reading the persist flags:
+// ValidateResult.Wrote is false for a rejection, which is emphatically still an
+// answer.
+func reflectionEngaged(kind ResponseKind) bool {
+	switch kind {
+	case RespAccepted, RespNuanced, RespRejected:
+		return true
+	case RespUnanswered:
+		return false
+	default:
+		return false
+	}
 }
 
 // frameworkLabel normalizes the request's lens label to a nullable pointer: a

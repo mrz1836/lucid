@@ -20,6 +20,15 @@ import (
 // `lucid reflect week` surface, distinct from `/reflect`.
 const commandReflectWeek = "/reflect week"
 
+// The two acts that may advance the reflected-through cursor, stamped on the
+// receipt as its provenance. Both are deliberate engagement with a reflection:
+// an explicit close, or an apply the user answered. Nothing else writes it —
+// least of all the read.
+const (
+	reflectionSourceClose = "close"
+	reflectionSourceApply = "apply"
+)
+
 // ReflectWeekRequest carries the inputs for one weekly deep-dive. Provider is
 // the model boundary the deep-dive reaches through; ActiveLens is the consented
 // lens the CLI resolved from config over the embedded framework registry (nil
@@ -165,6 +174,52 @@ func weekWindowLabel(b WeekBundle) string {
 	}
 	return fmt.Sprintf("%s to %s (%d %s)",
 		engine.DateString(b.WindowStart), engine.DateString(b.WindowEnd), b.DaysCovered, unit)
+}
+
+// ReflectionCloseResult reports what a close stamped on the reflected-through
+// cursor: the instant the window is now reflected through, which act wrote it
+// ("close"), and when it was written.
+type ReflectionCloseResult struct {
+	ReflectedThrough time.Time
+	Source           string
+	WrittenAt        time.Time
+}
+
+// CloseReflectWeek stamps the reflected-through cursor, ending one reflection.
+// It is one of exactly two writers of that cursor (the other is a completed
+// apply) — the deep-dive read itself never advances it, so an opened-but-never-
+// closed sit-down re-reads those days rather than marking them done.
+//
+// It stamps the close INSTANT rather than a remembered window: the read is
+// stateless and recomputes its bounds every run, so there is no window to
+// remember. The next window starts at the beginning of this instant's logical
+// day, so an entry logged later the same evening is re-read rather than
+// half-dropped.
+func (r *Router) CloseReflectWeek(now time.Time) (ReflectionCloseResult, error) {
+	now = whenOr(now)
+	if err := r.advanceReflectionCursor(now, reflectionSourceClose); err != nil {
+		return ReflectionCloseResult{}, err
+	}
+	return ReflectionCloseResult{
+		ReflectedThrough: now,
+		Source:           reflectionSourceClose,
+		WrittenAt:        now,
+	}, nil
+}
+
+// advanceReflectionCursor overwrites the reflected-through cursor with `now`,
+// stamped with the act that advanced it. The receipt is a cursor, not a history:
+// each write replaces the last.
+func (r *Router) advanceReflectionCursor(now time.Time, source string) error {
+	stamp := now.Format(time.RFC3339)
+	if err := r.store.WriteReflectionReceipt(storage.ReflectionReceipt{
+		ReflectedThrough: stamp,
+		Source:           source,
+		WrittenAt:        stamp,
+	}); err != nil {
+		return fmt.Errorf("reflectweek: write reflected-through cursor: %w", err)
+	}
+	return nil
 }
 
 // proposalPausePassive reports whether the silent proposal pause is currently

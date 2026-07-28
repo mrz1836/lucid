@@ -257,6 +257,76 @@ func TestReflectWeek_DefaultWindowIsTheCatchUpRead(t *testing.T) {
 	assert.Equal(t, 2, res.DaysCovered)
 }
 
+// TestReflectWeekClose_StampsAndRereadsCursor proves a close writes the cursor
+// and it round-trips: the instant is preserved and the act is stamped as its
+// provenance.
+func TestReflectWeekClose_StampsAndRereadsCursor(t *testing.T) {
+	r, a, home := reflectWeekRouter(t)
+
+	res, err := r.CloseReflectWeek(weekOf())
+	require.NoError(t, err)
+	assert.True(t, res.ReflectedThrough.Equal(weekOf()))
+	assert.Equal(t, "close", res.Source)
+	assert.True(t, res.WrittenAt.Equal(weekOf()))
+	assert.FileExists(t, reflectionReceiptPath(home))
+
+	receipt, ok, err := a.ReadReflectionReceipt()
+	require.NoError(t, err)
+	require.True(t, ok, "the cursor is readable after a close")
+	assert.Equal(t, "close", receipt.Source)
+
+	through, err := time.Parse(time.RFC3339, receipt.ReflectedThrough)
+	require.NoError(t, err)
+	assert.True(t, through.Equal(weekOf()), "the close instant is stamped, not a remembered window")
+}
+
+// TestReflectWeekClose_OverwritesRatherThanAppends proves the receipt is a
+// cursor, not a history: a second close replaces the first, leaving one file.
+func TestReflectWeekClose_OverwritesRatherThanAppends(t *testing.T) {
+	r, a, home := reflectWeekRouter(t)
+
+	_, err := r.CloseReflectWeek(weekOf())
+	require.NoError(t, err)
+	after := weekOf().Add(72 * time.Hour)
+	_, err = r.CloseReflectWeek(after)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, countTreeFiles(t, filepath.Dir(reflectionReceiptPath(home))), "one cursor file, overwritten")
+
+	receipt, ok, err := a.ReadReflectionReceipt()
+	require.NoError(t, err)
+	require.True(t, ok)
+	through, err := time.Parse(time.RFC3339, receipt.ReflectedThrough)
+	require.NoError(t, err)
+	assert.True(t, through.Equal(after), "the later close wins")
+}
+
+// TestReflectWeek_ClosedCursorBoundsTheNextRead is the whole point of the
+// cursor, proven end to end at the router: after a close, the next default read
+// starts at the close DAY — re-reading it rather than half-dropping an entry
+// logged later that same evening.
+func TestReflectWeek_ClosedCursorBoundsTheNextRead(t *testing.T) {
+	r, a, _ := reflectWeekRouter(t)
+	citeID := seedWeek(t, a)
+
+	closedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, edt)
+	_, err := r.CloseReflectWeek(closedAt)
+	require.NoError(t, err)
+
+	fake := &provider.Fake{Script: []provider.Exchange{
+		deepWeekReply("One possible pattern: preparation as a way to feel safe.", "prep-as-safety", citeID),
+	}}
+	res, err := r.ReflectWeek(context.Background(), ReflectWeekRequest{
+		Now:      time.Date(2026, 7, 5, 9, 0, 0, 0, edt),
+		Provider: fake,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-07-02", res.WindowStart.Format("2006-01-02"), "the close day is re-read, never half-dropped")
+	assert.Equal(t, "2026-07-05", res.WindowEnd.Format("2006-01-02"))
+	assert.Equal(t, 4, res.DaysCovered)
+}
+
 // TestReflectWeek_AppliedLensLabel proves a consented lens frames the run and
 // its "<id> v<version>" label reaches the result (AC-6 label path).
 func TestReflectWeek_AppliedLensLabel(t *testing.T) {
