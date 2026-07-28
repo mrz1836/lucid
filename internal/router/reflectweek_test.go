@@ -343,3 +343,34 @@ func TestReflectWeek_AppliedLensLabel(t *testing.T) {
 
 	assert.Equal(t, "stoicism v1", res.AppliedLens)
 }
+
+// TestWeekWindowLabel_NamesTheSpanTruthfully proves the label the deep-dive is
+// handed states the real span, and pluralizes its day count. A single-day window
+// is the realistic case — close today, read again today — and telling the model
+// "(1 days)" in the one line that frames its entire slice is exactly the kind of
+// sloppiness that reads as an untrustworthy Mirror.
+func TestWeekWindowLabel_NamesTheSpanTruthfully(t *testing.T) {
+	cases := []struct {
+		name       string
+		start, end string
+		days       int
+		want       string
+	}{
+		{"a single day is singular", "2026-07-05", "2026-07-05", 1, "2026-07-05 to 2026-07-05 (1 day)"},
+		{"a catch-up span is plural", "2026-07-13", "2026-07-26", 14, "2026-07-13 to 2026-07-26 (14 days)"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, err := time.ParseInLocation("2006-01-02", tc.start, edt)
+			require.NoError(t, err)
+			end, err := time.ParseInLocation("2006-01-02", tc.end, edt)
+			require.NoError(t, err)
+
+			label := weekWindowLabel(WeekBundle{WindowStart: start, WindowEnd: end, DaysCovered: tc.days})
+			assert.Equal(t, tc.want, label)
+			// The slice the model sees names dates only — never a Ledger path.
+			assert.NotContains(t, label, "engine/")
+		})
+	}
+}
