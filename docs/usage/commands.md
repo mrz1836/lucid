@@ -855,6 +855,37 @@ lucid reflect
 lucid reflect gate --json
 ```
 
+#### reflect week
+
+```
+lucid reflect week [--json] [--week | --since <YYYY-MM-DD> | --days <N>]
+lucid reflect week apply [--json]
+lucid reflect week close [--json]
+```
+
+The **read-only weekly deep-dive** — it reads everything since your last
+reflection, frames one calm hypothesis through your active lens, and creates no
+record. The window is a **catch-up** window, not a fixed calendar week: a skipped
+week is read on the next run rather than dropped. The three range flags are
+mutually exclusive — `--week` restores the ISO-week-only behavior, `--since` runs
+from an explicit day, and `--days` covers the last `N` logical days. The default
+window is capped at `reflect_week_max_days` (35); when the cap bites the output
+says how many days it deferred, and `--since` reads the full span. `--json` adds
+`window_start`, `window_end`, `days_covered`, `capped`, and `uncovered_days`
+alongside the retained `iso_week` (the ISO week of the window's end day).
+
+**`apply`** is the write path — it routes a surfaced candidate plus your response
+through the same resonance gate every proposal passes. **`close`** stamps the
+reflected-through cursor so the next run starts where this one ended; reading
+alone never moves it, so an abandoned sit-down re-reads instead of skipping days.
+Full guide: [`weekly-reflection.md`](weekly-reflection.md).
+
+```sh
+lucid reflect week
+lucid reflect week --since 2026-07-13 --json
+lucid reflect week close
+```
+
 ### ask
 
 ```

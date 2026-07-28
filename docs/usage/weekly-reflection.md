@@ -8,10 +8,11 @@ mirror for the whole stretch — a skipped week is caught up on the next run rat
 than dropped — distinct from the daily rhythm and from `lucid reflect`, which
 only recalls insights you have already validated.
 
-This page covers what the deep-dive reads, the frameworks/lens layer it can be
-framed through, the two commands (`reflect week` and `reflect week apply`), and
-how a pattern you confirm becomes a tracked insight through the same resonance
-gate every proposal passes.
+This page covers what the deep-dive reads, the window it resolves, the
+frameworks/lens layer it can be framed through, the three commands
+(`reflect week`, `reflect week apply`, and `reflect week close`), and how a
+pattern you confirm becomes a tracked insight through the same resonance gate
+every proposal passes.
 
 > Read [`commands.md`](commands.md) for the full CLI reference, [`companion.md`](companion.md)
 > for the daily model-composed messages, and [`../frameworks.md`](../frameworks.md)
@@ -19,14 +20,18 @@ gate every proposal passes.
 
 ## What it is
 
-- **Read-only.** The deep-dive **writes nothing** under `~/.lucid/` — no insight,
-  no reflection record, no raw entry. It reads the week, composes the reflection,
-  and returns it. Persisting a pattern is a separate, explicit step
-  ([`reflect week apply`](#applying-a-pattern-reflect-week-apply)).
+- **Read-only.** The deep-dive **creates no record** — no insight, no reflection
+  record, no raw entry. It resolves its window, reads it, composes the
+  reflection, and returns it. Persisting a pattern is a separate, explicit step
+  ([`reflect week apply`](#applying-a-pattern-reflect-week-apply)), and marking
+  the stretch reflected is another
+  ([`reflect week close`](#closing-a-reflection)).
 - **Projection-only.** It never reaches the sanctuary trees
-  (`engine` / `observations` / `registries`) directly. Every number and signal
+  (`engine` / `observations` / `registries`) itself. Every number and signal
   comes through the same read-only projections the CLI and the daily companion
-  already expose (see [The week bundle](#the-week-bundle)).
+  already expose (see [The week bundle](#the-week-bundle)); the one piece of
+  state it consults — the [reflected-through cursor](#closing-a-reflection) —
+  is read through the storage adapter like any other record.
 - **Hypothesis-framed and Safety-gated.** Every line is written tentatively —
   no diagnosis, no clinical label as fact, no advice — and every line passes the
   Safety/Consent gate before it is shown. A surfaced pattern always carries the
@@ -82,14 +87,62 @@ The three flags are **mutually exclusive** — passing two is an error, never a
 silent precedence. `--since` and `--days` are deliberate requests, so they
 **bypass the cap**; the default window and `--week` are capped.
 
+#### The catch-up cap
+
+A catch-up window loads every raw entry it covers, so an unbounded gap would be
+slow, expensive, and a worse read — the reflection averages over too much
+material. The default window is therefore capped at **35 days (5 weeks)**,
+configurable in `lucid.json`:
+
+```json
+{
+  "reflect_week_max_days": 35
+}
+```
+
+When the cap bites, the read covers the most recent capped span and **says so**
+— the shortfall is stated, never hidden. The text form prints, under the header:
+
+```
+Covering the last 35 of 96 un-reflected days — pass --since to read the full span.
+```
+
+and `--json` carries the same fact in machine form:
+
+```json
+{
+  "capped": true,
+  "uncovered_days": 61
+}
+```
+
+`capped` is `false` and `uncovered_days` is `0` on any window the cap did not
+touch. Passing `--since` (or `--days`) reads the full span deliberately.
+
 ### Text output
 
 The text form is Discord-friendly — bulleted sections and a header line, never a
-markdown table. Empty sections are omitted. A week with material renders:
+markdown table. Empty sections are omitted.
+
+The header states the range actually covered. A window that falls inside a single
+ISO week keeps the familiar one-week line, unchanged:
 
 ```
 Week 2026-W19
-A steadier week overall, with a few quieter evenings.
+```
+
+A catch-up window spanning more than one ISO week names both ends and the day
+count:
+
+```
+Weeks 2026-W29 → W30 (14 days)
+```
+
+A window with material renders:
+
+```
+Weeks 2026-W29 → W30 (14 days)
+A steadier stretch overall, with a few quieter evenings.
 Wins:
 • Logged an entry every day
 Misses:
@@ -106,7 +159,7 @@ One possible pattern: preparation as a way to feel safe — does that fit?
 Cites: raw_2026_05_06_20_41, raw_2026_05_08_19_02
 ```
 
-An empty or thin week prints only:
+An empty or thin window prints only:
 
 ```
 Nothing to reflect on yet this week — capture a few entries and come back.
@@ -115,14 +168,29 @@ Nothing to reflect on yet this week — capture a few entries and come back.
 ### JSON output
 
 `--json` emits a stable, snake_case projection so a harness can branch on fields
-rather than parse prose. The read-only surface writes nothing, so there is no
+rather than parse prose. The read-only surface creates no record, so there is no
 record id or `wrote` flag. `pattern` is `null` when no candidate surfaced;
 `applied_lens` is present only when a lens framed the run.
 
+The window fields describe exactly what was read: `window_start` and `window_end`
+are logical days (`YYYY-MM-DD`, inclusive), `days_covered` is the count of
+logical days between them, and `capped` / `uncovered_days` state any shortfall
+(see [The catch-up cap](#the-catch-up-cap)).
+
+**`iso_week` is retained** and keeps its key and its position: on a catch-up
+window it is the ISO week of the window's **end** day. Existing harnesses that
+key on `iso_week` keep working unchanged — it is never renamed, removed, or
+emitted as `null`.
+
 ```json
 {
-  "iso_week": "2026-W19",
-  "summary": "A steadier week overall, with a few quieter evenings.",
+  "iso_week": "2026-W30",
+  "window_start": "2026-07-13",
+  "window_end": "2026-07-26",
+  "days_covered": 14,
+  "capped": false,
+  "uncovered_days": 0,
+  "summary": "A steadier stretch overall, with a few quieter evenings.",
   "wins": ["Logged an entry every day"],
   "misses": ["One skipped closeout mid-week"],
   "body_pain": ["A pain note on Wednesday"],
@@ -240,6 +308,11 @@ Envelope shape:
 - **`rejected`** records that the shape was not a fit and tracks nothing.
 - **`unanswered`** leaves it open and advances the pause bookkeeping.
 
+A completed apply — `accepted`, `nuanced`, or `rejected` — also advances the
+[reflected-through cursor](#closing-a-reflection) as a convenience, so answering
+a candidate closes the stretch without a second command. `unanswered` does not:
+nothing was engaged with.
+
 The apply path honors the existing guardrails end to end: **one hypothesis at a
 time** (the deep-dive surfaces at most one candidate), and the
 **three-unanswered → 14-day proposal pause**. While a pause is in effect the
@@ -249,13 +322,43 @@ requires at least one processed artifact to anchor it to; a week that never
 reached a check-in has no processed context and the apply surfaces that honestly
 rather than writing an orphan insight.
 
+## Closing a reflection
+
+The deep-dive's default window runs from your last reflection forward, so
+something has to record when that was. That record is the **reflected-through
+cursor**: one small receipt at `engine/reflection/receipt.json` under
+`~/.lucid/`, overwritten each time — a cursor, not a history.
+
+```
+lucid reflect week close          # "Reflected through 2026-07-28."
+lucid reflect week close --json   # {"reflected_through": "…", "source": "close", "wrote": true}
+```
+
+Two things move the cursor, and nothing else does:
+
+- **`reflect week close`** — the explicit act of finishing a sit-down. It stamps
+  the moment you closed.
+- **A completed `reflect week apply`** — `accepted`, `nuanced`, or `rejected`.
+  Answering a candidate is engagement, so it advances the same cursor as a
+  convenience. `unanswered` does **not**.
+
+**Reading is not closing.** Running `reflect week` leaves the cursor exactly
+where it was, so a sit-down you open and abandon re-reads those days next time
+instead of marking them done. That is deliberate: a repeated read is a cheap,
+visible cost, while a silently dropped day is the failure this window exists to
+prevent. The trade is stated plainly so you can rely on it — forget to close and
+you will see the stretch again; you will not lose it.
+
 ## Safety and privacy
 
 - **Read-only by contract.** `reflect week` creates no insight, reflection, or
-  raw file. The only write path is the explicit `apply` command.
-- **Sanctuary boundary.** The deep-dive reads only through projections; it never
-  touches `~/.lucid/engine`, `~/.lucid/observations`, or `~/.lucid/registries`
-  directly.
+  raw file, and never stamps the cursor. It reads one small reflected-through
+  receipt to resolve its window; the two write paths are the explicit `apply` and
+  `close` commands.
+- **Sanctuary boundary.** The deep-dive reads only through the storage adapter —
+  projections for everything it reflects on, plus the reflected-through receipt
+  for its window. It touches no observation or registry record, and reaches no
+  `~/.lucid/` path itself.
 - **Local-first.** Everything runs on your own host; nothing syncs to a cloud.
 - **Hypothesis, never diagnosis.** Every surfaced line is Safety-gated and
   framed as a question, grounded in citations to your own words.
