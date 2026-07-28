@@ -98,6 +98,11 @@ func TestIsUsageError(t *testing.T) {
 	// cobra positional-arg validator messages map to a usage error.
 	assert.True(t, isUsageError(errors.New("accepts 1 arg(s), received 0")))
 	assert.True(t, isUsageError(errors.New("requires at least 1 arg(s), only received 0")))
+	// cobra's MarkFlagsMutuallyExclusive message — an impossible flag
+	// combination is a misuse, not a failed run.
+	assert.True(t, isUsageError(errors.New(
+		"if any flags in the group [week since days] are set none of the others can be; [days week] were all set",
+	)))
 }
 
 func TestUnknownCommand_IsUsageError(t *testing.T) {

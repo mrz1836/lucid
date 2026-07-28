@@ -152,8 +152,10 @@ func isUsageError(err error) bool {
 	// validators (ExactArgs, MinimumNArgs, MaximumNArgs, RangeArgs), whose
 	// messages read "accepts N arg(s), received M" / "requires at least N
 	// arg(s), only received M" — a bare `lucid storm` is a usage error (exit 2),
-	// not a runtime failure.
-	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "invalid argument", "flag needs an argument", "required flag", "accepts", "requires at least"} {
+	// not a runtime failure. "none of the others can be" catches
+	// MarkFlagsMutuallyExclusive (`reflect week --week --days 3`): passing an
+	// impossible flag combination is a misuse, not a failed run.
+	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "invalid argument", "flag needs an argument", "required flag", "accepts", "requires at least", "none of the others can be"} {
 		if containsFold(msg, p) {
 			return true
 		}

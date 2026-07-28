@@ -8,6 +8,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/agents/reflection"
 	"github.com/mrz1836/lucid/internal/agents/safety"
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/frameworks"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/provider"
@@ -19,15 +20,29 @@ import (
 // `lucid reflect week` surface, distinct from `/reflect`.
 const commandReflectWeek = "/reflect week"
 
+// The two acts that may advance the reflected-through cursor, stamped on the
+// receipt as its provenance. Both are deliberate engagement with a reflection:
+// an explicit close, or an apply the user answered. Nothing else writes it —
+// least of all the read.
+const (
+	reflectionSourceClose = "close"
+	reflectionSourceApply = "apply"
+)
+
 // ReflectWeekRequest carries the inputs for one weekly deep-dive. Provider is
 // the model boundary the deep-dive reaches through; ActiveLens is the consented
 // lens the CLI resolved from config over the embedded framework registry (nil
 // for the baseline, lens-neutral voice). The router owns every Ledger read and
 // builds the projection-only week bundle.
+//
+// Window is the caller's range request. Its zero value is the catch-up read —
+// everything since the last reflection — so a caller that asks for nothing gets
+// the complete span rather than a fixed calendar week.
 type ReflectWeekRequest struct {
 	Now        time.Time
 	Provider   provider.Provider
 	ActiveLens *frameworks.Lens
+	Window     ReflectWindowOptions
 }
 
 // ReflectWeekPattern is the Safety-gated candidate pattern the deep-dive
@@ -41,20 +56,32 @@ type ReflectWeekPattern struct {
 }
 
 // ReflectWeekResult is the read-only weekly deep-dive: the ISO-week label, the
-// six Discord-friendly narrative sections (each line already gated through
-// Safety), the optional Safety-gated candidate pattern, and the "<id>
-// v<version>" applied-lens label when a lens framed the run. Nothing here is
-// persisted — the surface writes no insight, reflection, or raw file.
+// resolved window's facts, the six Discord-friendly narrative sections (each
+// line already gated through Safety), the optional Safety-gated candidate
+// pattern, and the "<id> v<version>" applied-lens label when a lens framed the
+// run. Nothing here is persisted — the surface writes no insight, reflection, or
+// raw file.
+//
+// ISOWeek labels the window's END day, so a downstream consumer that keys on it
+// keeps working across a multi-week catch-up read. WindowStart, WindowEnd and
+// DaysCovered state the span that was actually read; Capped and UncoveredDays
+// state the shortfall a long gap deferred, so the surface can say so out loud
+// rather than quietly reading less than the user thinks.
 type ReflectWeekResult struct {
-	ISOWeek     string
-	Summary     string
-	Wins        []string
-	Misses      []string
-	BodyPain    []string
-	HabitChange []string
-	NextWeek    []string
-	Pattern     *ReflectWeekPattern
-	AppliedLens string
+	ISOWeek       string
+	WindowStart   time.Time
+	WindowEnd     time.Time
+	DaysCovered   int
+	Capped        bool
+	UncoveredDays int
+	Summary       string
+	Wins          []string
+	Misses        []string
+	BodyPain      []string
+	HabitChange   []string
+	NextWeek      []string
+	Pattern       *ReflectWeekPattern
+	AppliedLens   string
 }
 
 // ReflectWeek executes the read-only weekly deep-dive. It assembles the
@@ -69,7 +96,16 @@ type ReflectWeekResult struct {
 func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (ReflectWeekResult, error) {
 	now := whenOr(req.Now)
 
-	bundle, err := r.BuildWeekBundle(now)
+	// The window is resolved once, here, and handed to the bundle: the assembler
+	// no longer derives its own bounds. Resolving it reads the reflected-through
+	// cursor, which is a pure read — a Ledger with no cursor yields a first-run
+	// window and no file is created, so this surface stays read-only.
+	win, err := r.resolveReflectWindow(now, req.Window)
+	if err != nil {
+		return ReflectWeekResult{}, fmt.Errorf("reflectweek: resolve window: %w", err)
+	}
+
+	bundle, err := r.BuildWeekBundle(now, win)
 	if err != nil {
 		return ReflectWeekResult{}, fmt.Errorf("reflectweek: build week bundle: %w", err)
 	}
@@ -85,6 +121,7 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 
 	dd := reflection.DeepDive(ctx, reflection.DeepDiveInput{
 		ISOWeek:             bundle.ISOWeek,
+		Window:              weekWindowLabel(bundle),
 		Numbers:             weekNumbers(bundle),
 		Entries:             toDeepEntries(bundle.RawDigest),
 		Signals:             toDeepSignals(bundle.Observations),
@@ -95,14 +132,22 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 		AgentVersion:        r.cfg.AgentVersions.Reflection,
 	}, req.Provider)
 
+	// The window facts are COPIED from the bundle, never recomputed here: a
+	// second derivation is how the narrative header and the JSON payload start
+	// disagreeing about what was covered.
 	res := ReflectWeekResult{
-		ISOWeek:     bundle.ISOWeek,
-		Summary:     r.gateLine(ctx, dd.Summary, req.Provider),
-		Wins:        r.gateLines(ctx, dd.Wins, req.Provider),
-		Misses:      r.gateLines(ctx, dd.Misses, req.Provider),
-		BodyPain:    r.gateLines(ctx, dd.BodyPain, req.Provider),
-		HabitChange: r.gateLines(ctx, dd.HabitChange, req.Provider),
-		NextWeek:    r.gateLines(ctx, dd.NextWeek, req.Provider),
+		ISOWeek:       bundle.ISOWeek,
+		WindowStart:   bundle.WindowStart,
+		WindowEnd:     bundle.WindowEnd,
+		DaysCovered:   bundle.DaysCovered,
+		Capped:        bundle.Capped,
+		UncoveredDays: bundle.UncoveredDays,
+		Summary:       r.gateLine(ctx, dd.Summary, req.Provider),
+		Wins:          r.gateLines(ctx, dd.Wins, req.Provider),
+		Misses:        r.gateLines(ctx, dd.Misses, req.Provider),
+		BodyPain:      r.gateLines(ctx, dd.BodyPain, req.Provider),
+		HabitChange:   r.gateLines(ctx, dd.HabitChange, req.Provider),
+		NextWeek:      r.gateLines(ctx, dd.NextWeek, req.Provider),
 	}
 	if dd.AppliedLens != nil {
 		res.AppliedLens = *dd.AppliedLens
@@ -117,6 +162,64 @@ func (r *Router) ReflectWeek(ctx context.Context, req ReflectWeekRequest) (Refle
 		}
 	}
 	return res, nil
+}
+
+// weekWindowLabel renders the span the deep-dive is reading as the truthful
+// header of its authorized slice — "2026-07-13 to 2026-07-26 (14 days)". It
+// names dates only: no Ledger path may appear in an agent-facing string.
+func weekWindowLabel(b WeekBundle) string {
+	unit := "days"
+	if b.DaysCovered == 1 {
+		unit = "day"
+	}
+	return fmt.Sprintf("%s to %s (%d %s)",
+		engine.DateString(b.WindowStart), engine.DateString(b.WindowEnd), b.DaysCovered, unit)
+}
+
+// ReflectionCloseResult reports what a close stamped on the reflected-through
+// cursor: the instant the window is now reflected through, which act wrote it
+// ("close"), and when it was written.
+type ReflectionCloseResult struct {
+	ReflectedThrough time.Time
+	Source           string
+	WrittenAt        time.Time
+}
+
+// CloseReflectWeek stamps the reflected-through cursor, ending one reflection.
+// It is one of exactly two writers of that cursor (the other is a completed
+// apply) — the deep-dive read itself never advances it, so an opened-but-never-
+// closed sit-down re-reads those days rather than marking them done.
+//
+// It stamps the close INSTANT rather than a remembered window: the read is
+// stateless and recomputes its bounds every run, so there is no window to
+// remember. The next window starts at the beginning of this instant's logical
+// day, so an entry logged later the same evening is re-read rather than
+// half-dropped.
+func (r *Router) CloseReflectWeek(now time.Time) (ReflectionCloseResult, error) {
+	now = whenOr(now)
+	if err := r.advanceReflectionCursor(now, reflectionSourceClose); err != nil {
+		return ReflectionCloseResult{}, err
+	}
+	return ReflectionCloseResult{
+		ReflectedThrough: now,
+		Source:           reflectionSourceClose,
+		WrittenAt:        now,
+	}, nil
+}
+
+// advanceReflectionCursor overwrites the reflected-through cursor with `now`,
+// stamped with the act that advanced it. The receipt is a cursor, not a history:
+// each write replaces the last.
+func (r *Router) advanceReflectionCursor(now time.Time, source string) error {
+	stamp := now.Format(time.RFC3339)
+	if err := r.store.WriteReflectionReceipt(storage.ReflectionReceipt{
+		ReflectedThrough: stamp,
+		Source:           source,
+		WrittenAt:        stamp,
+	}); err != nil {
+		return fmt.Errorf("reflectweek: write reflected-through cursor: %w", err)
+	}
+	return nil
 }
 
 // proposalPausePassive reports whether the silent proposal pause is currently

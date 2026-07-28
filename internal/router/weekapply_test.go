@@ -3,7 +3,10 @@ package router
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -224,4 +227,105 @@ func TestApplyWeekProposal_NoProcessedArtifactErrors(t *testing.T) {
 		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{},
 	))
 	require.Error(t, err)
+}
+
+// TestApplyWeekProposal_CursorAdvancesOnlyWhenAnswered is the guard on the
+// abandoned case. Accepting, refining, and rejecting are all answers — the user
+// read the pattern and said something — so each advances the reflected-through
+// cursor as a convenience, sparing an explicit close. Letting the pattern pass is
+// NOT an answer: it advances nothing, so the next reflection re-reads those days
+// instead of marking them done. Getting this backwards would reintroduce the
+// silent-drop this whole window exists to kill, which is why the unanswered case
+// asserts the file's ABSENCE rather than some differing field.
+func TestApplyWeekProposal_CursorAdvancesOnlyWhenAnswered(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    ResponseKind
+		text    string
+		advance bool
+	}{
+		{name: "accepted", kind: RespAccepted, text: "Yes, that fits.", advance: true},
+		{name: "nuanced", kind: RespNuanced, text: "Closer to: I over-prepare when the week felt loose.", advance: true},
+		{name: "rejected", kind: RespRejected, text: "No — that's not it.", advance: true},
+		{name: "unanswered", kind: RespUnanswered, advance: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, a, home := newBootedRouter(t)
+			seedProc(t, a, curr, fixedNow(), nil, "prep")
+
+			res, err := r.ApplyWeekProposal(context.Background(), applyReq(
+				cleanCandidate, "prep-as-safety", "stoicism v1",
+				ProposalResponse{Kind: tc.kind, Text: tc.text}, RuleResponse{}, &provider.Fake{},
+			))
+			require.NoError(t, err)
+			assert.False(t, res.CursorStalled, "the cursor write succeeds on a healthy Ledger")
+
+			receipt, ok, err := a.ReadReflectionReceipt()
+			require.NoError(t, err)
+			path := filepath.Join(home, "engine", "reflection", "receipt.json")
+
+			if !tc.advance {
+				assert.False(t, ok, "an unanswered proposal leaves no cursor")
+				assert.NoFileExists(t, path, "the abandoned case writes nothing at all")
+				return
+			}
+
+			require.True(t, ok, "an answered proposal advances the cursor")
+			assert.FileExists(t, path)
+			assert.Equal(t, "apply", receipt.Source, "the apply path stamps its own provenance")
+
+			through, perr := time.Parse(time.RFC3339, receipt.ReflectedThrough)
+			require.NoError(t, perr)
+			assert.True(t, through.Equal(fixedNow()), "the cursor is stamped at the apply instant")
+		})
+	}
+}
+
+// TestApplyWeekProposal_CursorFailureNeverMasksThePersist proves the degrade
+// ordering. By the time the cursor is advanced the user's insight is already on
+// disk; returning a cursor write's error would tell them their accepted pattern
+// failed when it did not. It degrades to a surfaced flag instead, and the whole
+// cost is that the next reflection re-reads days already sat with — the same
+// trade the cursor makes everywhere else.
+func TestApplyWeekProposal_CursorFailureNeverMasksThePersist(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	seedProc(t, a, curr, fixedNow(), nil, "prep")
+
+	// A plain file where the cursor's directory belongs: the write cannot
+	// succeed, and the persist that already happened must survive it.
+	require.NoError(t, os.MkdirAll(filepath.Join(home, "engine"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(home, "engine", "reflection"), []byte("not a directory"), 0o600))
+
+	res, err := r.ApplyWeekProposal(context.Background(), applyReq(
+		cleanCandidate, "prep-as-safety", "stoicism v1",
+		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{},
+	))
+	require.NoError(t, err, "a cursor failure is a degrade, never an error")
+	assert.True(t, res.CursorStalled, "and it is surfaced, never swallowed")
+
+	require.True(t, res.Wrote, "the insight still persisted")
+	ins, err := a.ReadInsight(res.InsightID)
+	require.NoError(t, err)
+	assert.Equal(t, storage.InsightStatusAccepted, ins.Status)
+}
+
+// TestApplyWeekProposal_NoArtifactLeavesCursorUntouched proves the early
+// precondition failure advances nothing. Apply errors before the proposal ever
+// reaches the user, so there was no engagement to record — stamping the cursor
+// here would mark days reflected that nobody read.
+func TestApplyWeekProposal_NoArtifactLeavesCursorUntouched(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+
+	_, err := r.ApplyWeekProposal(context.Background(), applyReq(
+		cleanCandidate, "prep-as-safety", "stoicism v1",
+		ProposalResponse{Kind: RespAccepted, Text: "Yes."}, RuleResponse{}, &provider.Fake{},
+	))
+	require.Error(t, err)
+
+	_, ok, rerr := a.ReadReflectionReceipt()
+	require.NoError(t, rerr)
+	assert.False(t, ok)
+	assert.NoFileExists(t, filepath.Join(home, "engine", "reflection", "receipt.json"))
 }

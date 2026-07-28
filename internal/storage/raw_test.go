@@ -238,3 +238,93 @@ func TestWriteRaw_ShardReadOnly(t *testing.T) {
 	_, err := a.WriteRaw(syntheticRaw(fixedTime(), "body"))
 	require.Error(t, err)
 }
+
+// TestEarliestRawDate_EmptyLedger: a Ledger with nothing captured reports no
+// earliest date rather than an error. This is the first-ever-reflection case —
+// the caller falls back to a bare calendar window instead of inventing a start.
+func TestEarliestRawDate_EmptyLedger(t *testing.T) {
+	a, _ := newRawAdapter(t)
+
+	date, ok, err := a.EarliestRawDate()
+	require.NoError(t, err, "an empty raw tree is not an error")
+	assert.False(t, ok)
+	assert.Empty(t, date)
+}
+
+// TestEarliestRawDate_NoRawTree covers the harder empty case: the raw/
+// directory does not exist at all (an unscaffolded home), which must still be
+// a clean miss rather than a read error.
+func TestEarliestRawDate_NoRawTree(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid"))
+
+	date, ok, err := a.EarliestRawDate()
+	require.NoError(t, err, "an absent raw tree is not an error")
+	assert.False(t, ok)
+	assert.Empty(t, date)
+}
+
+// TestEarliestRawDate_AcrossMonthsAndYears is the case a per-shard search would
+// get wrong: entries spread over two months and two years must resolve to the
+// single oldest date, not the oldest within some shard.
+func TestEarliestRawDate_AcrossMonthsAndYears(t *testing.T) {
+	a, _ := newRawAdapter(t)
+
+	for _, at := range []time.Time{
+		time.Date(2026, time.March, 15, 9, 5, 0, 0, time.UTC),
+		time.Date(2025, time.November, 20, 21, 30, 0, 0, time.UTC),
+		time.Date(2026, time.March, 1, 7, 0, 0, 0, time.UTC),
+		time.Date(2025, time.December, 2, 12, 0, 0, 0, time.UTC),
+	} {
+		_, err := a.WriteRaw(syntheticRaw(at, "synthetic entry"))
+		require.NoError(t, err)
+	}
+
+	date, ok, err := a.EarliestRawDate()
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "2025-11-20", date)
+}
+
+// TestEarliestRawDate_IgnoresStrayNames proves a foreign file in the tree is
+// skipped rather than answered with. The adversarial fixture is
+// raw_0001_01_01.md: it looks like a raw id and carries a date far older than
+// any real entry, so a naive prefix match would return year 1 and send the
+// reflection window back to antiquity.
+func TestEarliestRawDate_IgnoresStrayNames(t *testing.T) {
+	a, home := newRawAdapter(t)
+
+	_, err := a.WriteRaw(syntheticRaw(time.Date(2026, time.June, 10, 8, 0, 0, 0, time.UTC), "synthetic entry"))
+	require.NoError(t, err)
+
+	shard := filepath.Join(home, "raw", "2026", "06")
+	for _, name := range []string{"raw_0001_01_01.md", "notes.md", "raw_not_a_date_here_x.md", "README.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(shard, name), []byte("stray"), 0o600))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(shard, "raw_1999_01_01"), 0o700))
+
+	date, ok, err := a.EarliestRawDate()
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "2026-06-10", date, "only well-formed raw ids count")
+}
+
+// TestEarliestRawDate_UnreadableShard surfaces a real read failure instead of
+// silently reporting no entries — a permission problem must not look like an
+// empty Ledger and quietly widen the reflection window.
+func TestEarliestRawDate_UnreadableShard(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod permission bits are a no-op as root")
+	}
+	a, home := newRawAdapter(t)
+
+	_, err := a.WriteRaw(syntheticRaw(fixedTime(), "synthetic entry"))
+	require.NoError(t, err)
+
+	shard := filepath.Join(home, "raw", "2026", "07")
+	require.NoError(t, os.Chmod(shard, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(shard, 0o700) })
+
+	_, ok, err := a.EarliestRawDate()
+	require.Error(t, err)
+	assert.False(t, ok)
+}

@@ -78,6 +78,12 @@ type ValidateRequest struct {
 // saw (post-Safety, or the fallback). The remaining flags record the durable
 // effect so a caller and the tests can assert exactly one of the accept /
 // reject / unanswered paths fired.
+//
+// CursorStalled is set only by the weekly apply path (ApplyWeekProposal), and
+// only when the turn's own outcome was persisted successfully but the
+// reflected-through cursor could not be advanced afterwards. It is a degrade,
+// not a failure: everything the user answered is on disk, and the only cost is
+// that the next reflection re-reads days already sat with.
 type ValidateResult struct {
 	Outcome        reflection.Outcome
 	Message        string
@@ -89,6 +95,7 @@ type ValidateResult struct {
 	Rejected       bool
 	Unanswered     bool
 	RuleSet        bool
+	CursorStalled  bool
 }
 
 // Validate runs the insight-validation flow for one processed artifact:
