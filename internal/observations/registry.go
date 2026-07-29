@@ -186,14 +186,15 @@ func (r Registry) Normalized() Registry {
 // its owner lookups on the same normalization the derivation uses.
 func NormalizedName(name string) string { return keyderive.Normalize(name) }
 
-// kindPrefix returns the singular key prefix for a registry kind.
+// kindPrefix returns the singular key prefix for a registry kind. The prefix is
+// the kind itself; validity defers to [RegistryDir] so the set of kinds is
+// enumerated in exactly one place — adding a kind means touching RegistryDir
+// alone.
 func kindPrefix(kind string) (string, bool) {
-	switch kind {
-	case RegistryInjury, RegistryThread, RegistryPlace, RegistryEra:
-		return kind, true
-	default:
+	if _, ok := RegistryDir(kind); !ok {
 		return "", false
 	}
+	return kind, true
 }
 
 // cloneAnyMap deep-copies a one-level map (nil stays a fresh empty map). The

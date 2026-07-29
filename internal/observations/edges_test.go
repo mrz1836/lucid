@@ -90,6 +90,10 @@ func TestRegistryDir_AllKinds(t *testing.T) {
 		require.Truef(t, ok, kind)
 		assert.Equal(t, dir, got)
 	}
+	// RegistryDir is the single enumeration of valid kinds (kindPrefix defers to
+	// it), so an unknown kind must report not-found here.
+	_, ok := RegistryDir("nonsense")
+	assert.False(t, ok, "an unknown kind has no directory")
 }
 
 func TestIsRangeSpanning_BadDates(t *testing.T) {
