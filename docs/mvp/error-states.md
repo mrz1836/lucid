@@ -195,6 +195,7 @@ from any of it.
 | Sc-3 | A periodic that is *intended inactive* is inactive (companion-suppressed bell; `bell.enabled: false`) | Left alone by every reconcile pass — the guard is derived from configuration per slug, so repair never fights a deliberate setting. | `scheduler status` reports it as *suppressed by companion (intended)* — OK, never a fault. | None. | (none — this is designed behavior, not a failure) |
 | Sc-4 | The companion owns the evening window and left no verified `night` receipt for that logical day by the backstop mark | The evening backstop fires the pre-committed bell template verbatim, so the window is not silent. | The ordinary bell prompt, late. | Job store only. | (none — the backstop *is* the recovery) |
 | Sc-5 | The companion already delivered a verified `night` receipt for that logical day | The backstop is a no-op: at most one evening send per day, by construction. | (none) | None. | (none — designed) |
+| Sc-6 | The daemon receives a stop signal (SIGINT/SIGTERM) while an outbound send's HTTP request is in flight | The run's context is canceled and threaded into the outbound POST and read-back GET, so the request aborts promptly rather than blocking up to its 10s transport timeout. The job ends; the periodic's next run advances. A canceled send costs one send, never the schedule (as Sc-1). | (none — a clean shutdown) | Job store only; no receipt is written for the aborted send. | Automatic (the next occurrence fires); repaired with `/closeout backfill` if it was the day's only window. |
 
 ## Storage failures
 
