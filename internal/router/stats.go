@@ -227,7 +227,7 @@ func logicalDayRange(from, to time.Time) []time.Time {
 		return nil
 	}
 	days := make([]time.Time, 0, n+1)
-	for i := 0; i <= n; i++ {
+	for i := range n + 1 {
 		days = append(days, engine.AddDays(from, i))
 	}
 	return days

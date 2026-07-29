@@ -399,10 +399,7 @@ func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter, s
 // and a backstop scheduled ahead of the bell it backs up would be nonsense.
 func bellFallbackMinutes(bellMin int) int {
 	backstop := (companionNightCutoffMin + int(bellFallbackGrace/time.Minute)) % minutesPerDay
-	if bellMin > backstop {
-		return bellMin
-	}
-	return backstop
+	return max(bellMin, backstop)
 }
 
 // markMinutes parses an "HH:MM" clock mark into minutes since local midnight. A

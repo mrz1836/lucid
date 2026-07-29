@@ -390,7 +390,7 @@ func TestBellFallbackMinutes(t *testing.T) {
 // midnight would compare tonight's fire against tomorrow's (absent) receipt and
 // send every night. Whatever the bell, the backstop stays before midnight.
 func TestBellFallbackMinutes_StaysOnTheBellsCalendarDay(t *testing.T) {
-	for bellMin := 0; bellMin < minutesPerDay; bellMin++ {
+	for bellMin := range minutesPerDay {
 		got := bellFallbackMinutes(bellMin)
 		require.GreaterOrEqual(t, got, bellMin, "the backstop never precedes the bell (bell %d)", bellMin)
 		require.Less(t, got, minutesPerDay, "the backstop never wraps past midnight (bell %d)", bellMin)

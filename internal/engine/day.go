@@ -215,9 +215,7 @@ func ComputeStreaks(records []DayRecord, loc *time.Location) Streaks {
 		} else {
 			run = 1
 		}
-		if run > longest {
-			longest = run
-		}
+		longest = max(longest, run)
 	}
 
 	// Current streak: walk back from the most recent completed day.

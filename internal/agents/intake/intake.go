@@ -126,10 +126,7 @@ func (in Input) cap() int {
 	if in.MaxQuestions <= 0 {
 		return defaultMaxQuestions
 	}
-	if in.MaxQuestions < floorQuestions {
-		return floorQuestions
-	}
-	return in.MaxQuestions
+	return max(in.MaxQuestions, floorQuestions)
 }
 
 // Gather runs one Intake turn end to end: it drives the follow-up loop via
