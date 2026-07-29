@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/provider/factory"
@@ -153,11 +154,11 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
 	// 3. The two required opaque prompt files — the operator's witness-report
 	// voice. These are the prose and stay loud: a missing or unreadable prompt is
 	// a configuration error, not a silent unwarm send.
-	systemPrompt, err := readPromptFile(c.systemPrompt)
+	systemPrompt, err := composekit.ReadPromptFile(c.systemPrompt)
 	if err != nil {
 		return Report{}, fmt.Errorf("witnessreport: read system prompt: %w", err)
 	}
-	tmpl, err := readPromptFile(c.template)
+	tmpl, err := composekit.ReadPromptFile(c.template)
 	if err != nil {
 		return Report{}, fmt.Errorf("witnessreport: read template: %w", err)
 	}
@@ -230,11 +231,7 @@ func signalGrounded(r Report) bool {
 // optional witness-report model override (an empty override inherits
 // provider.model), mirroring the companion.
 func (c *Composer) providerConfig() config.ProviderConfig {
-	pc := c.provider
-	if c.model != "" {
-		pc.Model = c.model
-	}
-	return pc
+	return composekit.WithModelOverride(c.provider, c.model)
 }
 
 // composeBody assembles the single authorized user message the model composes
@@ -400,19 +397,4 @@ func readCuratedAsks(path string) []string {
 		asks = append(asks, t)
 	}
 	return boundAsks(asks)
-}
-
-// readPromptFile reads one explicit, opaque prompt file. It opens exactly the
-// configured path and never walks a directory, so no traversal into the personal
-// template tree is possible — the config block is the whole firewall seam. An
-// empty path is a configuration error surfaced here rather than an empty read.
-func readPromptFile(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", errors.New("empty prompt path")
-	}
-	b, err := os.ReadFile(path) //nolint:gosec // an operator-configured, explicit prompt path — read directly, never dir-walked
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }

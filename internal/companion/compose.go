@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/engine/templates"
@@ -282,11 +283,11 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 		return Result{}, err
 	}
 
-	systemPrompt, err := readPromptFile(c.companion.SystemPrompt)
+	systemPrompt, err := composekit.ReadPromptFile(c.companion.SystemPrompt)
 	if err != nil {
 		return Result{}, fmt.Errorf("companion: read system prompt: %w", err)
 	}
-	tmpl, err := readPromptFile(tmplPath)
+	tmpl, err := composekit.ReadPromptFile(tmplPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("companion: read %s template: %w", mode, err)
 	}
@@ -421,11 +422,7 @@ func (c *Composer) modeParams(mode Mode) (tmplPath, routinePath, intent string, 
 // providerConfig returns the provider config for the compose call, applying the
 // optional companion.model override (an empty override inherits provider.model).
 func (c *Composer) providerConfig() config.ProviderConfig {
-	pc := c.provider
-	if c.companion.Model != "" {
-		pc.Model = c.companion.Model
-	}
-	return pc
+	return composekit.WithModelOverride(c.provider, c.companion.Model)
 }
 
 // readNumbers reads the same MetricsResult/StatusResult the CLI exposes and
@@ -703,19 +700,4 @@ func readRoutine(path string) (content string, degraded bool) {
 		return "", true
 	}
 	return strings.TrimSpace(string(b)), false
-}
-
-// readPromptFile reads one explicit, opaque prompt file. It opens exactly the
-// configured path and never walks a directory, so no traversal into the personal
-// template tree is possible — the config block is the whole firewall seam. An
-// empty path is a configuration error surfaced here rather than an empty read.
-func readPromptFile(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", errors.New("empty prompt path")
-	}
-	b, err := os.ReadFile(path) //nolint:gosec // an operator-configured, explicit prompt path — read directly, never dir-walked
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }

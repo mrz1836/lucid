@@ -13,10 +13,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
@@ -186,11 +186,11 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 	anchor := BuildAnchor(prog, now, loc)
 	res := Result{Recommendation: rec, Trend: tr, Anchor: anchor, EnrichmentDegraded: degraded}
 
-	systemPrompt, err := readPromptFile(c.workout.SystemPrompt)
+	systemPrompt, err := composekit.ReadPromptFile(c.workout.SystemPrompt)
 	if err != nil {
 		return Result{}, fmt.Errorf("workout: read system prompt: %w", err)
 	}
-	tmpl, err := readPromptFile(c.workout.Template)
+	tmpl, err := composekit.ReadPromptFile(c.workout.Template)
 	if err != nil {
 		return Result{}, fmt.Errorf("workout: read template: %w", err)
 	}
@@ -278,11 +278,7 @@ func (c *Composer) readInjuries() (injuries []observations.Registry, failed bool
 // providerConfig returns the provider config for the phrasing call, applying the
 // optional workout.model override (an empty override inherits provider.model).
 func (c *Composer) providerConfig() config.ProviderConfig {
-	pc := c.provider
-	if c.workout.Model != "" {
-		pc.Model = c.workout.Model
-	}
-	return pc
+	return composekit.WithModelOverride(c.provider, c.workout.Model)
 }
 
 // composeBody assembles the single authorized user message the model phrases
@@ -366,20 +362,4 @@ func renderWithNote(note string, rec Recommendation, tr Trend, anchor Anchor, no
 		return spine
 	}
 	return fmt.Sprintf("%s %s\n\n%s", emojiCoach, note, spine)
-}
-
-// readPromptFile reads one explicit, opaque prompt file. It opens exactly the
-// configured path and never walks a directory, so no traversal into the personal
-// template tree is possible — the config block is the whole firewall seam, the
-// same shape the program loader and the companion draw. An empty path is a
-// configuration error surfaced here rather than an empty read.
-func readPromptFile(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", errors.New("empty prompt path")
-	}
-	b, err := os.ReadFile(path) //nolint:gosec // an operator-configured, explicit prompt path — read directly, never dir-walked
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
