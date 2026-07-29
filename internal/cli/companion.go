@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -29,7 +30,7 @@ const (
 type noopNotifier struct{}
 
 // Send discards: the send-free verdict read never calls it.
-func (noopNotifier) Send(_, _ string) error { return nil }
+func (noopNotifier) Send(_ context.Context, _, _ string) error { return nil }
 
 // newCompanionCmd wires the `companion` verb group and its on-demand `fire`
 // child. The scheduled companion runs inside `lucid scheduler run`; this verb is

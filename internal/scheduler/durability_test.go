@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,7 +33,7 @@ func TestScheduler_KillMidEveningTripwireFiresNextMorning(t *testing.T) {
 	restarted := New(storage.New(a.Home()), &fakeNotifier{failOn: map[string]bool{}})
 
 	// Next morning the tripwire fires the dead-man for the missed 07-05.
-	rep, err := restarted.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := restarted.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 
 	require.Len(t, rep.Sends, 1, "the tripwire still fires after the restart")

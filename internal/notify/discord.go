@@ -173,8 +173,8 @@ func New(token, userID, witnessID string, do httpDoer) *Discord {
 // response surfaces the status and a short body snippet. It composes nothing —
 // the text is the fixed Engine template the scheduler handed it. This is the
 // teeth path: it discards the created message id.
-func (d *Discord) Send(channel, text string) error {
-	_, err := d.post(channel, text)
+func (d *Discord) Send(ctx context.Context, channel, text string) error {
+	_, err := d.post(ctx, channel, text)
 	return err
 }
 
@@ -183,8 +183,8 @@ func (d *Discord) Send(channel, text string) error {
 // companion path uses the id for read-back verification ([Discord.VerifyPresent])
 // and to persist an idempotent delivery receipt. An empty id in an otherwise-2xx
 // response is an error, so a caller never records a receipt it cannot verify.
-func (d *Discord) SendReturningID(channel, text string) (string, error) {
-	body, err := d.post(channel, text)
+func (d *Discord) SendReturningID(ctx context.Context, channel, text string) (string, error) {
+	body, err := d.post(ctx, channel, text)
 	if err != nil {
 		return "", err
 	}
@@ -204,8 +204,8 @@ func (d *Discord) SendReturningID(channel, text string) (string, error) {
 // response surfaces the status and a short body snippet. It composes nothing —
 // the embed value is handed to it fully rendered. This is the teeth path for
 // the witness report: it discards the created message id.
-func (d *Discord) SendEmbed(channel string, e Embed) error {
-	_, err := d.postMessage(channel, message{Embeds: []Embed{e}})
+func (d *Discord) SendEmbed(ctx context.Context, channel string, e Embed) error {
+	_, err := d.postMessage(ctx, channel, message{Embeds: []Embed{e}})
 	return err
 }
 
@@ -215,8 +215,8 @@ func (d *Discord) SendEmbed(channel string, e Embed) error {
 // uses the id for read-back verification ([Discord.VerifyPresent]) and to
 // persist an idempotent weekly receipt. An empty id in an otherwise-2xx response
 // is an error, so a caller never records a receipt it cannot verify.
-func (d *Discord) SendEmbedReturningID(channel string, e Embed) (string, error) {
-	body, err := d.postMessage(channel, message{Embeds: []Embed{e}})
+func (d *Discord) SendEmbedReturningID(ctx context.Context, channel string, e Embed) (string, error) {
+	body, err := d.postMessage(ctx, channel, message{Embeds: []Embed{e}})
 	if err != nil {
 		return "", err
 	}
@@ -236,7 +236,7 @@ func (d *Discord) SendEmbedReturningID(channel string, e Embed) (string, error) 
 // non-2xx status (a 404 for a message that never landed), a body whose id does
 // not match, or an empty id argument is a clear error so a delivery is never
 // recorded as verified when the message is not really there.
-func (d *Discord) VerifyPresent(channel, messageID string) error {
+func (d *Discord) VerifyPresent(ctx context.Context, channel, messageID string) error {
 	id, err := d.resolve(channel)
 	if err != nil {
 		return err
@@ -246,7 +246,7 @@ func (d *Discord) VerifyPresent(channel, messageID string) error {
 	}
 
 	url := fmt.Sprintf("%s/channels/%s/messages/%s", d.base, id, messageID)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("notify: build read-back request: %w", err)
 	}
@@ -281,8 +281,8 @@ func (d *Discord) VerifyPresent(channel, messageID string) error {
 // id) build on. Its resolve/marshal/request/status behavior and error wording
 // are byte-for-byte what Send used before, so the teeth path is unchanged. It is
 // a thin wrapper over [Discord.postMessage] carrying a content-only body.
-func (d *Discord) post(channel, text string) ([]byte, error) {
-	return d.postMessage(channel, message{Content: text})
+func (d *Discord) post(ctx context.Context, channel, text string) ([]byte, error) {
+	return d.postMessage(ctx, channel, message{Content: text})
 }
 
 // postMessage resolves the logical channel, marshals the given message body,
@@ -290,7 +290,7 @@ func (d *Discord) post(channel, text string) ([]byte, error) {
 // create-message request leaves the machine — the content path ([Discord.post])
 // and the embed path ([Discord.SendEmbed]/[Discord.SendEmbedReturningID]) share
 // it, so resolve/request/status/read behavior is identical for both.
-func (d *Discord) postMessage(channel string, msg message) ([]byte, error) {
+func (d *Discord) postMessage(ctx context.Context, channel string, msg message) ([]byte, error) {
 	id, err := d.resolve(channel)
 	if err != nil {
 		return nil, err
@@ -302,7 +302,7 @@ func (d *Discord) postMessage(channel string, msg message) ([]byte, error) {
 	}
 
 	url := fmt.Sprintf("%s/channels/%s/messages", d.base, id)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("notify: build request: %w", err)
 	}

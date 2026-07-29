@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -49,7 +50,7 @@ func newStubServer(t *testing.T, status int, reply string) (*Discord, *capturedR
 func TestSend_UserChannelRoutesAuthsAndBody(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, "")
 
-	err := d.Send(engine.ChannelUser, "the bell rings")
+	err := d.Send(context.Background(), engine.ChannelUser, "the bell rings")
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodPost, got.method)
@@ -62,11 +63,36 @@ func TestSend_UserChannelRoutesAuthsAndBody(t *testing.T) {
 func TestSend_WitnessChannelRoutesToWitnessID(t *testing.T) {
 	d, got := newStubServer(t, http.StatusNoContent, "")
 
-	err := d.Send(engine.ChannelWitness, "streak intact")
+	err := d.Send(context.Background(), engine.ChannelWitness, "streak intact")
 	require.NoError(t, err)
 
 	assert.Equal(t, "/channels/W456/messages", got.path)
 	assert.JSONEq(t, `{"content":"streak intact"}`, got.body)
+}
+
+// TestSend_CanceledContextAbortsPost proves the caller's context is threaded
+// into the outbound POST: a canceled context aborts the request rather than
+// blocking to the transport timeout (error-states.md Sc-6).
+func TestSend_CanceledContextAbortsPost(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := d.Send(ctx, engine.ChannelUser, "the bell rings")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled, "a canceled context aborts the send")
+}
+
+// TestVerifyPresent_CanceledContextAbortsGet proves the read-back GET honors the
+// caller's context the same way.
+func TestVerifyPresent_CanceledContextAbortsGet(t *testing.T) {
+	d, _ := newStubServer(t, http.StatusOK, `{"id":"777"}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := d.VerifyPresent(ctx, engine.ChannelUser, "777")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled, "a canceled context aborts the read-back")
 }
 
 func TestSend_NonSuccessStatusSurfacesError(t *testing.T) {
@@ -81,7 +107,7 @@ func TestSend_NonSuccessStatusSurfacesError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d, _ := newStubServer(t, tc.status, tc.reply)
 
-			err := d.Send(engine.ChannelUser, "hi")
+			err := d.Send(context.Background(), engine.ChannelUser, "hi")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "status")
 			// The short body snippet is echoed into the error for triage.
@@ -93,7 +119,7 @@ func TestSend_NonSuccessStatusSurfacesError(t *testing.T) {
 func TestSend_UnknownLogicalChannelErrorsBeforeAnySend(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, "")
 
-	err := d.Send("nope", "hi")
+	err := d.Send(context.Background(), "nope", "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown logical channel")
 	// Never touched the network — no mis-send.
@@ -110,7 +136,7 @@ func TestSend_UnsetWitnessChannelErrorsNeverMisSends(t *testing.T) {
 	d := New("tok", "U123", "", srv.Client()) // witness ID intentionally empty
 	d.base = srv.URL
 
-	err := d.Send(engine.ChannelWitness, "should not send")
+	err := d.Send(context.Background(), engine.ChannelWitness, "should not send")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "witness channel id is not configured")
 	assert.Empty(t, got.path)
@@ -118,7 +144,7 @@ func TestSend_UnsetWitnessChannelErrorsNeverMisSends(t *testing.T) {
 
 func TestSend_UnsetUserChannelErrors(t *testing.T) {
 	d := New("tok", "", "W456", nil)
-	err := d.Send(engine.ChannelUser, "x")
+	err := d.Send(context.Background(), engine.ChannelUser, "x")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "user channel id is not configured")
 }
@@ -132,7 +158,7 @@ func (s stubDoer) Do(_ *http.Request) (*http.Response, error) { return nil, s.er
 func TestSend_TransportErrorSurfaces(t *testing.T) {
 	d := New("tok", "U123", "W456", stubDoer{err: errors.New("dial refused")})
 
-	err := d.Send(engine.ChannelUser, "hi")
+	err := d.Send(context.Background(), engine.ChannelUser, "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dial refused")
 }
@@ -141,7 +167,7 @@ func TestSend_MalformedBaseFailsToBuildRequest(t *testing.T) {
 	d := New("tok", "U123", "W456", stubDoer{})
 	d.base = "://not-a-url"
 
-	err := d.Send(engine.ChannelUser, "hi")
+	err := d.Send(context.Background(), engine.ChannelUser, "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build request")
 }
@@ -157,7 +183,7 @@ func TestNewDefaultsDoerToBoundedClient(t *testing.T) {
 func TestSendReturningID_ParsesCreatedID(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, `{"id":"1526225086254682172","channel_id":"U123"}`)
 
-	id, err := d.SendReturningID(engine.ChannelUser, "test fire")
+	id, err := d.SendReturningID(context.Background(), engine.ChannelUser, "test fire")
 	require.NoError(t, err)
 	assert.Equal(t, "1526225086254682172", id)
 
@@ -172,7 +198,7 @@ func TestSendReturningID_ParsesCreatedID(t *testing.T) {
 func TestSendReturningID_EmptyIDErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusOK, `{}`)
 
-	_, err := d.SendReturningID(engine.ChannelUser, "hi")
+	_, err := d.SendReturningID(context.Background(), engine.ChannelUser, "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no message id")
 }
@@ -180,7 +206,7 @@ func TestSendReturningID_EmptyIDErrors(t *testing.T) {
 func TestSendReturningID_MalformedResponseErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusOK, "not-json")
 
-	_, err := d.SendReturningID(engine.ChannelUser, "hi")
+	_, err := d.SendReturningID(context.Background(), engine.ChannelUser, "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse create-message response")
 }
@@ -188,7 +214,7 @@ func TestSendReturningID_MalformedResponseErrors(t *testing.T) {
 func TestSendReturningID_PropagatesPostError(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusForbidden, `{"message":"Missing Access"}`)
 
-	_, err := d.SendReturningID(engine.ChannelUser, "hi")
+	_, err := d.SendReturningID(context.Background(), engine.ChannelUser, "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status")
 }
@@ -196,7 +222,7 @@ func TestSendReturningID_PropagatesPostError(t *testing.T) {
 func TestVerifyPresent_PresentSucceeds(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, `{"id":"777"}`)
 
-	err := d.VerifyPresent(engine.ChannelUser, "777")
+	err := d.VerifyPresent(context.Background(), engine.ChannelUser, "777")
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodGet, got.method)
@@ -207,7 +233,7 @@ func TestVerifyPresent_PresentSucceeds(t *testing.T) {
 func TestVerifyPresent_AbsentErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusNotFound, `{"message":"Unknown Message"}`)
 
-	err := d.VerifyPresent(engine.ChannelUser, "777")
+	err := d.VerifyPresent(context.Background(), engine.ChannelUser, "777")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status")
 }
@@ -215,7 +241,7 @@ func TestVerifyPresent_AbsentErrors(t *testing.T) {
 func TestVerifyPresent_MismatchedIDErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusOK, `{"id":"999"}`)
 
-	err := d.VerifyPresent(engine.ChannelUser, "777")
+	err := d.VerifyPresent(context.Background(), engine.ChannelUser, "777")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mismatched id")
 }
@@ -223,7 +249,7 @@ func TestVerifyPresent_MismatchedIDErrors(t *testing.T) {
 func TestVerifyPresent_EmptyMessageIDErrorsBeforeAnyGet(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, `{"id":"777"}`)
 
-	err := d.VerifyPresent(engine.ChannelUser, "")
+	err := d.VerifyPresent(context.Background(), engine.ChannelUser, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "empty message id")
 	assert.Empty(t, got.path) // never touched the network
@@ -232,7 +258,7 @@ func TestVerifyPresent_EmptyMessageIDErrorsBeforeAnyGet(t *testing.T) {
 func TestVerifyPresent_UnknownChannelErrorsBeforeAnyGet(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, `{"id":"777"}`)
 
-	err := d.VerifyPresent("nope", "777")
+	err := d.VerifyPresent(context.Background(), "nope", "777")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown logical channel")
 	assert.Empty(t, got.path)
@@ -299,7 +325,7 @@ func sampleEmbed() Embed {
 func TestSendEmbed_UserChannelRoutesAuthsAndEmbedBody(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, "")
 
-	err := d.SendEmbed(engine.ChannelUser, sampleEmbed())
+	err := d.SendEmbed(context.Background(), engine.ChannelUser, sampleEmbed())
 	require.NoError(t, err)
 
 	assert.Equal(t, http.MethodPost, got.method)
@@ -327,7 +353,7 @@ func TestSendEmbed_UserChannelRoutesAuthsAndEmbedBody(t *testing.T) {
 func TestSendEmbed_WitnessChannelRoutesToWitnessID(t *testing.T) {
 	d, got := newStubServer(t, http.StatusNoContent, "")
 
-	err := d.SendEmbed(engine.ChannelWitness, sampleEmbed())
+	err := d.SendEmbed(context.Background(), engine.ChannelWitness, sampleEmbed())
 	require.NoError(t, err)
 
 	assert.Equal(t, "/channels/W456/messages", got.path)
@@ -339,7 +365,7 @@ func TestSendEmbed_OmitsEmptyOptionalFields(t *testing.T) {
 
 	// A title-only embed: color 0, no description, no fields, empty footer all
 	// drop off the wire so a minimal embed carries no stray keys.
-	err := d.SendEmbed(engine.ChannelUser, Embed{Title: "just a title"})
+	err := d.SendEmbed(context.Background(), engine.ChannelUser, Embed{Title: "just a title"})
 	require.NoError(t, err)
 
 	assert.JSONEq(t, `{"content":"","embeds":[{"title":"just a title"}]}`, got.body)
@@ -351,7 +377,7 @@ func TestSendEmbed_OmitsEmptyOptionalFields(t *testing.T) {
 func TestSendEmbed_NonSuccessStatusSurfacesError(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusForbidden, `{"message":"Missing Access"}`)
 
-	err := d.SendEmbed(engine.ChannelUser, sampleEmbed())
+	err := d.SendEmbed(context.Background(), engine.ChannelUser, sampleEmbed())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status")
 	assert.Contains(t, err.Error(), "Missing Access")
@@ -360,7 +386,7 @@ func TestSendEmbed_NonSuccessStatusSurfacesError(t *testing.T) {
 func TestSendEmbed_UnknownLogicalChannelErrorsBeforeAnySend(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, "")
 
-	err := d.SendEmbed("nope", sampleEmbed())
+	err := d.SendEmbed(context.Background(), "nope", sampleEmbed())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown logical channel")
 	assert.Empty(t, got.path) // never touched the network — no mis-send
@@ -376,7 +402,7 @@ func TestSendEmbed_UnsetWitnessChannelErrorsNeverMisSends(t *testing.T) {
 	d := New("tok", "U123", "", srv.Client()) // witness ID intentionally empty
 	d.base = srv.URL
 
-	err := d.SendEmbed(engine.ChannelWitness, sampleEmbed())
+	err := d.SendEmbed(context.Background(), engine.ChannelWitness, sampleEmbed())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "witness channel id is not configured")
 	assert.Empty(t, got.path)
@@ -385,7 +411,7 @@ func TestSendEmbed_UnsetWitnessChannelErrorsNeverMisSends(t *testing.T) {
 func TestSendEmbedReturningID_ParsesCreatedID(t *testing.T) {
 	d, got := newStubServer(t, http.StatusOK, `{"id":"1526225086254682172","channel_id":"U123"}`)
 
-	id, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	id, err := d.SendEmbedReturningID(context.Background(), engine.ChannelUser, sampleEmbed())
 	require.NoError(t, err)
 	assert.Equal(t, "1526225086254682172", id)
 
@@ -399,7 +425,7 @@ func TestSendEmbedReturningID_ParsesCreatedID(t *testing.T) {
 func TestSendEmbedReturningID_EmptyIDErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusOK, `{}`)
 
-	_, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	_, err := d.SendEmbedReturningID(context.Background(), engine.ChannelUser, sampleEmbed())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no message id")
 }
@@ -407,7 +433,7 @@ func TestSendEmbedReturningID_EmptyIDErrors(t *testing.T) {
 func TestSendEmbedReturningID_MalformedResponseErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusOK, "not-json")
 
-	_, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	_, err := d.SendEmbedReturningID(context.Background(), engine.ChannelUser, sampleEmbed())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse create-message response")
 }
@@ -415,7 +441,7 @@ func TestSendEmbedReturningID_MalformedResponseErrors(t *testing.T) {
 func TestSendEmbedReturningID_PropagatesPostError(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusForbidden, `{"message":"Missing Access"}`)
 
-	_, err := d.SendEmbedReturningID(engine.ChannelUser, sampleEmbed())
+	_, err := d.SendEmbedReturningID(context.Background(), engine.ChannelUser, sampleEmbed())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "status")
 }
@@ -427,13 +453,13 @@ func TestSendEmbedReturningID_PropagatesPostError(t *testing.T) {
 func TestContentSend_BodyCarriesNoEmbedsKey(t *testing.T) {
 	t.Run("Send", func(t *testing.T) {
 		d, got := newStubServer(t, http.StatusOK, "")
-		require.NoError(t, d.Send(engine.ChannelUser, "the bell rings"))
+		require.NoError(t, d.Send(context.Background(), engine.ChannelUser, "the bell rings"))
 		assert.JSONEq(t, `{"content":"the bell rings"}`, got.body)
 		assert.NotContains(t, got.body, "embeds")
 	})
 	t.Run("SendReturningID", func(t *testing.T) {
 		d, got := newStubServer(t, http.StatusOK, `{"id":"42"}`)
-		_, err := d.SendReturningID(engine.ChannelUser, "test fire")
+		_, err := d.SendReturningID(context.Background(), engine.ChannelUser, "test fire")
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"content":"test fire"}`, got.body)
 		assert.NotContains(t, got.body, "embeds")

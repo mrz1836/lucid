@@ -121,8 +121,8 @@ type bellWorker struct {
 func (bellWorker) Kind() string { return kindBell }
 
 // Work posts the evening bell (a no-op when the bell is disabled in chain.json).
-func (w bellWorker) Work(_ context.Context, _ *flywheel.Job[bellArgs]) (flywheel.Result, error) {
-	if _, err := w.sc.RunBell(); err != nil {
+func (w bellWorker) Work(ctx context.Context, _ *flywheel.Job[bellArgs]) (flywheel.Result, error) {
+	if _, err := w.sc.RunBell(ctx); err != nil {
 		return flywheel.Result{}, err
 	}
 	return flywheel.Result{}, nil
@@ -144,7 +144,7 @@ func (bellFallbackWorker) Kind() string { return kindBellFallback }
 // already delivered its night message, and when the bell is disabled in
 // chain.json (the backstop rides the bell's consent, not its own).
 func (w bellFallbackWorker) Work(ctx context.Context, _ *flywheel.Job[bellFallbackArgs]) (flywheel.Result, error) {
-	if _, err := w.sc.RunBellFallback(w.clock.Now(ctx)); err != nil {
+	if _, err := w.sc.RunBellFallback(ctx, w.clock.Now(ctx)); err != nil {
 		return flywheel.Result{}, err
 	}
 	return flywheel.Result{}, nil
@@ -182,7 +182,7 @@ func (w tripwireWorker) Work(ctx context.Context, _ *flywheel.Job[tripwireArgs])
 	if w.presented {
 		run = w.sc.RunTripwirePresented
 	}
-	if _, err := run(now); err != nil {
+	if _, err := run(ctx, now); err != nil {
 		return flywheel.Result{}, err
 	}
 	return flywheel.Result{}, nil

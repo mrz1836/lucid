@@ -77,9 +77,9 @@ type MessageComposer interface {
 // on; the plain Send carries the loud alert when a fire cannot deliver its real
 // message. *notify.Discord satisfies all three.
 type Deliverer interface {
-	SendReturningID(channel, text string) (string, error)
-	VerifyPresent(channel, messageID string) error
-	Send(channel, text string) error
+	SendReturningID(ctx context.Context, channel, text string) (string, error)
+	VerifyPresent(ctx context.Context, channel, messageID string) error
+	Send(ctx context.Context, channel, text string) error
 }
 
 // Runner delivers one composed companion message for a window with the
@@ -168,15 +168,15 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 			res.Text = lateNote + "\n\n" + res.Text
 			return res
 		},
-		Send: func(_ context.Context, channel string, res Result) (string, error) {
-			id, serr := r.deliver.SendReturningID(channel, res.Text)
+		Send: func(sctx context.Context, channel string, res Result) (string, error) {
+			id, serr := r.deliver.SendReturningID(sctx, channel, res.Text)
 			if serr != nil {
 				return "", fmt.Errorf("companion: deliver %s: %w", mode, serr)
 			}
 			return id, nil
 		},
-		Verify: func(_ context.Context, channel, id string) error {
-			if verr := r.deliver.VerifyPresent(channel, id); verr != nil {
+		Verify: func(vctx context.Context, channel, id string) error {
+			if verr := r.deliver.VerifyPresent(vctx, channel, id); verr != nil {
 				return fmt.Errorf("companion: verify %s delivery: %w", mode, verr)
 			}
 			return nil
@@ -194,7 +194,7 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 			}
 			return nil
 		},
-		Alert:        r.alert,
+		Alert:        func(text string) { r.alert(ctx, text) },
 		CutoffAlert:  fmt.Sprintf("Lucid %s companion skipped — it is past the %s cut-off (the host was asleep at the fire time). No stale message was posted.", mode, win.cutoff),
 		ComposeAlert: fmt.Sprintf("Lucid %s companion could not compose a message — the scheduled send did not go out.", mode),
 		SendAlert:    fmt.Sprintf("Lucid %s companion failed to deliver — the scheduled send did not go out.", mode),
@@ -227,8 +227,8 @@ const (
 // deliberately best-effort: if the channel itself is unreachable the returned
 // error from [Runner.Fire] is the loud signal (it fails the job and lands in the
 // supervised daemon log), and a failed alert must not mask that original error.
-func (r *Runner) alert(text string) {
-	_ = r.deliver.Send(engine.ChannelUser, text)
+func (r *Runner) alert(ctx context.Context, text string) {
+	_ = r.deliver.Send(ctx, engine.ChannelUser, text)
 }
 
 // window is the per-mode scheduling metadata: the periodic identity, the

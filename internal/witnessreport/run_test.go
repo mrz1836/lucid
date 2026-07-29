@@ -68,7 +68,7 @@ type runFakeDeliverer struct {
 	idSeq        int
 }
 
-func (f *runFakeDeliverer) SendEmbedReturningID(channel string, e notify.Embed) (string, error) {
+func (f *runFakeDeliverer) SendEmbedReturningID(_ context.Context, channel string, e notify.Embed) (string, error) {
 	f.sends = append(f.sends, embedRecord{channel, e})
 	if f.sendErr != nil {
 		return "", f.sendErr
@@ -77,7 +77,7 @@ func (f *runFakeDeliverer) SendEmbedReturningID(channel string, e notify.Embed) 
 	return fmt.Sprintf("msg-%d", f.idSeq), nil
 }
 
-func (f *runFakeDeliverer) VerifyPresent(_, messageID string) error {
+func (f *runFakeDeliverer) VerifyPresent(_ context.Context, _, messageID string) error {
 	f.verifies = append(f.verifies, messageID)
 	if f.verifyErrFor != nil {
 		if e, ok := f.verifyErrFor[messageID]; ok {
@@ -87,7 +87,7 @@ func (f *runFakeDeliverer) VerifyPresent(_, messageID string) error {
 	return f.verifyErr
 }
 
-func (f *runFakeDeliverer) Send(channel, text string) error {
+func (f *runFakeDeliverer) Send(_ context.Context, channel, text string) error {
 	f.alerts = append(f.alerts, alertRecord{channel, text})
 	return nil
 }

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +32,7 @@ func corrupt(t *testing.T, a interface{ Home() string }, name string) {
 func TestRunBell_CorruptChainErrors(t *testing.T) {
 	sc, a, _ := newSched(t)
 	corrupt(t, a, "chain.json")
-	_, err := sc.RunBell()
+	_, err := sc.RunBell(context.Background())
 	assert.Error(t, err)
 }
 
@@ -39,7 +40,7 @@ func TestRunBell_CorruptChainErrors(t *testing.T) {
 func TestRunBell_SendFailureSurfaced(t *testing.T) {
 	sc, _, n := newSched(t)
 	n.failOn[engine.ChannelUser] = true
-	_, err := sc.RunBell()
+	_, err := sc.RunBell(context.Background())
 	assert.Error(t, err)
 }
 
@@ -50,7 +51,7 @@ func TestRunTripwire_CorruptFilesErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			sc, a, _ := newSched(t)
 			corrupt(t, a, name) // writes (or creates) the file with unparseable JSON
-			_, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+			_, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 			assert.Error(t, err)
 		})
 	}
@@ -64,7 +65,7 @@ func TestRunTripwire_BadClockErrors(t *testing.T) {
 	require.NoError(t, err)
 	chain.BellTime = "99:99"
 	require.NoError(t, a.WriteChainConfig(chain))
-	_, err = sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	_, err = sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	assert.Error(t, err)
 }
 
@@ -74,7 +75,7 @@ func TestRunTripwire_L1SendFailureSurfaced(t *testing.T) {
 	sc, a, n := newSched(t)
 	n.failOn[engine.ChannelUser] = true
 	seed(t, a, completedRec("2026-07-04")) // 07-05 absent → L1 to the user
-	_, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	_, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	assert.Error(t, err)
 }
 
@@ -86,7 +87,7 @@ func TestRunTripwire_L2FallbackFailureSurfaced(t *testing.T) {
 	n.failOn[engine.ChannelWitness] = true
 	n.failOn[engine.ChannelUser] = true
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false))
-	_, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	_, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	assert.Error(t, err)
 }
 
@@ -100,6 +101,6 @@ func TestRunTripwire_StormAppendFailureSurfaced(t *testing.T) {
 	stormPath := filepath.Join(a.Home(), "engine", "storm.json")
 	require.NoError(t, os.Chmod(stormPath, 0o400))
 	t.Cleanup(func() { _ = os.Chmod(stormPath, 0o600) })
-	_, err := sc.RunTripwire(at(2026, 7, 5, 9, 0)) // past 72h ⇒ a lapse event must persist
+	_, err := sc.RunTripwire(context.Background(), at(2026, 7, 5, 9, 0)) // past 72h ⇒ a lapse event must persist
 	assert.Error(t, err)
 }

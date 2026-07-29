@@ -226,5 +226,5 @@ func TestLookupEnvString(t *testing.T) {
 // TestSelfCheckNotifierSend documents the no-op notifier contract: a self-check
 // delivers nothing, so Send never errors and never sends.
 func TestSelfCheckNotifierSend(t *testing.T) {
-	require.NoError(t, selfCheckNotifier{}.Send("bell", "body"))
+	require.NoError(t, selfCheckNotifier{}.Send(context.Background(), "bell", "body"))
 }

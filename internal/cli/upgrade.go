@@ -207,7 +207,7 @@ func runManagedUpgrade(ctx context.Context, stdout, stderr io.Writer, cfg upgrad
 type selfCheckNotifier struct{}
 
 // Send is never called — a self-check delivers nothing — and always succeeds.
-func (selfCheckNotifier) Send(_, _ string) error { return nil }
+func (selfCheckNotifier) Send(_ context.Context, _, _ string) error { return nil }
 
 // lookupEnvString returns the value of the named env var (empty when
 // unset). Wrapping os.LookupEnv lets resolveChannel stay a pure

@@ -55,7 +55,7 @@ func seededLedger(t *testing.T) *storage.Adapter {
 // no file is created), so Assemble can classify a never-run scheduler.
 func TestGatherDB_Missing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.db")
-	in := GatherDB(path)
+	in := GatherDB(context.Background(), path)
 	assert.True(t, in.Missing, "a missing DB file is reported Missing")
 	assert.Empty(t, in.Err)
 	assert.Nil(t, in.Periodics)
@@ -75,7 +75,7 @@ func TestGatherDB_ReadsPeriodics(t *testing.T) {
 		flywheel.PeriodicSpec{Slug: SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: false},
 	)
 
-	in := GatherDB(path)
+	in := GatherDB(context.Background(), path)
 	require.Empty(t, in.Err, "a valid DB reads cleanly")
 	require.False(t, in.Missing)
 	require.Len(t, in.Periodics, 2)
@@ -98,7 +98,7 @@ func TestGatherDB_ReadsPeriodics(t *testing.T) {
 func TestGatherDB_Malformed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "garbage.db")
 	require.NoError(t, os.WriteFile(path, []byte("this is not a sqlite database"), 0o600))
-	in := GatherDB(path)
+	in := GatherDB(context.Background(), path)
 	assert.False(t, in.Missing)
 	assert.NotEmpty(t, in.Err, "an unreadable/malformed DB is reported via Err")
 }
@@ -107,7 +107,7 @@ func TestGatherDB_Malformed(t *testing.T) {
 // a DB.
 func TestGatherDB_Directory(t *testing.T) {
 	dir := t.TempDir()
-	in := GatherDB(dir)
+	in := GatherDB(context.Background(), dir)
 	assert.NotEmpty(t, in.Err)
 	assert.Contains(t, in.Err, "directory")
 }
@@ -189,7 +189,7 @@ func TestGatherChain_Missing(t *testing.T) {
 	_, err := GatherChain(a)
 	require.Error(t, err)
 
-	_, gerr := Gather(GatherParams{Config: config.Default(), Store: a})
+	_, gerr := Gather(context.Background(), GatherParams{Config: config.Default(), Store: a})
 	require.Error(t, gerr, "Gather surfaces an unreadable chain config")
 }
 
@@ -230,7 +230,7 @@ func TestGather_AssemblesEndToEnd(t *testing.T) {
 	cfg := config.Default()
 	cfg.Companion = config.CompanionConfig{Enabled: true, SystemPrompt: sys, MorningTemplate: morn, NightTemplate: night}
 
-	in, err := Gather(GatherParams{
+	in, err := Gather(context.Background(), GatherParams{
 		Config: cfg, Store: a, SchedulerDB: teeth, CompanionDB: comp,
 		Probe: fakeProbe{checks: []Check{okCheck("host.daemon", "up")}},
 	})

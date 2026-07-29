@@ -97,9 +97,9 @@ type MessageComposer interface {
 // on; the plain Send carries the loud alert when a fire cannot deliver its real
 // message. *notify.Discord satisfies all three.
 type Deliverer interface {
-	SendReturningID(channel, text string) (string, error)
-	VerifyPresent(channel, messageID string) error
-	Send(channel, text string) error
+	SendReturningID(ctx context.Context, channel, text string) (string, error)
+	VerifyPresent(ctx context.Context, channel, messageID string) error
+	Send(ctx context.Context, channel, text string) error
 }
 
 // Runner delivers one composed workout recommendation for the day with the
@@ -181,15 +181,15 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 			res.Text = lateNote + "\n\n" + res.Text
 			return res
 		},
-		Send: func(_ context.Context, channel string, res Result) (string, error) {
-			id, serr := r.deliver.SendReturningID(channel, res.Text)
+		Send: func(sctx context.Context, channel string, res Result) (string, error) {
+			id, serr := r.deliver.SendReturningID(sctx, channel, res.Text)
 			if serr != nil {
 				return "", fmt.Errorf("workout: deliver: %w", serr)
 			}
 			return id, nil
 		},
-		Verify: func(_ context.Context, channel, id string) error {
-			if verr := r.deliver.VerifyPresent(channel, id); verr != nil {
+		Verify: func(vctx context.Context, channel, id string) error {
+			if verr := r.deliver.VerifyPresent(vctx, channel, id); verr != nil {
 				return fmt.Errorf("workout: verify delivery: %w", verr)
 			}
 			return nil
@@ -207,7 +207,7 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 			}
 			return nil
 		},
-		Alert:        r.alert,
+		Alert:        func(text string) { r.alert(ctx, text) },
 		CutoffAlert:  fmt.Sprintf("Lucid workout slot skipped — it is past the %s delivery window (the host was asleep at the slot time). No stale recommendation was posted.", cutoffAt.Format("15:04")),
 		ComposeAlert: "Lucid workout slot could not compose a recommendation — the scheduled send did not go out.",
 		SendAlert:    "Lucid workout slot failed to deliver — the scheduled send did not go out.",
@@ -233,8 +233,8 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 // best-effort: if the channel itself is unreachable the returned error from
 // [Runner.Fire] is the loud signal (it fails the job and lands in the supervised
 // daemon log), and a failed alert must not mask that original error.
-func (r *Runner) alert(text string) {
-	_ = r.deliver.Send(engine.ChannelUser, text)
+func (r *Runner) alert(ctx context.Context, text string) {
+	_ = r.deliver.Send(ctx, engine.ChannelUser, text)
 }
 
 // Options configures a workout daemon run. Store, Notifier, and Metrics are

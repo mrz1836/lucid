@@ -39,7 +39,7 @@ type capture struct{ channel, text string }
 // fired without a real token or socket (mirrors internal/scheduler's fake).
 type fakeNotifier struct{ sent []capture }
 
-func (f *fakeNotifier) Send(channel, text string) error {
+func (f *fakeNotifier) Send(_ context.Context, channel, text string) error {
 	f.sent = append(f.sent, capture{channel, text})
 	return nil
 }
@@ -447,7 +447,7 @@ type deadlineNotifier struct{ attempts atomic.Int64 }
 // Send always times out. The runner classifies a deadline-exceeded error as a
 // retriable timeout (not a permanent failure), so the job walks its whole retry
 // ladder before it is discarded.
-func (n *deadlineNotifier) Send(_, _ string) error {
+func (n *deadlineNotifier) Send(_ context.Context, _, _ string) error {
 	n.attempts.Add(1)
 	return fmt.Errorf("post to channel: %w", context.DeadlineExceeded)
 }

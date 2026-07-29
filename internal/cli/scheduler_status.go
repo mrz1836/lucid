@@ -113,7 +113,7 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 		return err
 	}
 
-	inputs, err := schedstatus.Gather(schedstatus.GatherParams{
+	inputs, err := schedstatus.Gather(cmd.Context(), schedstatus.GatherParams{
 		Config:      r.Config(),
 		Store:       r.Store(),
 		SchedulerDB: schedulerDB,

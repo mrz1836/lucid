@@ -13,6 +13,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ import (
 // credential-dumb) — that lands host-side in Phase 16. Tests use a capturing
 // fake; no real token is ever needed here.
 type Notifier interface {
-	Send(channel, text string) error
+	Send(ctx context.Context, channel, text string) error
 }
 
 // Scheduler owns the bell and tripwire jobs over one Ledger.
@@ -70,7 +71,7 @@ type Report struct {
 // (it names a chain, it does not sting). When the bell is disabled in
 // chain.json nothing is sent; it returns the delivered message (Text empty when
 // the bell is off).
-func (sc *Scheduler) RunBell() (SentMessage, error) {
+func (sc *Scheduler) RunBell(ctx context.Context) (SentMessage, error) {
 	if err := sc.store.ScaffoldEngine(); err != nil {
 		return SentMessage{}, fmt.Errorf("scheduler: prepare engine tree: %w", err)
 	}
@@ -82,7 +83,7 @@ func (sc *Scheduler) RunBell() (SentMessage, error) {
 		return SentMessage{}, nil
 	}
 	text := templates.Bell(chain.Label)
-	if err := sc.notify.Send(engine.ChannelUser, text); err != nil {
+	if err := sc.notify.Send(ctx, engine.ChannelUser, text); err != nil {
 		return SentMessage{}, fmt.Errorf("scheduler: send bell: %w", err)
 	}
 	return SentMessage{Channel: engine.ChannelUser, Kind: engine.SendBell, Text: text}, nil
@@ -112,7 +113,7 @@ const companionWindowNight = "night"
 // speaks. A receipt from an earlier day is stale and does not gate tonight. No
 // Mirror content is read and no model sits in the path. Like [Scheduler.RunBell]
 // it returns a message whose Text is empty on every no-op.
-func (sc *Scheduler) RunBellFallback(now time.Time) (SentMessage, error) {
+func (sc *Scheduler) RunBellFallback(ctx context.Context, now time.Time) (SentMessage, error) {
 	if err := sc.store.ScaffoldEngine(); err != nil {
 		return SentMessage{}, fmt.Errorf("scheduler: prepare engine tree: %w", err)
 	}
@@ -131,7 +132,7 @@ func (sc *Scheduler) RunBellFallback(now time.Time) (SentMessage, error) {
 		return SentMessage{}, nil
 	}
 	text := templates.Bell(chain.Label)
-	if err := sc.notify.Send(engine.ChannelUser, text); err != nil {
+	if err := sc.notify.Send(ctx, engine.ChannelUser, text); err != nil {
 		return SentMessage{}, fmt.Errorf("scheduler: send bell backstop: %w", err)
 	}
 	return SentMessage{Channel: engine.ChannelUser, Kind: engine.SendBell, Text: text}, nil
@@ -157,8 +158,8 @@ type tripwireContext struct {
 // the sends (falling back to a user-channel note when the witness channel is
 // unreachable), persists the escalation_state, and records the run's date so a
 // second run the same morning is an idempotent no-op.
-func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
-	return sc.runTripwire(now, false)
+func (sc *Scheduler) RunTripwire(ctx context.Context, now time.Time) (Report, error) {
+	return sc.runTripwire(ctx, now, false)
 }
 
 // RunTripwirePresented runs the same modeless dead-man decision as
@@ -170,8 +171,8 @@ func (sc *Scheduler) RunTripwire(now time.Time) (Report, error) {
 // witness channel, storm events are still appended, and escalation_state +
 // tripwire state are still persisted. It is a pure suppression of one delivery
 // channel, not a change to the decision.
-func (sc *Scheduler) RunTripwirePresented(now time.Time) (Report, error) {
-	return sc.runTripwire(now, true)
+func (sc *Scheduler) RunTripwirePresented(ctx context.Context, now time.Time) (Report, error) {
+	return sc.runTripwire(ctx, now, true)
 }
 
 // SelfCheck is the post-upgrade tripwire self-check (ADR-0007: on a supervised
@@ -227,7 +228,7 @@ func (sc *Scheduler) TripwireUserVerdict(now time.Time) (string, error) {
 // storm bookkeeping, and escalation_state + tripwire-state persistence — is
 // identical, so the modeless decision and its record never diverge between the
 // two modes.
-func (sc *Scheduler) runTripwire(now time.Time, presented bool) (Report, error) {
+func (sc *Scheduler) runTripwire(ctx context.Context, now time.Time, presented bool) (Report, error) {
 	tc, err := sc.gatherTripwire(now)
 	if err != nil {
 		return Report{}, err
@@ -246,7 +247,7 @@ func (sc *Scheduler) runTripwire(now time.Time, presented bool) (Report, error) 
 		if presented && s.Channel == engine.ChannelUser {
 			continue
 		}
-		msg, sendErr := sc.emit(s)
+		msg, sendErr := sc.emit(ctx, s)
 		if sendErr != nil {
 			return rep, sendErr
 		}
@@ -337,12 +338,12 @@ func evaluate(now time.Time, tc tripwireContext) engine.TripwireDecision {
 // unreachable falls back to the user-channel "you owe the message" note — the
 // escalation still fired (engine-module.md §Error states); every other send's
 // delivery failure is surfaced to the caller.
-func (sc *Scheduler) emit(s engine.Send) (SentMessage, error) {
+func (sc *Scheduler) emit(ctx context.Context, s engine.Send) (SentMessage, error) {
 	text := templates.Render(s)
-	if err := sc.notify.Send(s.Channel, text); err != nil {
+	if err := sc.notify.Send(ctx, s.Channel, text); err != nil {
 		if s.Kind == engine.SendL2 {
 			fb := templates.L2Unreachable(s.WitnessName)
-			if ferr := sc.notify.Send(engine.ChannelUser, fb); ferr != nil {
+			if ferr := sc.notify.Send(ctx, engine.ChannelUser, fb); ferr != nil {
 				return SentMessage{}, fmt.Errorf("scheduler: L2 fallback send: %w", ferr)
 			}
 			return SentMessage{Channel: engine.ChannelUser, Kind: "l2_unreachable", Text: fb}, nil

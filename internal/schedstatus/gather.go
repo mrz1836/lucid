@@ -56,7 +56,7 @@ type GatherParams struct {
 // job). Only a genuinely unreadable chain config — the one piece every scaffolded
 // Ledger has — is returned as an error, so the command surfaces it as a runtime
 // failure rather than a bogus health verdict.
-func Gather(p GatherParams) (Inputs, error) {
+func Gather(ctx context.Context, p GatherParams) (Inputs, error) {
 	chain, err := GatherChain(p.Store)
 	if err != nil {
 		return Inputs{}, err
@@ -68,8 +68,8 @@ func Gather(p GatherParams) (Inputs, error) {
 	return Inputs{
 		Companion:     GatherCompanion(p.Config),
 		Chain:         chain,
-		Teeth:         GatherDB(p.SchedulerDB),
-		CompanionJobs: GatherDB(p.CompanionDB),
+		Teeth:         GatherDB(ctx, p.SchedulerDB),
+		CompanionJobs: GatherDB(ctx, p.CompanionDB),
 		Receipts:      GatherReceipts(p.Store),
 		Host:          host,
 	}, nil
@@ -163,7 +163,7 @@ func gatherReceipt(store *storage.Adapter, window string) ReceiptStatus {
 // Missing:true (the scheduler has not run), and an unopenable/unreadable file (not
 // a database, or a locked/corrupt one) yields Err (malformed). Both degrade
 // cleanly — the read-only report never panics on a never-run or corrupt DB (AC-6).
-func GatherDB(path string) DBInput {
+func GatherDB(ctx context.Context, path string) DBInput {
 	in := DBInput{Path: path}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -186,7 +186,6 @@ func GatherDB(path string) DBInput {
 	}
 	defer closeDB(db)
 
-	ctx := context.Background()
 	views, err := flywheel.ListPeriodics(ctx, db)
 	if err != nil {
 		in.Err = err.Error()

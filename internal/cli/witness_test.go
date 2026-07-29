@@ -44,7 +44,7 @@ type fakeEmbedDeliverer struct {
 	verifyErr error
 }
 
-func (f *fakeEmbedDeliverer) SendEmbedReturningID(channel string, e notify.Embed) (string, error) {
+func (f *fakeEmbedDeliverer) SendEmbedReturningID(_ context.Context, channel string, e notify.Embed) (string, error) {
 	f.sends++
 	f.channel = channel
 	f.embed = e
@@ -57,7 +57,7 @@ func (f *fakeEmbedDeliverer) SendEmbedReturningID(channel string, e notify.Embed
 	return f.id, nil
 }
 
-func (f *fakeEmbedDeliverer) VerifyPresent(channel, messageID string) error {
+func (f *fakeEmbedDeliverer) VerifyPresent(_ context.Context, channel, messageID string) error {
 	f.verified = append(f.verified, channel+"/"+messageID)
 	return f.verifyErr
 }

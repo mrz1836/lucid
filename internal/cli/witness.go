@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -27,8 +28,8 @@ const (
 // preview proof. It is an interface so a test injects a fake that captures the
 // resolved channel without a live Discord token.
 type embedDeliverer interface {
-	SendEmbedReturningID(channel string, e notify.Embed) (string, error)
-	VerifyPresent(channel, messageID string) error
+	SendEmbedReturningID(ctx context.Context, channel string, e notify.Embed) (string, error)
+	VerifyPresent(ctx context.Context, channel, messageID string) error
 }
 
 // newWitnessDeliverer is the seam that builds the concrete Discord transport from
@@ -187,11 +188,11 @@ func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Repor
 	if err != nil {
 		return fmt.Errorf("lucid witness report: %w", err)
 	}
-	id, err := d.SendEmbedReturningID(channel, witnessreport.RenderEmbed(r))
+	id, err := d.SendEmbedReturningID(cmd.Context(), channel, witnessreport.RenderEmbed(r))
 	if err != nil {
 		return fmt.Errorf("lucid witness report: deliver: %w", err)
 	}
-	if err := d.VerifyPresent(channel, id); err != nil {
+	if err := d.VerifyPresent(cmd.Context(), channel, id); err != nil {
 		return fmt.Errorf("lucid witness report: read-back verify: %w", err)
 	}
 	note := ""

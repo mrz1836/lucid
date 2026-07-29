@@ -68,9 +68,9 @@ type ReportComposer interface {
 // on, and the plain Send carries the loud alert when a fire cannot deliver its
 // real report. *notify.Discord satisfies all three.
 type Deliverer interface {
-	SendEmbedReturningID(channel string, e notify.Embed) (string, error)
-	VerifyPresent(channel, messageID string) error
-	Send(channel, text string) error
+	SendEmbedReturningID(ctx context.Context, channel string, e notify.Embed) (string, error)
+	VerifyPresent(ctx context.Context, channel, messageID string) error
+	Send(ctx context.Context, channel, text string) error
 }
 
 // Runner delivers one composed weekly report with the reliability guarantees
@@ -177,15 +177,15 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 			}
 			return report, nil
 		},
-		Send: func(_ context.Context, ch string, report Report) (string, error) {
-			id, serr := r.deliver.SendEmbedReturningID(ch, RenderEmbed(report))
+		Send: func(sctx context.Context, ch string, report Report) (string, error) {
+			id, serr := r.deliver.SendEmbedReturningID(sctx, ch, RenderEmbed(report))
 			if serr != nil {
 				return "", fmt.Errorf("witnessreport: deliver: %w", serr)
 			}
 			return id, nil
 		},
-		Verify: func(_ context.Context, ch, id string) error {
-			if verr := r.deliver.VerifyPresent(ch, id); verr != nil {
+		Verify: func(vctx context.Context, ch, id string) error {
+			if verr := r.deliver.VerifyPresent(vctx, ch, id); verr != nil {
 				return fmt.Errorf("witnessreport: verify delivery: %w", verr)
 			}
 			return nil
@@ -202,13 +202,13 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 			}
 			return nil
 		},
-		Alert: r.alert,
+		Alert: func(text string) { r.alert(ctx, text) },
 		PostSend: func(report Report) {
 			// A tripped witness-safe scan means the model produced flagged prose
 			// that was discarded — alert so the operator can review why. It runs
 			// only after the receipt is persisted and never unwinds the send.
 			if report.SafetyTripped {
-				r.alert(fmt.Sprintf(
+				r.alert(ctx, fmt.Sprintf(
 					"Lucid weekly witness report for %s tripped the witness-safe scan — the model prose was discarded and the metrics-only report was delivered. Worth a review.",
 					week,
 				))
@@ -241,8 +241,8 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 // unreachable the returned error from [Runner.Fire] is the loud signal (it fails
 // the job and lands in the supervised daemon log), and a failed alert must not
 // mask that original error.
-func (r *Runner) alert(text string) {
-	_ = r.deliver.Send(engine.ChannelUser, text)
+func (r *Runner) alert(ctx context.Context, text string) {
+	_ = r.deliver.Send(ctx, engine.ChannelUser, text)
 }
 
 // markFor builds the scheduled-mark instant for the ISO week containing `now`:

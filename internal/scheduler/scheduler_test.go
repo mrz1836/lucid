@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/parser"
@@ -30,7 +31,7 @@ type fakeNotifier struct {
 	failOn map[string]bool
 }
 
-func (f *fakeNotifier) Send(channel, text string) error {
+func (f *fakeNotifier) Send(_ context.Context, channel, text string) error {
 	if f.failOn[channel] {
 		return fmt.Errorf("unreachable channel %q", channel)
 	}
@@ -126,7 +127,7 @@ func seedStandingStorm(t *testing.T, a *storage.Adapter) {
 // TestRunBell posts the chain label to the user channel with no sign-off.
 func TestRunBell(t *testing.T) {
 	sc, _, n := newSched(t)
-	msg, err := sc.RunBell()
+	msg, err := sc.RunBell(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, engine.ChannelUser, msg.Channel)
 	assert.Contains(t, msg.Text, "Journal. Dock. Read.")
@@ -142,7 +143,7 @@ func TestRunBell_DisabledSendsNothing(t *testing.T) {
 	chain.Bell.Enabled = false
 	require.NoError(t, a.WriteChainConfig(chain))
 
-	msg, err := sc.RunBell()
+	msg, err := sc.RunBell(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, msg.Text)
 	assert.Zero(t, n.count(engine.ChannelUser))
@@ -167,7 +168,7 @@ func nightReceipt(t *testing.T, a *storage.Adapter, date, messageID string) {
 func TestRunBellFallback_NoReceiptSends(t *testing.T) {
 	sc, _, n := newSched(t)
 
-	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	msg, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.NoError(t, err)
 	assert.Equal(t, engine.ChannelUser, msg.Channel)
 	assert.Equal(t, engine.SendBell, msg.Kind, "the backstop is the bell, not a fourth send class")
@@ -177,7 +178,7 @@ func TestRunBellFallback_NoReceiptSends(t *testing.T) {
 
 	// Byte-for-byte the ordinary bell — one template, one voice, one consent.
 	scBell, _, _ := newSched(t)
-	bell, err := scBell.RunBell()
+	bell, err := scBell.RunBell(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, bell.Text, msg.Text)
 }
@@ -188,7 +189,7 @@ func TestRunBellFallback_TodaysReceiptIsNoOp(t *testing.T) {
 	sc, a, n := newSched(t)
 	nightReceipt(t, a, "2026-07-06", "1234567890")
 
-	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	msg, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.NoError(t, err)
 	assert.Empty(t, msg.Text, "a delivered evening is never doubled")
 	assert.Empty(t, msg.Channel)
@@ -201,7 +202,7 @@ func TestRunBellFallback_StaleReceiptSends(t *testing.T) {
 	sc, a, n := newSched(t)
 	nightReceipt(t, a, "2026-07-05", "1234567890")
 
-	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	msg, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.NoError(t, err)
 	assert.Contains(t, msg.Text, "Journal. Dock. Read.")
 	assert.Equal(t, 1, n.count(engine.ChannelUser))
@@ -213,7 +214,7 @@ func TestRunBellFallback_ReceiptWithoutMessageIDSends(t *testing.T) {
 	sc, a, n := newSched(t)
 	nightReceipt(t, a, "2026-07-06", "")
 
-	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	msg, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.NoError(t, err)
 	assert.Contains(t, msg.Text, "Journal. Dock. Read.")
 	assert.Equal(t, 1, n.count(engine.ChannelUser))
@@ -229,7 +230,7 @@ func TestRunBellFallback_DisabledBellSendsNothing(t *testing.T) {
 	chain.Bell.Enabled = false
 	require.NoError(t, a.WriteChainConfig(chain))
 
-	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	msg, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.NoError(t, err)
 	assert.Empty(t, msg.Text)
 	assert.Zero(t, n.count(engine.ChannelUser))
@@ -241,7 +242,7 @@ func TestRunBellFallback_SendFailureSurfaces(t *testing.T) {
 	sc, _, n := newSched(t)
 	n.failOn[engine.ChannelUser] = true
 
-	_, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	_, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bell backstop")
 }
@@ -256,7 +257,7 @@ func TestRunBellFallback_CorruptReceiptErrorsRatherThanDoubleSends(t *testing.T)
 	path := filepath.Join(a.Home(), "engine", "companion", "receipt_night.json")
 	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
 
-	_, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	_, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "night receipt")
 	assert.Zero(t, n.count(engine.ChannelUser), "an unreadable gate never becomes a send")
@@ -268,12 +269,12 @@ func TestRunBellFallback_CorruptReceiptErrorsRatherThanDoubleSends(t *testing.T)
 func TestRunBellFallback_RepeatedRunsAfterDeliveryStayQuiet(t *testing.T) {
 	sc, a, n := newSched(t)
 
-	_, err := sc.RunBellFallback(at(2026, 7, 6, 22, 15))
+	_, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 15))
 	require.NoError(t, err)
 	require.Equal(t, 1, n.count(engine.ChannelUser))
 
 	nightReceipt(t, a, "2026-07-06", "1234567890")
-	msg, err := sc.RunBellFallback(at(2026, 7, 6, 22, 45))
+	msg, err := sc.RunBellFallback(context.Background(), at(2026, 7, 6, 22, 45))
 	require.NoError(t, err)
 	assert.Empty(t, msg.Text)
 	assert.Equal(t, 1, n.count(engine.ChannelUser), "no second evening send")
@@ -285,7 +286,7 @@ func TestRunBellFallback_RepeatedRunsAfterDeliveryStayQuiet(t *testing.T) {
 func TestTripwire_CompletedNoSend(t *testing.T) {
 	sc, a, n := newSched(t)
 	seed(t, a, completedRec("2026-07-05"))
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, rep.Sends)
 	assert.Empty(t, n.sent)
@@ -297,7 +298,7 @@ func TestTripwire_CompletedNoSend(t *testing.T) {
 func TestTripwire_OneMissFiresOneL1(t *testing.T) {
 	sc, a, n := newSched(t)
 	seed(t, a, completedRec("2026-07-04")) // 07-05 absent
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 
 	require.Len(t, rep.Sends, 1)
@@ -320,7 +321,7 @@ func TestTripwire_TwoConsecutiveFiresOneL2WitnessNoLeak(t *testing.T) {
 	armWitness(t, a)
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false)) // 07-05 absent
 
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 
 	require.Len(t, rep.Sends, 1, "exactly one L2 to the witness")
@@ -344,7 +345,7 @@ func TestTripwire_L2BlockedWhenWitnessUnconfirmed(t *testing.T) {
 	sc, a, n := newSched(t)
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false))
 
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 
 	require.Len(t, rep.Sends, 1)
@@ -364,7 +365,7 @@ func TestTripwire_WitnessUnreachableFallsBack(t *testing.T) {
 	n.failOn[engine.ChannelWitness] = true
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false))
 
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 
 	require.Len(t, rep.Sends, 1)
@@ -380,7 +381,7 @@ func TestTripwire_RecoveryResetsAndDoesNotRefire(t *testing.T) {
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false), completedRec("2026-07-05"))
 
 	// Run on 07-06 evaluates 07-05 (completed) → nothing.
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, rep.Sends)
 	assert.Empty(t, n.sent)
@@ -393,7 +394,7 @@ func TestTripwire_BackfillBeforeRunSuppresses(t *testing.T) {
 	sc, a, n := newSched(t)
 	// 07-04 completed (chain start) and a backfilled completed 07-05.
 	seed(t, a, completedRec("2026-07-04"), completedRec("2026-07-05"))
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, rep.Sends)
 	assert.Empty(t, n.sent)
@@ -408,7 +409,7 @@ func TestTripwire_StormL1Variant(t *testing.T) {
 	seedStandingStorm(t, a)
 	seed(t, a, completedRec("2026-07-04")) // 07-05 absent, under the standing storm
 
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	require.Len(t, rep.Sends, 1)
 	assert.Equal(t, engine.SendL1, rep.Sends[0].Kind)
@@ -430,7 +431,7 @@ func TestTripwire_StormL2VariantNoStake(t *testing.T) {
 	seedStandingStorm(t, a)
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", true)) // 07-05 absent
 
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	require.Len(t, rep.Sends, 1)
 	assert.Equal(t, engine.SendL2, rep.Sends[0].Kind)
@@ -453,7 +454,7 @@ func TestTripwire_StormLapseAppendsAndNotifies(t *testing.T) {
 	require.NoError(t, a.AppendStormEvent(engine.StormEvent{At: "2026-07-01T07:00:00Z", Event: engine.StormDeclared, Label: "clause-1"}))
 	seed(t, a, completedRec("2026-07-04")) // completed yesterday → no escalation, isolate the lapse
 
-	rep, err := sc.RunTripwire(at(2026, 7, 5, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 5, 9, 0))
 	require.NoError(t, err)
 
 	msg, ok := n.first(engine.ChannelUser)
@@ -478,7 +479,7 @@ func TestTripwire_AmbushEnterIsSilent(t *testing.T) {
 	writeStorm(t, a, h)
 	seed(t, a, completedRec("2026-11-01")) // completed yesterday → no escalation
 
-	rep, err := sc.RunTripwire(at(2026, 11, 2, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 11, 2, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, n.sent, "entry is silent")
 	require.Len(t, rep.StormEvents, 1)
@@ -492,7 +493,7 @@ func TestTripwire_ExpiryAppendsExpired(t *testing.T) {
 	seedStandingStorm(t, a) // through 2026-07-28
 	seed(t, a, completedRec("2026-07-28"))
 
-	rep, err := sc.RunTripwire(at(2026, 7, 29, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 29, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, n.sent)
 	require.NotEmpty(t, rep.StormEvents)
@@ -509,7 +510,7 @@ func TestTripwire_CompletedReferenceDaySendsNothing(t *testing.T) {
 	armWitness(t, a)
 	seed(t, a, completedRec("2026-07-05"), completedRec("2026-07-06"))
 
-	rep, err := sc.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, rep.Sends, "a completed reference day is silent")
 	assert.Zero(t, n.count(engine.ChannelWitness), "nothing to the witness")
@@ -532,7 +533,7 @@ func TestTripwireUserVerdict_OneMissReturnsExactL1(t *testing.T) {
 	// Byte-for-byte parity with the live run's L1 over an identical Ledger.
 	scLive, aLive, _ := newSched(t)
 	seed(t, aLive, completedRec("2026-07-04"))
-	rep, err := scLive.RunTripwire(at(2026, 7, 6, 9, 0))
+	rep, err := scLive.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	require.Len(t, rep.Sends, 1)
 	assert.Equal(t, rep.Sends[0].Text, got, "the verdict is the exact L1 the Engine would send")
@@ -593,7 +594,7 @@ func TestRunTripwirePresented_SuppressesUserButPersists(t *testing.T) {
 	sc, a, n := newSched(t)
 	seed(t, a, completedRec("2026-07-04")) // 07-05 absent -> one miss
 
-	rep, err := sc.RunTripwirePresented(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwirePresented(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	assert.Empty(t, rep.Sends, "no user send in presented mode")
 	assert.Zero(t, n.count(engine.ChannelUser), "the Engine stays silent on the user channel")
@@ -616,7 +617,7 @@ func TestRunTripwirePresented_StillFiresWitnessL2(t *testing.T) {
 	armWitness(t, a)
 	seed(t, a, completedRec("2026-07-03"), missedRec("2026-07-04", false)) // 07-05 absent
 
-	rep, err := sc.RunTripwirePresented(at(2026, 7, 6, 9, 0))
+	rep, err := sc.RunTripwirePresented(context.Background(), at(2026, 7, 6, 9, 0))
 	require.NoError(t, err)
 	require.Len(t, rep.Sends, 1)
 	assert.Equal(t, engine.SendL2, rep.Sends[0].Kind)
@@ -634,7 +635,7 @@ func TestRunTripwirePresented_StormLapseSuppressedFromUser(t *testing.T) {
 	require.NoError(t, a.AppendStormEvent(engine.StormEvent{At: "2026-07-01T07:00:00Z", Event: engine.StormDeclared, Label: "clause-1"}))
 	seed(t, a, completedRec("2026-07-04")) // completed yesterday -> isolate the lapse
 
-	rep, err := sc.RunTripwirePresented(at(2026, 7, 5, 9, 0))
+	rep, err := sc.RunTripwirePresented(context.Background(), at(2026, 7, 5, 9, 0))
 	require.NoError(t, err)
 	assert.Zero(t, n.count(engine.ChannelUser), "the lapse note is withheld from the user in presented mode")
 	require.Len(t, rep.StormEvents, 1)
