@@ -5,8 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mrz1836/lucid/internal/config"
-	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/witnessreport"
 )
@@ -181,7 +179,7 @@ func renderWitnessDryRun(cmd *cobra.Command, r witnessreport.Report) error {
 // SendEmbedReturningID + VerifyPresent shape with per-week receipt idempotency and
 // missed-fire handling.
 func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Report) error {
-	channel, err := witnessChannelForMode(mode)
+	channel, err := witnessreport.ChannelForMode(mode)
 	if err != nil {
 		return err
 	}
@@ -202,21 +200,4 @@ func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Repor
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "witness report delivered to the %s channel%s — message %s.\n", channel, note, id)
 	return nil
-}
-
-// witnessChannelForMode resolves the delivery mode to a logical channel: preview
-// posts to the operator's own user channel, auto posts to the friend-facing
-// witness channel. An unknown mode is a hard error (config validation already
-// rejects one on an enabled report, so this only guards a hand-driven call) rather
-// than a mis-send to the wrong audience.
-func witnessChannelForMode(mode string) (string, error) {
-	switch mode {
-	case config.WitnessReportModePreview:
-		return engine.ChannelUser, nil
-	case config.WitnessReportModeAuto:
-		return engine.ChannelWitness, nil
-	default:
-		return "", fmt.Errorf("lucid witness report: unknown witness_report.mode %q — use %q|%q",
-			mode, config.WitnessReportModePreview, config.WitnessReportModeAuto)
-	}
 }

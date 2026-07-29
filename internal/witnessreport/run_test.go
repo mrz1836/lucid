@@ -382,15 +382,15 @@ func TestMarkFor(t *testing.T) {
 
 // TestChannelForMode covers the preview/auto routing and the unknown-mode error.
 func TestChannelForMode(t *testing.T) {
-	c, err := channelForMode(config.WitnessReportModePreview)
+	c, err := ChannelForMode(config.WitnessReportModePreview)
 	require.NoError(t, err)
 	assert.Equal(t, engine.ChannelUser, c)
 
-	c, err = channelForMode(config.WitnessReportModeAuto)
+	c, err = ChannelForMode(config.WitnessReportModeAuto)
 	require.NoError(t, err)
 	assert.Equal(t, engine.ChannelWitness, c)
 
-	_, err = channelForMode("bogus")
+	_, err = ChannelForMode("bogus")
 	require.Error(t, err)
 }
 

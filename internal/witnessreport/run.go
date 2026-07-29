@@ -153,7 +153,7 @@ const (
 // best-effort alert and returns a loud error — silence is the one outcome it
 // never produces.
 func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
-	channel, err := channelForMode(r.mode)
+	channel, err := ChannelForMode(r.mode)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -269,12 +269,14 @@ func (r *Runner) markFor(now time.Time) (time.Time, error) {
 	return time.Date(markDay.Year(), markDay.Month(), markDay.Day(), h, m, 0, 0, loc), nil
 }
 
-// channelForMode resolves the delivery mode to a logical channel: preview posts
+// ChannelForMode resolves the delivery mode to a logical channel: preview posts
 // to the operator's own user channel (the safe default during the trust period),
 // auto posts to the friend-facing witness channel. An unknown mode is a hard
 // error — config validation already rejects one on an enabled report, so this
 // only guards a hand-built Runner — rather than a mis-send to the wrong audience.
-func channelForMode(mode string) (string, error) {
+// Exported so the CLI's `witness report` command shares this exact routing
+// rather than keeping a second copy.
+func ChannelForMode(mode string) (string, error) {
 	switch mode {
 	case config.WitnessReportModePreview:
 		return engine.ChannelUser, nil

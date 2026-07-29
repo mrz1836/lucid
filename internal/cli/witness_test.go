@@ -397,23 +397,6 @@ func TestWitnessReport_MissingPromptFile_Errors(t *testing.T) {
 	assert.Contains(t, runErr.Error(), "system prompt")
 }
 
-// TestWitnessChannelForMode unit-covers the mode → logical-channel mapping,
-// including the defensive default branch config validation normally forecloses on
-// an enabled report.
-func TestWitnessChannelForMode(t *testing.T) {
-	user, err := witnessChannelForMode(config.WitnessReportModePreview)
-	require.NoError(t, err)
-	assert.Equal(t, engine.ChannelUser, user)
-
-	wit, err := witnessChannelForMode(config.WitnessReportModeAuto)
-	require.NoError(t, err)
-	assert.Equal(t, engine.ChannelWitness, wit)
-
-	_, err = witnessChannelForMode("broadcast")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown witness_report.mode")
-}
-
 // assertAnErr returns a non-nil error for the transport-failure tests.
 func assertAnErr() error { return errWitnessTest }
 

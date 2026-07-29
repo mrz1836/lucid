@@ -383,18 +383,15 @@ func (c Config) Validate() error {
 	if c.Version != SchemaVersion {
 		return fmt.Errorf("config: unsupported version %d (want %d)", c.Version, SchemaVersion)
 	}
-	dirs := map[string]string{
+	if err := requireNonEmpty(map[string]string{
 		"raw_dir":         c.RawDir,
 		"processed_dir":   c.ProcessedDir,
 		"insights_dir":    c.InsightsDir,
 		"people_dir":      c.PeopleDir,
 		"sessions_dir":    c.SessionsDir,
 		"reflections_dir": c.ReflectionsDir,
-	}
-	for name, v := range dirs {
-		if v == "" {
-			return fmt.Errorf("config: %s must not be empty", name)
-		}
+	}, ""); err != nil {
+		return err
 	}
 	if c.RecentWindowMax < 1 {
 		return fmt.Errorf("config: recent_window_max must be >= 1, got %d", c.RecentWindowMax)
@@ -461,17 +458,11 @@ func (c CompanionConfig) validate() error {
 	if !c.Enabled {
 		return nil
 	}
-	paths := map[string]string{
+	return requireNonEmpty(map[string]string{
 		"companion.morning_template": c.MorningTemplate,
 		"companion.night_template":   c.NightTemplate,
 		"companion.system_prompt":    c.SystemPrompt,
-	}
-	for name, v := range paths {
-		if v == "" {
-			return fmt.Errorf("config: %s must not be empty when companion.enabled is true", name)
-		}
-	}
-	return nil
+	}, " when companion.enabled is true")
 }
 
 // validate reports whether the workout block is structurally usable. Like the
@@ -487,15 +478,12 @@ func (c WorkoutConfig) validate() error {
 	if !c.Enabled {
 		return nil
 	}
-	paths := map[string]string{
+	if err := requireNonEmpty(map[string]string{
 		"workout.program":       c.Program,
 		"workout.system_prompt": c.SystemPrompt,
 		"workout.template":      c.Template,
-	}
-	for name, v := range paths {
-		if v == "" {
-			return fmt.Errorf("config: %s must not be empty when workout.enabled is true", name)
-		}
+	}, " when workout.enabled is true"); err != nil {
+		return err
 	}
 	if !validClockHM(c.SlotTime) {
 		return fmt.Errorf("config: workout.slot_time %q must be a valid HH:MM when workout.enabled is true", c.SlotTime)
@@ -518,14 +506,11 @@ func (c WitnessReportConfig) validate() error {
 	if !c.Enabled {
 		return nil
 	}
-	paths := map[string]string{
+	if err := requireNonEmpty(map[string]string{
 		"witness_report.system_prompt": c.SystemPrompt,
 		"witness_report.template":      c.Template,
-	}
-	for name, v := range paths {
-		if v == "" {
-			return fmt.Errorf("config: %s must not be empty when witness_report.enabled is true", name)
-		}
+	}, " when witness_report.enabled is true"); err != nil {
+		return err
 	}
 	if c.Mode != WitnessReportModePreview && c.Mode != WitnessReportModeAuto {
 		return fmt.Errorf("config: witness_report.mode %q must be %q or %q when witness_report.enabled is true",
@@ -536,6 +521,19 @@ func (c WitnessReportConfig) validate() error {
 	}
 	if c.Weekday < 0 || c.Weekday > 6 {
 		return fmt.Errorf("config: witness_report.weekday %d must be 0 (Sunday) to 6 (Saturday) when witness_report.enabled is true", c.Weekday)
+	}
+	return nil
+}
+
+// requireNonEmpty returns an error naming the first empty value among fields, or
+// nil when every value is set. The message is "config: <name> must not be empty"
+// followed by cond (e.g. " when companion.enabled is true"), so the base config
+// check and the three feature validate() methods share one required-field loop.
+func requireNonEmpty(fields map[string]string, cond string) error {
+	for name, v := range fields {
+		if v == "" {
+			return fmt.Errorf("config: %s must not be empty%s", name, cond)
+		}
 	}
 	return nil
 }
