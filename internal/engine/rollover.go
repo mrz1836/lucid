@@ -2,32 +2,24 @@ package engine
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/mrz1836/lucid/internal/clockmark"
 )
 
 // dateLayout is the logical_date string form (data-model.md: local civil
 // dates, YYYY-MM-DD).
 const dateLayout = "2006-01-02"
 
-// parseHM parses an "HH:MM" clock string into minutes since midnight. It
-// is strict: the hour must be 0–23 and the minute 0–59, so a malformed
-// chain.json clock is caught at boot rather than silently mis-scheduling.
+// parseHM parses an "HH:MM" clock string into minutes since midnight via the
+// shared strict [clockmark] rule, so a malformed chain.json clock is caught at
+// boot rather than silently mis-scheduling.
 func parseHM(s string) (int, error) {
-	parts := strings.Split(strings.TrimSpace(s), ":")
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("invalid clock %q (want HH:MM)", s)
+	mark, err := clockmark.Parse(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid clock %q: %w", s, err)
 	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil || h < 0 || h > 23 {
-		return 0, fmt.Errorf("invalid hour in clock %q", s)
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil || m < 0 || m > 59 {
-		return 0, fmt.Errorf("invalid minute in clock %q", s)
-	}
-	return h*60 + m, nil
+	return mark.Minutes(), nil
 }
 
 // minutesOfDay returns t's time-of-day as minutes since local midnight.

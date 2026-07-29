@@ -32,6 +32,12 @@ func TestEngineIsPure_NoIONoLLM(t *testing.T) {
 		`"strconv"`: true,
 		`"strings"`: true,
 		`"time"`:    true,
+		// clockmark is a pure sibling (fmt/strconv/strings only — no io, model,
+		// or obligation): the single strict HH:MM rule the Engine's chain clocks
+		// share with config and the daemons. It cannot reach disk or a model, so
+		// it is allowed like a stdlib import (mirrors the keyderive precedent in
+		// observations/purity_test.go).
+		`"github.com/mrz1836/lucid/internal/clockmark"`: true,
 	}
 	fset := token.NewFileSet()
 	var scanned int

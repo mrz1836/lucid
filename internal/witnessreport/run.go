@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -16,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/mrz1836/lucid/internal/clockmark"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/isoweek"
@@ -445,19 +444,11 @@ func weeklyCron(hm string, weekday int) (string, error) {
 // parseHM parses an "HH:MM" clock mark into its hour and minute, rejecting a
 // wrong shape, an out-of-range field, or a non-numeric field.
 func parseHM(hm string) (hour, minute int, err error) {
-	parts := strings.Split(hm, ":")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("witnessreport: malformed clock mark %q: want HH:MM", hm)
+	mark, err := clockmark.Parse(hm)
+	if err != nil {
+		return 0, 0, fmt.Errorf("witnessreport: %w", err)
 	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil || h < 0 || h > 23 {
-		return 0, 0, fmt.Errorf("witnessreport: invalid hour in clock mark %q", hm)
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil || m < 0 || m > 59 {
-		return 0, 0, fmt.Errorf("witnessreport: invalid minute in clock mark %q", hm)
-	}
-	return h, m, nil
+	return mark.Hour(), mark.Minute(), nil
 }
 
 // DefaultDBPath resolves the disposable weekly-report job-DB path: an explicit

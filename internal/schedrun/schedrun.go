@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -30,6 +28,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/mrz1836/lucid/internal/clockmark"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/scheduler"
 	"github.com/mrz1836/lucid/internal/storage"
@@ -406,19 +405,11 @@ func bellFallbackMinutes(bellMin int) int {
 // malformed mark (wrong shape, out-of-range hour or minute, non-numeric field)
 // is rejected rather than silently mis-scheduled.
 func markMinutes(hm string) (int, error) {
-	parts := strings.Split(hm, ":")
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("schedrun: malformed clock mark %q: want HH:MM", hm)
+	mark, err := clockmark.Parse(hm)
+	if err != nil {
+		return 0, fmt.Errorf("schedrun: %w", err)
 	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil || h < 0 || h > 23 {
-		return 0, fmt.Errorf("schedrun: invalid hour in clock mark %q", hm)
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil || m < 0 || m > 59 {
-		return 0, fmt.Errorf("schedrun: invalid minute in clock mark %q", hm)
-	}
-	return h*60 + m, nil
+	return mark.Minutes(), nil
 }
 
 // cronFromMinutes renders minutes since local midnight as a daily 5-field cron

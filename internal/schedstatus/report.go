@@ -17,9 +17,9 @@ package schedstatus
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/mrz1836/lucid/internal/clockmark"
 )
 
 // CheckState is the health of a single check. The four states mirror the
@@ -633,23 +633,15 @@ func lastFire(now time.Time, hm string) (time.Time, bool) {
 	return today, true
 }
 
-// parseHM parses a strict "HH:MM" 24-hour mark. It rejects anything out of range
-// so an unparseable chain mark degrades to "skip the miss check" rather than a
-// bogus window time.
+// parseHM parses a strict "HH:MM" 24-hour mark via the shared [clockmark] rule.
+// It rejects anything out of range so an unparseable chain mark degrades to
+// "skip the miss check" rather than a bogus window time.
 func parseHM(hm string) (hour, minute int, ok bool) {
-	parts := strings.SplitN(hm, ":", 2)
-	if len(parts) != 2 {
+	mark, err := clockmark.Parse(hm)
+	if err != nil {
 		return 0, 0, false
 	}
-	h, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil || h < 0 || h > 23 {
-		return 0, 0, false
-	}
-	m, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil || m < 0 || m > 59 {
-		return 0, 0, false
-	}
-	return h, m, true
+	return mark.Hour(), mark.Minute(), true
 }
 
 // findPeriodic returns the periodic with the given slug and whether it was

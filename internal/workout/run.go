@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +26,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/mrz1836/lucid/internal/clockmark"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/storage"
@@ -415,29 +415,21 @@ func atClock(now time.Time, hm string) (time.Time, error) {
 // "12:00" -> "0 12 * * *". A malformed mark is rejected rather than silently
 // mis-scheduled.
 func cronFromHM(hm string) (string, error) {
-	h, m, err := parseHM(hm)
+	mark, err := clockmark.Parse(hm)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("workout: invalid slot time: %w", err)
 	}
-	return fmt.Sprintf("%d %d * * *", m, h), nil
+	return mark.Cron(), nil
 }
 
 // parseHM parses an "HH:MM" clock mark into its hour and minute, rejecting a
 // wrong shape, an out-of-range field, or a non-numeric field.
 func parseHM(hm string) (hour, minute int, err error) {
-	parts := strings.Split(hm, ":")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("workout: malformed slot time %q: want HH:MM", hm)
+	mark, err := clockmark.Parse(hm)
+	if err != nil {
+		return 0, 0, fmt.Errorf("workout: invalid slot time: %w", err)
 	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil || h < 0 || h > 23 {
-		return 0, 0, fmt.Errorf("workout: invalid hour in slot time %q", hm)
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil || m < 0 || m > 59 {
-		return 0, 0, fmt.Errorf("workout: invalid minute in slot time %q", hm)
-	}
-	return h, m, nil
+	return mark.Hour(), mark.Minute(), nil
 }
 
 // DefaultDBPath resolves the disposable workout job-DB path: an explicit

@@ -11,8 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
-	"strings"
+
+	"github.com/mrz1836/lucid/internal/clockmark"
 )
 
 // SchemaVersion is the only lucid.json schema version the MVP
@@ -541,24 +541,12 @@ func (c WitnessReportConfig) validate() error {
 }
 
 // validClockHM reports whether s is a usable "HH:MM" 24-hour local clock mark
-// (hour 0–23, minute 0–59). It matches the leniency of the scheduler's own
-// cronFromHM — a colon-separated pair of in-range integers — so a slot_time that
-// passes config validation is guaranteed to build a valid daily cron for the
-// workout node.
+// (hour 0–23, minute 0–59). It shares the daemons' and scheduler's exact
+// [clockmark] rule, so a slot_time or report time that passes config validation
+// is guaranteed to build a valid daily cron for the workout and report nodes.
 func validClockHM(s string) bool {
-	parts := strings.SplitN(s, ":", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	h, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-	if err != nil || h < 0 || h > 23 {
-		return false
-	}
-	m, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err != nil || m < 0 || m > 59 {
-		return false
-	}
-	return true
+	_, err := clockmark.Parse(s)
+	return err == nil
 }
 
 // Marshal renders the config as the exact indented JSON written to

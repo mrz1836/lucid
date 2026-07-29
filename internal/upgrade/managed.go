@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/mrz1836/lucid/internal/clockmark"
 )
 
 // minutesPerDay is the wrap modulus for the drain-window arithmetic.
@@ -56,24 +56,15 @@ func (w DrainWindow) Contains(m int) bool {
 // [DrainWindow.Contains] tests.
 func MinuteOfDay(t time.Time) int { return t.Hour()*60 + t.Minute() }
 
-// parseHM parses an "HH:MM" 24-hour clock mark into minutes since midnight.
+// parseHM parses an "HH:MM" 24-hour clock mark into minutes since midnight via
+// the shared strict [clockmark] rule, tagging any failure with the package's
+// [errInvalidClockMark] sentinel so callers keep matching on it.
 func parseHM(s string) (int, error) {
-	parts := strings.Split(strings.TrimSpace(s), ":")
-	if len(parts) != 2 {
+	mark, err := clockmark.Parse(s)
+	if err != nil {
 		return 0, fmt.Errorf("%w: %q", errInvalidClockMark, s)
 	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, fmt.Errorf("lucid/upgrade: parse hour %q: %w", s, err)
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, fmt.Errorf("lucid/upgrade: parse minute %q: %w", s, err)
-	}
-	if h < 0 || h > 23 || m < 0 || m > 59 {
-		return 0, fmt.Errorf("%w: %q", errInvalidClockMark, s)
-	}
-	return h*60 + m, nil
+	return mark.Minutes(), nil
 }
 
 // errInvalidClockMark is returned for a malformed "HH:MM" drain-window mark.

@@ -431,6 +431,10 @@ func TestValidate_WorkoutEnabledRequiresPaths(t *testing.T) {
 		"hour out of range":     func(w *WorkoutConfig) { w.SlotTime = "25:00" },
 		"minute out of range":   func(w *WorkoutConfig) { w.SlotTime = "12:60" },
 		"missing colon":         func(w *WorkoutConfig) { w.SlotTime = "1200" },
+		// The shared clockmark rule rejects inner whitespace, so a slot_time that
+		// passes here is guaranteed to build a valid cron in the workout node —
+		// the lenient inner-trim this replaced once accepted "12 : 30".
+		"inner whitespace": func(w *WorkoutConfig) { w.SlotTime = "12 : 30" },
 	}
 	for name, mutate := range failures {
 		t.Run(name, func(t *testing.T) {

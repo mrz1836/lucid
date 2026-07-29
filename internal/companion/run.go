@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -16,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/mrz1836/lucid/internal/clockmark"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/scheduler"
@@ -470,29 +469,21 @@ func atClock(now time.Time, hm string) (time.Time, error) {
 // "19:00" -> "0 19 * * *". A malformed mark is rejected rather than silently
 // mis-scheduled.
 func cronFromHM(hm string) (string, error) {
-	h, m, err := parseHM(hm)
+	mark, err := clockmark.Parse(hm)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("companion: %w", err)
 	}
-	return fmt.Sprintf("%d %d * * *", m, h), nil
+	return mark.Cron(), nil
 }
 
 // parseHM parses an "HH:MM" clock mark into its hour and minute, rejecting a
 // wrong shape, an out-of-range field, or a non-numeric field.
 func parseHM(hm string) (hour, minute int, err error) {
-	parts := strings.Split(hm, ":")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("companion: malformed clock mark %q: want HH:MM", hm)
+	mark, err := clockmark.Parse(hm)
+	if err != nil {
+		return 0, 0, fmt.Errorf("companion: %w", err)
 	}
-	h, err := strconv.Atoi(parts[0])
-	if err != nil || h < 0 || h > 23 {
-		return 0, 0, fmt.Errorf("companion: invalid hour in clock mark %q", hm)
-	}
-	m, err := strconv.Atoi(parts[1])
-	if err != nil || m < 0 || m > 59 {
-		return 0, 0, fmt.Errorf("companion: invalid minute in clock mark %q", hm)
-	}
-	return h, m, nil
+	return mark.Hour(), mark.Minute(), nil
 }
 
 // DefaultDBPath resolves the disposable companion job-DB path: an explicit
