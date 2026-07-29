@@ -96,6 +96,12 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `templates/` = the fixed send templates.
 - [`internal/scheduler`](internal/scheduler) — the **only** send path
   off-machine (evening bell + morning tripwire); takes an explicit `now`.
+- [`internal/flynode`](internal/flynode) — the flywheel-node scaffolding every
+  daemon (teeth, companion, workout, witness report) shares: `Boot` is the job-DB
+  open/migrate/scaffold/reconcile/run spine each `Run` previously carried inline.
+  Transport- and model-free by construction (the reconcile step is an injected
+  closure); *enforced by
+  [`flynode/purity_test.go`](internal/flynode/purity_test.go)*.
 - [`internal/observations`](internal/observations) — micro-logs, salted
   registries, day-view join, curiosity, enrichment; `exports/` = CSV +
   clinician packet.

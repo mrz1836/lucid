@@ -4,19 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	flywheel "github.com/mrz1836/go-flywheel"
 	"github.com/mrz1836/go-foundation/models"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/scheduler"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -32,13 +29,10 @@ const (
 	slugMorning = "lucid-companion-morning"
 	slugNight   = "lucid-companion-night"
 
-	// backfillCap fires only the single most-recent missed bucket on a
-	// supervised restart — the same bounded catch-up the teeth use — so a host
-	// asleep across the fire time wakes to one late attempt, not a replay.
+	// backfillCap is the bounded missed-fire catch-up the flynode boot spine
+	// applies (a single most-recent bucket). It is mirrored here only so the
+	// in-process test rig builds its scheduler with the same cap the daemon runs.
 	backfillCap = 1
-
-	// dbDirPerm is the mode for the disposable job-DB parent directory.
-	dbDirPerm = 0o755
 
 	// envCompanionDB overrides the job-DB path when --db is not passed. Like the
 	// teeth's flywheel.db it is disposable machinery, not Ledger truth, so it
@@ -348,34 +342,10 @@ func Run(ctx context.Context, o Options) error {
 		return errNoVerdict
 	}
 
-	// One clock drives both the flywheel machinery (via the ctx) and each
-	// worker's reference instant, so a test's fixed clock moves them together and
-	// production inherits the real wall clock.
-	clock := o.Clock
-	if clock == nil {
-		clock = models.ClockFrom(ctx)
-	}
-	ctx = models.WithClock(ctx, clock)
+	clock := flynode.ResolveClock(ctx, o.Clock)
 
 	dbPath, err := DefaultDBPath(o.DBPath)
 	if err != nil {
-		return err
-	}
-	if mkErr := os.MkdirAll(filepath.Dir(dbPath), dbDirPerm); mkErr != nil {
-		return fmt.Errorf("companion: create job db dir: %w", mkErr)
-	}
-
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
-	if err != nil {
-		return fmt.Errorf("companion: open job db %q: %w", dbPath, err)
-	}
-	if err = flywheel.Migrate(db); err != nil {
-		return fmt.Errorf("companion: migrate job db: %w", err)
-	}
-	if err = o.Store.ScaffoldEngine(); err != nil {
-		return fmt.Errorf("companion: scaffold engine: %w", err)
-	}
-	if err = upsertPeriodics(ctx, db, o.Store); err != nil {
 		return err
 	}
 
@@ -383,30 +353,17 @@ func Run(ctx context.Context, o Options) error {
 	runner := NewRunner(deps, o.Notifier, o.Store)
 	reg := buildRegistry(runner, clock)
 
-	// One Driver instance shared by the runner and the scheduler: flywheel wants
-	// the two halves of a node speaking to the store through the same driver.
-	driver := flywheel.NewSQLiteDriver(db)
-	node, err := flywheel.NewNode(flywheel.NodeConfig{
-		Runners: []flywheel.RunnerConfig{{
-			DB:       db,
-			Driver:   driver,
-			Registry: reg,
-			Queues:   []string{queueName},
-			// SQLite is single-writer: one runner claiming every class.
-			ClaimAnyClass: true,
-			Concurrency:   1,
-		}},
-		Scheduler: &flywheel.SchedulerConfig{
-			DB:          db,
-			Client:      flywheel.NewClient(db),
-			Driver:      driver,
-			BackfillCap: backfillCap,
+	return flynode.Boot(ctx, flynode.BootConfig{
+		Pkg:      "companion",
+		Queue:    queueName,
+		DBPath:   dbPath,
+		Clock:    clock,
+		Store:    o.Store,
+		Registry: reg,
+		Reconcile: func(ctx context.Context, db *gorm.DB) error {
+			return upsertPeriodics(ctx, db, o.Store)
 		},
 	})
-	if err != nil {
-		return fmt.Errorf("companion: build node: %w", err)
-	}
-	return node.Run(ctx)
 }
 
 // buildRegistry registers the morning and night workers over one runner.
@@ -492,15 +449,5 @@ func parseHM(hm string) (hour, minute int, err error) {
 // distinct from the teeth's flywheel.db). It is exported so a read-only inspector
 // resolves the exact same path the daemon writes to.
 func DefaultDBPath(dbPath string) (string, error) {
-	if dbPath != "" {
-		return dbPath, nil
-	}
-	if env := os.Getenv(envCompanionDB); env != "" {
-		return env, nil
-	}
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("companion: resolve user config dir: %w", err)
-	}
-	return filepath.Join(cfgDir, "lucid", "companion.db"), nil
+	return flynode.ResolveDBPath(dbPath, envCompanionDB, "companion.db")
 }

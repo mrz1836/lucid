@@ -18,18 +18,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	flywheel "github.com/mrz1836/go-flywheel"
 	"github.com/mrz1836/go-foundation/models"
 	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/scheduler"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -46,13 +43,10 @@ const (
 	slugBellFallback = "lucid-bell-fallback"
 	slugTripwire     = "lucid-tripwire"
 
-	// backfillCap fires only the single most-recent missed bucket on a
-	// supervised restart: a killed daemon catches the last morning up without
-	// replaying a week of bells after a long outage (ADR-0004 catch-up).
+	// backfillCap is the bounded missed-fire catch-up the flynode boot spine
+	// applies (a single most-recent bucket, ADR-0004). It is mirrored here only
+	// so the in-process test rig builds its scheduler with the same cap.
 	backfillCap = 1
-
-	// dbDirPerm is the mode for the disposable job-DB parent directory.
-	dbDirPerm = 0o755
 
 	// envSchedulerDB overrides the job-DB path when --db is not passed. The
 	// flywheel.db is disposable scheduler machinery, not Ledger truth, so it
@@ -212,79 +206,42 @@ func Run(ctx context.Context, opts Options) error {
 		return errNoNotifier
 	}
 
-	// One clock drives both the flywheel machinery (via the ctx) and the
-	// tripwire worker's reference day, so a test's fixed clock moves them
-	// together and production inherits the real wall clock.
-	clock := opts.Clock
-	if clock == nil {
-		clock = models.ClockFrom(ctx)
-	}
-	ctx = models.WithClock(ctx, clock)
+	clock := flynode.ResolveClock(ctx, opts.Clock)
 
 	dbPath, err := DefaultDBPath(opts.DBPath)
 	if err != nil {
 		return err
 	}
-	if mkErr := os.MkdirAll(filepath.Dir(dbPath), dbDirPerm); mkErr != nil {
-		return fmt.Errorf("schedrun: create job db dir: %w", mkErr)
-	}
-
-	// The disposable job DB is machinery, not truth: gorm's per-statement SQL
-	// logging (including the expected record-not-found on a first-boot upsert) is
-	// noise the daemon's flywheel slog does not need. Silence it.
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
-	if err != nil {
-		return fmt.Errorf("schedrun: open job db %q: %w", dbPath, err)
-	}
-	if err = flywheel.Migrate(db); err != nil {
-		return fmt.Errorf("schedrun: migrate job db: %w", err)
-	}
-	if err = opts.Store.ScaffoldEngine(); err != nil {
-		return fmt.Errorf("schedrun: scaffold engine: %w", err)
-	}
-	if err = upsertPeriodics(ctx, db, opts.Store, opts.SuppressUserChannel); err != nil {
-		return startupErr(ctx, err)
-	}
-
-	// Seeding declares the schedule; this pass repairs it. They are not the same
-	// job: an upsert restores each periodic's active flag but deliberately
-	// preserves its cursor, so a periodic whose next run was left frozen in the
-	// past would come back up still unreachable by the due scan. Running the same
-	// pass `lucid scheduler reconcile` exposes — rather than a second, boot-only
-	// notion of "parked" — is what keeps the daemon and the command agreeing on
-	// what a healthy schedule looks like. It is a no-op on a healthy store, and
-	// the intended-active guard means it never re-arms a suppressed bell.
-	if _, err = Reconcile(ctx, db, ReconcileOptions{CompanionEnabled: opts.SuppressUserChannel}); err != nil {
-		return startupErr(ctx, err)
-	}
 
 	sc := scheduler.New(opts.Store, opts.Notifier)
 	reg := buildRegistry(sc, clock, opts.Store, opts.SuppressUserChannel)
 
-	// One Driver instance shared by the runner and the scheduler: flywheel wants
-	// the two halves of a node speaking to the store through the same driver.
-	driver := flywheel.NewSQLiteDriver(db)
-	node, err := flywheel.NewNode(flywheel.NodeConfig{
-		Runners: []flywheel.RunnerConfig{{
-			DB:       db,
-			Driver:   driver,
-			Registry: reg,
-			Queues:   []string{queueName},
-			// SQLite is single-writer: one runner claiming every class.
-			ClaimAnyClass: true,
-			Concurrency:   1,
-		}},
-		Scheduler: &flywheel.SchedulerConfig{
-			DB:          db,
-			Client:      flywheel.NewClient(db),
-			Driver:      driver,
-			BackfillCap: backfillCap,
+	return flynode.Boot(ctx, flynode.BootConfig{
+		Pkg:      "schedrun",
+		Queue:    queueName,
+		DBPath:   dbPath,
+		Clock:    clock,
+		Store:    opts.Store,
+		Registry: reg,
+		Reconcile: func(ctx context.Context, db *gorm.DB) error {
+			if err := upsertPeriodics(ctx, db, opts.Store, opts.SuppressUserChannel); err != nil {
+				return startupErr(ctx, err)
+			}
+			// Seeding declares the schedule; this pass repairs it. They are not the
+			// same job: an upsert restores each periodic's active flag but
+			// deliberately preserves its cursor, so a periodic whose next run was
+			// left frozen in the past would come back up still unreachable by the
+			// due scan. Running the same pass `lucid scheduler reconcile` exposes —
+			// rather than a second, boot-only notion of "parked" — is what keeps the
+			// daemon and the command agreeing on what a healthy schedule looks like.
+			// It is a no-op on a healthy store, and the intended-active guard means
+			// it never re-arms a suppressed bell.
+			if _, err := Reconcile(ctx, db, ReconcileOptions{CompanionEnabled: opts.SuppressUserChannel}); err != nil {
+				return startupErr(ctx, err)
+			}
+			return nil
 		},
 	})
-	if err != nil {
-		return fmt.Errorf("schedrun: build node: %w", err)
-	}
-	return node.Run(ctx)
 }
 
 // startupErr grades a failure from the boot sequence: a stop signal that lands
@@ -434,15 +391,5 @@ func cronFromHM(hm string) (string, error) {
 // exported so a read-only inspector resolves the exact same path the daemon
 // writes to, rather than duplicating the resolution and drifting from it.
 func DefaultDBPath(dbPath string) (string, error) {
-	if dbPath != "" {
-		return dbPath, nil
-	}
-	if env := os.Getenv(envSchedulerDB); env != "" {
-		return env, nil
-	}
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("schedrun: resolve user config dir: %w", err)
-	}
-	return filepath.Join(cfgDir, "lucid", "flywheel.db"), nil
+	return flynode.ResolveDBPath(dbPath, envSchedulerDB, "flywheel.db")
 }
