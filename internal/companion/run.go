@@ -147,69 +147,73 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 		return Outcome{}, err
 	}
 
-	// Past the cut-off: the host was down long enough that a message now would
-	// read as stale. Refuse it and alert instead of posting a confusing
-	// hours-late "morning" — but never fall silent.
-	if !now.Before(cutoffAt) {
-		r.alert(fmt.Sprintf(
-			"Lucid %s companion skipped — it is past the %s cut-off (the host was asleep at the fire time). No stale message was posted.",
-			mode, win.cutoff,
-		))
-		return Outcome{Mode: mode, Skipped: true, SkipReason: skipPastCutoff}, nil
-	}
-
-	// Idempotency: a receipt for this date + window whose message still reads
-	// back means a prior fire already delivered — skip rather than double-post on
-	// a supervisor retry. A receipt whose message is gone falls through to a
-	// fresh delivery so the window is never left silently empty.
-	date := engine.DateString(engine.DateOf(now))
-	rec, ok, err := r.store.ReadCompanionReceipt(string(mode))
+	fired, err := flynode.Fire(ctx, now, flynode.Delivery[Result]{
+		Channel:  engine.ChannelUser,
+		CutoffAt: cutoffAt,
+		LateAt:   markAt.Add(lateGrace),
+		Guard: func(_ context.Context, gnow time.Time) (flynode.Receipt, error) {
+			rec, ok, rerr := r.store.ReadCompanionReceipt(string(mode))
+			if rerr != nil {
+				return flynode.Receipt{}, fmt.Errorf("companion: read receipt: %w", rerr)
+			}
+			if ok && rec.Date == engine.DateString(engine.DateOf(gnow)) && rec.MessageID != "" {
+				return flynode.Receipt{MessageID: rec.MessageID, Channel: engine.ChannelUser, Found: true}, nil
+			}
+			return flynode.Receipt{}, nil
+		},
+		Compose: func(cctx context.Context, cnow time.Time) (Result, error) {
+			return r.compose.Compose(cctx, mode, cnow)
+		},
+		LatePrefix: func(res Result) Result {
+			res.Text = lateNote + "\n\n" + res.Text
+			return res
+		},
+		Send: func(_ context.Context, channel string, res Result) (string, error) {
+			id, serr := r.deliver.SendReturningID(channel, res.Text)
+			if serr != nil {
+				return "", fmt.Errorf("companion: deliver %s: %w", mode, serr)
+			}
+			return id, nil
+		},
+		Verify: func(_ context.Context, channel, id string) error {
+			if verr := r.deliver.VerifyPresent(channel, id); verr != nil {
+				return fmt.Errorf("companion: verify %s delivery: %w", mode, verr)
+			}
+			return nil
+		},
+		WriteReceipt: func(wnow time.Time, channel, id string) error {
+			if werr := r.store.WriteCompanionReceipt(storage.CompanionReceipt{
+				Date:        engine.DateString(engine.DateOf(wnow)),
+				Window:      string(mode),
+				MessageID:   id,
+				ChannelID:   channel,
+				Verified:    true,
+				DeliveredAt: wnow.Format(time.RFC3339),
+			}); werr != nil {
+				return fmt.Errorf("companion: write receipt: %w", werr)
+			}
+			return nil
+		},
+		Alert:        r.alert,
+		CutoffAlert:  fmt.Sprintf("Lucid %s companion skipped — it is past the %s cut-off (the host was asleep at the fire time). No stale message was posted.", mode, win.cutoff),
+		ComposeAlert: fmt.Sprintf("Lucid %s companion could not compose a message — the scheduled send did not go out.", mode),
+		SendAlert:    fmt.Sprintf("Lucid %s companion failed to deliver — the scheduled send did not go out.", mode),
+		VerifyAlert:  fmt.Sprintf("Lucid %s companion sent a message that could not be verified in the channel.", mode),
+	})
 	if err != nil {
-		return Outcome{}, fmt.Errorf("companion: read receipt: %w", err)
-	}
-	if ok && rec.Date == date && rec.MessageID != "" {
-		if verr := r.deliver.VerifyPresent(engine.ChannelUser, rec.MessageID); verr == nil {
-			return Outcome{Mode: mode, Skipped: true, SkipReason: skipAlreadyDelivered, MessageID: rec.MessageID}, nil
-		}
-	}
-
-	late := now.After(markAt.Add(lateGrace))
-
-	res, err := r.compose.Compose(ctx, mode, now)
-	if err != nil {
-		// A loud compose failure (a missing prompt file, an unreadable verdict, a
-		// non-transport provider error) is never a silent empty send.
-		r.alert(fmt.Sprintf("Lucid %s companion could not compose a message — the scheduled send did not go out.", mode))
 		return Outcome{}, err
 	}
 
-	text := res.Text
-	if late {
-		text = lateNote + "\n\n" + text
-	}
-
-	id, err := r.deliver.SendReturningID(engine.ChannelUser, text)
-	if err != nil {
-		r.alert(fmt.Sprintf("Lucid %s companion failed to deliver — the scheduled send did not go out.", mode))
-		return Outcome{}, fmt.Errorf("companion: deliver %s: %w", mode, err)
-	}
-	if err := r.deliver.VerifyPresent(engine.ChannelUser, id); err != nil {
-		r.alert(fmt.Sprintf("Lucid %s companion sent a message that could not be verified in the channel.", mode))
-		return Outcome{}, fmt.Errorf("companion: verify %s delivery: %w", mode, err)
-	}
-
-	if werr := r.store.WriteCompanionReceipt(storage.CompanionReceipt{
-		Date:        date,
-		Window:      string(mode),
-		MessageID:   id,
-		ChannelID:   engine.ChannelUser,
-		Verified:    true,
-		DeliveredAt: now.Format(time.RFC3339),
-	}); werr != nil {
-		return Outcome{}, fmt.Errorf("companion: write receipt: %w", werr)
-	}
-
-	return Outcome{Mode: mode, Delivered: true, MessageID: id, Late: late, Fallback: res.Fallback, Text: text}, nil
+	return Outcome{
+		Mode:       mode,
+		Delivered:  fired.Delivered,
+		MessageID:  fired.MessageID,
+		Late:       fired.Late,
+		Skipped:    fired.Skipped,
+		SkipReason: fired.SkipReason,
+		Fallback:   fired.Payload.Fallback,
+		Text:       fired.Payload.Text,
+	}, nil
 }
 
 // The two skip reasons a fire can report.

@@ -157,74 +157,81 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 		return Outcome{}, err
 	}
 
-	// Past the stale cut-off: the host was down across the fire long enough that a
-	// report now would describe a week already gone. Refuse it and alert instead
-	// of posting a stale card — but never fall silent.
-	if !now.Before(markAt.Add(staleAfter)) {
-		r.alert(fmt.Sprintf(
-			"Lucid weekly witness report skipped for %s — it is past the missed-fire cut-off (the host was asleep at the scheduled mark). No stale report was posted.",
-			week,
-		))
-		return Outcome{Week: week, Skipped: true, SkipReason: skipPastCutoff}, nil
-	}
-
-	// Idempotency: a receipt for this ISO week whose message still reads back means
-	// a prior fire already delivered — skip rather than double-post on a supervisor
-	// retry. A receipt whose message is gone falls through to a fresh delivery so
-	// the week is never left silently empty.
-	rec, ok, err := r.store.ReadWitnessReportReceipt()
+	fired, err := flynode.Fire(ctx, now, flynode.Delivery[Report]{
+		Channel:  channel,
+		CutoffAt: markAt.Add(staleAfter),
+		Guard: func(_ context.Context, _ time.Time) (flynode.Receipt, error) {
+			rec, ok, rerr := r.store.ReadWitnessReportReceipt()
+			if rerr != nil {
+				return flynode.Receipt{}, fmt.Errorf("witnessreport: read receipt: %w", rerr)
+			}
+			if ok && rec.Week == week && rec.MessageID != "" {
+				return flynode.Receipt{MessageID: rec.MessageID, Channel: rec.ChannelID, Found: true}, nil
+			}
+			return flynode.Receipt{}, nil
+		},
+		Compose: func(cctx context.Context, cnow time.Time) (Report, error) {
+			report, cerr := r.compose.Compose(cctx, cnow)
+			if cerr != nil {
+				return Report{}, fmt.Errorf("witnessreport: compose: %w", cerr)
+			}
+			return report, nil
+		},
+		Send: func(_ context.Context, ch string, report Report) (string, error) {
+			id, serr := r.deliver.SendEmbedReturningID(ch, RenderEmbed(report))
+			if serr != nil {
+				return "", fmt.Errorf("witnessreport: deliver: %w", serr)
+			}
+			return id, nil
+		},
+		Verify: func(_ context.Context, ch, id string) error {
+			if verr := r.deliver.VerifyPresent(ch, id); verr != nil {
+				return fmt.Errorf("witnessreport: verify delivery: %w", verr)
+			}
+			return nil
+		},
+		WriteReceipt: func(wnow time.Time, ch, id string) error {
+			if werr := r.store.WriteWitnessReportReceipt(storage.WitnessReportReceipt{
+				Week:        week,
+				MessageID:   id,
+				ChannelID:   ch,
+				Verified:    true,
+				DeliveredAt: wnow.Format(time.RFC3339),
+			}); werr != nil {
+				return fmt.Errorf("witnessreport: write receipt: %w", werr)
+			}
+			return nil
+		},
+		Alert: r.alert,
+		PostSend: func(report Report) {
+			// A tripped witness-safe scan means the model produced flagged prose
+			// that was discarded — alert so the operator can review why. It runs
+			// only after the receipt is persisted and never unwinds the send.
+			if report.SafetyTripped {
+				r.alert(fmt.Sprintf(
+					"Lucid weekly witness report for %s tripped the witness-safe scan — the model prose was discarded and the metrics-only report was delivered. Worth a review.",
+					week,
+				))
+			}
+		},
+		CutoffAlert:  fmt.Sprintf("Lucid weekly witness report skipped for %s — it is past the missed-fire cut-off (the host was asleep at the scheduled mark). No stale report was posted.", week),
+		ComposeAlert: "Lucid weekly witness report could not be composed — the scheduled report did not go out.",
+		SendAlert:    "Lucid weekly witness report failed to deliver — the scheduled report did not go out.",
+		VerifyAlert:  "Lucid weekly witness report sent a report that could not be verified in the channel.",
+	})
 	if err != nil {
-		return Outcome{}, fmt.Errorf("witnessreport: read receipt: %w", err)
-	}
-	if ok && rec.Week == week && rec.MessageID != "" {
-		if verr := r.deliver.VerifyPresent(rec.ChannelID, rec.MessageID); verr == nil {
-			return Outcome{Week: week, Skipped: true, SkipReason: skipAlreadyDelivered, MessageID: rec.MessageID, Channel: rec.ChannelID}, nil
-		}
-	}
-
-	// Compose the report. The deterministic scaffold always lands — a provider
-	// timeout or a tripped witness-safe scan degrades to the metrics-only report
-	// (Fallback/SafetyTripped), never an error. A loud compose failure (a missing
-	// prompt file, an unreadable projection) is never a silent empty send.
-	report, err := r.compose.Compose(ctx, now)
-	if err != nil {
-		r.alert("Lucid weekly witness report could not be composed — the scheduled report did not go out.")
-		return Outcome{}, fmt.Errorf("witnessreport: compose: %w", err)
-	}
-
-	id, err := r.deliver.SendEmbedReturningID(channel, RenderEmbed(report))
-	if err != nil {
-		r.alert("Lucid weekly witness report failed to deliver — the scheduled report did not go out.")
-		return Outcome{}, fmt.Errorf("witnessreport: deliver: %w", err)
-	}
-	if err := r.deliver.VerifyPresent(channel, id); err != nil {
-		r.alert("Lucid weekly witness report sent a report that could not be verified in the channel.")
-		return Outcome{}, fmt.Errorf("witnessreport: verify delivery: %w", err)
-	}
-
-	if werr := r.store.WriteWitnessReportReceipt(storage.WitnessReportReceipt{
-		Week:        week,
-		MessageID:   id,
-		ChannelID:   channel,
-		Verified:    true,
-		DeliveredAt: now.Format(time.RFC3339),
-	}); werr != nil {
-		return Outcome{}, fmt.Errorf("witnessreport: write receipt: %w", werr)
-	}
-
-	// The report delivered whole, but a tripped witness-safe scan means the model
-	// produced flagged prose that was discarded — alert so the operator can review
-	// why. This never blocks or unwinds the successful send.
-	if report.SafetyTripped {
-		r.alert(fmt.Sprintf(
-			"Lucid weekly witness report for %s tripped the witness-safe scan — the model prose was discarded and the metrics-only report was delivered. Worth a review.",
-			week,
-		))
+		return Outcome{}, err
 	}
 
 	return Outcome{
-		Week: week, Delivered: true, MessageID: id, Channel: channel,
-		Fallback: report.Fallback, SafetyTripped: report.SafetyTripped,
+		Week:          week,
+		Delivered:     fired.Delivered,
+		MessageID:     fired.MessageID,
+		Channel:       fired.Channel,
+		Fallback:      fired.Payload.Fallback,
+		SafetyTripped: fired.Payload.SafetyTripped,
+		Skipped:       fired.Skipped,
+		SkipReason:    fired.SkipReason,
 	}, nil
 }
 

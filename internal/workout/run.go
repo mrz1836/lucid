@@ -160,69 +160,72 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 	}
 	cutoffAt := markAt.Add(cutoffWindow)
 
-	// Past the cut-off: the host was down long enough that a "today's session"
-	// message now would read as stale. Refuse it and alert instead of posting a
-	// confusing hours-late recommendation — but never fall silent.
-	if !now.Before(cutoffAt) {
-		r.alert(fmt.Sprintf(
-			"Lucid workout slot skipped — it is past the %s delivery window (the host was asleep at the slot time). No stale recommendation was posted.",
-			cutoffAt.Format("15:04"),
-		))
-		return Outcome{Skipped: true, SkipReason: skipPastCutoff}, nil
-	}
-
-	// Idempotency: a receipt for this date whose message still reads back means a
-	// prior fire already delivered — skip rather than double-post on a supervisor
-	// retry. A receipt whose message is gone falls through to a fresh delivery so
-	// the day is never left silently empty.
-	date := engine.DateString(engine.DateOf(now))
-	rec, ok, err := r.store.ReadCompanionReceipt(receiptWindow)
+	fired, err := flynode.Fire(ctx, now, flynode.Delivery[Result]{
+		Channel:  engine.ChannelUser,
+		CutoffAt: cutoffAt,
+		LateAt:   markAt.Add(lateGrace),
+		Guard: func(_ context.Context, gnow time.Time) (flynode.Receipt, error) {
+			rec, ok, rerr := r.store.ReadCompanionReceipt(receiptWindow)
+			if rerr != nil {
+				return flynode.Receipt{}, fmt.Errorf("workout: read receipt: %w", rerr)
+			}
+			if ok && rec.Date == engine.DateString(engine.DateOf(gnow)) && rec.MessageID != "" {
+				return flynode.Receipt{MessageID: rec.MessageID, Channel: engine.ChannelUser, Found: true}, nil
+			}
+			return flynode.Receipt{}, nil
+		},
+		Compose: func(cctx context.Context, cnow time.Time) (Result, error) {
+			return r.compose.Compose(cctx, cnow)
+		},
+		LatePrefix: func(res Result) Result {
+			res.Text = lateNote + "\n\n" + res.Text
+			return res
+		},
+		Send: func(_ context.Context, channel string, res Result) (string, error) {
+			id, serr := r.deliver.SendReturningID(channel, res.Text)
+			if serr != nil {
+				return "", fmt.Errorf("workout: deliver: %w", serr)
+			}
+			return id, nil
+		},
+		Verify: func(_ context.Context, channel, id string) error {
+			if verr := r.deliver.VerifyPresent(channel, id); verr != nil {
+				return fmt.Errorf("workout: verify delivery: %w", verr)
+			}
+			return nil
+		},
+		WriteReceipt: func(wnow time.Time, channel, id string) error {
+			if werr := r.store.WriteCompanionReceipt(storage.CompanionReceipt{
+				Date:        engine.DateString(engine.DateOf(wnow)),
+				Window:      receiptWindow,
+				MessageID:   id,
+				ChannelID:   channel,
+				Verified:    true,
+				DeliveredAt: wnow.Format(time.RFC3339),
+			}); werr != nil {
+				return fmt.Errorf("workout: write receipt: %w", werr)
+			}
+			return nil
+		},
+		Alert:        r.alert,
+		CutoffAlert:  fmt.Sprintf("Lucid workout slot skipped — it is past the %s delivery window (the host was asleep at the slot time). No stale recommendation was posted.", cutoffAt.Format("15:04")),
+		ComposeAlert: "Lucid workout slot could not compose a recommendation — the scheduled send did not go out.",
+		SendAlert:    "Lucid workout slot failed to deliver — the scheduled send did not go out.",
+		VerifyAlert:  "Lucid workout slot sent a message that could not be verified in the channel.",
+	})
 	if err != nil {
-		return Outcome{}, fmt.Errorf("workout: read receipt: %w", err)
-	}
-	if ok && rec.Date == date && rec.MessageID != "" {
-		if verr := r.deliver.VerifyPresent(engine.ChannelUser, rec.MessageID); verr == nil {
-			return Outcome{Skipped: true, SkipReason: skipAlreadyDelivered, MessageID: rec.MessageID}, nil
-		}
-	}
-
-	late := now.After(markAt.Add(lateGrace))
-
-	res, err := r.compose.Compose(ctx, now)
-	if err != nil {
-		// A loud compose failure (a missing program or prompt file, an unreadable
-		// live-number read) is never a silent empty send.
-		r.alert("Lucid workout slot could not compose a recommendation — the scheduled send did not go out.")
 		return Outcome{}, err
 	}
 
-	text := res.Text
-	if late {
-		text = lateNote + "\n\n" + text
-	}
-
-	id, err := r.deliver.SendReturningID(engine.ChannelUser, text)
-	if err != nil {
-		r.alert("Lucid workout slot failed to deliver — the scheduled send did not go out.")
-		return Outcome{}, fmt.Errorf("workout: deliver: %w", err)
-	}
-	if err := r.deliver.VerifyPresent(engine.ChannelUser, id); err != nil {
-		r.alert("Lucid workout slot sent a message that could not be verified in the channel.")
-		return Outcome{}, fmt.Errorf("workout: verify delivery: %w", err)
-	}
-
-	if werr := r.store.WriteCompanionReceipt(storage.CompanionReceipt{
-		Date:        date,
-		Window:      receiptWindow,
-		MessageID:   id,
-		ChannelID:   engine.ChannelUser,
-		Verified:    true,
-		DeliveredAt: now.Format(time.RFC3339),
-	}); werr != nil {
-		return Outcome{}, fmt.Errorf("workout: write receipt: %w", werr)
-	}
-
-	return Outcome{Delivered: true, MessageID: id, Late: late, Fallback: res.Fallback, Text: text}, nil
+	return Outcome{
+		Delivered:  fired.Delivered,
+		MessageID:  fired.MessageID,
+		Late:       fired.Late,
+		Skipped:    fired.Skipped,
+		SkipReason: fired.SkipReason,
+		Fallback:   fired.Payload.Fallback,
+		Text:       fired.Payload.Text,
+	}, nil
 }
 
 // alert posts a best-effort loud ping to the user channel when a workout fire
