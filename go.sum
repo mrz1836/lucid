@@ -46,8 +46,8 @@ github.com/mattn/go-sqlite3 v1.14.47 h1:jOBI62gS7nKeZv+as1oGEy0+1qISgXwH/QBlR6Kb
 github.com/mattn/go-sqlite3 v1.14.47/go.mod h1:6JTjA44L93a0QCyJef5YvlPoKXntQPjzWv5gtm9sB6w=
 github.com/microsoft/go-mssqldb v1.7.2 h1:CHkFJiObW7ItKTJfHo1QX7QBBD1iV+mn1eOyRP3b/PA=
 github.com/microsoft/go-mssqldb v1.7.2/go.mod h1:kOvZKUdrhhFQmxLZqbwUV0rHkNkZpthMITIb2Ko1IoA=
-github.com/mrz1836/go-flywheel v0.8.1 h1:RDaNAP6dcrh6m5Zt3ry9bC8/1N/4RpBnrDPKdPT4GA0=
-github.com/mrz1836/go-flywheel v0.8.1/go.mod h1:IMz7XpKjcpMv/CM8gjTFncqGePgqIcQxALM1O/7bxKA=
+github.com/mrz1836/go-flywheel v0.9.1 h1:yZFQ+xV8roD8mobl9qZBzTzfuu46sYM10chxKrqMO8A=
+github.com/mrz1836/go-flywheel v0.9.1/go.mod h1:QqQE1GQWE5PIKhkY6f4ErONDLn/O3NOEGiqyIsf6B68=
 github.com/mrz1836/go-foundation v0.3.5 h1:z+7UILwnCGysGBslsTpTttMBU7OJzkkfDRRXqFuR+3s=
 github.com/mrz1836/go-foundation v0.3.5/go.mod h1:xsAXA9az/XUOOPM1SA3+FWjJVUP47vKrAzkn+R4UICU=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
