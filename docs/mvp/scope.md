@@ -62,7 +62,7 @@ close-out is the unifying act: one command feeds both subsystems.
 | Storage | Markdown + JSON files under `~/.lucid/`. No SQLite, no graph, no cloud. | Boring, replaceable, lossless subset of the spec's SQLite schema. | [`data-model.md`](data-model.md) |
 | Reflection cadence | Manual `/reflect`, weekly. | One cadence before four. | [`steel-thread.md`](steel-thread.md) Stage 5 |
 | External action | **Messages:** none, except the pre-committed templates — bell prompt, L1 nudge (user's own channel), L2 witness escalation + monthly heartbeat (topline status only, dead-man semantics, witness-confirmed). **Fetches:** none, except opted-in enrichers — read-only, quantized coordinates + dates to pinned keyless endpoints, through one audited adapter op (S-17). | Pre-commitment is consent granted in advance (architecture P5); a system with an unwired escalation path is a suggestion; fetches are not sends. | [`engine-module.md`](engine-module.md) §"Consent amendment", [`observations-module.md`](observations-module.md) §"The enrichment job" |
-| Sanctuary boundary | The Engine module reads/writes `~/.lucid/engine/` only; no read path to raw/processed/insights/people. Witness view computed from Engine data only. | Teeth attach to acts, never to content (architecture P3). | [`../engine.md`](../engine.md) §4 |
+| Sanctuary boundary | The Engine module reads/writes `~/.lucid/engine/` only; no read path to raw/processed/insights/people. Witness view computed from Engine data only. | Consequences attach to acts, never to content (architecture P3). | [`../engine.md`](../engine.md) §4 |
 | Voice | Trusted advisor — warm, honest, non-judgmental, humble about certainty. Hypothesis language only. The Engine has no voice: fixed templates. | Encodes the only voice constraints a future agent prompt needs. | [`product-principles.md`](product-principles.md) §6 |
 | Implementation | Contracts are language-agnostic; the build is **Go** — one static `lucid` binary (core + CLI), with the chat harness as a thin surface over the same router. Core dependencies: `go-flywheel` (durable job runtime for bell/tripwire/heartbeat/enrichment when installed) and `go-foundation` (base layer). Language and database lock-in are reviewed at the post-MVP retro. | Single-binary durability suits a tool that must outlive its tooling; the owner's toolchain is Go and first-party; nothing locks before the loop earns it. | [`../adr/0001-implementation-language.md`](../adr/0001-implementation-language.md), [`0003`](../adr/0003-runtime-surface.md), [`0004`](../adr/0004-core-dependencies.md) |
 
@@ -245,9 +245,9 @@ these amendments:
   **workout module** ([`workout-module.md`](workout-module.md)) are the
   narrow exception: each recommends on a silver platter with a
   *deterministic core the model only phrases* — no goal trees, no
-  celebration, no voice of their own, no teeth. They add a **surface, not
+  celebration, no voice of their own, no consequences. They add a **surface, not
   a new steel thread**: the one steel thread stands unchanged, and a fresh
-  Ledger runs the pure teeth until an operator opts in. The workout
+  Ledger runs the pure Engine until an operator opts in. The workout
   module's two new kinds stay inventory: its streak and its daily-anchor
   targets are read-only projections counted on demand, never a score
   written onto an event ([`../observations.md`](../observations.md) §0).

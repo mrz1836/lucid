@@ -553,7 +553,7 @@ evening bell and the morning tripwire (the L1/L2 escalation ladder) on the
 active chain profile's clocks (`bell_time`, `tripwire_time`) — pre-committed
 Engine templates, never model-authored. The retired monthly heartbeat is
 absorbed by the weekly [witness report](witness-report.md), which runs beside
-the teeth alongside the daily [companion](companion.md) when configured. The
+the Engine alongside the daily [companion](companion.md) when configured. The
 jobs are durable: a daemon killed mid-evening still fires the missed
 tripwire on its next supervised start (bounded missed-fire catch-up). The
 path is deterministic and agent-free — no LLM, ever. It is meant to run
@@ -566,7 +566,7 @@ from the injected environment (see
 |------|--------|
 | `--db <path>` | Path to the durable job store. Overrides `LUCID_SCHEDULER_DB`; defaults to a `flywheel.db` under the OS user-config dir, **outside** the `~/.lucid/` Ledger — disposable machinery, never the record (ADR-0004). |
 
-**Periodics it reconciles at boot.** Every start seeds the teeth periodics from
+**Periodics it reconciles at boot.** Every start seeds the Engine periodics from
 the default profile's clock marks, idempotently by slug, so a restart never
 duplicates them:
 
@@ -592,7 +592,7 @@ lucid scheduler run --db /var/lib/lucid/scheduler.db
 #### The evening backstop (`lucid-bell-fallback`)
 
 When the [companion](companion.md) is enabled it owns the evening user send, and
-the teeth bell is suppressed so the window never double-posts. That hands one
+the Engine bell is suppressed so the window never double-posts. That hands one
 window to one sender — and if that sender's delivery fails outright (the host was
 off past its cut-off, the channel was unreachable all evening), the evening
 accountability window would pass in silence. The backstop closes that gap: a
@@ -636,7 +636,7 @@ question: *is the scheduler healthy, what fires next, and what happened last?* I
 aggregates local state only and is **credential-dumb and agent-free**: it sends
 nothing, renews no secret, reads no prompt body, and runs no model. It reports the
 companion enabled/disabled state and its provider backend/model, each configured
-prompt path (existence only), the chain bell and tripwire marks, the teeth and
+prompt path (existence only), the chain bell and tripwire marks, the Engine and
 companion periodics (cron, active flag, next run, last enqueue, and — for one that
 is deliberately off — the reason), the last companion
 delivery receipt per window, a bounded recent-run failure summary, and a
@@ -656,7 +656,7 @@ not a parked one.
 | Flag | Effect |
 |------|--------|
 | `--json` | Emit the full report as JSON with a top-level `verdict` (`ok` \| `warn` \| `error`) and structured per-check results. The `verdict` mirrors the exit code. |
-| `--scheduler-db <path>` | Inspect an explicit teeth job-store path. Overrides `LUCID_SCHEDULER_DB`; defaults to the daemon's resolved path. |
+| `--scheduler-db <path>` | Inspect an explicit Engine job-store path. Overrides `LUCID_SCHEDULER_DB`; defaults to the daemon's resolved path. |
 | `--companion-db <path>` | Inspect an explicit companion job-store path. Overrides `LUCID_COMPANION_DB`; defaults to the daemon's resolved path. |
 
 The command resolves the two disposable job-store paths exactly as the daemon does
@@ -684,11 +684,11 @@ verdict is the most severe check — `error` beats `warn` beats `ok`, and an
 | Condition | Verdict |
 |-----------|---------|
 | Companion disabled | `warn` |
-| Teeth or (required) companion job store missing / unreadable | `error` |
+| Engine or (required) companion job store missing / unreadable | `error` |
 | Companion enabled but a configured prompt file is missing | `error` |
 | A required periodic inactive or missing while the companion is enabled | `error` |
 | An intended-active periodic parked (inactive, or next run stuck in the past) | `error` — the line names `lucid scheduler reconcile` |
-| Teeth bell inactive while the companion owns the night send | not a fault (*suppressed by companion (intended)*) |
+| Engine bell inactive while the companion owns the night send | not a fault (*suppressed by companion (intended)*) |
 | Evening backstop (`lucid-bell-fallback`) inactive while the companion owns the night send | `error` |
 | Latest companion receipt present but unverified | `warn` |
 | Most-recent already-elapsed window has no receipt, or only a stale one | `error` |
@@ -1281,7 +1281,7 @@ embellished, or celebrated):
 | `/person <name>` | `lucid person <name>` |
 | `/bootstrap` · `/bootstrap done` | `lucid bootstrap [done]` |
 
-The scheduled teeth sends — the bell and the morning tripwire (L1/L2) — are the
+The scheduled Engine sends — the bell and the morning tripwire (L1/L2) — are the
 scheduler's, not a command's: pre-committed templates. The config-gated
 Mirror-side sends (the daily companion and the weekly witness report, which
 replaced the retired monthly heartbeat) run beside them. See
@@ -1296,6 +1296,6 @@ replaced the retired monthly heartbeat) run beside them. See
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `lucid scheduler run` posts with (a Discord bot token). Injected at spawn — vaulted in `hush` and never committed (ADR-0005); the binary reads it only from the environment. |
 | `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
 | `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2 escalation, weekly witness report). Injected, never committed. |
-| `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable teeth job-store path; `--db` (on `run` and `reconcile`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
+| `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable Engine job-store path; `--db` (on `run` and `reconcile`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
 | `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status`; `--companion-db` overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
 | `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |

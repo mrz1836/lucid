@@ -273,7 +273,7 @@ func latestRecordDate(records []DayRecord, loc *time.Location) (latest time.Time
 // windowStats folds the records whose logical date falls in the length-day
 // window ending at ref (inclusive) into an adherence Window. A day is
 // "decided" once it is completed or missed; adherence is completed/decided
-// (floors count as completions — teeth math has no shame score). Accounted
+// (floors count as completions — consequence math has no shame score). Accounted
 // counts any record, so an in-progress mode-only day inflates the co-number,
 // never the adherence.
 func windowStats(records []DayRecord, ref time.Time, length int, loc *time.Location) Window {

@@ -40,7 +40,7 @@ Three rules from [`../engine.md`](../engine.md) and
    ([`product-principles.md`](product-principles.md) §8) and
    architecture **P9** (the runtime never depends on AI). If every
    model is down, `/closeout` still works.
-2. **Teeth attach to acts, never to content** (architecture **P3**).
+2. **Consequences attach to acts, never to content** (architecture **P3**).
    The Engine module reads and writes only `~/.lucid/engine/`. It has
    no read path to `raw/`, `processed/`, `insights/`, or `people/`.
    The close-out's journal line is written to `raw/` *by the router
@@ -513,7 +513,7 @@ active profile · days to next gate.
 Adherence never travels alone: every surface that shows it —
 status.json and `/status` included — co-presents the floor-day ratio
 and raw days-accounted (the **honest-number pairing**, engine §3).
-Floors count as full completions for all teeth math; the co-numbers,
+Floors count as full completions for all consequence math; the co-numbers,
 never a score, are what keep the record honest without shame math.
 `rebuild_engine_status` computes over **folded** day records
 (`corrections[]` applied in array order) plus the storm and profile

@@ -45,7 +45,7 @@ Lucid ships **one first-class skill** as the harness integration:
 
 ## Consequences
 
-* The Phase-0 rule keeps its teeth end-to-end: with the agent, the
+* The Phase-0 rule keeps its force end-to-end: with the agent, the
   model, or the whole harness down, `lucid closeout` at a terminal —
   or a plain line backfilled later — still completes the night (P9,
   P10, ADR-0003).

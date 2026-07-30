@@ -20,7 +20,7 @@ import (
 )
 
 // Job runtime identifiers. The weekly report runs its own disposable flywheel
-// node beside the teeth's and the companion's, so its queue, kind, and slug are
+// node beside the Engine's and the companion's, so its queue, kind, and slug are
 // distinct: the single weekly periodic never collides with the daily pairs, and
 // a restart reconciles it by slug without duplicating.
 const (
@@ -34,7 +34,7 @@ const (
 	backfillCap = 1
 
 	// envWitnessReportDB overrides the job-DB path when --db is not passed. Like
-	// the teeth's flywheel.db and the companion's companion.db it is disposable
+	// the Engine's flywheel.db and the companion's companion.db it is disposable
 	// machinery, not Ledger truth, so it lives outside ~/.lucid by default.
 	envWitnessReportDB = "LUCID_WITNESS_REPORT_DB"
 
@@ -330,7 +330,7 @@ func (w weeklyWorker) Work(ctx context.Context, _ *flywheel.Job[weeklyArgs]) (fl
 // Run opens the disposable job DB, migrates it, registers the weekly worker,
 // reconciles the single Monday-morning periodic from the config Time/Weekday, and
 // runs the flywheel node until ctx is canceled (SIGINT/SIGTERM upstream). It
-// returns nil on a clean drain. It runs beside the teeth and companion daemons in
+// returns nil on a clean drain. It runs beside the Engine and companion daemons in
 // the same process (config-gated), so it is up whenever the scheduler is.
 func Run(ctx context.Context, o Options) error {
 	if o.Store == nil {
@@ -419,7 +419,7 @@ func parseHM(hm string) (hour, minute int, err error) {
 // DefaultDBPath resolves the disposable weekly-report job-DB path: an explicit
 // override wins, then the LUCID_WITNESS_REPORT_DB env override, then the default
 // witness-report.db under the OS user-config dir (outside the ~/.lucid Ledger,
-// and distinct from the teeth's flywheel.db and the companion's companion.db). It
+// and distinct from the Engine's flywheel.db and the companion's companion.db). It
 // is exported so a read-only inspector resolves the exact same path the daemon
 // writes to.
 func DefaultDBPath(dbPath string) (string, error) {

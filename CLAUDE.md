@@ -107,7 +107,7 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `internal/cli` (the junction that owns the `deploy` dependency; `storage`
   never imports it).
 - [`internal/flynode`](internal/flynode) — the flywheel-node scaffolding every
-  daemon (teeth, companion, workout, witness report) shares: `Boot` is the job-DB
+  daemon (Engine, companion, workout, witness report) shares: `Boot` is the job-DB
   open/migrate/scaffold/reconcile/run spine each `Run` previously carried inline,
   and `Fire[P]` is the send-path reliability order (past-cutoff → idempotency →
   compose → late-note → send → verify → receipt → post-send) the three message

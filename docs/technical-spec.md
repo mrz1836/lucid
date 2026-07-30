@@ -21,7 +21,7 @@ agents**:
 | **Structuring Agent** | Extracts entities, themes, connections from raw entries |
 | **People Agent** | Detects new people, prompts for profiles, maintains the relational map |
 | **Therapist Agent** | Identifies emotional patterns, fears, wounds, growth edges — cartography, never treatment |
-| **Coach Agent** | Tracks goals, suggests actions, celebrates progress — voice and encouragement, never teeth: accountability for committed practices belongs to the Engine ([engine.md](engine.md)) |
+| **Coach Agent** | Tracks goals, suggests actions, celebrates progress — voice and encouragement, never consequences: accountability for committed practices belongs to the Engine ([engine.md](engine.md)) |
 | **Framework Agent** | Applies the user's consented interpretation lenses ([frameworks.md](frameworks.md)) to any entry or insight |
 | **Reflection Agent** | Generates daily/weekly/monthly/yearly summaries |
 | **Consolidation Agent** | Strengthens memory connections, surfaces patterns, maintains the memory graph |

@@ -86,7 +86,7 @@ evidence.
   lens is one book's conversation practice. Where entries read as
   contempt, fear, or harm, the clinical boundary (architecture §6)
   binds: professional care, with longitudinal context.
-* If the user wants the dates themselves as a commitment with teeth
+* If the user wants the dates themselves as a commitment with consequences
   (a monthly date as a practice), that is an Engine act through a
   Gate — the lens interprets; it never schedules.
 

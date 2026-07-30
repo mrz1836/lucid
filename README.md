@@ -346,7 +346,7 @@ Lucid is two subsystems over one substrate, with a hard boundary between them:
 
 - No cloud sync, no telemetry, no analytics, no accounts — the record lives on
   your machine and is always exportable as a directory of plain files.
-- Nothing you write is ever scored, streaked, or penalized. Teeth attach to acts
+- Nothing you write is ever scored, streaked, or penalized. Consequences attach to acts
   (did you show up?), never to content.
 - No autonomous messages beyond the pre-committed Engine templates (bell, nudge,
   witness escalation) and the opt-in, config-gated sends (the daily companion,
@@ -370,7 +370,7 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 |-----|---------|
 | [`docs/vision.md`](docs/vision.md) | The long-form product vision: the five roles Lucid plays, and sharing the record — the right truth, at the right depth, for the right person. |
 | [`docs/architecture.md`](docs/architecture.md) | The whole design in ~150 lines: the Mirror and the Engine over one user-owned Ledger, and the ten principles that govern both. |
-| [`docs/engine.md`](docs/engine.md) | The half with teeth: chains, bells, floors, modes, storms, telemetry, and the accountability ladder. |
+| [`docs/engine.md`](docs/engine.md) | The half with consequences: chains, bells, floors, modes, storms, telemetry, and the accountability ladder. |
 | [`docs/observations.md`](docs/observations.md) | The body's biographer: one-line logs on a frozen event envelope; registries, enrichers, and the projections that turn a life into a queryable record. Inventory, never obligation. |
 | [`docs/frameworks.md`](docs/frameworks.md) | Interpretation lenses — Stoicism, NVC, IFS, attachment theory, Eight Dates, the Four Agreements, or any tradition you author. Your worldview is sovereign; the record stays lens-neutral forever. |
 | [`docs/scientist.md`](docs/scientist.md) | Pre-registered self-experiments at Retro/Gate cadence — and how the design learns across users while the data never leaves. |

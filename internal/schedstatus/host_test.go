@@ -190,7 +190,7 @@ func healthyInputs() Inputs {
 	return Inputs{
 		Companion: CompanionInfo{Enabled: true, Prompts: nil},
 		Chain:     ChainMarks{BellTime: "19:00", TripwireTime: "06:00"},
-		Teeth: DBInput{Path: "/t.db", Periodics: []PeriodicStatus{
+		Engine: DBInput{Path: "/t.db", Periodics: []PeriodicStatus{
 			{Slug: SlugTripwire, Present: true, Active: true},
 			{Slug: SlugBell, Present: true, Active: false},
 			{Slug: SlugBellFallback, Present: true, Active: true},

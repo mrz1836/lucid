@@ -609,7 +609,7 @@ func TestTripwireWorker_SecondRunSameDayIsNoOp(t *testing.T) {
 // ── Companion presentation: user-channel suppression ─────────────────────────
 
 // TestTripwireWorker_PresentedSuppressesUserSend proves the presented worker
-// keeps the teeth modeless while withholding the user-channel send: on a
+// keeps the Engine modeless while withholding the user-channel send: on a
 // one-miss day it fires no user L1 (the companion presents it) yet still
 // persists escalation_state to l1_fired. A default (non-presented) worker over
 // an identical Ledger still fires exactly one user L1 — today's behavior intact.
@@ -662,7 +662,7 @@ func TestUpsertPeriodics_SuppressDeactivatesBell(t *testing.T) {
 // un-suppressed flips the bell inactive and back to active on the next boot —
 // the reconcile makes the live state match the config every time. The backstop
 // tracks the inverse: it stands down as soon as the real bell is firing again,
-// so the evening never has two teeth senders armed at once.
+// so the evening never has two Engine senders armed at once.
 func TestUpsertPeriodics_SuppressTogglesBellBackOn(t *testing.T) {
 	r := newRig(t, models.NewFixedClock(at(2026, 7, 5, 12, 0)))
 	ctx := ctxAt(at(2026, 7, 5, 12, 0))

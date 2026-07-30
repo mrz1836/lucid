@@ -192,7 +192,7 @@ func TestSchedulerRun_GracefulStopDrainsClean(t *testing.T) {
 
 // enableWorkoutInScheduler writes an enabled workout block (with a synthetic
 // program and the two opaque prompt files) into the LUCID_HOME the scheduler
-// env points at, so the daemon starts the workout node beside the teeth.
+// env points at, so the daemon starts the workout node beside the engine.
 func enableWorkoutInScheduler(t *testing.T) {
 	t.Helper()
 	home := os.Getenv("LUCID_HOME")
@@ -220,8 +220,8 @@ func enableWorkoutInScheduler(t *testing.T) {
 // TestSchedulerRun_WorkoutEnabled_StartsSlotNode proves the config gate: with the
 // workout block enabled the daemon starts the workout slot node, which reconciles
 // its daily periodic into its own disposable job DB (LUCID_WORKOUT_DB), and a
-// cancel drains the whole set cleanly. The teeth-only drain test above is the
-// paired "workout disabled → not started" proof (only the two teeth periodics
+// cancel drains the whole set cleanly. The engine-only drain test above is the
+// paired "workout disabled → not started" proof (only the two engine periodics
 // appear and no workout job DB is created).
 func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
 	setSchedulerEnv(t)
@@ -238,14 +238,14 @@ func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
 	go func() { done <- runScheduler(ctx, &stderr, dbPath) }()
 
 	// The workout node reconciles its single daily periodic into its own job DB —
-	// proof the config gate started it beside the teeth. Both nodes must be up
+	// proof the config gate started it beside the engine. Both nodes must be up
 	// before the cancel: the two start concurrently, and the workout node reaches
 	// its (single, smaller) store first often enough that canceling on its
-	// periodic alone would routinely interrupt the teeth mid-startup and surface a
+	// periodic alone would routinely interrupt the engine mid-startup and surface a
 	// context-canceled error where this test asserts a clean drain.
 	require.Eventually(t, func() bool {
 		return len(slugsIn(workoutDB)) == 1 && len(slugsIn(dbPath)) == 3
-	}, 15*time.Second, 25*time.Millisecond, "the daemon starts the workout slot node beside the teeth")
+	}, 15*time.Second, 25*time.Millisecond, "the daemon starts the workout slot node beside the engine")
 	assert.Equal(t, []string{"lucid-workout-daily"}, slugsIn(workoutDB), "the slot node reconciles its own daily periodic")
 
 	cancel()
@@ -272,7 +272,7 @@ type reconcileJSON struct {
 }
 
 // seedReconcileEnv points the command at an isolated Ledger whose companion owns
-// the evening window, plus a teeth job store holding the three production
+// the evening window, plus an engine job store holding the three production
 // definitions with the tripwire parked — the exact shape the repair lever exists
 // for: one send switched off, one deliberately suppressed, one healthy.
 func seedReconcileEnv(t *testing.T) string {

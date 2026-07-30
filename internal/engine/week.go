@@ -9,7 +9,7 @@ import "time"
 // arithmetic as the metrics projection and can never diverge from it. Pure: no
 // model, no IO. A day is "decided" once completed or missed; weekly misses are
 // Decided - Completed on the returned Window (floors count as completions —
-// teeth math has no shame score, so a Yellow floor day scores 1.0). A nil loc
+// consequence math has no shame score, so a Yellow floor day scores 1.0). A nil loc
 // falls back to UTC, matching BuildMetrics/BuildStatus, so a caller that never
 // resolves a location cannot panic the fold.
 func WeekWindow(records []DayRecord, ref time.Time, loc *time.Location) Window {

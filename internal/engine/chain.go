@@ -11,7 +11,7 @@
 //   - Agent-free (P9): nothing here calls a model. Close-out is a fixed
 //     script, streak math is arithmetic. A guard test asserts no
 //     provider/agent import ever reaches this package.
-//   - Teeth attach to acts, never content (P3): this package reads and
+//   - Consequences attach to acts, never content (P3): this package reads and
 //     writes only the engine/ tree via the storage adapter; it never
 //     touches raw/, processed/, insights/, or people/. The close-out's
 //     journal line is written to raw/ by the router, not here.

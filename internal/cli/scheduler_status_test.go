@@ -33,9 +33,9 @@ type schedStatusJSON struct {
 		BellTime     string `json:"bell_time"`
 		TripwireTime string `json:"tripwire_time"`
 	} `json:"chain"`
-	Teeth struct {
+	Engine struct {
 		State string `json:"state"`
-	} `json:"teeth"`
+	} `json:"engine"`
 	Receipts []struct {
 		Window   string `json:"window"`
 		Present  bool   `json:"present"`
@@ -143,7 +143,7 @@ func seedStatusJobDB(t *testing.T, path string, specs ...flywheel.PeriodicSpec) 
 	require.NoError(t, sqlDB.Close())
 }
 
-// seedHealthyDBs seeds the teeth and companion job DBs and both delivery receipts
+// seedHealthyDBs seeds the engine and companion job DBs and both delivery receipts
 // for a fully-healthy companion at statusMorning: tripwire active, bell suppressed
 // with its evening backstop armed (the companion owns the night send), morning +
 // night companion periodics active, and verified receipts whose morning date
@@ -208,7 +208,7 @@ func TestSchedulerStatus_Healthy_ExitOK(t *testing.T) {
 	assert.Contains(t, out, "Companion: enabled")
 	assert.Contains(t, out, "Provider:")
 	assert.Contains(t, out, "Chain: bell 19:00, tripwire 06:00")
-	assert.Contains(t, out, "Teeth periodics")
+	assert.Contains(t, out, "Engine periodics")
 	assert.Contains(t, out, "Companion periodics")
 	assert.Contains(t, out, "Receipts:")
 	assert.Contains(t, out, "Recent runs:")
@@ -244,11 +244,11 @@ func TestSchedulerStatus_ParkedPeriodic_NamesRemedy(t *testing.T) {
 }
 
 // TestSchedulerStatus_CompanionDisabled_Warn: a disabled companion with healthy
-// teeth is a warn (configured but delivery is off) — exit 1, not a hard error
+// engine is a warn (configured but delivery is off) — exit 1, not a hard error
 // (AC-4).
 func TestSchedulerStatus_CompanionDisabled_Warn(t *testing.T) {
 	_, schedulerDB, _ := seedScheduler(t, false, "PROMPT BODY")
-	// Companion disabled → the bell is required active; seed both teeth active.
+	// Companion disabled → the bell is required active; seed both engine periodics active.
 	seedStatusJobDB(
 		t, schedulerDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
@@ -266,7 +266,7 @@ func TestSchedulerStatus_CompanionDisabled_Warn(t *testing.T) {
 
 // TestSchedulerStatus_NeverRun_Error_NoPanic: a scaffolded-but-never-run
 // scheduler (no job DBs, no receipts) does not panic, prints clear "not
-// initialized / no receipt yet" output, and classifies the missing teeth DB as a
+// initialized / no receipt yet" output, and classifies the missing engine DB as a
 // hard error (exit 2) (AC-6).
 func TestSchedulerStatus_NeverRun_Error_NoPanic(t *testing.T) {
 	isolatedHome(t)
@@ -304,7 +304,7 @@ func TestSchedulerStatus_JSON_HasVerdictAndShape(t *testing.T) {
 	assert.NotEmpty(t, v.Companion.ProviderBackend)
 	assert.Equal(t, "19:00", v.Chain.BellTime)
 	assert.Equal(t, "06:00", v.Chain.TripwireTime)
-	assert.Equal(t, "ok", v.Teeth.State)
+	assert.Equal(t, "ok", v.Engine.State)
 	require.Len(t, v.Receipts, 2)
 	require.NotEmpty(t, v.Host, "host checks are present in the JSON document")
 	require.NotEmpty(t, v.Checks, "the flat check list is present in the JSON document")

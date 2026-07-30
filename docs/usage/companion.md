@@ -3,8 +3,8 @@
 The **companion** is Lucid's optional pair of daily messages — one in the
 morning, one at night — composed through your model provider from your own prompt
 files and the chain's honest live numbers, and delivered to your user channel. It
-is the Mirror-side, model-allowed counterpart to the Engine's accountability
-*teeth*: the bell and tripwire stay modeless and deterministic (a model can never
+is the Mirror-side, model-allowed counterpart to the Engine's accountability:
+the bell and tripwire stay modeless and deterministic (a model can never
 soften "you missed"), while the companion wraps that same window in a warm,
 in-voice message.
 
@@ -14,9 +14,9 @@ you opt in; nothing below happens until you set `companion.enabled: true`.
 - **What it is** — a Mirror-side job that reaches the model through
   [`../adr/0006-model-access.md`](../adr/0006-model-access.md), never the Engine.
   See [`../architecture.md`](../architecture.md) for the Mirror/Engine split and
-  why the teeth stay pure.
+  why the Engine stays pure.
 - **Where it runs** — inside `lucid scheduler run`, in the same supervised
-  process as the teeth (config-gated), so it is up whenever the scheduler is. It
+  process as the Engine (config-gated), so it is up whenever the scheduler is. It
   is not an external cron.
 
 ## The two windows
@@ -29,7 +29,7 @@ The companion composes for two windows a day:
 Both are in your host's local time and follow the same DST-correct clock the
 Engine uses. **The fire times are not companion settings.** The companion inherits
 the `chain.json` `bell_time` / `escalation.tripwire_time` marks so it can never
-drift from the deterministic pair — the companion and the teeth fire at the same
+drift from the deterministic pair — the companion and the Engine fire at the same
 instant, and you get exactly **one message per window**. To move a window, change
 the chain mark (see [`../engine.md`](../engine.md)); the companion follows.
 
@@ -52,7 +52,7 @@ prompt files:
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `enabled` | bool | Gates the whole feature. Default `false` → the scheduler runs only the pure Engine teeth. |
+| `enabled` | bool | Gates the whole feature. Default `false` → the scheduler runs only the pure Engine. |
 | `morning_template` | path | The morning-window template — an opaque prompt file, passed to the model as the user message. |
 | `night_template` | path | The night-window template — same, for the night window. |
 | `system_prompt` | path | The system prompt, passed to the model as the `System` role on every compose. |
@@ -250,7 +250,7 @@ is never mistaken for the model's warm output when it was not.
 ## Pausing it
 
 Set `companion.enabled: false` (or remove the block) and restart
-`lucid scheduler run`. The scheduler reverts to the pure Engine teeth — the bell
+`lucid scheduler run`. The scheduler reverts to the pure Engine — the bell
 and tripwire send on their own, exactly as before the companion existed. Pausing
 the companion never disables accountability.
 
@@ -292,12 +292,12 @@ The companion degrades in layers and is designed to **never fall silent** — a 
   If even that channel is unreachable, the job returns a loud error that fails the
   scheduled job and lands in the supervised daemon log. Silence is the one outcome
   the companion never produces.
-- **A missed night window** (any of the above ending in no delivery): the teeth
-  [evening backstop](#how-it-coexists-with-the-engine-teeth) posts the ordinary
+- **A missed night window** (any of the above ending in no delivery): the Engine's
+  [evening backstop](#how-it-coexists-with-the-engine) posts the ordinary
   pre-committed Bell after the cut-off, so the accountability window itself is not
   lost — only its warmth.
 
-## How it coexists with the Engine teeth
+## How it coexists with the Engine
 
 When the companion is enabled it becomes the single user-facing sender for its
 window. The Engine still runs its **full modeless decision** every day — it
@@ -306,12 +306,12 @@ escalation, all deterministic and untouched. Only
 its *user-channel* send is suppressed, because the companion presents that line
 (appending the verdict verbatim on a missed day). The dead-man decision stays
 modeless; the companion only dresses its output. Disable the companion and the
-teeth send for themselves again, byte-for-byte as before.
+Engine sends for itself again, byte-for-byte as before.
 
 **The evening backstop.** Owning the window means owning the risk of missing it:
 if the night send fails outright — the host was off past the `22:00` cut-off, the
 channel was unreachable all evening — the evening would pass in silence. So the
-teeth keep one backstop. A dedicated periodic (`lucid-bell-fallback`) fires
+Engine keeps one backstop. A dedicated periodic (`lucid-bell-fallback`) fires
 *after* the companion can no longer post, and sends the ordinary pre-committed
 Bell **only if** there is no verified `night` delivery receipt for that logical
 day. If the companion delivered — on time or late — the backstop stands down. At
@@ -322,7 +322,7 @@ behavior: [`commands.md`](commands.md#the-evening-backstop-lucid-bell-fallback).
 ## Operational notes
 
 - The companion runs its own small, disposable job database, separate from the
-  teeth's and from the `~/.lucid` Ledger. It defaults to a path under your user
+  Engine's and from the `~/.lucid` Ledger. It defaults to a path under your user
   config directory; set `LUCID_COMPANION_DB` to override it. It holds only
   scheduling machinery — no Ledger truth — so it is safe to delete; it is rebuilt
   on the next run.
@@ -367,7 +367,7 @@ The full flag, exit-code, and verdict-threshold tables live in the
 
 - [`commands.md`](commands.md) — the full `lucid` command reference, including
   `companion fire`, `scheduler run`, and `scheduler status`.
-- [`../engine.md`](../engine.md) — the accountability teeth (bell, tripwire,
+- [`../engine.md`](../engine.md) — the accountability node (bell, tripwire,
   escalation) and the chain marks the companion inherits.
 - [`../architecture.md`](../architecture.md) — the Mirror/Engine split and the
   purity boundary the companion sits beside.

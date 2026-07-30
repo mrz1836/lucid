@@ -16,7 +16,7 @@ The central architectural claim: reflection tools fail without a behavior layer,
 
 **P2 — Events are immutable; interpretations are drafts.** The Ledger is append-only. Everything derived from it — the Profile, relational patterns, balance views, statistics — is a projection: rebuildable, versioned, editable. No inference merges into the self-model without explicit user acceptance (the resonance gate, §5). Rejected inferences are retained as events.
 
-**P3 — Teeth attach to acts, never to content.** The Engine may enforce, escalate, and apply stakes to whether a committed practice occurred. Nothing in the Mirror — no entry, emotion, admission, or silence about content — may ever be scored, escalated, shared, or penalized. A return after silence is welcomed, not audited. Rationale: behavior responds to stakes; honesty dies under them.
+**P3 — Consequences attach to acts, never to content.** The Engine may enforce, escalate, and apply stakes to whether a committed practice occurred. Nothing in the Mirror — no entry, emotion, admission, or silence about content — may ever be scored, escalated, shared, or penalized. A return after silence is welcomed, not audited. Rationale: behavior responds to stakes; honesty dies under them.
 
 **P4 — Obliquity.** Outcome variables (body composition, relationship status, skill level) may be computed and reviewed at gate cadence but are never surfaced as daily targets. Daily surfaces show process only. The Charter may name outcomes as **forever unmeasured**: things the system contributes rooms and readiness toward, but never metrics — these are recorded explicitly so they cannot drift into being targets later.
 
@@ -91,7 +91,7 @@ What is *never* an extension: changing the envelope, mutating past
 events, adding a subsystem beyond those already named in §3
 (Agent-Self, Charter, and Witness are base design activated by
 roadmap phase, not extensions — the prohibition covers *new*
-subsystems), or letting a new capability grow teeth outside the
+subsystems), or letting a new capability acquire consequences outside the
 Engine's Gate process. Registries themselves are not a new subsystem
 — they generalize the existing people store. Payload
 schemas version forward; projections read what they understand and
@@ -103,7 +103,7 @@ them never has to be migrated, re-consented, or re-understood.
 
 ## 5. Consent and privacy model
 
-The **resonance gate** is the lifecycle for all inferences: proposed → presented with supporting evidence and the question "does this resonate?" → accepted, edited, or rejected → merged into the Profile only on acceptance, with rejections retained as events. The system never asserts a pattern; it offers one. An accepted insight may carry a **rule** — one line of user-stated intent derived from it, recorded as testimony. Rules take no streaks, scores, or reminders; they are revisited at gate cadence ("still standing?" — kept and lapsed are both first-class answers), and they earn teeth only by becoming an Engine commitment through a Gate. Insight-to-action is the Mirror's honest measure, and it is measured at review cadence, never surfaced daily (P4).
+The **resonance gate** is the lifecycle for all inferences: proposed → presented with supporting evidence and the question "does this resonate?" → accepted, edited, or rejected → merged into the Profile only on acceptance, with rejections retained as events. The system never asserts a pattern; it offers one. An accepted insight may carry a **rule** — one line of user-stated intent derived from it, recorded as testimony. Rules take no streaks, scores, or reminders; they are revisited at gate cadence ("still standing?" — kept and lapsed are both first-class answers), and they earn consequences only by becoming an Engine commitment through a Gate. Insight-to-action is the Mirror's honest measure, and it is measured at review cadence, never surfaced daily (P4).
 
 An **off-limits registry** lets the user mark topics as sensitive or excluded from inference entirely — including people: an off-limits person is redacted from every inference input at slice-build time, fail closed, while the record beneath persists (facts persist, labels belong to the user). The Profile is exportable and wipeable; the Ledger beneath it is not — facts persist, labels belong to the user. The Witness visibility contract (§3) is enforced at the projection layer: witness-facing views are computed from Engine events only — no observation, enrichment, or Mirror content is ever witness-visible.
 

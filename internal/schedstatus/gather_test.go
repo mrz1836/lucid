@@ -204,10 +204,10 @@ func TestGather_AssemblesEndToEnd(t *testing.T) {
 	require.NoError(t, a.WriteCompanionReceipt(storage.CompanionReceipt{Date: today, Window: windowMorning, MessageID: "m", Verified: true}))
 	require.NoError(t, a.WriteCompanionReceipt(storage.CompanionReceipt{Date: today, Window: windowNight, MessageID: "n", Verified: true}))
 
-	teeth := filepath.Join(t.TempDir(), "flywheel.db")
+	engineJobs := filepath.Join(t.TempDir(), "flywheel.db")
 	comp := filepath.Join(t.TempDir(), "companion.db")
 	seedJobDB(
-		t, teeth,
+		t, engineJobs,
 		flywheel.PeriodicSpec{Slug: SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: true},
 		// The companion owns the evening, so the bell is suppressed and its
 		// backstop is the armed one — the daemon's own healthy shape.
@@ -231,11 +231,11 @@ func TestGather_AssemblesEndToEnd(t *testing.T) {
 	cfg.Companion = config.CompanionConfig{Enabled: true, SystemPrompt: sys, MorningTemplate: morn, NightTemplate: night}
 
 	in, err := Gather(context.Background(), GatherParams{
-		Config: cfg, Store: a, SchedulerDB: teeth, CompanionDB: comp,
+		Config: cfg, Store: a, SchedulerDB: engineJobs, CompanionDB: comp,
 		Probe: fakeProbe{checks: []Check{okCheck("host.daemon", "up")}},
 	})
 	require.NoError(t, err)
-	assert.True(t, in.Teeth.Periodics != nil && in.CompanionJobs.Periodics != nil)
+	assert.True(t, in.Engine.Periodics != nil && in.CompanionJobs.Periodics != nil)
 	assert.Len(t, in.Receipts, 2)
 	assert.Len(t, in.Host, 1)
 

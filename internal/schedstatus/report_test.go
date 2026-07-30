@@ -24,12 +24,12 @@ func okPrompts() []PromptPath {
 	}
 }
 
-// okTeeth builds a healthy teeth job DB. The bell and its evening backstop take
+// okEngine builds a healthy engine job DB. The bell and its evening backstop take
 // turns: with the companion enabled the bell is deliberately suppressed and the
 // backstop is armed to catch a companion that never delivers; with the companion
 // disabled the bell fires itself and the backstop stands down. Either way the
 // inactive one is the correct state and must not fault.
-func okTeeth(companionEnabled bool, now time.Time) DBInput {
+func okEngine(companionEnabled bool, now time.Time) DBInput {
 	return DBInput{
 		Path: "/var/lucid/flywheel.db",
 		Periodics: []PeriodicStatus{
@@ -67,33 +67,33 @@ func healthyEnabled(now time.Time) Inputs {
 	return Inputs{
 		Companion:     CompanionInfo{Enabled: true, ProviderBackend: "claude_cli", ProviderModel: "opus", Prompts: okPrompts()},
 		Chain:         baseChain(),
-		Teeth:         okTeeth(true, now),
+		Engine:        okEngine(true, now),
 		CompanionJobs: okCompanionDB(),
 		Receipts:      okReceipts(now),
 		Host:          []Check{{Name: "host.daemon", State: Ok, Detail: "running"}},
 	}
 }
 
-// healthyDisabled is a healthy teeth-only system: the companion is off (a warn,
+// healthyDisabled is a healthy engine-only system: the companion is off (a warn,
 // not an error), the bell and tripwire both deliver to the user and are active,
 // and the companion job DB legitimately does not exist.
 func healthyDisabled(now time.Time) Inputs {
 	return Inputs{
 		Companion:     CompanionInfo{Enabled: false, ProviderBackend: "claude_cli", ProviderModel: "opus"},
 		Chain:         baseChain(),
-		Teeth:         okTeeth(false, now),
+		Engine:        okEngine(false, now),
 		CompanionJobs: DBInput{Path: "/var/lucid/companion.db", Missing: true},
 		Host:          []Check{{Name: "host.daemon", State: Ok, Detail: "running"}},
 	}
 }
 
-// parkTeeth switches one teeth periodic off by slug — the exact state a parked
+// parkEngine switches one engine periodic off by slug — the exact state a parked
 // send is in — so a case reads as what it is testing and never depends on
 // fixture ordering.
-func parkTeeth(in *Inputs, slug string) {
-	for i := range in.Teeth.Periodics {
-		if in.Teeth.Periodics[i].Slug == slug {
-			in.Teeth.Periodics[i].Active = false
+func parkEngine(in *Inputs, slug string) {
+	for i := range in.Engine.Periodics {
+		if in.Engine.Periodics[i].Slug == slug {
+			in.Engine.Periodics[i].Active = false
 			return
 		}
 	}
@@ -102,9 +102,9 @@ func parkTeeth(in *Inputs, slug string) {
 // setTripwireCursor moves the tripwire's next run — the knob that separates a
 // merely-due periodic from one whose cursor is frozen.
 func setTripwireCursor(in *Inputs, next time.Time) {
-	for i := range in.Teeth.Periodics {
-		if in.Teeth.Periodics[i].Slug == SlugTripwire {
-			in.Teeth.Periodics[i].NextRun = next
+	for i := range in.Engine.Periodics {
+		if in.Engine.Periodics[i].Slug == SlugTripwire {
+			in.Engine.Periodics[i].NextRun = next
 			return
 		}
 	}
@@ -122,9 +122,9 @@ func checkFor(r Report, name string) (Check, bool) {
 	return Check{}, false
 }
 
-// periodicFor returns the reported teeth periodic row for a slug.
+// periodicFor returns the reported engine periodic row for a slug.
 func periodicFor(r Report, slug string) (PeriodicStatus, bool) {
-	for _, p := range r.Teeth.Periodics {
+	for _, p := range r.Engine.Periodics {
 		if p.Slug == slug {
 			return p, true
 		}
@@ -160,19 +160,19 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			verdict: Error,
 		},
 		{
-			name: "missing teeth DB is an error",
+			name: "missing engine DB is an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
-				in.Teeth = DBInput{Path: "/var/lucid/flywheel.db", Missing: true}
+				in.Engine = DBInput{Path: "/var/lucid/flywheel.db", Missing: true}
 				return in
 			},
 			verdict: Error,
 		},
 		{
-			name: "malformed teeth DB is an error",
+			name: "malformed engine DB is an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
-				in.Teeth = DBInput{Path: "/var/lucid/flywheel.db", Err: "file is not a database"}
+				in.Engine = DBInput{Path: "/var/lucid/flywheel.db", Err: "file is not a database"}
 				return in
 			},
 			verdict: Error,
@@ -199,7 +199,7 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			name: "inactive tripwire is an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
-				parkTeeth(&in, SlugTripwire)
+				parkEngine(&in, SlugTripwire)
 				return in
 			},
 			verdict: Error,
@@ -208,7 +208,7 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			name: "inactive evening backstop while the companion owns the send is an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
-				parkTeeth(&in, SlugBellFallback)
+				parkEngine(&in, SlugBellFallback)
 				return in
 			},
 			verdict: Error,
@@ -223,7 +223,7 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			verdict: Warn,
 		},
 		{
-			name: "a teeth cursor stuck a full day behind is an error",
+			name: "an engine cursor stuck a full day behind is an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
 				setTripwireCursor(&in, now.Add(-36*time.Hour))
@@ -232,7 +232,7 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			verdict: Error,
 		},
 		{
-			name: "a merely-due teeth cursor is not an error",
+			name: "a merely-due engine cursor is not an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
 				setTripwireCursor(&in, now.Add(-30*time.Minute))
@@ -252,7 +252,7 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			name: "missing bell while companion owns the evening send is not an error",
 			build: func() Inputs {
 				in := healthyEnabled(now)
-				in.Teeth.Periodics = in.Teeth.Periodics[1:] // drop the suppressed bell entirely
+				in.Engine.Periodics = in.Engine.Periodics[1:] // drop the suppressed bell entirely
 				return in
 			},
 			verdict: Ok,
@@ -261,7 +261,7 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			name: "inactive bell while companion disabled is an error",
 			build: func() Inputs {
 				in := healthyDisabled(now)
-				in.Teeth.Periodics[0].Active = false // bell off, nothing delivers the evening
+				in.Engine.Periodics[0].Active = false // bell off, nothing delivers the evening
 				return in
 			},
 			verdict: Error,
@@ -381,7 +381,7 @@ func TestExitCodeMirrorsVerdict(t *testing.T) {
 func TestAssembleAggregatesRunFailures(t *testing.T) {
 	now := fixedNow()
 	in := healthyEnabled(now)
-	in.Teeth.Failures = []RunFailure{{Kind: "lucid-tripwire", ErrorClass: "timeout", Message: "discord timeout"}}
+	in.Engine.Failures = []RunFailure{{Kind: "lucid-tripwire", ErrorClass: "timeout", Message: "discord timeout"}}
 	in.CompanionJobs.Failures = []RunFailure{{Kind: "lucid-companion-morning", ErrorClass: "timeout", Message: "discord timeout"}}
 
 	r := Assemble(in, now)
@@ -390,14 +390,14 @@ func TestAssembleAggregatesRunFailures(t *testing.T) {
 	require.Equal(t, string(Ok), r.Verdict, "recent failures alone must not lower the verdict")
 }
 
-// TestParkedTeethPeriodicNamesRemedy proves the whole point of the parked-send
+// TestParkedEnginePeriodicNamesRemedy proves the whole point of the parked-send
 // report: a periodic that is intended active but switched off is an error whose
 // detail names the slug *and* the exact command that repairs it, so the report is
 // actionable without a second lookup.
-func TestParkedTeethPeriodicNamesRemedy(t *testing.T) {
+func TestParkedEnginePeriodicNamesRemedy(t *testing.T) {
 	now := fixedNow()
 	in := healthyEnabled(now)
-	parkTeeth(&in, SlugTripwire)
+	parkEngine(&in, SlugTripwire)
 
 	r := Assemble(in, now)
 	require.Equal(t, string(Error), r.Verdict)
@@ -475,7 +475,7 @@ func TestSuppressedBellIsIntendedOK(t *testing.T) {
 func TestParkedBackstopNamesRemedy(t *testing.T) {
 	now := fixedNow()
 	in := healthyEnabled(now)
-	parkTeeth(&in, SlugBellFallback)
+	parkEngine(&in, SlugBellFallback)
 
 	r := Assemble(in, now)
 	require.Equal(t, string(Error), r.Verdict)
@@ -504,14 +504,14 @@ func TestBackstopStoodDownIsIntendedOK(t *testing.T) {
 	require.Contains(t, p.Note, "stood down")
 }
 
-// TestAbsentTeethPeriodicPointsAtTheDaemon: a slug the store has no row for
+// TestAbsentEnginePeriodicPointsAtTheDaemon: a slug the store has no row for
 // cannot be re-armed — there is nothing to re-arm — so the fault points at the
 // one thing that seeds it, a daemon start. An absent *intended-inactive* periodic
 // stays a non-fault with its reason.
-func TestAbsentTeethPeriodicPointsAtTheDaemon(t *testing.T) {
+func TestAbsentEnginePeriodicPointsAtTheDaemon(t *testing.T) {
 	now := fixedNow()
 	in := healthyEnabled(now)
-	in.Teeth.Periodics = in.Teeth.Periodics[:2] // drop the tripwire row entirely
+	in.Engine.Periodics = in.Engine.Periodics[:2] // drop the tripwire row entirely
 
 	r := Assemble(in, now)
 	require.Equal(t, string(Error), r.Verdict)
@@ -529,7 +529,7 @@ func TestAbsentTeethPeriodicPointsAtTheDaemon(t *testing.T) {
 
 	// An absent bell while the companion owns the evening is not a fault.
 	noBell := healthyEnabled(now)
-	noBell.Teeth.Periodics = noBell.Teeth.Periodics[1:]
+	noBell.Engine.Periodics = noBell.Engine.Periodics[1:]
 	r = Assemble(noBell, now)
 	require.Equal(t, string(Ok), r.Verdict)
 	c, ok = checkFor(r, "periodic."+SlugBell)
@@ -565,13 +565,13 @@ func TestMissedEveningWindowStaysLegible(t *testing.T) {
 }
 
 // TestAssembleNeverRun is the never-initialized scaffold: no job DBs, no
-// receipts. It must not panic and must classify the missing teeth DB as an error.
+// receipts. It must not panic and must classify the missing engine DB as an error.
 func TestAssembleNeverRun(t *testing.T) {
 	now := fixedNow()
 	in := Inputs{
 		Companion: CompanionInfo{Enabled: false},
 		Chain:     baseChain(),
-		Teeth:     DBInput{Path: "/var/lucid/flywheel.db", Missing: true},
+		Engine:    DBInput{Path: "/var/lucid/flywheel.db", Missing: true},
 		CompanionJobs: DBInput{
 			Path:    "/var/lucid/companion.db",
 			Missing: true,

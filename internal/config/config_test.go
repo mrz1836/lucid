@@ -179,7 +179,7 @@ func TestProvider_RoundTripWithRoleOverride(t *testing.T) {
 
 // TestDefault_CompanionBlock pins the shipped companion default: the
 // feature is off and every prompt-file path is empty so a fresh Ledger
-// runs the pure Engine teeth until an operator opts in (data-model.md
+// runs the pure Engine until an operator opts in (data-model.md
 // §"lucid.json").
 func TestDefault_CompanionBlock(t *testing.T) {
 	c := Default().Companion
@@ -341,7 +341,7 @@ func TestValidate_CompanionDisabledIgnoresPaths(t *testing.T) {
 
 // TestDefault_WorkoutBlock pins the shipped workout default: the feature is off
 // and every opaque path and the slot time are empty, so a fresh Ledger runs only
-// the existing teeth and companion until an operator opts in (data-model.md
+// the existing Engine and companion until an operator opts in (data-model.md
 // §"lucid.json"; workout-module.md).
 func TestDefault_WorkoutBlock(t *testing.T) {
 	w := Default().Workout
@@ -476,7 +476,7 @@ func TestValidate_WorkoutDisabledIgnoresPaths(t *testing.T) {
 // TestDefault_WitnessReportBlock pins the shipped witness-report default: the
 // feature is off (enabled false) with its safe behavioral defaults pre-filled —
 // preview mode, a Monday (weekday 1) 09:00 fire mark, and every opaque path empty
-// — so a fresh Ledger runs only the existing teeth and companion until an operator
+// — so a fresh Ledger runs only the existing Engine and companion until an operator
 // opts in (data-model.md §"lucid.json"; witness-report.md).
 func TestDefault_WitnessReportBlock(t *testing.T) {
 	w := Default().WitnessReport

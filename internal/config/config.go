@@ -85,7 +85,7 @@ type ProviderConfig struct {
 // LUCID_USER_CHANNEL_ID / LUCID_HARNESS_TOKEN), only the explicit paths to
 // the three opaque prompt files the compose worker reads. Enabled gates the
 // whole feature: the default zero value is false, so an unconfigured Ledger
-// runs the pure Engine teeth exactly as before. MorningTemplate,
+// runs the pure Engine exactly as before. MorningTemplate,
 // NightTemplate, and SystemPrompt are each an opaque, self-contained prompt
 // file the worker opens directly — lucid never traverses into the directory
 // holding them (no dir-walk, no filename convention), so the block is the
@@ -116,7 +116,7 @@ type CompanionConfig struct {
 // it is credential-dumb: it carries no channel id and no token (those stay
 // env-only), only the explicit opaque file paths the surface reads. Enabled
 // gates the whole feature; the default zero value is false, so an unconfigured
-// Ledger runs only the existing teeth and companion. Program is the generic-
+// Ledger runs only the existing Engine and companion. Program is the generic-
 // schema program JSON on an opaque operator path — read directly by the loader
 // with no dir-walk and no filename convention (the OSS/personal firewall seam):
 // a synthetic program in the repo's tests, the operator's private program at
@@ -153,7 +153,7 @@ const (
 // no token (those stay env-only — LUCID_USER_CHANNEL_ID / LUCID_WITNESS_CHANNEL_ID
 // / LUCID_HARNESS_TOKEN), only the explicit opaque prompt-file paths the compose
 // worker reads. Enabled gates the whole feature: the default zero value is false,
-// so an unconfigured Ledger runs the pure Engine teeth (and any companion) exactly
+// so an unconfigured Ledger runs the pure Engine (and any companion) exactly
 // as before. Mode selects the delivery target — preview (the operator's own
 // channel, the safe default) or auto (the witness channel) — so graduating from a
 // private preview to a friend-facing post is a config change, not a rebuild. Time
@@ -263,20 +263,20 @@ func Default() Config {
 			Endpoint:       "http://localhost:11434",
 			Roles:          map[string]ProviderRole{},
 		},
-		// The companion ships off: a fresh Ledger runs the pure Engine teeth
+		// The companion ships off: a fresh Ledger runs the pure Engine
 		// until an operator points the three prompt-file paths at their own
 		// template dir and flips enabled true.
 		Companion: CompanionConfig{},
 		// The workout companion ships off too: the zero value is disabled with
 		// every opaque path empty, so a fresh Ledger runs only the existing
-		// teeth and companion until an operator points the program/prompt paths
+		// Engine and companion until an operator points the program/prompt paths
 		// at their own files and flips enabled true.
 		Workout: WorkoutConfig{},
 		// The weekly witness report ships off (enabled false) with its safe
 		// behavioral defaults pre-filled so the seam is discoverable: preview
 		// mode (posts to the operator's own channel, never friends), a Monday
 		// (weekday 1) 09:00 fire mark landing after Sunday's reflection, and
-		// empty opaque paths. A fresh Ledger runs only the existing teeth and
+		// empty opaque paths. A fresh Ledger runs only the existing Engine and
 		// companion until an operator points the prompt paths at their own files
 		// and flips enabled true; graduating preview → auto is then one key.
 		WitnessReport: WitnessReportConfig{

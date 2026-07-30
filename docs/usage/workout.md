@@ -162,7 +162,7 @@ and never changes tomorrow's card.
 ## The daily slot
 
 When enabled, the recommendation also fires once a day at `slot_time` (local,
-default midday), delivered inside `lucid scheduler run` beside the teeth and the
+default midday), delivered inside `lucid scheduler run` beside the Engine and the
 companion. It composes the same way the on-demand command does — deterministic
 pick, model phrasing, deterministic fallback — and delivers one idempotent,
 read-back-verified message with the same never-silent degrade layering the

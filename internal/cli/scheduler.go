@@ -244,11 +244,11 @@ func missedSuffix(firesMissed bool) string {
 // build the env-injected notifier, boot the router (for config + the honest live
 // numbers), install the signal-canceled context, and hand off to the flywheel
 // driver. When the companion is enabled it presents both user windows, so the
-// teeth run with their user-channel send suppressed and the companion node runs
-// beside them under one canceled context; when the workout slot is enabled its
-// node runs beside them too; when the weekly witness report is enabled its node
-// runs beside them too. When no companion-class node is enabled only the teeth
-// run — byte-for-byte today's behavior. Every startup error is funneled through a
+// Engine runs with its user-channel send suppressed and the companion node runs
+// beside it under one canceled context; when the workout slot is enabled its
+// node runs beside it too; when the weekly witness report is enabled its node
+// runs beside it too. When no companion-class node is enabled only the Engine
+// runs — byte-for-byte today's behavior. Every startup error is funneled through a
 // single "lucid: scheduler: <message>" stderr line (mirroring `upgrade`) before
 // being returned, so exitCodeForError still classifies it.
 func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error {
@@ -292,7 +292,7 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 	defer stop()
 
 	if !cfg.Companion.Enabled && !cfg.Workout.Enabled && !cfg.WitnessReport.Enabled {
-		// Teeth only: bell + tripwire both deliver to the user, exactly as before.
+		// Engine only: bell + tripwire both deliver to the user, exactly as before.
 		if err := schedrun.Run(ctx, schedrun.Options{Store: store, Notifier: notifier, DBPath: dbPath}); err != nil {
 			_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
 			return fmt.Errorf("lucid: scheduler: %w", err)
@@ -300,13 +300,13 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 		return nil
 	}
 
-	// At least one companion-class node runs beside the teeth. When the companion
-	// presents both user windows the teeth run with their user-channel send
+	// At least one companion-class node runs beside the Engine. When the companion
+	// presents both user windows the Engine runs with its user-channel send
 	// suppressed (the modeless decision, witness L2, and escalation_state
 	// persistence all unchanged); the workout slot never
-	// suppresses the teeth (it is an additive midday send). They share one
+	// suppresses the Engine (it is an additive midday send). They share one
 	// context, so a failure in any node drains the process and the supervisor
-	// restarts the set together — the teeth are never left suppressed-but-silent.
+	// restarts the set together — the Engine is never left suppressed-but-silent.
 	if err := runSchedulerWithCompanions(ctx, store, r, notifier, cfg, dbPath); err != nil {
 		_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
 		return fmt.Errorf("lucid: scheduler: %w", err)
@@ -314,16 +314,16 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 	return nil
 }
 
-// runSchedulerWithCompanions runs the teeth and every enabled companion-class
+// runSchedulerWithCompanions runs the Engine and every enabled companion-class
 // node concurrently under one errgroup: the first to fail cancels the rest, so
-// the whole process exits and the supervisor restarts the set. The teeth suppress
-// their user-channel send only when the companion presents those windows; the
+// the whole process exits and the supervisor restarts the set. The Engine suppresses
+// its user-channel send only when the companion presents those windows; the
 // companion reads the send-free tripwire verdict through its own scheduler (a
 // no-op notifier — the verdict read never sends), the workout slot reads its
 // deterministic recommendation through the router's metrics/observation seams,
 // and the weekly witness report reads the same honest metrics projection plus the
 // engine day records for its 7-day window. All nodes deliver through the same
-// env-injected Discord transport the teeth use.
+// env-injected Discord transport the Engine uses.
 func runSchedulerWithCompanions(
 	ctx context.Context,
 	store *storage.Adapter,
@@ -353,7 +353,7 @@ func runSchedulerWithCompanions(
 	if cfg.Workout.Enabled {
 		g.Go(func() error {
 			// The workout slot keeps its own disposable job DB (LUCID_WORKOUT_DB, or
-			// a workout.db under the OS config dir) rather than sharing the teeth's
+			// a workout.db under the OS config dir) rather than sharing the Engine's
 			// --db file: SQLite is single-writer, so co-locating two flywheel nodes
 			// on one file would contend. The default is separate files per node.
 			return workout.Run(gctx, workout.Options{
@@ -371,9 +371,9 @@ func runSchedulerWithCompanions(
 		g.Go(func() error {
 			// The weekly report keeps its own disposable job DB
 			// (LUCID_WITNESS_REPORT_DB, or a witness-report.db under the OS config
-			// dir), separate from the teeth/companion/workout files for the same
+			// dir), separate from the Engine/companion/workout files for the same
 			// single-writer reason. It reads the honest numbers from the router and
-			// the engine day records from the store; it never suppresses the teeth
+			// the engine day records from the store; it never suppresses the Engine
 			// (an additive witness-channel send, like the workout slot).
 			return witnessreport.Run(gctx, witnessreport.Options{
 				Store:    store,

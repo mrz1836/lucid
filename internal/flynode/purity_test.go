@@ -12,7 +12,7 @@ import (
 )
 
 // TestFlynodeImportsNoModel is the agent-free guard for the shared daemon
-// scaffolding (P9 / ADR-0004: no LLM in a write path). flynode hosts the teeth's
+// scaffolding (P9 / ADR-0004: no LLM in a write path). flynode hosts the Engine's
 // boot spine as well as the message daemons', so it must stay reachable from the
 // agent-free write path — send/verify/compose reach it only as injected
 // closures, never as a named provider/agent type. It parses every non-test .go

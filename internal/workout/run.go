@@ -2,7 +2,7 @@ package workout
 
 // This file owns the workout module's **daily-slot daemon** — the configurable-
 // time periodic that delivers the workout recommendation once a day. It mirrors
-// internal/companion/run.go exactly: a disposable flywheel node beside the teeth
+// internal/companion/run.go exactly: a disposable flywheel node beside the Engine
 // and the companion, delivery idempotency + read-back through a persisted
 // receipt, a bounded missed-fire catch-up, a deterministic fallback on a
 // provider outage, and a loud alert on any total miss — never a silent empty
@@ -30,7 +30,7 @@ import (
 )
 
 // Job runtime identifiers. The workout slot runs its own disposable flywheel
-// node beside the teeth's and the companion's, so its queue, kind, and slug are
+// node beside the Engine's and the companion's, so its queue, kind, and slug are
 // distinct: the three periodic sets never collide, and a restart reconciles the
 // workout slot by slug without duplicating.
 const (
@@ -44,7 +44,7 @@ const (
 	backfillCap = 1
 
 	// envWorkoutDB overrides the job-DB path when --db is not passed. Like the
-	// teeth's flywheel.db and the companion's companion.db it is disposable
+	// Engine's flywheel.db and the companion's companion.db it is disposable
 	// machinery, not Ledger truth, so it lives outside ~/.lucid by default.
 	envWorkoutDB = "LUCID_WORKOUT_DB"
 
@@ -282,7 +282,7 @@ func (w dailyWorker) Work(ctx context.Context, _ *flywheel.Job[workoutArgs]) (fl
 // Run opens the disposable job DB, migrates it, registers the daily worker,
 // reconciles the daily periodic from the configured slot time, and runs the
 // flywheel node until ctx is canceled (SIGINT/SIGTERM upstream). It returns nil
-// on a clean drain. It runs beside the teeth and the companion in the same
+// on a clean drain. It runs beside the Engine and the companion in the same
 // process (config-gated), so it is up whenever the scheduler is and the feature
 // is enabled.
 func Run(ctx context.Context, o Options) error {
@@ -395,7 +395,7 @@ func parseHM(hm string) (hour, minute int, err error) {
 // DefaultDBPath resolves the disposable workout job-DB path: an explicit
 // override wins, then the LUCID_WORKOUT_DB env override, then the default
 // workout.db under the OS user-config dir (outside the ~/.lucid Ledger, and
-// distinct from the teeth's flywheel.db and the companion's companion.db). It is
+// distinct from the Engine's flywheel.db and the companion's companion.db). It is
 // exported so a read-only inspector resolves the exact same path the daemon
 // writes to.
 func DefaultDBPath(dbPath string) (string, error) {

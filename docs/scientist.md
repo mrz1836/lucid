@@ -17,7 +17,7 @@ cannot. (Grounding:
 
 ## 0. The governing rule
 
-**Experiments never grow teeth. Results never appear on daily
+**Experiments never acquire consequences. Results never appear on daily
 surfaces.** The first sentence extends the sanctuary rule
 (architecture P3): declining an experiment, deviating from one, or
 stopping one is never a miss, never escalates, never reaches the
@@ -94,7 +94,7 @@ Lifecycle semantics, binding:
   block one starts at that Retro. Pre-registration is consent (§5).
 * **Equipoise by construction.** Every arm must be a configuration the
   Retro could legally adopt on its own — a bell time, a floor size, a
-  lens choice. If an arm would need a Gate, a waiver, or new teeth to
+  lens choice. If an arm would need a Gate, a waiver, or new consequences to
   adopt, it cannot be an arm. This is what makes an experiment safe by
   default: whichever arm is running, the user is living under an
   ordinary, legal configuration.

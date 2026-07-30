@@ -48,7 +48,7 @@ func newSchedulerStatusCmd() *cobra.Command {
 		Short: "Report scheduler health: what fires next, what happened last, and what is broken",
 		Long: `status is the read-only health surface for the autonomous Engine
 scheduler. It reports the companion enabled/disabled state and its provider and
-prompt paths, the chain bell and tripwire times, the teeth and companion
+prompt paths, the chain bell and tripwire times, the Engine and companion
 periodics (with their next run and last enqueue), the last companion delivery
 receipt per window, a bounded recent-run summary, and a best-effort
 host/supervisor probe — then rolls the checks into one verdict.
@@ -72,7 +72,7 @@ only a positively detected problem does.`,
 			return runSchedulerStatus(cmd, schedulerDB, companionDB)
 		},
 	}
-	cmd.Flags().StringVar(&schedulerDB, statusFlagSchedulerDB, "", "Override the teeth job-store path to inspect (default: LUCID_SCHEDULER_DB or the daemon's default)")
+	cmd.Flags().StringVar(&schedulerDB, statusFlagSchedulerDB, "", "Override the Engine job-store path to inspect (default: LUCID_SCHEDULER_DB or the daemon's default)")
 	cmd.Flags().StringVar(&companionDB, statusFlagCompanionDB, "", "Override the companion job-store path to inspect (default: LUCID_COMPANION_DB or the daemon's default)")
 	return cmd
 }

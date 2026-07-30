@@ -199,7 +199,7 @@ lucid scheduler status --json   # machine-readable, with a top-level verdict fie
 ```
 
 It aggregates local state only — the companion enabled/disabled state, the chain
-fire marks, the teeth and companion periodics (what fires next), the last delivery
+fire marks, the Engine and companion periodics (what fires next), the last delivery
 receipt per window (what happened last), and a best-effort host/supervisor probe —
 and rolls them into one verdict with a 3-tier exit code: `0` ok, `1` warn, `2`
 error, identical in text and `--json`. It **sends nothing, renews no secret, and

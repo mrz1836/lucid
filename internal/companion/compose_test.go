@@ -246,7 +246,7 @@ func TestCompose_SlotSuccess_RendersInterpAndActions(t *testing.T) {
 // TestCompose_MissDay_RendersVerdictAsFinalGroup: on a miss-day the model
 // composes the warmth and the Engine's user verdict is rendered byte-for-byte as
 // the final scaffold group (trailing newline trimmed, internal newlines
-// preserved) — the teeth are never reworded.
+// preserved) — the Engine is never reworded.
 func TestCompose_MissDay_RendersVerdictAsFinalGroup(t *testing.T) {
 	comp := writePrompts(t)
 	verdict := "last night was a miss. Tonight is a must.\n— the form letter, pre-committed at Day 0.\n"
@@ -321,8 +321,8 @@ func TestCompose_ProviderDown_NormalNight_FallsBackToBellCloseout(t *testing.T) 
 	assert.Contains(t, res.Text, "🌒 **Close-out**\n• "+templates.Bell("Journal. Dock. Read."))
 }
 
-// TestCompose_ProviderDown_MissDay_FallsBackWithVerdict confirms the teeth still
-// land when the model is unreachable on a miss-day: the fallback scaffold renders
+// TestCompose_ProviderDown_MissDay_FallsBackWithVerdict confirms the Engine still
+// lands when the model is unreachable on a miss-day: the fallback scaffold renders
 // with the Engine's verdict as its final group, verbatim.
 func TestCompose_ProviderDown_MissDay_FallsBackWithVerdict(t *testing.T) {
 	comp := writePrompts(t)

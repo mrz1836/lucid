@@ -166,7 +166,7 @@ func (sc *Scheduler) RunTripwire(ctx context.Context, now time.Time) (Report, er
 // [Scheduler.RunTripwire] but suppresses the Engine's own user-channel sends
 // (L1, L2-blocked, storm-lapse). When the companion presents the morning
 // window it delivers that verdict itself — appending it byte-for-byte from
-// [Scheduler.TripwireUserVerdict] so a model can never reword the teeth. Every
+// [Scheduler.TripwireUserVerdict] so a model can never reword the Engine's verdict. Every
 // other effect is identical to a live run: the witness L2 still fires on the
 // witness channel, storm events are still appended, and escalation_state +
 // tripwire state are still persisted. It is a pure suppression of one delivery

@@ -16,7 +16,7 @@ may ever carry a streak, a quota, a target, a score, or an escalation.
 You log what happened; the system never grades it. Logging food is not
 a diet program; logging pain is not a compliance chart; a day with no
 observations is a day with no observations. If a practice ever deserves
-teeth, it becomes an Engine commitment through a Gate — a separate,
+consequences, it becomes an Engine commitment through a Gate — a separate,
 deliberate act. The two never blur: **the Engine enforces acts;
 observations are words about the body, and words are sanctuary.**
 
@@ -182,7 +182,7 @@ default** — a fresh Ledger never carries them, and they only receive commands
 once the operator adds them to `kinds_enabled`. Like every kind on this page they
 are governed by §0: they are inventory of what happened, never obligation. The
 companion may *surface* a logged commitment; it never grades one, reminds about
-one, or scores follow-through — a commitment that earns teeth becomes an Engine
+one, or scores follow-through — a commitment that earns consequences becomes an Engine
 commitment through a Gate, exactly as an eating practice does (§9).
 
 The `workout` and `body_state` rows are the **workout-module kinds**: capturable
@@ -192,7 +192,7 @@ progress over time. They ship **enabled per-instance and off by default** on the
 same terms — inventory of what happened (§0), never a streak, target, or score.
 The workout streak the surface shows is the **Engine chain's**, read from the
 fold, never written onto these events; the progress trend is a read-only
-projection (§7), never stored. A workout practice that ever earns teeth becomes
+projection (§7), never stored. A workout practice that ever earns consequences becomes
 an Engine link through a Gate, exactly as an eating practice does (§9).
 
 ## 4. Micro-logs — the capture grammar
@@ -525,7 +525,7 @@ and your own record (P6).
   `context.location` is sensitive by default (§3).
 * **Intake logging is never a diet program** — restated because the
   failure mode is real: no calorie targets, no daily compliance, no
-  "you didn't log lunch." If an eating practice ever earns teeth
+  "you didn't log lunch." If an eating practice ever earns consequences
   (e.g., a protein floor), it does so as an Engine link through a
   Gate, and the observation layer still just takes inventory.
 * **Wearables and device data**: only if a device is already owned,

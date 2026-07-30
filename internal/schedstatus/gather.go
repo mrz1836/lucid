@@ -68,7 +68,7 @@ func Gather(ctx context.Context, p GatherParams) (Inputs, error) {
 	return Inputs{
 		Companion:     GatherCompanion(p.Config),
 		Chain:         chain,
-		Teeth:         GatherDB(ctx, p.SchedulerDB),
+		Engine:        GatherDB(ctx, p.SchedulerDB),
 		CompanionJobs: GatherDB(ctx, p.CompanionDB),
 		Receipts:      GatherReceipts(p.Store),
 		Host:          host,

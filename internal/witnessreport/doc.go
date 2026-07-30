@@ -1,7 +1,7 @@
 // Package witnessreport builds Lucid's weekly witness report — the polished,
 // friend-facing accountability post that replaces the sparse monthly all-clear
 // on the witness channel. It is the Mirror-side, model-allowed sibling of the
-// pure accountability teeth, structured exactly like internal/companion: a
+// pure Engine, structured exactly like internal/companion: a
 // deterministic core computes a witness-safe report from the chain's honest
 // live numbers, and (in a later phase) a narrative pass reaches the model
 // through internal/provider to warm that skeleton with in-voice prose.

@@ -189,7 +189,7 @@ func TestCompanionFire_DisabledWarns(t *testing.T) {
 }
 
 // TestRunScheduler_CompanionEnabled_WiresSuppression drives the full scheduler
-// composition root with the companion enabled: the teeth come up with the bell
+// composition root with the companion enabled: the engine comes up with the bell
 // periodic suppressed (the companion owns the night user send) and the companion
 // node comes up with its own morning + night periodics — proving the suppression
 // flag and the concurrent companion node are wired. A cancel drains both to a
@@ -200,7 +200,7 @@ func TestRunScheduler_CompanionEnabled_WiresSuppression(t *testing.T) {
 	t.Setenv("LUCID_USER_CHANNEL_ID", "100000000000000001")
 	t.Setenv("LUCID_WITNESS_CHANNEL_ID", "100000000000000002")
 
-	teethDB := filepath.Join(t.TempDir(), "flywheel.db")
+	engineDB := filepath.Join(t.TempDir(), "flywheel.db")
 	companionDB := filepath.Join(t.TempDir(), "companion.db")
 	t.Setenv("LUCID_COMPANION_DB", companionDB)
 
@@ -209,25 +209,25 @@ func TestRunScheduler_CompanionEnabled_WiresSuppression(t *testing.T) {
 
 	var stderr bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- runScheduler(ctx, &stderr, teethDB) }()
+	go func() { done <- runScheduler(ctx, &stderr, engineDB) }()
 
-	// Wait until both nodes reconciled: the teeth (bell inactive, tripwire
+	// Wait until both nodes reconciled: the engine (bell inactive, tripwire
 	// active) and the companion (morning + night).
 	require.Eventually(t, func() bool {
-		return bellSuppressed(t, teethDB) && companionPeriodics(t, companionDB) == 2
+		return bellSuppressed(t, engineDB) && companionPeriodics(t, companionDB) == 2
 	}, 10*time.Second, 25*time.Millisecond, "both nodes reconcile with the bell suppressed")
 
 	cancel()
 	select {
 	case err := <-done:
-		require.NoError(t, err, "a canceled companion+teeth daemon drains cleanly")
+		require.NoError(t, err, "a canceled companion+engine daemon drains cleanly")
 		assert.Empty(t, stderr.String(), "a clean drain writes no error line")
 	case <-time.After(10 * time.Second):
 		t.Fatal("scheduler run did not return after cancellation")
 	}
 }
 
-// bellSuppressed reports whether the teeth job DB has all three periodics with
+// bellSuppressed reports whether the engine job DB has all three periodics with
 // the evening handed to the companion: the bell reconciled inactive (the
 // companion owns the night user send), its backstop armed to catch a companion
 // that never delivers, and the tripwire active.

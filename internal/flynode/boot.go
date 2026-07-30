@@ -1,5 +1,5 @@
 // Package flynode extracts the flywheel "node" scaffolding shared, verbatim, by
-// every Lucid background daemon — the teeth (schedrun), the companion, the
+// every Lucid background daemon — the Engine scheduler (schedrun), the companion, the
 // workout slot, and the weekly witness report. Each ran its own disposable
 // flywheel node with a byte-identical boot spine (open+migrate a job DB,
 // scaffold the engine, reconcile periodics, build a single-writer node, run it
@@ -10,7 +10,7 @@
 //
 // It is delivery-transport- and model-free by construction: it names no
 // notifier, provider, or agent type — send, verify, compose, and alert are
-// injected as closures — so it can host the teeth's agent-free write path
+// injected as closures — so it can host the Engine's agent-free write path
 // without breaching the P9 "no LLM in the write path" guard. purity_test.go
 // enforces the absence of any provider/agent/LLM import.
 package flynode
@@ -49,7 +49,7 @@ type ScaffoldStore interface {
 // BootConfig is everything [Boot] needs that differs between daemons. Registry
 // is built by the caller (each daemon's workers and their dependencies differ
 // entirely); Reconcile declares the daemon's periodics and may grade a canceled
-// boot as a clean stop (as the teeth do); Pkg tags the boot errors with the
+// boot as a clean stop (as the Engine does); Pkg tags the boot errors with the
 // daemon name so a supervised log still says which node failed.
 type BootConfig struct {
 	Pkg       string                                // daemon name, for error wrapping ("companion", …)

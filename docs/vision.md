@@ -53,7 +53,7 @@ A therapist that builds a living map of your fears, triggers, wounds, and growth
 A coach that tracks your goals, celebrates your progress, and gently reminds you of what you said mattered. It gives *actionable guidance*, not abstract ideas.
 
 ### **Engine**
-A behavior layer with real teeth — because insight that is never applied is just a more articulate way of staying stuck. The Engine initiates and defends a small set of committed daily practices: a bell that starts the chain (never memory, never motivation), a floor version for the worst days, honest escalation when you slip — up to a human witness who sees only that you showed up, never what you said. Reflection tools fail without a behavior layer; behavior tools fail without a reflection layer. Lucid is deliberately both, with a hard boundary between them: the Engine enforces *acts*, and everything you *say* in reflection lives under absolute amnesty. Full design in [docs/architecture.md](architecture.md) and [docs/engine.md](engine.md).
+A behavior layer with real consequences — because insight that is never applied is just a more articulate way of staying stuck. The Engine initiates and defends a small set of committed daily practices: a bell that starts the chain (never memory, never motivation), a floor version for the worst days, honest escalation when you slip — up to a human witness who sees only that you showed up, never what you said. Reflection tools fail without a behavior layer; behavior tools fail without a reflection layer. Lucid is deliberately both, with a hard boundary between them: the Engine enforces *acts*, and everything you *say* in reflection lives under absolute amnesty. Full design in [docs/architecture.md](architecture.md) and [docs/engine.md](engine.md).
 
 ### **Agent-Self**
 An extension of you that helps you **act**. When your friend's birthday is coming up, Lucid drafts a message in your voice, suggests when to send it, and waits for your approval. When you've been meaning to reach out to someone, it proposes what you might say. When you made a commitment and forgot, it reminds you—with a draft ready to go.
@@ -241,9 +241,9 @@ Everything goes into your secure "life stream" that the system analyzes over tim
 The philosophy: **capture first, structure later.** Never let the interface get in the way of the moment.
 
 **Streaks without punishment:**
-* Streaks exist only where you granted them teeth: the Engine tracks the small set of practices you formally committed to ([docs/engine.md](engine.md)) — and even there a return after a miss is one floor-level night, never makeup work
+* Streaks exist only where you granted them consequences: the Engine tracks the small set of practices you formally committed to ([docs/engine.md](engine.md)) — and even there a return after a miss is one floor-level night, never makeup work
 * Everything you *say* is never scored: capture volume, journaling depth, observation logging, silence about content carry no streaks, no quotas, no "you were quiet" pushes — if you've been away, the welcome happens when *you* open the door, at your next check-in, not via a notification
-* Teeth on acts, amnesty on words — the one clean boundary the whole system is built on
+* Consequences on acts, amnesty on words — the one clean boundary the whole system is built on
 
 **Historical entries:**
 Not everything important happened today. Lucid lets you add past events—traumas, key life moments, relationship history, formative experiences—and places them in the correct temporal context. When you add something from the past, it can recontextualize patterns the system has already noticed.

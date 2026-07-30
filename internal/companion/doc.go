@@ -1,13 +1,13 @@
 // Package companion composes and (in later phases) delivers Lucid's two daily
 // messages — the morning and night companion. It is the Mirror-side,
-// model-allowed sibling of the pure accountability teeth: unlike
+// model-allowed sibling of the pure Engine: unlike
 // internal/{engine,scheduler,schedrun}, which carry a purity guard forbidding
 // any provider/agent/model import so the dead-man decision can never be softened
 // by a model (architecture P9), this package deliberately reaches the model
 // through internal/provider to compose a warm, in-voice message from the
 // operator's own opaque prompt files and the chain's honest live numbers.
 //
-// The split is the whole point. The teeth keep their modeless floor; the
+// The split is the whole point. The Engine keeps its modeless floor; the
 // companion enriches it. On a miss-day the companion composes the warm message
 // and appends the Engine's deterministic user verdict byte-for-byte below it
 // (read send-free via the scheduler), so the model writes the warmth but never

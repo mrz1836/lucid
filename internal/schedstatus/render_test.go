@@ -21,7 +21,7 @@ func TestTextLinesSections(t *testing.T) {
 		"Companion:",
 		"Provider:",
 		"Chain:",
-		"Teeth periodics",
+		"Engine periodics",
 		"Companion periodics",
 		"Receipts:",
 		"Recent runs",
@@ -47,7 +47,7 @@ func TestTextLinesIssuesBlock(t *testing.T) {
 	in.Companion.Prompts[1].Exists = false                      // error: missing prompt
 	in.CompanionJobs.Periodics = in.CompanionJobs.Periodics[1:] // error: missing morning periodic
 	in.Receipts[1].Verified = false                             // warn: unverified night receipt
-	in.Teeth.Failures = []RunFailure{{Kind: "lucid-tripwire", ErrorClass: "timeout", Message: "discord timeout"}}
+	in.Engine.Failures = []RunFailure{{Kind: "lucid-tripwire", ErrorClass: "timeout", Message: "discord timeout"}}
 	in.Host = []Check{{Name: "host.daemon", State: Unknown, Detail: "launchctl unavailable"}}
 
 	r := Assemble(in, now)
@@ -70,7 +70,7 @@ func TestTextLinesNeverRun(t *testing.T) {
 	in := Inputs{
 		Companion:     CompanionInfo{Enabled: true, ProviderBackend: "claude_cli", ProviderModel: "opus", Prompts: okPrompts()},
 		Chain:         baseChain(),
-		Teeth:         DBInput{Path: "/var/lucid/flywheel.db", Missing: true},
+		Engine:        DBInput{Path: "/var/lucid/flywheel.db", Missing: true},
 		CompanionJobs: DBInput{Path: "/var/lucid/companion.db", Missing: true},
 		Receipts:      []ReceiptStatus{{Window: "morning", Present: false}, {Window: "night", Present: false}},
 	}
@@ -91,7 +91,7 @@ func TestTextLinesEmptyCollections(t *testing.T) {
 	in := Inputs{
 		Companion:     CompanionInfo{Enabled: false, ProviderBackend: "claude_cli", ProviderModel: "opus"},
 		Chain:         baseChain(),
-		Teeth:         DBInput{Path: "/var/lucid/flywheel.db", Periodics: []PeriodicStatus{{Slug: SlugBell, Cron: "0 19 * * *", Active: true, Present: true}, {Slug: SlugTripwire, Cron: "0 6 * * *", Active: true, Present: true}}},
+		Engine:        DBInput{Path: "/var/lucid/flywheel.db", Periodics: []PeriodicStatus{{Slug: SlugBell, Cron: "0 19 * * *", Active: true, Present: true}, {Slug: SlugTripwire, Cron: "0 6 * * *", Active: true, Present: true}}},
 		CompanionJobs: DBInput{Path: "/var/lucid/companion.db"}, // present, zero periodics
 		Receipts:      nil,
 		Host:          []Check{{Name: "host.daemon", State: Ok}}, // no detail
@@ -118,7 +118,7 @@ func TestReportJSONShape(t *testing.T) {
 	var doc map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(raw, &doc))
 
-	for _, key := range []string{"verdict", "companion", "chain", "teeth", "companion_jobs", "receipts", "runs", "host", "checks"} {
+	for _, key := range []string{"verdict", "companion", "chain", "engine", "companion_jobs", "receipts", "runs", "host", "checks"} {
 		require.Contains(t, doc, key, "missing top-level JSON key %q", key)
 	}
 

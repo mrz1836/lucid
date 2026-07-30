@@ -1,7 +1,7 @@
 // Package workout is the config-gated, off-by-default workout companion
 // (docs/mvp/workout-module.md): the Mirror-side surface that recommends today's
 // session, records what actually happened, and reviews progress over time. It is
-// the model-allowed sibling of the pure accountability teeth — like
+// the model-allowed sibling of the pure Engine — like
 // internal/companion it may reach the model through internal/provider to phrase a
 // message, but the decision it phrases is always made first by a deterministic
 // core.

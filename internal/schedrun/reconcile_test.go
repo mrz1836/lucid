@@ -19,10 +19,10 @@ import (
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
-// seedTeeth reconciles the production periodic set into a rig's store at
+// seedEngine reconciles the production periodic set into a rig's store at
 // seedClock — the exact state a daemon boot leaves behind, so a reconcile test
 // starts from real rows rather than hand-built ones.
-func seedTeeth(t *testing.T, r *rig, seedClock time.Time, suppressBell bool) {
+func seedEngine(t *testing.T, r *rig, seedClock time.Time, suppressBell bool) {
 	t.Helper()
 	require.NoError(t, upsertPeriodics(ctxAt(seedClock), r.db, r.store, suppressBell))
 }
@@ -146,7 +146,7 @@ func TestReconcile_ReArmsParkedTripwireAndFiresTheMissedSend(t *testing.T) {
 func TestReconcile_HealthyStoreChangesNothing(t *testing.T) {
 	seedAt := at(2026, 7, 5, 12, 0)
 	r := newRig(t, models.NewFixedClock(seedAt))
-	seedTeeth(t, r, seedAt, false)
+	seedEngine(t, r, seedAt, false)
 
 	report, err := Reconcile(ctxAt(seedAt), r.db, ReconcileOptions{})
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestReconcile_IsIdempotent(t *testing.T) {
 	seedAt := at(2026, 7, 5, 12, 0)
 	now := at(2026, 7, 5, 13, 0)
 	r := newRig(t, models.NewFixedClock(now))
-	seedTeeth(t, r, seedAt, false)
+	seedEngine(t, r, seedAt, false)
 	park(t, r, slugTripwire, seedAt)
 
 	first, err := Reconcile(ctxAt(now), r.db, ReconcileOptions{})
@@ -240,7 +240,7 @@ func TestReconcile_LeavesTheCompanionSuppressedBellAlone(t *testing.T) {
 	seedAt := at(2026, 7, 5, 12, 0)
 	now := at(2026, 7, 5, 13, 0)
 	r := newRig(t, models.NewFixedClock(now))
-	seedTeeth(t, r, seedAt, true)
+	seedEngine(t, r, seedAt, true)
 
 	report, err := Reconcile(ctxAt(now), r.db, ReconcileOptions{CompanionEnabled: true})
 	require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestReconcile_ReArmsTheParkedBackstop(t *testing.T) {
 	seedAt := at(2026, 7, 5, 12, 0)
 	now := at(2026, 7, 5, 13, 0)
 	r := newRig(t, models.NewFixedClock(now))
-	seedTeeth(t, r, seedAt, true)
+	seedEngine(t, r, seedAt, true)
 	park(t, r, slugBellFallback, seedAt)
 
 	report, err := Reconcile(ctxAt(now), r.db, ReconcileOptions{CompanionEnabled: true})
@@ -278,7 +278,7 @@ func TestReconcile_SlugNarrowsToOnePeriodic(t *testing.T) {
 	seedAt := at(2026, 7, 5, 12, 0)
 	now := at(2026, 7, 5, 13, 0)
 	r := newRig(t, models.NewFixedClock(now))
-	seedTeeth(t, r, seedAt, false)
+	seedEngine(t, r, seedAt, false)
 	park(t, r, slugTripwire, seedAt)
 	park(t, r, slugBell, seedAt)
 
@@ -529,7 +529,7 @@ func TestRun_StartupSequenceReconcilesAfterSeeding(t *testing.T) {
 	now := at(2026, 7, 5, 13, 0)
 	r := newRig(t, models.NewFixedClock(now))
 
-	seedTeeth(t, r, seedAt, true)
+	seedEngine(t, r, seedAt, true)
 	// Drift the seed cannot have caused, but a boot must still not leave behind.
 	park(t, r, slugBellFallback, seedAt)
 

@@ -54,7 +54,7 @@ type httpDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// message is the Discord "create message" REST body. The teeth path fills only
+// message is the Discord "create message" REST body. The Engine path fills only
 // Content with the pre-rendered template text; the witness-report path fills
 // only Embeds with a pre-built rich embed. Embeds is omitempty so the existing
 // content-only send serializes byte-for-byte as before ({"content":...}).
@@ -76,7 +76,7 @@ type EmbedField struct {
 // footer line. Footer is exposed as a plain string here for renderer ergonomics
 // even though Discord's wire format nests it as an object — [Embed.MarshalJSON]
 // bridges that. The notifier composes no text of its own; a caller hands it an
-// already-built Embed value, mirroring the credential-dumb teeth contract.
+// already-built Embed value, mirroring the credential-dumb Engine contract.
 type Embed struct {
 	Title       string
 	Description string
@@ -116,7 +116,7 @@ func (e Embed) MarshalJSON() ([]byte, error) {
 // created is the subset of Discord's create-message (and get-message) response
 // the notifier reads: the snowflake id of the message. The companion path uses
 // it for read-back verification and to persist an idempotent delivery receipt;
-// the teeth path ([Discord.Send]) ignores it entirely.
+// the Engine path ([Discord.Send]) ignores it entirely.
 type created struct {
 	ID string `json:"id"`
 }
@@ -172,7 +172,7 @@ func New(token, userID, witnessID string, do httpDoer) *Discord {
 // unresolved (unset) channel ID is an error, never a mis-send; a non-2xx
 // response surfaces the status and a short body snippet. It composes nothing —
 // the text is the fixed Engine template the scheduler handed it. This is the
-// teeth path: it discards the created message id.
+// Engine path: it discards the created message id.
 func (d *Discord) Send(ctx context.Context, channel, text string) error {
 	_, err := d.post(ctx, channel, text)
 	return err
@@ -202,7 +202,7 @@ func (d *Discord) SendReturningID(ctx context.Context, channel, text string) (st
 // logical channel ("user" or "witness"), the embed analog of [Discord.Send].
 // An unknown or unresolved channel is an error, never a mis-send; a non-2xx
 // response surfaces the status and a short body snippet. It composes nothing —
-// the embed value is handed to it fully rendered. This is the teeth path for
+// the embed value is handed to it fully rendered. This is the Engine path for
 // the witness report: it discards the created message id.
 func (d *Discord) SendEmbed(ctx context.Context, channel string, e Embed) error {
 	_, err := d.postMessage(ctx, channel, message{Embeds: []Embed{e}})
@@ -276,10 +276,10 @@ func (d *Discord) VerifyPresent(ctx context.Context, channel, messageID string) 
 }
 
 // post resolves the logical channel, POSTs the rendered text, and returns the
-// (bounded) 2xx response body — the shared transport both [Discord.Send] (teeth,
+// (bounded) 2xx response body — the shared transport both [Discord.Send] (Engine,
 // fire-and-forget) and [Discord.SendReturningID] (companion, needs the created
 // id) build on. Its resolve/marshal/request/status behavior and error wording
-// are byte-for-byte what Send used before, so the teeth path is unchanged. It is
+// are byte-for-byte what Send used before, so the Engine path is unchanged. It is
 // a thin wrapper over [Discord.postMessage] carrying a content-only body.
 func (d *Discord) post(ctx context.Context, channel, text string) ([]byte, error) {
 	return d.postMessage(ctx, channel, message{Content: text})

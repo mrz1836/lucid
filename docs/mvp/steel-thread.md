@@ -173,7 +173,7 @@ silence leaves `rule: null` and the prompt never returns for that
 insight. A rule is testimony, not a goal: nothing tracks it, nothing
 scores it, nothing reminds about it — it resurfaces only at recall,
 where *kept* and *lapsed* are both first-class, judgment-free answers.
-A rule that deserves teeth becomes an Engine commitment through a
+A rule that deserves consequences becomes an Engine commitment through a
 Gate; the Mirror never grows any.
 
 **Rejected** — the user says the pattern does not fit.

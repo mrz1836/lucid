@@ -251,7 +251,7 @@ The single global config file. Tiny, hand-editable, agent-readable.
 * `companion` configures the optional daily companion — the Mirror-side,
   model-allowed job that composes and delivers the morning and night
   messages. It ships **off** (`enabled: false`): a fresh Ledger runs the
-  pure Engine teeth (bell/tripwire) unchanged until an operator opts in.
+  pure Engine (bell/tripwire) unchanged until an operator opts in.
   `morning_template`, `night_template`, and `system_prompt` are **explicit
   per-file paths**, each pointing at one opaque, self-contained prompt file
   the compose worker opens directly — lucid never traverses into the
@@ -880,7 +880,7 @@ backup format. This keeps
   [`product-principles.md`](product-principles.md) §1. Insight rules
   are not goals: recorded testimony revisited at gate cadence, never
   tracked daily, never celebrated, never reminded — a rule that
-  deserves teeth becomes an Engine commitment through a Gate.
+  deserves consequences becomes an Engine commitment through a Gate.
 * **Not a backup spec.** The user is responsible for backing up
   `~/.lucid/` (especially `~/.lucid/raw/`). The docs name this as a
   responsibility; the MVP does not implement automated backup.

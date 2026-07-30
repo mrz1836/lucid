@@ -12,7 +12,7 @@ const timeLayout = "2006-01-02 15:04 MST"
 
 // TextLines renders the report as the calm, human-first output the command
 // prints by default. It leads with the one-word verdict, then one short section
-// per group (companion, provider, chain, teeth periodics, companion periodics,
+// per group (companion, provider, chain, engine periodics, companion periodics,
 // receipts, recent runs, host). A healthy report stays terse; every warning or
 // error is repeated in a closing issues block so a reader sees exactly what to
 // act on without re-scanning. The JSON form (the marshaled [Report]) carries the
@@ -38,8 +38,8 @@ func (r Report) TextLines() []string {
 	// Chain marks.
 	add("Chain: bell %s, tripwire %s", orDash(r.Chain.BellTime), orDash(r.Chain.TripwireTime))
 
-	// Teeth + companion periodics.
-	out = append(out, dbLines("Teeth periodics", r.Teeth)...)
+	// Engine + companion periodics.
+	out = append(out, dbLines("Engine periodics", r.Engine)...)
 	out = append(out, dbLines("Companion periodics", r.CompanionJobs)...)
 
 	// Receipts.

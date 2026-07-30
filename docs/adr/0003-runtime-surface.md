@@ -37,5 +37,5 @@ contract, in this order:
 binary, `lucid init`, done — the harness is optional sugar for phone
 access rather than a hard dependency. No feature may be
 harness-coupled (local-runtime.md already binds this); the harness
-never bypasses the router; and the Phase-0 rule keeps its teeth — the
+never bypasses the router; and the Phase-0 rule keeps its force — the
 chain must survive every surface being down (engine P10 / S-14).

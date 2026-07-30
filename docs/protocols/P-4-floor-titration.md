@@ -44,7 +44,7 @@ surfaced (architecture P4).
 
 P-4 runs on the live chain: misses inside the experiment are the same
 misses the Engine's budget and ladder see. The experiment adds no
-teeth and removes none — it only decides what the floor should be.
+consequences and removes none — it only decides what the floor should be.
 
 ## Primary measure (and disqualified measures)
 

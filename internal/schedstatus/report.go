@@ -40,7 +40,7 @@ const (
 )
 
 // The periodic slugs the scheduler registers, mirrored from internal/schedrun
-// (teeth) and internal/companion. They are duplicated here as exported
+// (the Engine scheduler) and internal/companion. They are duplicated here as exported
 // constants rather than imported so the pure report core stays dependency-free;
 // a divergence would surface as a "not registered" check, which is the honest
 // signal anyway.
@@ -186,7 +186,7 @@ type DBInput struct {
 type Inputs struct {
 	Companion     CompanionInfo
 	Chain         ChainMarks
-	Teeth         DBInput
+	Engine        DBInput
 	CompanionJobs DBInput
 	Receipts      []ReceiptStatus
 	Host          []Check
@@ -211,7 +211,7 @@ type Report struct {
 	Verdict       string          `json:"verdict"`
 	Companion     CompanionInfo   `json:"companion"`
 	Chain         ChainMarks      `json:"chain"`
-	Teeth         DBReport        `json:"teeth"`
+	Engine        DBReport        `json:"engine"`
 	CompanionJobs DBReport        `json:"companion_jobs"`
 	Receipts      []ReceiptStatus `json:"receipts"`
 	Runs          RunSummary      `json:"runs"`
@@ -259,14 +259,14 @@ func worst(groups ...[]Check) CheckState {
 // returns a classified report. The rules, in one place:
 //
 //   - companion disabled                                   -> warn
-//   - missing/malformed teeth job DB                       -> error (always)
+//   - missing/malformed engine job DB                       -> error (always)
 //   - missing/malformed companion job DB (companion on)    -> error
 //   - missing companion job DB (companion off)             -> not a fault (expected)
 //   - enabled companion with a missing prompt file         -> error
 //   - required periodic inactive/missing (companion on)    -> error
-//   - intended-active teeth periodic parked (off, or its
+//   - intended-active engine periodic parked (off, or its
 //     cursor stuck a full day behind)                      -> error, naming the repair command
-//   - teeth bell inactive while the companion owns the send-> not a fault (suppressed, intended)
+//   - engine bell inactive while the companion owns the send-> not a fault (suppressed, intended)
 //   - evening backstop inactive while the companion owns
 //     the send                                             -> error, naming the repair command
 //   - latest receipt present but unverified                -> warn
@@ -285,25 +285,25 @@ func Assemble(in Inputs, now time.Time) Report {
 		Receipts:  in.Receipts,
 		Host:      in.Host,
 		Runs: RunSummary{
-			Failures:     appendFailures(in.Teeth.Failures, in.CompanionJobs.Failures),
-			FailureCount: len(in.Teeth.Failures) + len(in.CompanionJobs.Failures),
+			Failures:     appendFailures(in.Engine.Failures, in.CompanionJobs.Failures),
+			FailureCount: len(in.Engine.Failures) + len(in.CompanionJobs.Failures),
 		},
 	}
 
 	var checks []Check
 	checks = append(checks, classifyCompanion(in.Companion)...)
 
-	// Teeth DB is always expected; the companion DB is only expected when the
+	// Engine DB is always expected; the companion DB is only expected when the
 	// companion is enabled (a disabled companion never creates its job store).
-	var teethChecks, compChecks []Check
-	r.Teeth, teethChecks = classifyDB(in.Teeth, "teeth", true)
+	var engineChecks, compChecks []Check
+	r.Engine, engineChecks = classifyDB(in.Engine, "engine", true)
 	r.CompanionJobs, compChecks = classifyDB(in.CompanionJobs, "companion", in.Companion.Enabled)
-	checks = append(checks, teethChecks...)
+	checks = append(checks, engineChecks...)
 	checks = append(checks, compChecks...)
 
 	// Periodic checks only make sense once the DB actually read.
-	if r.Teeth.State == Ok {
-		checks = append(checks, classifyTeethPeriodics(&r.Teeth, in.Companion.Enabled, now)...)
+	if r.Engine.State == Ok {
+		checks = append(checks, classifyEnginePeriodics(&r.Engine, in.Companion.Enabled, now)...)
 	}
 	if in.Companion.Enabled && r.CompanionJobs.State == Ok {
 		checks = append(checks, classifyCompanionPeriodics(&r.CompanionJobs)...)
@@ -344,7 +344,7 @@ func classifyCompanion(c CompanionInfo) []Check {
 
 // classifyDB turns a gathered DBInput into its report and any DB-level check. A
 // malformed DB is always an error; a missing DB is an error only when required
-// (the teeth DB always, the companion DB when the companion is enabled). A
+// (the engine DB always, the companion DB when the companion is enabled). A
 // missing-but-not-required DB is reported as Unknown with an explanatory detail
 // and contributes no verdict-lowering check.
 func classifyDB(in DBInput, name string, required bool) (DBReport, []Check) {
@@ -375,7 +375,7 @@ func classifyDB(in DBInput, name string, required bool) (DBReport, []Check) {
 	}
 }
 
-// teethExpectation is one teeth periodic paired with what configuration says
+// engineExpectation is one engine periodic paired with what configuration says
 // about it: the label a human reads, whether it is *intended active*, and — for
 // the two evening periodics that legitimately take turns — the note explaining
 // why it is off, so a deliberately-quiet send reads as designed.
@@ -384,7 +384,7 @@ func classifyDB(in DBInput, name string, required bool) (DBReport, []Check) {
 // (usage/commands.md §"The intended-active guard"), which is what lets a fault
 // line promise `reconcile` will fix it: this report and that repair pass derive
 // the same answer from the same configuration.
-type teethExpectation struct {
+type engineExpectation struct {
 	slug       string
 	label      string
 	want       bool
@@ -392,13 +392,13 @@ type teethExpectation struct {
 	absentNote string
 }
 
-// teethExpectations resolves what each teeth periodic should be doing for the
+// engineExpectations resolves what each engine periodic should be doing for the
 // current evening-window ownership. The morning tripwire is unconditional — it is
 // the escalation ladder's dead-man. The bell and its backstop move in opposite
 // directions: whichever one is not delivering the evening is intended inactive,
 // never parked.
-func teethExpectations(companionEnabled bool) []teethExpectation {
-	return []teethExpectation{
+func engineExpectations(companionEnabled bool) []engineExpectation {
+	return []engineExpectation{
 		{slug: SlugTripwire, label: "morning tripwire", want: true},
 		{
 			slug: SlugBell, label: "evening bell", want: !companionEnabled,
@@ -413,25 +413,25 @@ func teethExpectations(companionEnabled bool) []teethExpectation {
 	}
 }
 
-// classifyTeethPeriodics checks the teeth job DB against those expectations. An
+// classifyEnginePeriodics checks the engine job DB against those expectations. An
 // intended-active periodic that is parked — switched off, or with its cursor
 // stuck a full day behind — is the silent failure the whole repair path exists
 // for, so it is an error whose detail names the exact command that fixes it. An
 // intended-inactive periodic is reported Ok with the reason it is off, never as a
 // fault.
-func classifyTeethPeriodics(rep *DBReport, companionEnabled bool, now time.Time) []Check {
-	expectations := teethExpectations(companionEnabled)
+func classifyEnginePeriodics(rep *DBReport, companionEnabled bool, now time.Time) []Check {
+	expectations := engineExpectations(companionEnabled)
 	checks := make([]Check, 0, len(expectations))
 	for _, exp := range expectations {
-		checks = append(checks, classifyTeethPeriodic(rep, exp, now)...)
+		checks = append(checks, classifyEnginePeriodic(rep, exp, now)...)
 	}
 	return checks
 }
 
-// classifyTeethPeriodic classifies one teeth periodic and annotates its row. A
+// classifyEnginePeriodic classifies one engine periodic and annotates its row. A
 // slug the store has no row for is appended as a Present:false placeholder so it
 // renders visibly rather than vanishing from the list.
-func classifyTeethPeriodic(rep *DBReport, exp teethExpectation, now time.Time) []Check {
+func classifyEnginePeriodic(rep *DBReport, exp engineExpectation, now time.Time) []Check {
 	name := "periodic." + exp.slug
 	i, found := indexOfPeriodic(rep.Periodics, exp.slug)
 	if !found {
@@ -515,7 +515,7 @@ func remedy(cmd, slug string) string {
 
 // classifyCompanionPeriodics checks the companion job DB's morning and night
 // periodics, both required active whenever the companion is enabled. They live in
-// the companion's own job store, which the teeth repair lever does not own, so
+// the companion's own job store, which the engine repair lever does not own, so
 // their faults name no reconcile command.
 func classifyCompanionPeriodics(rep *DBReport) []Check {
 	checks := requireActive(rep, SlugCompanionMorning, "morning companion")

@@ -446,9 +446,9 @@ func TestSendEmbedReturningID_PropagatesPostError(t *testing.T) {
 	assert.Contains(t, err.Error(), "status")
 }
 
-// TestContentSend_BodyCarriesNoEmbedsKey pins the byte-for-byte teeth guarantee:
+// TestContentSend_BodyCarriesNoEmbedsKey pins the byte-for-byte Engine guarantee:
 // the omitempty on message.Embeds keeps the content-only send serializing as
-// {"content":...} with no embeds key, so the fixed-template teeth path is
+// {"content":...} with no embeds key, so the fixed-template Engine path is
 // unchanged by the embed addition.
 func TestContentSend_BodyCarriesNoEmbedsKey(t *testing.T) {
 	t.Run("Send", func(t *testing.T) {

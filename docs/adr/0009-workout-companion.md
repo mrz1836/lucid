@@ -21,8 +21,8 @@ and backs off on a pain signal — without a second daily decision to make.
 The [daily companion](../usage/companion.md) already resolved the same
 tension for the morning/night briefing. It is a **config-gated,
 off-by-default, model-allowed** Mirror surface with a **deterministic
-core** and **LLM-phrased delivery**, sitting beside the Engine teeth
-without touching them: the deterministic verdict is the Engine's, the
+core** and **LLM-phrased delivery**, sitting beside the Engine
+without touching it: the deterministic verdict is the Engine's, the
 model only writes warmth, and nothing it does scores content (P3). That
 precedent is the shape a workout surface needs.
 
@@ -39,7 +39,7 @@ exactly the same class as the daily companion. Full spec:
   is handed an *already-decided* plan and writes only the prose; it never
   changes the pick. The surface completes with every model down (P9).
 * **Off by default.** A `workout` block in `lucid.json` gates the whole
-  feature. A fresh Ledger runs the existing teeth and companion unchanged
+  feature. A fresh Ledger runs the existing Engine and companion unchanged
   until an operator opts in, exactly like the companion block.
 * **Observations stay inventory.** Two new capturable kinds — `workout`
   and `body_state` — carry no streak, target, or score; they are
@@ -65,7 +65,7 @@ a config-gated companion-class workout surface exists — with a
 deterministic core, off by default, and no voice of its own beyond the
 model phrasing the companion already sanctioned. It is not the Coach: it
 has no goal trees, no progress celebration, no accountability voice, and
-no teeth. A workout practice that earns teeth still becomes an Engine link
+no consequences. A workout practice that earns consequences still becomes an Engine link
 through a Gate.
 
 ## Consequences

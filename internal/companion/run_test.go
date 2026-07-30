@@ -590,7 +590,7 @@ func TestAtClock(t *testing.T) {
 }
 
 // TestDefaultDBPath covers the explicit > env > default precedence and that the
-// default lands outside the ~/.lucid Ledger, distinct from the teeth's job DB.
+// default lands outside the ~/.lucid Ledger, distinct from the Engine's job DB.
 func TestDefaultDBPath(t *testing.T) {
 	explicit := filepath.Join(t.TempDir(), "custom.db")
 	got, err := DefaultDBPath(explicit)

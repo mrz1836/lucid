@@ -385,7 +385,7 @@ func cronFromHM(hm string) (string, error) {
 	return cronFromMinutes(total), nil
 }
 
-// DefaultDBPath resolves the disposable teeth job-DB path: an explicit override
+// DefaultDBPath resolves the disposable Engine job-DB path: an explicit override
 // wins, then the LUCID_SCHEDULER_DB env override, then the default flywheel.db
 // under the OS user-config dir (outside the ~/.lucid Ledger, ADR-0004). It is
 // exported so a read-only inspector resolves the exact same path the daemon

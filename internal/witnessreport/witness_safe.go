@@ -14,7 +14,7 @@ import "regexp"
 // The list is deliberately NOT internal/agents/safety.MatchesBlocklist. That
 // blocklist's whole external-action category (send / dm / email / post / notify)
 // would false-trip a legitimate friend-ask like "post me a reminder" or "DM me
-// midweek", and its overclaim category ("clearly", "!!") is about the teeth's
+// midweek", and its overclaim category ("clearly", "!!") is about the Engine's
 // tone, not privacy. What a witness report must never carry is a different set:
 // a raw journal citation, or an elevated medical / private-relationship detail
 // that belongs in the private user channel and not in front of the witness audience.

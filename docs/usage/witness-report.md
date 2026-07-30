@@ -8,8 +8,8 @@ three concrete asks a friend can act on. It replaces the sparse monthly all-clea
 line the witness channel used to carry (see
 [What it retires](#what-it-retires)).
 
-It is the Mirror-side, model-allowed sibling of the Engine's accountability
-*teeth*. Like the [companion](companion.md), the numbers stay modeless and
+It is the Mirror-side, model-allowed sibling of the Engine's accountability.
+Like the [companion](companion.md), the numbers stay modeless and
 deterministic — a model can never soften "you missed" or invent a streak — while
 the model wraps that same honest skeleton in warm, in-voice prose. See
 [`../architecture.md`](../architecture.md) for the Mirror/Engine split and
@@ -24,7 +24,7 @@ exactly as before until you opt in; nothing below happens until you set
   provider seam, never the Engine. Every streak, adherence, and miss figure is
   copied from the same projection `lucid metrics --json` exposes.
 - **Where it runs** — inside `lucid scheduler run`, in the same supervised process
-  as the teeth and the companion (config-gated), so it is up whenever the
+  as the Engine and the companion (config-gated), so it is up whenever the
   scheduler is. It is not an external cron.
 
 ## The weekly window
@@ -74,7 +74,7 @@ at your own prompt files:
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `enabled` | bool | Gates the whole feature. Default `false` → the scheduler runs only the pure Engine teeth (and any companion). |
+| `enabled` | bool | Gates the whole feature. Default `false` → the scheduler runs only the pure Engine (and any companion). |
 | `mode` | string | Delivery target: `preview` posts to your **own** user channel (the safe default during the trust-building period), `auto` posts to the friend-facing **witness** channel. Flipping `preview` → `auto` is a one-key change, never code. |
 | `time` | string | The `HH:MM` local fire mark. Default `"09:00"`. |
 | `weekday` | int | The cron weekday of the fire mark (`0`=Sunday … `1`=Monday … `6`=Saturday). Default `1` (Monday). |
@@ -320,20 +320,20 @@ Monday is visible, not a quiet gap.
   scheduled job and lands in the supervised daemon log. Silence is the one outcome
   the report never produces.
 
-## How it coexists with the Engine teeth
+## How it coexists with the Engine
 
-The report is a third node beside the teeth and the companion, and it changes
+The report is a third node beside the Engine and the companion, and it changes
 nothing about the accountability decision. The Engine still runs its **full
 modeless decision** every day — it evaluates the tripwire, persists escalation
 state, and fires the L2 witness escalation, all deterministic and untouched. The
 witness report only adds the weekly accountability post; it never gates, softens,
 or delays an escalation. Disable it (`witness_report.enabled: false`) and restart
-`lucid scheduler run`, and the teeth and companion run exactly as before.
+`lucid scheduler run`, and the Engine and companion run exactly as before.
 
 ## Operational notes
 
 - The report runs its own small, disposable job database, separate from the
-  teeth's and the companion's and from the `~/.lucid` Ledger. It defaults to a path
+  Engine's and the companion's and from the `~/.lucid` Ledger. It defaults to a path
   under your user config directory; set `LUCID_WITNESS_REPORT_DB` to override it.
   It holds only scheduling machinery and the per-week delivery receipt — no Ledger
   truth — so it is safe to delete; it is rebuilt on the next run.
@@ -348,7 +348,7 @@ or delays an escalation. Disable it (`witness_report.enabled: false`) and restar
   `witness report`, `scheduler run`, and `scheduler status`.
 - [`weekly-reflection.md`](weekly-reflection.md) — the Sunday weekly deep-dive the
   Monday report lands after.
-- [`../engine.md`](../engine.md) — the accountability teeth (bell, tripwire,
+- [`../engine.md`](../engine.md) — the accountability node (bell, tripwire,
   escalation) and the retired monthly heartbeat the weekly report absorbs.
 - [`../architecture.md`](../architecture.md) — the Mirror/Engine split and the
   purity boundary the report sits beside.

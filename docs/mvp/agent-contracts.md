@@ -80,7 +80,7 @@ future agent unless a contract explicitly overrides them.
   fail closed**. The Engine and observation modules
   ([`engine-module.md`](engine-module.md),
   [`observations-module.md`](observations-module.md)) invoke no agent.
-  Enforcement teeth, body data, and reflective content never touch
+  Enforcement, body data, and reflective content never touch
   (architecture P3); the only join is that `/closeout`'s journal line
   enters `raw/` as an ordinary entry, via the router. Widening agent
   access to observation-derived data requires both a contract diff on

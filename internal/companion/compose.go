@@ -292,7 +292,7 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 		return Result{}, fmt.Errorf("companion: read %s template: %w", mode, err)
 	}
 
-	// The send-free teeth verdict: "" on a normal/completed day, the deterministic
+	// The send-free Engine verdict: "" on a normal/completed day, the deterministic
 	// L1 / L2-blocked / storm-lapse line on a miss-day. A read failure is loud —
 	// the verdict is life-critical and is never silently dropped.
 	verdict, err := c.verdict.TripwireUserVerdict(now)
@@ -391,7 +391,7 @@ func fallbackInterpretation(mode Mode) string {
 
 // fallbackActions returns the deterministic next-action(s) for a window's
 // fallback scaffold. The night reuses the Engine's evening Bell (naming the
-// chain) so the close-out cue is the same deterministic copy the teeth post; the
+// chain) so the close-out cue is the same deterministic copy the Engine posts; the
 // morning uses a fixed start-small nudge. A night fallback that cannot read the
 // chain is a loud error — the Bell needs the chain label.
 func (c *Composer) fallbackActions(mode Mode) ([]string, error) {

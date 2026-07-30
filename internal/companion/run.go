@@ -19,7 +19,7 @@ import (
 )
 
 // Job runtime identifiers. The companion runs its own disposable flywheel node
-// beside the teeth's, so its queue, kinds, and slugs are distinct: the two
+// beside the Engine's, so its queue, kinds, and slugs are distinct: the two
 // periodics never collide with the bell/tripwire pair, and a restart reconciles
 // them by slug without duplicating.
 const (
@@ -35,7 +35,7 @@ const (
 	backfillCap = 1
 
 	// envCompanionDB overrides the job-DB path when --db is not passed. Like the
-	// teeth's flywheel.db it is disposable machinery, not Ledger truth, so it
+	// Engine's flywheel.db it is disposable machinery, not Ledger truth, so it
 	// lives outside ~/.lucid by default.
 	envCompanionDB = "LUCID_COMPANION_DB"
 
@@ -330,7 +330,7 @@ func (w nightWorker) Work(ctx context.Context, _ *flywheel.Job[companionArgs]) (
 // Run opens the disposable job DB, migrates it, registers the morning and night
 // workers, reconciles the two periodics from the chain's bell/tripwire marks,
 // and runs the flywheel node until ctx is canceled (SIGINT/SIGTERM upstream). It
-// returns nil on a clean drain. It runs beside the teeth daemon in the same
+// returns nil on a clean drain. It runs beside the Engine daemon in the same
 // process (config-gated), so it is up whenever the scheduler is.
 func Run(ctx context.Context, o Options) error {
 	if o.Store == nil {
@@ -450,7 +450,7 @@ func parseHM(hm string) (hour, minute int, err error) {
 // DefaultDBPath resolves the disposable companion job-DB path: an explicit
 // override wins, then the LUCID_COMPANION_DB env override, then the default
 // companion.db under the OS user-config dir (outside the ~/.lucid Ledger, and
-// distinct from the teeth's flywheel.db). It is exported so a read-only inspector
+// distinct from the Engine's flywheel.db). It is exported so a read-only inspector
 // resolves the exact same path the daemon writes to.
 func DefaultDBPath(dbPath string) (string, error) {
 	return flynode.ResolveDBPath(dbPath, envCompanionDB, "companion.db")

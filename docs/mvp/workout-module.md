@@ -9,7 +9,7 @@ the user the right workout on a silver platter, safely, in under a
 minute.*
 
 Like the companion, it ships **off**. A fresh Ledger runs the pure
-Engine teeth and the existing surfaces exactly as before until an
+Engine and the existing surfaces exactly as before until an
 operator sets `workout.enabled: true`; nothing below happens until then.
 
 Precedence follows the same rule as [`engine-module.md`](engine-module.md)
@@ -40,8 +40,8 @@ three lines the companion draws:
    from the Engine chain ([`engine-module.md`](engine-module.md)
    `status.json` / `metrics`). Both are **read-only projections**, computed
    on demand and never written back onto an event. Counting days is not
-   teeth: there is no quota, no makeup obligation, and no escalation —
-   a workout practice that earns teeth becomes an Engine link through a
+   consequences: there is no quota, no makeup obligation, and no escalation —
+   a workout practice that earns consequences becomes an Engine link through a
    Gate, a separate deliberate act.
 3. **It surfaces, it never nags.** The recommendation rides one
    configurable daily slot and an on-demand command. A skipped day is a
@@ -67,9 +67,9 @@ model phrasing the companion already sanctioned.
    streak from the logged workout days it is handed, and reads adherence
    from the Engine fold ([`engine-module.md`](engine-module.md) `metrics` /
    `status.json`); it stores nothing back, and no count ever becomes a
-   field on an event. If a workout practice ever deserves teeth it becomes
+   field on an event. If a workout practice ever deserves consequences it becomes
    an Engine link through a Gate (§0), a separate deliberate act — the
-   recommender never grows teeth of its own.
+   recommender never acquires consequences of its own.
 3. **Sanctuary boundaries hold, in both directions.** The two new kinds
    live under `~/.lucid/observations/`; no agent context slice includes
    the observation, registry, or engine trees, nor any projection over
@@ -137,7 +137,7 @@ The whole feature is one block, off by default (full schema notes in
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `enabled` | bool | Gates the whole feature. Default `false` → the scheduler runs only the existing teeth and companion. |
+| `enabled` | bool | Gates the whole feature. Default `false` → the scheduler runs only the existing Engine and companion. |
 | `program` | path | The generic-schema program JSON, on an **opaque** operator path — the personal program at runtime, a synthetic one in tests. |
 | `slot_time` | `HH:MM` | The daily slot's local fire time. **Configurable, default midday** — this surface is not tied to the chain's bell/tripwire the way the companion is, because a workout window is a personal choice (some train in the morning, some at midday). |
 | `system_prompt` | path | The system prompt for the phrasing call — an opaque file, same seam as `program`. |
@@ -452,7 +452,7 @@ follow, and both are deliberate:
 
 * **The daily slot** — a config-gated periodic that fires once at
   `workout.slot_time` (local, **default midday**), delivered by a
-  flywheel node beside the teeth and companion, gated on
+  flywheel node beside the Engine and companion, gated on
   `workout.enabled`. It composes the deterministic recommendation, asks
   the model to phrase it, and delivers one idempotent, read-back-verified
   message with the same degrade layering the companion uses (deterministic
@@ -596,7 +596,7 @@ cutoff, and alerts loudly on a total miss.
 * **Not a Coach.** No goal trees, no progress celebration, no "you should"
   voice. The recommendation is deterministic and offered; the only voice
   is the model phrasing the companion already sanctioned. A workout
-  practice that earns teeth becomes an Engine link through a Gate.
+  practice that earns consequences becomes an Engine link through a Gate.
 * **Not a score on the body.** `workout` and `body_state` are inventory;
   the trend — streak included — is a read-only projection counted on
   demand and stored nowhere. Nothing grades a session, an anchor count, or
