@@ -372,17 +372,18 @@ func writeCapped(r io.Reader, destPath, slash string, limit int64) (int64, error
 // cleaned absolute path only if it stays inside destDir. Absolute entries and any
 // ".." traversal return [ErrPathTraversal] — the Zip-Slip defense, mirroring the
 // upgrade extractor.
+//
+// The guard is a prefix check of the cleaned, joined target against the cleaned
+// destination plus a trailing separator: this is the form CodeQL's go/zipslip
+// query recognizes as a sanitizer barrier (a filepath.Rel + ".." check is
+// equivalent but the analyzer does not model it).
 func validateArchivePath(destDir, name string) (string, error) {
 	if filepath.IsAbs(name) {
 		return "", fmt.Errorf("%w: absolute path %q", ErrPathTraversal, name)
 	}
-	destDir = filepath.Clean(destDir)
-	target := filepath.Clean(filepath.Join(destDir, name))
-	rel, err := filepath.Rel(destDir, target)
-	if err != nil {
-		return "", fmt.Errorf("storage: relative path: %w", err)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	cleanDest := filepath.Clean(destDir)
+	target := filepath.Join(cleanDest, name) // Join cleans the result.
+	if !strings.HasPrefix(target, cleanDest+string(filepath.Separator)) {
 		return "", fmt.Errorf("%w: %s", ErrPathTraversal, name)
 	}
 	return target, nil

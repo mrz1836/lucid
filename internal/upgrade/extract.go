@@ -27,19 +27,34 @@ const extractDirPerm os.FileMode = 0o700
 // returns the resulting absolute path only if it stays inside destDir.
 // Absolute entries and any traversal pattern (.., ./.., etc.) return
 // [ErrPathTraversal]. This is the Zip-Slip defense boundary.
+//
+// The check compares the cleaned, joined target against the cleaned
+// destination plus a trailing separator: any entry that resolves out of
+// destDir fails the prefix. This is the form CodeQL's go/zipslip query
+// recognizes as a sanitizer barrier — a filepath.Rel + ".." check is
+// equivalent but the analyzer does not model it, so it flagged the sink.
 func validateExtractPath(destDir, tarPath string) (string, error) {
 	if filepath.IsAbs(tarPath) {
 		return "", fmt.Errorf("%w: absolute path not allowed: %s", ErrPathTraversal, tarPath)
 	}
 
-	destDir = filepath.Clean(destDir)
-	targetPath := filepath.Clean(filepath.Join(destDir, tarPath))
+	cleanDest := filepath.Clean(destDir)
+	targetPath := filepath.Join(cleanDest, tarPath) // Join cleans the result.
 
-	relPath, err := filepath.Rel(destDir, targetPath)
+	// Primary Zip-Slip barrier: the cleaned target must stay strictly under
+	// destDir. This prefix check is the form CodeQL's go/zipslip query models
+	// as a sanitizer.
+	if !strings.HasPrefix(targetPath, cleanDest+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: %s", ErrPathTraversal, tarPath)
+	}
+
+	// Defense in depth: also refuse any entry whose relative path opens with
+	// ".." — conservatively rejecting odd literal names (e.g. "...", "..\x")
+	// a release tarball never carries.
+	relPath, err := filepath.Rel(cleanDest, targetPath)
 	if err != nil {
 		return "", fmt.Errorf("lucid/upgrade: relative path: %w", err)
 	}
-
 	if strings.HasPrefix(relPath, "..") || strings.Contains(relPath, string(filepath.Separator)+"..") {
 		return "", fmt.Errorf("%w: %s", ErrPathTraversal, tarPath)
 	}
