@@ -172,12 +172,12 @@ what each is allowed to do.
 single static binary named `lucid`. It runs on **macOS or Linux** and stores
 everything under a user-owned Ledger at `~/.lucid/`.
 
-> ⚠️ **Status:** Lucid is `PRE-RELEASE` and under active construction. The
-> deterministic CLI loop (capture, the Engine close-out, observations, exports)
-> works today; the fully-wired autonomous surface (scheduler sends, witness
-> escalation, and the agentic Mirror on the chat harness) is still being built
-> out. Commands and the `~/.lucid/` layout may change before 1.0. PRs are
-> welcome.
+> ⚠️ **Status:** Lucid is `PRE-RELEASE` (pre-1.0); commands and the `~/.lucid/`
+> layout may still change before 1.0. The whole command surface below runs
+> today — the deterministic daily loop (capture, close-out, observations, the
+> day view, exports) needs no model and no network, while the autonomous sends
+> (bell, companion, witness report) need a delivery channel and the reflective
+> verbs need an LLM provider configured. PRs are welcome.
 
 <br/>
 
@@ -235,33 +235,66 @@ than installing elsewhere.
 
 ## 🗺️ Command reference
 
-Every `lucid` subcommand at a glance — each entry below runs real, deterministic
-logic today, with no model in the loop.
+Every `lucid` command, grouped by what you're doing. The daily loop is
+deterministic — no model, no network — so capture and the close-out never wait
+on a provider (P9).
 
-| Command | Purpose |
-|---------|---------|
-| `lucid init` | Scaffold the `~/.lucid/` Ledger tree (idempotent; most verbs also self-scaffold). |
-| `lucid log <text>` | Capture one immutable raw entry — no structure imposed at capture time. |
-| `lucid closeout [skip \| backfill …]` | The two-minute nightly close-out: record the day's committed practice. Idempotent per logical day. |
-| `lucid mode <green\|yellow\|red>` | Declare today's capacity mode (rejected after the bell). |
-| `lucid status` | Read-only Engine state: streak, mode-relative adherence, error budget. |
-| `lucid obs <kind> [value…]` | One-line health/context micro-log (pain, mood, sleep, …) — inventory, never obligation. |
-| `lucid day [date]` | The joined day view: engine record + observations + enrichment + entries. |
-| `lucid export [series \| packet clinician [@date\|all]]` | Export a CSV series or a clinician packet (zero journal content by default). |
-| `lucid validate` | Read-only architecture-gate sweep (boundary, diagnostic-language, links, schema). |
-| `lucid scheduler run` | The autonomous send daemon: evening bell + morning tripwire, plus the config-gated companion and weekly witness report. |
-| `lucid version` | Print build metadata (add `--json` for a machine-readable object). |
-| `lucid upgrade` | Self-update in place from a GitHub release (`--check`, `--channel`, `--force`). |
+**The daily loop**
 
-Global flag `--json` works where output is structured; exit codes are `0` (ok),
-`1` (error), `2` (usage).
+| Command | What it does |
+|---------|--------------|
+| `log <text>` | Capture one immutable raw entry — no structure imposed at capture time. |
+| `closeout [skip \| backfill …]` | The two-minute nightly close-out — record the day's committed practice. Idempotent per logical day. |
+| `mode <green\|yellow\|red>` | Declare today's capacity mode; the floor drops with it (rejected after the bell). |
+| `obs <kind> [value…]` | One-line health/context micro-log — pain, mood, sleep, place. Inventory, never obligation. |
+| `attach <file>` | Attach a photo or file to a logical day. |
 
-> 💬 **Optional chat harness.** Driving Lucid from a chat client unlocks the
-> agentic Mirror verbs — `/checkin`, `/reflect`, `/ask`, `/person`, and the
-> micro-log aliases — which structure entries, propose one resonance-gated
-> pattern, and recall it later. The harness shells out to this same binary and
-> needs an LLM provider configured; the CLI works standalone without it. See
-> [`docs/usage/commands.md`](docs/usage/commands.md).
+**Read the record**
+
+| Command | What it does |
+|---------|--------------|
+| `day [date]` | The joined day view — engine record + observations + enrichment + raw entries. |
+| `status` · `metrics` · `stats` | Engine state (streak, mode-relative adherence, error budget); derived practice metrics; Ledger volume over a window. |
+| `reflect` · `ask` | Recall your validated insights; grounded, cited Q&A across your insights and reflections. |
+| `recall` · `excavate` | Browse the archive by era / thread / injury, or pick the next memory cluster to excavate — both read-only. |
+
+**Build your history**
+
+| Command | What it does |
+|---------|--------------|
+| `memory` | Record a story from your past — backdated, linked, kept. |
+| `injury` · `era` · `thread` · `anchor` | Record or amend body history, life chapters, ongoing threads, and days-since milestones. |
+| `person` | Look up a person you've mentioned. |
+| `bootstrap` | Toggle historical-entry mode to backfill the past without disturbing today. |
+
+**Accountability & autonomous sends**
+
+| Command | What it does |
+|---------|--------------|
+| `scheduler` | The send daemon — evening bell + morning tripwire on the chain's clocks. |
+| `companion` · `witness` · `workout` | Config-gated sends: the daily companion, the weekly witness report, the training slot. |
+| `storm` · `profile` | Declare / renew / end a storm (a grace window); switch clock profile. |
+
+**System & data**
+
+| Command | What it does |
+|---------|--------------|
+| `init` | Scaffold the `~/.lucid/` Ledger (idempotent; most verbs also self-scaffold). |
+| `export [series \| packet clinician [@date\|all]]` | Export a CSV series or a clinician packet — zero journal content by default. |
+| `validate` | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
+| `serve` | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
+| `version` · `upgrade` | Print build metadata; self-update in place from a GitHub release (`--check`, `--channel`, `--force`). |
+
+Global `--json` works where output is structured; exit codes are `0` (ok),
+`1` (error), `2` (usage). Full synopsis, flags, and examples for every command
+and its sub-forms live in [`docs/usage/commands.md`](docs/usage/commands.md).
+
+> 💬 **Chat-driven, optionally.** `lucid serve` speaks a stdin/JSON protocol so a
+> chat client can drive the interactive close-out and the agentic Mirror verbs
+> (`/checkin`, `/reflect`, `/ask`, `/person`) — which structure entries, propose
+> one resonance-gated pattern, and recall it later. Those verbs need an LLM
+> provider; every one is also a direct CLI command, so the CLI is fully usable
+> standalone.
 
 <br/>
 
@@ -314,9 +347,9 @@ Lucid is two subsystems over one substrate, with a hard boundary between them:
 - Nothing you write is ever scored, streaked, or penalized. Teeth attach to acts
   (did you show up?), never to content.
 - No autonomous messages beyond the pre-committed Engine templates (bell, nudge,
-  witness escalation) and the opt-in, config-gated Mirror-side sends (the daily
-  companion and the weekly witness report), and no outbound fetch beyond opted-in,
-  outbound-minimal enrichers.
+  witness escalation) and the opt-in, config-gated sends (the daily companion,
+  the weekly witness report, and the workout slot), and no outbound fetch beyond
+  opted-in, outbound-minimal enrichers.
 - No diagnosis. The voice is a trusted advisor — warm, honest, humble about
   certainty — offering hypotheses, never verdicts.
 
@@ -356,15 +389,15 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 </details>
 
 <details>
-<summary><strong><code>Build in progress</code></strong></summary>
+<summary><strong><code>Go deeper</code></strong></summary>
 <br/>
 
 | Doc | Purpose |
 |-----|---------|
-| [`docs/mvp/scope.md`](docs/mvp/scope.md) | One page, build-ready: the contract for the first steel thread — the unified nightly loop. |
-| [`docs/mvp/README.md`](docs/mvp/README.md) | The build order: agent contracts, data model, error states, and per-phase acceptance criteria — "done" means the checks pass. |
-| [`docs/technical-spec.md`](docs/technical-spec.md) | The reference architecture for the full system beyond the MVP. |
-| [`docs/adr/README.md`](docs/adr/README.md) | Why the build goes this way: Go core with a CLI-first surface, plain files with SQLite as a later index, chat harness as thin sugar. Nothing locks before the loop earns it. |
+| [`docs/technical-spec.md`](docs/technical-spec.md) | The reference architecture for the whole system — every subsystem, record, and seam. |
+| [`docs/adr/README.md`](docs/adr/README.md) | The architecture decisions of record: a Go core with a CLI-first surface, plain files with SQLite as a later index, the chat harness as thin sugar over the binary. |
+| [`docs/mvp/scope.md`](docs/mvp/scope.md) | The canonical build scope: the unified nightly loop, its agent contracts, and its acceptance criteria on one page. |
+| [`docs/mvp/README.md`](docs/mvp/README.md) | The engineering doc set — data model, error states, and per-module contracts — the source of truth for how the internals fit together. |
 
 </details>
 
@@ -420,7 +453,7 @@ magex help
 
 Common commands:
 - `magex build` — build the `lucid` binary
-- `magex test` — run the test suite (race + coverage, ≥90%)
+- `magex test` — run the test suite (race + coverage)
 - `magex lint` — run all linters (golangci-lint, 60+)
 - `magex format:fix` — gofumpt + imports
 
@@ -465,7 +498,7 @@ development environment and CI in sync with the vetted versions.
 All unit tests run via [GitHub Actions](https://github.com/mrz1836/lucid/actions).
 View the [configuration file](.github/workflows/fortress.yml).
 
-Run the tests (race + coverage, ≥90% floor):
+Run the tests (race + coverage):
 
 ```bash
 magex test
