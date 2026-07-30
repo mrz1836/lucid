@@ -261,10 +261,7 @@ func (a *Adapter) SetInsightRule(insightID, rule string, at time.Time) error {
 // insightPath resolves insights/<id>.md, rejecting a separator-bearing id so a
 // malformed id can never escape the tree.
 func (a *Adapter) insightPath(id string) (string, error) {
-	if id == "" || strings.ContainsAny(id, `/\`) {
-		return "", fmt.Errorf("storage: invalid insight id %q", id)
-	}
-	return filepath.Join(a.insightsDir(), id+insightExt), nil
+	return safeRecordPath(a.insightsDir(), id, insightExt, "insight id")
 }
 
 // nextInsightID returns the next free id for the given day, advancing the slot

@@ -2,9 +2,7 @@ package storage
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -99,13 +97,9 @@ func (a *Adapter) AppendUnansweredProposal(processedID string, up UnansweredProp
 // byte (produced_at included, so an append never re-times the artifact).
 func (a *Adapter) appendProposal(processedID string, mutate func(*processedJSON)) error {
 	path := filepath.Join(a.processedDir(), processedID+processedExt)
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path under the processed tree
+	j, err := readJSON[processedJSON](path, fmt.Sprintf("processed %q", processedID))
 	if err != nil {
-		return fmt.Errorf("storage: read processed %q: %w", processedID, err)
-	}
-	var j processedJSON
-	if err = json.Unmarshal(b, &j); err != nil {
-		return fmt.Errorf("storage: parse processed %q: %w", processedID, err)
+		return err
 	}
 	mutate(&j)
 	j.RejectedProposals = orEmptyRaw(j.RejectedProposals)
@@ -210,16 +204,9 @@ type offLimitsJSON struct {
 // §P-3). An absent registry means nothing is off-limits.
 func (a *Adapter) ReadOffLimitsPersonKeys() ([]string, error) {
 	path := filepath.Join(a.home, offLimitsFile)
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path at the Ledger root
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
+	j, _, err := readJSONOptional[offLimitsJSON](path, "off-limits registry")
 	if err != nil {
-		return nil, fmt.Errorf("storage: read off-limits registry: %w", err)
-	}
-	var j offLimitsJSON
-	if err := json.Unmarshal(b, &j); err != nil {
-		return nil, fmt.Errorf("storage: parse off-limits registry: %w", err)
+		return nil, err
 	}
 	return j.PersonKeys, nil
 }

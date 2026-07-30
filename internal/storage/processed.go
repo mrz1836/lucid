@@ -153,13 +153,9 @@ func (a *Adapter) ListProcessedIDs() ([]string, error) {
 // ReadProcessed loads the processed artifact with the given id.
 func (a *Adapter) ReadProcessed(id string) (ProcessedArtifact, error) {
 	path := filepath.Join(a.processedDir(), id+processedExt)
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path under the processed tree, id derived from a raw id
+	j, err := readJSON[processedJSON](path, fmt.Sprintf("processed %q", id))
 	if err != nil {
-		return ProcessedArtifact{}, fmt.Errorf("storage: read processed %q: %w", id, err)
-	}
-	var j processedJSON
-	if err := json.Unmarshal(b, &j); err != nil {
-		return ProcessedArtifact{}, fmt.Errorf("storage: parse processed %q: %w", id, err)
+		return ProcessedArtifact{}, err
 	}
 	return j.decode()
 }

@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -281,13 +280,9 @@ func (a *Adapter) decodeSidecarEntry(dir string, e fs.DirEntry, prefix string) (
 // sidecar's own path (the stored binary is the sidecar path minus `.json`).
 func readMediaSidecar(dir, sidecarName string) (MediaRecord, error) {
 	path := filepath.Join(dir, sidecarName)
-	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path under the Ledger media tree
+	rec, err := readJSON[MediaRecord](path, fmt.Sprintf("media sidecar %q", sidecarName))
 	if err != nil {
-		return MediaRecord{}, fmt.Errorf("storage: read media sidecar %q: %w", sidecarName, err)
-	}
-	var rec MediaRecord
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return MediaRecord{}, fmt.Errorf("storage: parse media sidecar %q: %w", sidecarName, err)
+		return MediaRecord{}, err
 	}
 	rec.StoredPath = strings.TrimSuffix(path, mediaSidecarExt)
 	return rec, nil

@@ -85,10 +85,7 @@ func (a *Adapter) peopleDir() string { return filepath.Join(a.home, peopleDirNam
 // personPath returns the on-disk path for a person key. It rejects a key
 // carrying a path separator so a malformed slug can never escape the tree.
 func (a *Adapter) personPath(key string) (string, error) {
-	if key == "" || strings.ContainsAny(key, `/\`) {
-		return "", fmt.Errorf("storage: invalid person key %q", key)
-	}
-	return filepath.Join(a.peopleDir(), key+personExt), nil
+	return safeRecordPath(a.peopleDir(), key, personExt, "person key")
 }
 
 // ReadPerson loads the person record at key, returning (record, found,
