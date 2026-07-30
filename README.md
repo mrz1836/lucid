@@ -281,6 +281,8 @@ on a provider (P9).
 |---------|--------------|
 | `init` | Scaffold the `~/.lucid/` Ledger (idempotent; most verbs also self-scaffold). |
 | `export [series \| packet clinician [@date\|all]]` | Export a CSV series or a clinician packet — zero journal content by default. |
+| `backup [--out <file>]` | Write the must-keep Ledger trees to a single `.tar.gz`. |
+| `restore [--in <file>] [--force]` | Rebuild a Ledger from a backup archive (refuses to overwrite occupied data without `--force`). |
 | `validate` | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
 | `serve` | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
 | `version` · `upgrade` | Print build metadata; self-update in place from a GitHub release (`--check`, `--channel`, `--force`). |
@@ -414,10 +416,10 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 >
 > - **Status:** pre-1.0; expect bugs, edge cases, and breaking changes to
 >   commands and the `~/.lucid/` layout.
-> - **Your data is yours — and only yours to back up.** Everything lives in
->   plain files on your machine; there is no cloud copy. The must-keep backup
->   set is `raw/`, `observations/`, `registries/`, `engine/` (minus
->   `status.json`), and `projections/exports.log`.
+> - **Your data is yours.** `lucid backup` writes the must-keep set (`raw/`,
+>   `observations/`, `registries/`, `engine/` minus `status.json`, and
+>   `projections/exports.log`) to a single archive; `lucid restore` rebuilds it.
+>   There is still no cloud copy — the backup goes where you tell it.
 > - **Not medical advice.** Lucid is not a therapist or clinician; health
 >   projections are data for you and your care team, never a diagnosis.
 > - **No liability.** The authors accept no responsibility for lost data,

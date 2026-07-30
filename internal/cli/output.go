@@ -31,6 +31,18 @@ func containsFold(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
+// emitErr prints a command error to stderr and returns it unchanged. The root
+// sets SilenceErrors, so a returned error otherwise only sets the exit code with
+// no explanation; the data-ops verbs (backup, restore) name their own remedy, so
+// the message and the exit code must travel together — mirroring the scheduler
+// verbs' "lucid: scheduler: <message>" stderr line.
+func emitErr(cmd *cobra.Command, err error) error {
+	if err != nil {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
+	}
+	return err
+}
+
 // emit renders a read-model command result: when --json is set it writes the
 // machine payload verbatim, otherwise it prints each human-first line to
 // stdout. It is the shared tail of the read commands (status, day, stats,

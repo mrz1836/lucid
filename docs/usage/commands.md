@@ -430,6 +430,64 @@ lucid export packet clinician all
 lucid export packet clinician @2026-06-30 --json
 ```
 
+### backup
+
+```
+lucid backup [--out <file>] [--json]
+```
+
+Write the **must-keep** Ledger set to a single gzip-compressed tar archive: the
+primary data that exists nowhere else and must survive forever (ADR-0002; the
+same set `scripts/backup.sh` and `deploy.BackupManifest` encode) — `raw/`,
+`observations/`, `registries/`, `engine/` (minus its derived `status.json`), and
+`projections/exports.log`. Rebuildable trees (`processed/`, `insights/`,
+`reflections/`, `engine/status.json`, the rest of `projections/`) and the
+reconstructable indexes (`people/`, `sessions/`, `lucid.json`) are deliberately
+omitted. It reads `~/.lucid/` and writes one archive; it makes no network call
+and never mutates the Ledger.
+
+| Flag | Effect |
+|------|--------|
+| `--out <file>` | Destination archive path. Default: `lucid-backup-<UTC-timestamp>.tar.gz` in the current directory. The path must be **outside** `~/.lucid/` (a backup is never written into the tree it copies), and an existing file is never clobbered — a same-named target is a clear error, not an overwrite. |
+
+`--json` emits `{command, path, bytes, files}` — the archive path, its compressed
+size in bytes, and the number of files written. The human summary ends by naming
+what was written and where.
+
+```sh
+lucid backup
+lucid backup --out /mnt/usb/lucid-2026-07-29.tar.gz
+lucid backup --out /tmp/b.tar.gz --json
+```
+
+### restore
+
+```
+lucid restore [--in <file>] [--force] [--json]
+```
+
+Rebuild a Ledger from a `lucid backup` archive. The archive is opened from
+wherever you name it (outside `~/.lucid/`); every entry is written back under
+`~/.lucid/` after a path-traversal (Zip-Slip) check and a manifest-root
+allowlist, so a crafted archive can never plant a file outside the record trees.
+Restore is an **overlay**: it writes and overwrites the archive's files and never
+deletes anything already present (a full replace is out of scope). The archive
+path may be passed with `--in` or positionally.
+
+| Flag | Effect |
+|------|--------|
+| `--in <file>` | Source archive path (or pass it positionally — not both). |
+| `--force` | Overlay even when the target already holds data. Without it, restore **refuses** to write into an occupied home (any backup-set root holding a non-`.keep` file) and names `--force`; a scaffolded-but-empty home (only `lucid.json` + `.keep` markers) counts as empty and restores without the flag. |
+
+`--json` emits `{command, path, bytes, files}` — the source archive, the total
+bytes restored, and the number of files written.
+
+```sh
+lucid restore --in /tmp/b.tar.gz
+lucid restore /mnt/usb/lucid-2026-07-29.tar.gz
+lucid restore --in /tmp/b.tar.gz --force --json
+```
+
 ### version
 
 ```

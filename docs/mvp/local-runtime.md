@@ -158,7 +158,11 @@ Two reasons this lives outside the repo:
    survive forever — the backup set — are `raw/`, `observations/`,
    `registries/`, `engine/` (minus `status.json`), and
    `projections/exports.log`: they are primary data that exists
-   nowhere else.
+   nowhere else. `lucid backup` writes exactly that set to a single
+   `.tar.gz`, and `lucid restore` rebuilds it — the native realization of
+   the ADR-0002 set (also encoded in `scripts/backup.sh` and
+   `deploy.BackupManifest`), so backing up no longer means copying trees
+   by hand.
 
 The standalone scheduler's durable job store (`flywheel.db`) is a
 third category — **disposable operational machinery, not testimony.**

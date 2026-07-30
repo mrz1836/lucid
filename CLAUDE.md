@@ -46,6 +46,7 @@ floor — if a doc and a passing test disagree, stop and surface it rather than
 | add/adjust enrichment or any network call | [`observations.md`](docs/observations.md) §5, [ADR-0006](docs/adr/0006-model-access.md) | `internal/storage/fetch_enrichment.go` + `internal/observations` |
 | change model/agent behavior | [`agent-contracts.md`](docs/mvp/agent-contracts.md) | `internal/agents/*` + `internal/provider` (never elsewhere) |
 | add a failure/error path | [`error-states.md`](docs/mvp/error-states.md) **first** | the owning package |
+| back up / restore the Ledger | [`data-model.md`](docs/mvp/data-model.md), [`local-runtime.md`](docs/mvp/local-runtime.md) §Rebuildability | `internal/storage` (archive IO) + `internal/cli` (the external sink) |
 
 ## Invariants — never violate (most are enforced by tests)
 
@@ -88,7 +89,7 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
 
 - [`cmd/lucid/main.go`](cmd/lucid/main.go) → [`internal/cli`](internal/cli) —
   Cobra entry; verbs: `init log closeout mode status obs day validate export
-  version upgrade` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
+  backup restore version upgrade` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
 - [`internal/router`](internal/router) — dispatch spine; verb→intent 1:1;
   holds the storage adapter + resolved config; orders agent calls.
 - [`internal/engine`](internal/engine) — pure, deterministic, agent-free Engine
