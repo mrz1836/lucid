@@ -70,6 +70,11 @@ sends themselves are the pre-committed Engine templates and nothing else.`,
 	// hand-edited (ADR-0007: state the binary owns is repaired only through the
 	// binary).
 	parent.AddCommand(newSchedulerReconcileCmd())
+	// `install`/`uninstall` are the host-install pair: render+lint the supervised
+	// launchd + hush artifacts (and, with --apply, load them). Pure CLI ops verbs
+	// like `run`/`status` — no router intent (ADR-0007).
+	parent.AddCommand(newSchedulerInstallCmd())
+	parent.AddCommand(newSchedulerUninstallCmd())
 	return parent
 }
 

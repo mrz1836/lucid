@@ -376,6 +376,64 @@ unprompted, within the pre-committed template ceiling; the
 never speaks at all but performs the runtime's only network fetches —
 outbound, read-only, allowlisted, audited.
 
+## Installing the supervised scheduler
+
+The Engine's whole autonomous surface — the evening bell, the morning
+tripwire, the companion, the weekly witness report — only fires if
+`lucid scheduler run` stays alive across reboots and logins. That last
+mile is a three-layer stack, and `lucid scheduler install` lays it down:
+
+```
+launchd  ──runs──▶  hush supervise  ──execs──▶  lucid scheduler run
+(keeps it            (injects the                (the credential-dumb
+ alive, RunAtLoad     harness token at             daemon; reads the
+ + KeepAlive)         spawn — ADR-0005)            token from its env)
+```
+
+The launchd job never names `lucid`; it runs `hush supervise <config>`,
+and hush fetches the harness token from its vault and injects it into the
+child at spawn time. The rendered artifacts **name** the token
+(`LUCID_HARNESS_TOKEN`, in the supervise `scope`) and **carry no value**
+— no secret ever appears in a file this command writes (ADR-0005, S-7).
+The two logical channel IDs are non-secret env the launchd job passes
+through (`LUCID_USER_CHANNEL_ID`, `LUCID_WITNESS_CHANNEL_ID`); they too
+are env-only, never `lucid.json` fields.
+
+**The command is opt-in about mutation**, matching Lucid's posture
+(installing the agent is what enables autonomous Discord sends):
+
+| Invocation | Effect |
+|------------|--------|
+| `lucid scheduler install` | Render both artifacts, lint them, and **print** them. Zero host mutation. Works on any OS. |
+| `lucid scheduler install --out <dir>` | Render + lint + **write** the two files to `<dir>`. No load. Portable. |
+| `lucid scheduler install --apply` | Write the plist to `~/Library/LaunchAgents/`, the supervise config to `~/.hush/supervisors/lucid-scheduler.toml`, then `launchctl bootstrap` and verify. **macOS only.** |
+| `lucid scheduler uninstall` | `launchctl bootout` + remove the plist (idempotent). `--dry-run` previews. |
+
+Every render goes through the `deploy` package's lint (ADR-0005), so an
+artifact that skipped its dry-run is never emitted. On `--apply` success
+the command reuses the same host probe `lucid scheduler status` runs and
+points the operator there to confirm the daemon is loaded and its next
+send is armed — the success condition is **the launchd job loaded**, not
+a process being momentarily up, so the launchd spawn race never reads as
+a false negative.
+
+**The plist and supervise config live outside `~/.lucid/`** (in
+`~/Library/LaunchAgents/` and `~/.hush/supervisors/`), so they never
+pollute a backup and never touch the Ledger — the Sanctuary boundary
+(P3) is untouched by an install.
+
+**When `hush` is absent** the command still lays down (or prints) the
+artifacts and prints the provisioning steps, but does **not** claim
+success: a supervised send needs the token hush injects, so a launchd job
+with no hush to run is not a working install.
+
+**Linux / systemd is manual for now.** `launchctl` has no portable
+equivalent this command drives, so off macOS `install --apply` returns an
+unsupported-host error and prints the manual guidance instead: place the
+rendered files, then run `hush supervise <path>` under the init system of
+your choice. The render/lint path itself is portable and runs on any OS
+(and in CI).
+
 ## When the harness goes away
 
 A standalone Lucid app is **not** an MVP requirement. It is a future

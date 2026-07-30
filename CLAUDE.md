@@ -47,6 +47,7 @@ floor — if a doc and a passing test disagree, stop and surface it rather than
 | change model/agent behavior | [`agent-contracts.md`](docs/mvp/agent-contracts.md) | `internal/agents/*` + `internal/provider` (never elsewhere) |
 | add a failure/error path | [`error-states.md`](docs/mvp/error-states.md) **first** | the owning package |
 | back up / restore the Ledger | [`data-model.md`](docs/mvp/data-model.md), [`local-runtime.md`](docs/mvp/local-runtime.md) §Rebuildability | `internal/storage` (archive IO) + `internal/cli` (the external sink) |
+| install/uninstall the scheduler daemon | [`local-runtime.md`](docs/mvp/local-runtime.md) §Installing the supervised scheduler, [ADR-0005](docs/adr/0005-secrets-management.md) | `internal/schedinstall` (launchctl host seam) + `internal/cli` + `deploy` (render+lint) |
 
 ## Invariants — never violate (most are enforced by tests)
 
@@ -97,6 +98,14 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `templates/` = the fixed send templates.
 - [`internal/scheduler`](internal/scheduler) — the **only** send path
   off-machine (evening bell + morning tripwire); takes an explicit `now`.
+- [`internal/schedinstall`](internal/schedinstall) — the macOS host-install
+  seam for the supervised daemon: writes the launchd plist + `hush supervise`
+  TOML (outside `~/.lucid/`) and drives `launchctl bootstrap`/`bootout`. All
+  decisions live in the untagged `apply.go` (Linux-covered); the darwin shell is
+  a thin `runLaunchctl` closure. Transport-free; renders nothing itself — the
+  top-level `deploy` package renders + lints the artifacts, reached only from
+  `internal/cli` (the junction that owns the `deploy` dependency; `storage`
+  never imports it).
 - [`internal/flynode`](internal/flynode) — the flywheel-node scaffolding every
   daemon (teeth, companion, workout, witness report) shares: `Boot` is the job-DB
   open/migrate/scaffold/reconcile/run spine each `Run` previously carried inline,

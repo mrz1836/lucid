@@ -778,6 +778,75 @@ lucid scheduler reconcile --no-fire                # re-arm, skip the missed sen
 lucid scheduler reconcile --json
 ```
 
+#### scheduler install
+
+```
+lucid scheduler install [--out <dir> | --apply] [--force] [--json]
+                        [--lucid <path>] [--hush <path>] [--scheduler-db <path>]
+                        [--supervise-config <path>] [--hush-server <url>] [--machine-index <n>]
+```
+
+Lay down the supervised-daemon artifacts that keep `scheduler run` alive across
+reboots: a launchd job that runs **`hush supervise`**, and the hush supervise
+config it reads. The launchd job never names `lucid` — hush injects the harness
+token at spawn and execs the scheduler, so the binary stays credential-dumb
+([ADR-0005](../adr/0005-secrets-management.md)). The rendered artifacts **name**
+`LUCID_HARNESS_TOKEN` (in the supervise `scope`) and **carry no value**; the two
+logical channel IDs are non-secret env (`LUCID_USER_CHANNEL_ID`,
+`LUCID_WITNESS_CHANNEL_ID`), read from the environment, never from `lucid.json`.
+
+Every render is linted by the `deploy` package before it is shown or written, so
+an artifact that failed its dry-run is never emitted. The command is opt-in about
+host mutation — three modes, one flag-gated command:
+
+| Mode | Effect | Platform |
+|------|--------|----------|
+| `lucid scheduler install` (default) | Render + lint + **print** both artifacts to stdout. Zero mutation. | any |
+| `lucid scheduler install --out <dir>` | Render + lint + **write** both files to `<dir>`. No load. | any |
+| `lucid scheduler install --apply` | Write the plist to `~/Library/LaunchAgents/`, the supervise config to `~/.hush/supervisors/lucid-scheduler.toml`, `launchctl bootstrap`, and verify. | macOS |
+
+| Flag | Effect |
+|------|--------|
+| `--out <dir>` | Write the two files to `<dir>` instead of printing. Mutually exclusive with `--apply`. |
+| `--apply` | Perform the host install (macOS). On a non-macOS host it returns an unsupported-host error and prints the manual guidance instead. |
+| `--force` | On `--apply`, replace an already-loaded job (`bootout` then `bootstrap`) instead of refusing. |
+| `--lucid <path>` | The lucid binary the child command runs (default: this executable, symlinks resolved). |
+| `--hush <path>` | The hush binary launchd execs (default: `hush` on `PATH`, else a placeholder + a "hush not on PATH" note). |
+| `--scheduler-db <path>` | The job store the plist pins as `LUCID_SCHEDULER_DB` (default: the daemon's resolved path, so `scheduler status` never reports drift). |
+| `--supervise-config <path>` | Where the supervise config is written / referenced (default: `~/.hush/supervisors/lucid-scheduler.toml`). |
+| `--hush-server <url>` / `--machine-index <n>` | Fill the supervise `server_url` / `client_machine_index`; unset keeps the example defaults and notes to edit them. |
+
+`--json` emits `{plist, supervise, hush_present, notes}` (the rendered bodies,
+whether hush was found, and any provisioning notes). On `--apply` success the
+command reuses the `scheduler status` host probe and points you there —
+**success is the launchd job loaded**, not a momentary process, so the launchd
+spawn race never reads as a false negative. When `hush` is absent the artifacts
+are still laid down but the command does **not** claim success (a supervised send
+needs the token hush injects).
+
+```sh
+lucid scheduler install                    # inspect the artifacts (no mutation)
+lucid scheduler install --out ./deploy-out # write them for review
+lucid scheduler install --apply            # install + load the launchd job (macOS)
+```
+
+#### scheduler uninstall
+
+```
+lucid scheduler uninstall [--dry-run] [--label <label>] [--json]
+```
+
+Tear the launchd job down: `launchctl bootout` then remove the plist. It is
+**idempotent** — an already-absent job or plist is a clean no-op, not an error —
+and never touches `~/.lucid/` or the disposable job store. On a non-macOS host it
+prints manual guidance. `--dry-run` reports what it would remove and touches
+nothing; `--label` overrides the job label (default `com.lucid.scheduler`).
+
+```sh
+lucid scheduler uninstall --dry-run        # preview
+lucid scheduler uninstall                  # bootout + remove the plist (macOS)
+```
+
 ### storm
 
 ```

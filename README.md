@@ -271,7 +271,7 @@ on a provider (P9).
 
 | Command | What it does |
 |---------|--------------|
-| `scheduler` | The send daemon — evening bell + morning tripwire on the chain's clocks. |
+| `scheduler` | The send daemon — evening bell + morning tripwire on the chain's clocks. `scheduler install`/`uninstall` render (and, with `--apply`, load) the supervised launchd + `hush` artifacts that keep it alive across reboots. |
 | `companion` · `witness` · `workout` | Config-gated sends: the daily companion, the weekly witness report, the training slot. |
 | `storm` · `profile` | Declare / renew / end a storm (a grace window); switch clock profile. |
 
