@@ -72,46 +72,46 @@ func TestMirrorDirs_SixInOrder(t *testing.T) {
 		Default().MirrorDirs())
 }
 
-func TestClip_InRangeUnchanged(t *testing.T) {
-	c := Default()
-	out, warnings := c.Clip()
-	assert.Empty(t, warnings)
-	assert.Equal(t, c, out)
-}
+// TestClip covers the recent_window clip rule end to end: an in-range value is
+// returned untouched with no warning; an over-ceiling value clips to the max
+// (acceptance case 1.4); a below-minimum value floors to one; and a
+// hand-zeroed ceiling falls back to the default max rather than clipping to
+// zero. Every row also proves Clip never mutates its receiver.
+func TestClip(t *testing.T) {
+	tests := []struct {
+		name        string
+		window      int  // RecentWindow override
+		zeroCeiling bool // also zero RecentWindowMax (hand-edited config)
+		wantWindow  int
+		wantWarning string // substring of the single warning; "" ⇒ expect none
+	}{
+		{"in-range value is unchanged", Default().RecentWindow, false, Default().RecentWindow, ""},
+		{"above the ceiling clips to the max", 999, false, 14, "clipped to 14"},
+		{"below the minimum floors to one", 0, false, 1, "below minimum"},
+		{"a zeroed ceiling falls back to the default max", 999, true, 14, "clipped to 14"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			c.RecentWindow = tc.window
+			if tc.zeroCeiling {
+				c.RecentWindowMax = 0
+			}
+			before := c.RecentWindow
 
-// TestClip_AboveCeiling is acceptance test case 1.4: recent_window: 999
-// clips to recent_window_max (14) with a warning; the receiver is not
-// mutated.
-func TestClip_AboveCeiling(t *testing.T) {
-	c := Default()
-	c.RecentWindow = 999
-	out, warnings := c.Clip()
-	require.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "recent_window 999")
-	assert.Contains(t, warnings[0], "clipped to 14")
-	assert.Equal(t, 14, out.RecentWindow)
-	assert.Equal(t, 999, c.RecentWindow, "Clip must not mutate the receiver")
-}
+			out, warnings := c.Clip()
 
-func TestClip_BelowMinimum(t *testing.T) {
-	c := Default()
-	c.RecentWindow = 0
-	out, warnings := c.Clip()
-	require.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "below minimum")
-	assert.Equal(t, 1, out.RecentWindow)
-}
-
-// TestClip_ZeroCeilingFallsBackToDefaultMax covers a hand-edited config
-// that also zeroed recent_window_max: the clip uses the default ceiling
-// rather than clipping everything to zero.
-func TestClip_ZeroCeilingFallsBackToDefaultMax(t *testing.T) {
-	c := Default()
-	c.RecentWindowMax = 0
-	c.RecentWindow = 999
-	out, warnings := c.Clip()
-	require.Len(t, warnings, 1)
-	assert.Equal(t, 14, out.RecentWindow)
+			assert.Equal(t, tc.wantWindow, out.RecentWindow)
+			assert.Equal(t, before, c.RecentWindow, "Clip must not mutate the receiver")
+			if tc.wantWarning == "" {
+				assert.Empty(t, warnings)
+				assert.Equal(t, c, out, "an in-range config is returned unchanged")
+			} else {
+				require.Len(t, warnings, 1)
+				assert.Contains(t, warnings[0], tc.wantWarning)
+			}
+		})
+	}
 }
 
 // TestDefault_ProviderBlock pins the shipped provider defaults
