@@ -184,6 +184,29 @@ func TestAttach_RolloverBeforeFour(t *testing.T) {
 	assert.Equal(t, "exact", doc.Fields["occurred_at_precision"], "the default (no --day) is an exact now")
 }
 
+// TestAttach_YesterdayPreRollover pins the other half of the pre-dawn window:
+// a 02:00 catch-up means the day before the one just lived. A bare capture at
+// that hour files under 2026-07-04 (above), so @yesterday steps back from that
+// logical day to 2026-07-03 rather than collapsing onto it.
+func TestAttach_YesterdayPreRollover(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	preDawn := time.Date(2026, time.July, 5, 2, 0, 0, 0, time.UTC)
+	path := writeTempFile(t, "whiteboard.jpg", []byte("whiteboard snapshot"))
+
+	res, err := r.Attach(AttachRequest{Path: path, DayArg: "@yesterday", Now: preDawn})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-07-03", res.Day, "@yesterday steps back from the current logical day")
+
+	recs := mustListMedia(t, a)
+	require.Len(t, recs, 1)
+	assert.Equal(t, "2026-07-03", recs[0].LogicalDay, "the sidecar files under the attributed day")
+
+	doc, err := a.ReadRaw(res.RawID)
+	require.NoError(t, err)
+	assert.Equal(t, "approximate", doc.Fields["occurred_at_precision"])
+}
+
 // TestAttach_RecordsProvenance proves the harness provenance rides the session
 // record and the media/raw source — the same fields /log carries, no new
 // plumbing.
@@ -294,6 +317,19 @@ func TestAttach_BadDayArgWritesNothing(t *testing.T) {
 	assertNothingWritten(t, a, home)
 }
 
+// TestAttach_FutureDayWritesNothing refuses a day that has not happened yet:
+// the realistic typo (a wrong year, transposed digits) would otherwise file a
+// capture silently far ahead. Nothing lands (error-states.md §St-1).
+func TestAttach_FutureDayWritesNothing(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	path := writeTempFile(t, "x.jpg", []byte("x"))
+
+	_, err := r.Attach(AttachRequest{Path: path, Now: fixedNow(), DayArg: "@2027-08-01"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assertNothingWritten(t, a, home)
+}
+
 // TestAttach_RawWriteFailureSurfaces covers the branch where the media lands
 // but the raw entry cannot be written (error-states.md §St-1: the error is
 // explicit and surfaced, never swallowed).
@@ -337,32 +373,53 @@ func TestMediaRelPath_Fallback(t *testing.T) {
 	assert.Equal(t, "fallback.jpg", rel)
 }
 
-// TestResolveAttachDay covers the day-resolution branches directly.
-func TestResolveAttachDay(t *testing.T) {
+// TestResolveCaptureDay covers the day-resolution branches directly — the one
+// backdating grammar every capture verb shares.
+func TestResolveCaptureDay(t *testing.T) {
 	now := fixedNow()
 
-	occ, prec, day, err := resolveAttachDay("", now)
+	occ, prec, day, err := resolveCaptureDay("", now)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-05", day)
 	assert.Equal(t, storage.PrecisionExact, prec)
 	assert.Equal(t, now, occ)
 
-	_, prec, day, err = resolveAttachDay("@yesterday", now)
+	_, prec, day, err = resolveCaptureDay("@yesterday", now)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-04", day)
 	assert.Equal(t, storage.PrecisionApproximate, prec)
 
 	// The bare (no-@) form is accepted too.
-	_, _, day, err = resolveAttachDay("yesterday", now)
+	_, _, day, err = resolveCaptureDay("yesterday", now)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-04", day)
 
-	_, prec, day, err = resolveAttachDay("2026-06-30", now)
+	_, prec, day, err = resolveCaptureDay("2026-06-30", now)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-06-30", day)
 	assert.Equal(t, storage.PrecisionApproximate, prec)
 
-	_, _, badDay, badErr := resolveAttachDay("@notaday", now)
+	// Before the 04:00 rollover, @yesterday steps back from the current
+	// *logical* day: at 02:00 on the 5th a bare capture files under the 4th, so
+	// a 02:00 catch-up means the day before the one just lived — the 3rd.
+	preDawn := time.Date(2026, time.July, 5, 2, 0, 0, 0, time.UTC)
+	_, prec, day, err = resolveCaptureDay("@yesterday", preDawn)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-03", day, "@yesterday steps back from the logical day, not the civil one")
+	assert.Equal(t, storage.PrecisionApproximate, prec)
+
+	// The ceiling is the current civil date, inclusive — today always resolves.
+	_, _, day, err = resolveCaptureDay("2026-07-05", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-05", day)
+
+	// A day that has not happened yet is refused before anything is written.
+	_, _, futureDay, futureErr := resolveCaptureDay("@2027-08-01", now)
+	require.Error(t, futureErr)
+	assert.Contains(t, futureErr.Error(), "nothing was saved")
+	assert.Empty(t, futureDay)
+
+	_, _, badDay, badErr := resolveCaptureDay("@notaday", now)
 	require.Error(t, badErr)
 	assert.Empty(t, badDay)
 }
