@@ -170,6 +170,19 @@ companion uses. It never inherits the chain marks; its time is your choice. See
 [`../mvp/workout-module.md`](../mvp/workout-module.md) §"Surfaces" for the delivery
 contract.
 
+## Operational notes
+
+- The workout companion runs its own small, disposable job database, separate from
+  the Engine's, the companion's, and the weekly witness report's, and from the
+  `~/.lucid` Ledger. It defaults to a path under your user config directory; set
+  `LUCID_WORKOUT_DB` to override it. It holds only scheduling machinery — no Ledger
+  truth — so it is safe to delete; it is rebuilt on the next run.
+- `lucid scheduler status` prints this path beside the other three job stores, so
+  the full set is visible in one command. See
+  [`commands.md`](commands.md#scheduler-status).
+- The delivery receipts that guard idempotency are written **only through the
+  binary**. Never hand-edit them.
+
 ## Boundaries
 
 The workout copy avoids medical and clinical claims — it offers options and names
