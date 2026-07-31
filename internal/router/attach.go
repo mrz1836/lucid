@@ -84,7 +84,7 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 	if err != nil {
 		return AttachResult{}, fmt.Errorf("invalid harness; nothing was saved: %w", err)
 	}
-	occ, precision, day, err := resolveAttachDay(req.DayArg, now)
+	occ, precision, day, err := resolveCaptureDay(req.DayArg, now)
 	if err != nil {
 		return AttachResult{}, err
 	}
@@ -146,28 +146,40 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 	}, nil
 }
 
-// resolveAttachDay resolves the capture instant, its precision, and the
-// logical day for one attach turn from the optional `--day` token, reusing the
-// same rollover boundary and `@`-grammar as observations — no second clock.
+// resolveCaptureDay resolves the capture instant, its precision, and the
+// logical day for one capture turn from the optional `--day` token. It is the
+// single backdating grammar the capture verbs share — `lucid log`,
+// `lucid attach`, and `lucid memory --attach` all resolve `--day` here, so
+// there is one rule to learn and one rollover boundary, never a second clock.
 // A leading `@` is optional (the `--day` flag reads naturally either way):
 //
 //   - "" (empty)  → now at exact precision; the logical day applies the 04:00
 //     rollover, so a pre-dawn capture files under the day just lived.
-//   - "yesterday" → the prior civil day at approximate precision (its own
-//     calendar date), matching the observations `@yesterday` backdate.
+//   - "yesterday" → the logical day before the current logical day, at
+//     approximate precision. It steps back from the rollover-adjusted base
+//     date the same way [resolveDayArg] does for `/day`, so before 04:00 it
+//     names the day before the one a bare capture files under rather than
+//     colliding with it — a 02:00 catch-up means the day before the one just
+//     lived.
 //   - "YYYY-MM-DD" → that civil day at approximate precision.
 //
-// Any other token is a clean error and nothing is written (error-states.md
-// §St-1).
-func resolveAttachDay(dayArg string, now time.Time) (occ time.Time, precision, day string, err error) {
+// A resolved day later than the current civil date is refused: a capture
+// cannot be attributed to a day that has not happened, and the realistic typo
+// (a wrong year, transposed digits) would otherwise file an entry silently far
+// in the future. The ceiling is the civil date rather than the logical day so
+// that before 04:00 the date on the caller's own clock still resolves.
+//
+// An unparseable token or a future day is a clean error and nothing is written
+// (error-states.md §St-1).
+func resolveCaptureDay(dayArg string, now time.Time) (occ time.Time, precision, day string, err error) {
 	arg := strings.TrimPrefix(strings.TrimSpace(dayArg), "@")
 	switch {
 	case arg == "":
-		return now, storage.PrecisionExact,
-			observations.DeriveLogicalDate(now, observations.PrecisionExact, observations.DefaultRolloverMin), nil
+		occ, precision = now, storage.PrecisionExact
+		day = observations.DeriveLogicalDate(now, observations.PrecisionExact, observations.DefaultRolloverMin)
 	case strings.EqualFold(arg, "yesterday"):
-		y := observations.DateOf(now).AddDate(0, 0, -1)
-		return y, storage.PrecisionApproximate, observations.DateString(y), nil
+		occ = observations.LogicalBaseDate(now, observations.DefaultRolloverMin).AddDate(0, 0, -1)
+		precision, day = storage.PrecisionApproximate, observations.DateString(occ)
 	default:
 		d, perr := observations.ParseDate(arg, now.Location())
 		if perr != nil {
@@ -175,8 +187,19 @@ func resolveAttachDay(dayArg string, now time.Time) (occ time.Time, precision, d
 				"could not read the day %q (want @yesterday or @YYYY-MM-DD); nothing was saved: %w", dayArg, perr,
 			)
 		}
-		return d, storage.PrecisionApproximate, observations.DateString(d), nil
+		occ, precision, day = d, storage.PrecisionApproximate, observations.DateString(d)
 	}
+
+	// Every branch falls through to one ceiling, so the rule is stated once.
+	// The empty and yesterday branches can never trip it; routing them through
+	// it anyway keeps a single comparison site instead of three.
+	if observations.DateOf(occ).After(observations.DateOf(now)) {
+		return time.Time{}, "", "", fmt.Errorf(
+			"cannot capture against %s — that day has not happened yet; nothing was saved", day,
+		)
+	}
+
+	return occ, precision, day, nil
 }
 
 // predictRawID renders the minute-precision raw id for a capture instant

@@ -56,6 +56,9 @@ understands you.
 - **`log`** (capture) — *"Jot this down — the pressure drop might be what wrecks
   my knee."*
   → runs `lucid log "the pressure drop might be what wrecks my knee"`
+- **`log`** (backdated capture) — *"Jot this down for yesterday — the power was
+  out all evening."*
+  → runs `lucid log "the power was out all evening" --day @yesterday`
 - **`obs`** — pain / intake / elimination / mood micro-logs:
   - *"Log pain four in my knee."* → `lucid obs pain 4 knee`
   - *"I ate oatmeal and a coffee."* → `lucid obs ate oatmeal, coffee`

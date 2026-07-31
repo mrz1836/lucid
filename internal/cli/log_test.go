@@ -272,6 +272,26 @@ func TestLog_CLI_ProvenanceEnvFallback(t *testing.T) {
 	assert.Equal(t, "thread-1", sess["thread_id"])
 }
 
+// TestLog_CLI_DayFlag confirms --day is discoverable in --help and reaches the
+// router end to end: a backdated capture lands one raw entry and acks with the
+// day it was attributed to. It runs on the wall clock, so it asserts the shape
+// of the day rather than a fixed date — the router tests pin the exact
+// resolution against a deterministic now.
+func TestLog_CLI_DayFlag(t *testing.T) {
+	home := isolatedHome(t)
+
+	help, _, err := runRoot(t, BuildInfo{Version: "dev"}, "log", "--help")
+	require.NoError(t, err)
+	assert.Contains(t, help, "--day")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "log", "notes from the workshop", "--day", "@yesterday")
+	require.NoError(t, err)
+	assert.Regexp(t, "Saved as `raw_[0-9_]+` for [0-9]{4}-[0-9]{2}-[0-9]{2}\\.", out)
+
+	assert.Equal(t, 1, rawFileCount(t, home))
+	assert.Contains(t, readOnlyRaw(t, home), "occurred_at_precision: approximate")
+}
+
 // TestLog_CLI_MalformedSourceRejected confirms a malformed --source token is
 // rejected honestly (never coerced to cli) and leaves nothing on disk (AC-8
 // via the router, exercised through the CLI accept surface).

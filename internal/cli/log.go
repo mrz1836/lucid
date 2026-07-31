@@ -15,10 +15,13 @@ import (
 // session records.
 const sourceCLI = "cli"
 
-// Provenance accept-surface flag names shared by the capture commands
-// (lucid log, lucid obs). Each is optional; a bare terminal call falls back to
-// its LUCID_* env then the local default, so a relaying harness can attribute a
-// capture through flags or env without a code change.
+// Flag names shared by the capture commands (lucid log, lucid attach,
+// lucid obs). The provenance cluster (source/harness/agent/model/channel/
+// thread) is optional and falls back to its LUCID_* env then the local
+// default, so a relaying harness can attribute a capture through flags or env
+// without a code change. day is the optional logical-day selector
+// (`@yesterday` / `@YYYY-MM-DD`) that log and attach resolve through the one
+// shared rollover grammar; it has no env fallback and is read directly.
 const (
 	flagSource  = "source"
 	flagHarness = "harness"
@@ -26,6 +29,7 @@ const (
 	flagModel   = "model"
 	flagChannel = "channel"
 	flagThread  = "thread"
+	flagDay     = "day"
 )
 
 // Environment-variable fallbacks for the provenance accept surface, paired with
@@ -39,12 +43,13 @@ const (
 	envThread  = "LUCID_THREAD"
 )
 
-// newLogCmd wires `lucid log [text]`: capture the text as one immutable
-// raw entry under ~/.lucid/raw/ with a sub-second ack. It scaffolds the
-// Ledger on first use (idempotently) so capture never blocks on setup
-// (product-principles.md P10). Structuring and insight work run in later
-// stages; /log only captures — nothing is written under processed/ or
-// insights/.
+// newLogCmd wires `lucid log [text] [--day @yesterday]`: capture the text as
+// one immutable raw entry under ~/.lucid/raw/ with a sub-second ack, optionally
+// attributed to a prior logical day when the day it belongs to is not the day
+// it could be written down. It scaffolds the Ledger on first use
+// (idempotently) so capture never blocks on setup (product-principles.md P10).
+// Structuring and insight work run in later stages; /log only captures —
+// nothing is written under processed/ or insights/.
 func newLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "log [text]",
@@ -56,9 +61,12 @@ func newLogCmd() *cobra.Command {
 				return fmt.Errorf("lucid log: %w", err)
 			}
 
+			day, _ := cmd.Flags().GetString(flagDay)
+
 			res, err := r.Log(router.LogRequest{
 				Text:      strings.Join(args, " "),
 				Now:       time.Now(),
+				DayArg:    day,
 				Source:    flagOrEnv(cmd, flagSource, envSource, sourceCLI),
 				Harness:   flagOrEnv(cmd, flagHarness, envHarness, sourceCLI),
 				ChannelID: flagOrEnv(cmd, flagChannel, envChannel, sourceCLI),
@@ -75,6 +83,14 @@ func newLogCmd() *cobra.Command {
 		},
 	}
 	registerProvenanceFlags(cmd)
+	// --day is declared here rather than in registerProvenanceFlags because
+	// lucid obs shares that helper and carries its own in-text day grammar; it
+	// must not grow a --day flag.
+	cmd.Flags().String(
+		flagDay, "",
+		"Attribute the entry to a logical day, e.g. @yesterday or @YYYY-MM-DD "+
+			"(04:00 rollover aware; a future day is rejected)",
+	)
 	return cmd
 }
 

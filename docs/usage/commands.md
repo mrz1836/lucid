@@ -54,15 +54,25 @@ LUCID_HOME=/tmp/scratch lucid init --json
 ### log
 
 ```
-lucid log [text]
+lucid log [text] [--day @yesterday|@YYYY-MM-DD]
 ```
 
 Capture `text` as one immutable raw entry under `~/.lucid/raw/`, with a
 sub-second acknowledgement. Capture-only: nothing is written under `processed/`
 or `insights/`. Scaffolds on first use.
 
+| Flag | Effect |
+|------|--------|
+| `--day @yesterday` (or `@YYYY-MM-DD`) | Attribute the entry to a prior logical day at approximate precision, reusing the same 04:00-rollover backdating grammar as `attach` and `obs`. The real capture time is always kept as `recorded_at`; only `occurred_at` follows the flag. Defaults to now at exact precision. |
+
+Backdating attributes the entry — it does not move it: the day view still lists
+the entry under the day it was captured. `--day` records the day it belongs to on
+the entry itself.
+
 ```sh
 lucid log "shower thought about the knee-and-weather thing"
+lucid log "power was out all evening, wrote this up the next morning" --day @yesterday
+lucid log "notes from the workshop" --day @2026-07-28
 ```
 
 ### attach
@@ -85,7 +95,7 @@ media, so the attachment is discoverable by the day view and the Mirror.
 | Flag | Effect |
 |------|--------|
 | `--caption <text>` | Optional description, stored verbatim and used to derive the filename slug. Absent on the frictionless "drop it" path. |
-| `--day @yesterday` (or `@YYYY-MM-DD`) | Attribute the media to a prior logical day, reusing the same 04:00-rollover backdating as `obs`. Defaults to the current logical day. |
+| `--day @yesterday` (or `@YYYY-MM-DD`) | Attribute the media to a prior logical day, reusing the same 04:00-rollover backdating as `log` and `obs`. `@yesterday` steps back from the current logical day, so before 04:00 it resolves to the day *before* the one a bare capture files under. A day in the future is rejected and nothing is saved. Defaults to the current logical day. |
 
 Provenance over magic: the ack lands only *after* the write, naming the stored
 path, the sha256, the logical day, and the linked raw id. `--json` emits
