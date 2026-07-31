@@ -83,7 +83,7 @@ func Boot(ctx context.Context, cfg BootConfig) error {
 	if err != nil {
 		return fmt.Errorf("%s: open job db %q: %w", cfg.Pkg, cfg.DBPath, err)
 	}
-	if err = flywheel.Migrate(db); err != nil {
+	if err = MigrateJobStore(db); err != nil {
 		return fmt.Errorf("%s: migrate job db: %w", cfg.Pkg, err)
 	}
 	if err = cfg.Store.ScaffoldEngine(); err != nil {
