@@ -345,7 +345,7 @@ folding.
 |-------|----------|---------|
 | `id` | yes | Stable, sortable identifier. |
 | `recorded_at` | yes | When the user wrote this (always "now" at write time). |
-| `occurred_at` | yes | When it happened. Equal to `recorded_at` for "now" entries. |
+| `occurred_at` | yes | When it happened. Equal to `recorded_at` for "now" entries. A backdated capture (`--day`) keeps the real `recorded_at` and moves only `occurred_at`, at `approximate` precision. |
 | `occurred_at_precision` | yes | `exact`, `approximate`, or `range`. Mirrors `technical-spec.md`. |
 | `occurred_at_end` | no | Only set when `precision: range`. |
 | `source` | yes | Harness identifier — a non-empty well-formed token, **normalized** on write (trimmed, lowercased, charset-restricted to `[a-z0-9._:-]`). Empty or malformed input is rejected with a clear error, never silently coerced or dropped. **No allowlist**: a recommended vocab (`cli`, `discord`, future surfaces) is documented but not enforced, so a new harness needs a passed token, not a code change. The relaying `agent`/`model` are **not** duplicated onto the (immutable) raw entry — a reader follows `session_id` to the session record's provenance cluster (`harness`/`channel_id`/`thread_id`/`agent`/`model`). |
@@ -434,9 +434,11 @@ Files shard by logical day under `YYYY/MM/`, mirroring `raw/`:
 The filename is `YYYY-MM-DD-<slug>.<ext>`:
 
 * `YYYY-MM-DD` is the **logical day** the attachment is attributed to — 04:00
-  rollover-aware, and `--day @yesterday` attaches to the prior logical day,
-  reusing the same day resolution as observations (§ backdating in
-  [`observations-module.md`](observations-module.md); no second clock).
+  rollover-aware, and `--day @yesterday` steps back from the current logical day
+  (so before the 04:00 rollover it names the day before the one a bare capture
+  files under), reusing the same day resolution as observations (§ backdating in
+  [`observations-module.md`](observations-module.md); no second clock). A day in
+  the future is rejected and nothing is saved.
 * `<slug>` is a low-signal label derived from the caption when present, else the
   original basename — lowercased, alphanumeric-and-hyphen, truncated.
 * `<ext>` is the **original extension, preserved** (content stored opaquely).
