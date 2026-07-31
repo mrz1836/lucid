@@ -1033,6 +1033,15 @@ scheduled run ([`scope.md`](scope.md) S-2); the resulting artifact
 enters `recent_window` at the next `/checkin`. No proposal is generated
 or delivered outside a `/checkin` session.
 
+That downstream pass is reachable on its own as `lucid structure`
+([`../usage/commands.md`](../usage/commands.md) §`structure`), over a
+single raw entry or an inclusive civil-date window. It is idempotent —
+a re-run overwrites the artifact and never touches the raw entry — and
+it skips an entry that already has an artifact unless forced. It runs
+Structuring only: no proposal is generated there either, so reaching
+the pass standalone does not widen the `/checkin`-only proposal
+surface.
+
 `/reflect` is read-and-ask only:
 
 ```

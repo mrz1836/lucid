@@ -328,3 +328,212 @@ func TestEarliestRawDate_UnreadableShard(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, ok)
 }
+
+// seedRawAt writes one synthetic raw entry recorded on the given civil date
+// (at a fixed hour, so the derived id is deterministic) and returns the id
+// the adapter assigned.
+func seedRawAt(t *testing.T, a *Adapter, date string) string {
+	t.Helper()
+	day, err := time.Parse("2006-01-02", date)
+	require.NoError(t, err)
+	res, err := a.WriteRaw(syntheticRaw(day.Add(9*time.Hour), "synthetic entry"))
+	require.NoError(t, err)
+	return res.RawID
+}
+
+// TestListRawIDsInRange_NoRawTree is the unscaffolded-home case: an absent
+// raw/ tree is an empty window, not a read error.
+func TestListRawIDsInRange_NoRawTree(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid"))
+
+	ids, err := a.ListRawIDsInRange("2026-01-01", "2026-12-31")
+	require.NoError(t, err, "an absent raw tree is not an error")
+	assert.Empty(t, ids)
+}
+
+// TestListRawIDsInRange_EmptyLedger covers the scaffolded-but-never-captured
+// Ledger: the tree exists and holds nothing.
+func TestListRawIDsInRange_EmptyLedger(t *testing.T) {
+	a, _ := newRawAdapter(t)
+
+	ids, err := a.ListRawIDsInRange("2026-01-01", "2026-12-31")
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}
+
+// TestListRawIDsInRange_SelectsWindowAndSorts seeds entries before, inside
+// and after the window out of chronological order: only the in-window ids
+// come back, and they come back sorted.
+func TestListRawIDsInRange_SelectsWindowAndSorts(t *testing.T) {
+	a, _ := newRawAdapter(t)
+
+	before := seedRawAt(t, a, "2026-02-28")
+	late := seedRawAt(t, a, "2026-03-20")
+	early := seedRawAt(t, a, "2026-03-05")
+	after := seedRawAt(t, a, "2026-04-02")
+
+	ids, err := a.ListRawIDsInRange("2026-03-01", "2026-03-31")
+	require.NoError(t, err)
+	assert.Equal(t, []string{early, late}, ids, "in-window ids only, chronological")
+	assert.NotContains(t, ids, before)
+	assert.NotContains(t, ids, after)
+}
+
+// TestListRawIDsInRange_BoundsAreInclusive pins the contract at the edges:
+// an entry falling exactly on since and one falling exactly on until are
+// both in the window.
+func TestListRawIDsInRange_BoundsAreInclusive(t *testing.T) {
+	a, _ := newRawAdapter(t)
+
+	first := seedRawAt(t, a, "2026-03-01")
+	middle := seedRawAt(t, a, "2026-03-15")
+	last := seedRawAt(t, a, "2026-03-31")
+
+	ids, err := a.ListRawIDsInRange("2026-03-01", "2026-03-31")
+	require.NoError(t, err)
+	assert.Equal(t, []string{first, middle, last}, ids)
+
+	single, err := a.ListRawIDsInRange("2026-03-15", "2026-03-15")
+	require.NoError(t, err)
+	assert.Equal(t, []string{middle}, single, "a one-day window is not an empty window")
+}
+
+// TestListRawIDsInRange_AcrossMonthsAndYears is the case a shard-guessing
+// walk would get wrong: a window spanning a month and a year boundary must
+// collect entries from every raw/YYYY/MM shard it crosses.
+func TestListRawIDsInRange_AcrossMonthsAndYears(t *testing.T) {
+	a, _ := newRawAdapter(t)
+
+	decLast := seedRawAt(t, a, "2025-12-31")
+	janFirst := seedRawAt(t, a, "2026-01-01")
+	janLast := seedRawAt(t, a, "2026-01-31")
+	febFirst := seedRawAt(t, a, "2026-02-01")
+
+	ids, err := a.ListRawIDsInRange("2025-12-31", "2026-02-01")
+	require.NoError(t, err)
+	assert.Equal(t, []string{decLast, janFirst, janLast, febFirst}, ids)
+
+	acrossYear, err := a.ListRawIDsInRange("2025-12-31", "2026-01-01")
+	require.NoError(t, err)
+	assert.Equal(t, []string{decLast, janFirst}, acrossYear, "the year boundary is not a wall")
+}
+
+// TestListRawIDsInRange_IgnoresStrayNames proves a foreign name in the tree
+// is skipped rather than raised or answered with. The window deliberately
+// starts at year one so the stray raw_0001_01_01.md would be in range if it
+// parsed at all — it is excluded because it is malformed, not because it is
+// old. The directory fixture covers the other half: a name that would parse
+// as a raw id but is not a file.
+func TestListRawIDsInRange_IgnoresStrayNames(t *testing.T) {
+	a, home := newRawAdapter(t)
+
+	want := seedRawAt(t, a, "2026-06-10")
+
+	shard := filepath.Join(home, "raw", "2026", "06")
+	for _, name := range []string{"raw_0001_01_01.md", "notes.md", "raw_not_a_date_here_x.md", "README.txt"} {
+		require.NoError(t, os.WriteFile(filepath.Join(shard, name), []byte("stray"), 0o600))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(shard, "raw_1999_01_01_00_00"), 0o700))
+
+	ids, err := a.ListRawIDsInRange("0001-01-01", "2026-06-30")
+	require.NoError(t, err, "a stray file must never break a read")
+	assert.Equal(t, []string{want}, ids, "only well-formed raw ids count")
+}
+
+// TestListRawIDsInRange_CollisionSuffixedIDs covers the same-minute
+// collision forms (raw_..._SS and raw_..._SS_N): they carry more id
+// components than the minute-precision form, so they must still parse, and
+// their zero-padded shape must still sort chronologically.
+func TestListRawIDsInRange_CollisionSuffixedIDs(t *testing.T) {
+	a, _ := newRawAdapter(t)
+	now := fixedTime()
+
+	written := make([]string, 0, 3)
+	for range 3 {
+		res, err := a.WriteRaw(syntheticRaw(now, "synthetic entry"))
+		require.NoError(t, err)
+		written = append(written, res.RawID)
+	}
+	require.Equal(t, []string{
+		"raw_2026_07_05_18_41",
+		"raw_2026_07_05_18_41_39",
+		"raw_2026_07_05_18_41_39_1",
+	}, written, "the collision ladder is the fixture under test")
+
+	ids, err := a.ListRawIDsInRange("2026-07-05", "2026-07-05")
+	require.NoError(t, err)
+	assert.Equal(t, written, ids, "every collision form is enumerated, in order")
+}
+
+// TestListRawIDsInRange_InvalidBounds: a malformed or inverted bound is an
+// error naming the expected form, never a silently empty window — a typo
+// must not read as "nothing captured".
+func TestListRawIDsInRange_InvalidBounds(t *testing.T) {
+	a, _ := newRawAdapter(t)
+	seedRawAt(t, a, "2026-03-15")
+
+	cases := map[string][2]string{
+		"unpadded since":    {"2026-7-1", "2026-07-31"},
+		"unpadded until":    {"2026-07-01", "2026-7-31"},
+		"no separators":     {"20260701", "2026-07-31"},
+		"empty since":       {"", "2026-07-31"},
+		"empty until":       {"2026-07-01", ""},
+		"non-digit since":   {"20x6-07-01", "2026-07-31"},
+		"wrong separator":   {"2026/07/01", "2026-07-31"},
+		"timestamp since":   {"2026-07-01T00:00:00Z", "2026-07-31"},
+		"since after until": {"2026-07-31", "2026-07-01"},
+	}
+	for name, bounds := range cases {
+		t.Run(name, func(t *testing.T) {
+			ids, err := a.ListRawIDsInRange(bounds[0], bounds[1])
+			require.Error(t, err)
+			assert.Nil(t, ids)
+			assert.Contains(t, err.Error(), "storage:")
+		})
+	}
+}
+
+// TestListRawIDsInRange_UnreadableShard surfaces a real read failure rather
+// than reporting an empty window: a permission problem must not look like a
+// stretch of the record with nothing in it.
+func TestListRawIDsInRange_UnreadableShard(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod permission bits are a no-op as root")
+	}
+	a, home := newRawAdapter(t)
+	seedRawAt(t, a, "2026-07-05")
+
+	shard := filepath.Join(home, "raw", "2026", "07")
+	require.NoError(t, os.Chmod(shard, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(shard, 0o700) })
+
+	ids, err := a.ListRawIDsInRange("2026-07-01", "2026-07-31")
+	require.Error(t, err)
+	assert.Empty(t, ids)
+}
+
+// TestListRawIDsInRange_UnreadableWalk covers the two directory levels above
+// the shard. An unreadable raw/ or raw/YYYY must surface too: the walk has
+// three places it can fail, and only the deepest one is obvious.
+func TestListRawIDsInRange_UnreadableWalk(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod permission bits are a no-op as root")
+	}
+	for name, rel := range map[string][]string{
+		"raw root": {"raw"},
+		"year dir": {"raw", "2026"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, home := newRawAdapter(t)
+			seedRawAt(t, a, "2026-07-05")
+
+			dir := filepath.Join(append([]string{home}, rel...)...)
+			require.NoError(t, os.Chmod(dir, 0o000))
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+			ids, err := a.ListRawIDsInRange("2026-07-01", "2026-07-31")
+			require.Error(t, err)
+			assert.Empty(t, ids)
+		})
+	}
+}
