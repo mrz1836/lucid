@@ -1116,9 +1116,9 @@ lucid workout log --anchor --anchor-item squats:55   # today's daily anchor
 
 ### Provider configuration (agentic verbs)
 
-`serve`, `reflect`, and `ask` are the only **provider-backed** verbs — they need a
-model backend, configured by the `provider` block in `lucid.json` (ADR-0006, no API
-keys):
+`serve`, `reflect`, `ask`, and `structure` are the **provider-backed** verbs — they
+need a model backend, configured by the `provider` block in `lucid.json` (ADR-0006,
+no API keys):
 
 | Field | Meaning |
 |-------|---------|
@@ -1268,6 +1268,72 @@ item (no tables).
 lucid recall
 lucid recall --era wild-summer
 lucid recall --injury left-knee --json
+```
+
+### structure
+
+```
+lucid structure <raw_id> [--force] [--json]
+lucid structure --since <YYYY-MM-DD> [--until <YYYY-MM-DD>] [--force] [--json]
+```
+
+The **standalone Structuring pass** — distill a raw entry this run did not
+capture into its processed artifact. Until now the pass ran only as a side effect
+of a guided check-in, so an entry captured any other way had no shipped route to
+a processed artifact; this verb is that route. It runs Structuring and nothing
+else: it never proposes a pattern (proposals stay inside a check-in session) and
+it never modifies the raw entry it read.
+
+**Two modes, one verb.** A positional raw id structures that one entry. `--since`
+structures every raw entry in an inclusive civil-date window, with `--until`
+defaulting to today. The two forms are mutually exclusive: passing both, passing
+neither, passing `--until` without `--since`, or giving a `--since` later than
+`--until` is a usage error (exit `2`).
+
+**Every entry, no filtering.** The ranged mode covers every raw entry in the
+window whatever command produced it — [`log`](#log) and [`closeout`](#closeout)
+journal lines included — per
+[`../mvp/agent-contracts.md`](../mvp/agent-contracts.md) §"How contracts
+compose". There is no per-command filter, by design: which captures are worth
+distilling is a reader's judgment, not the binary's.
+
+**Skip by default, `--force` to redo.** An entry that already has a processed
+artifact is skipped with no model call. `--force` re-structures it — the pass is
+idempotent, so a re-run overwrites the artifact differing only in its
+produced-at stamp, and leaves the raw entry untouched. Skipping is what makes an
+interrupted window run resumable: re-run the same command and it pays only for
+what it has not already done, so a repeat run over a settled window is free.
+
+**Counts.** Every run reports attempted / written / skipped / degraded / failed.
+`written` and `degraded` overlap on purpose, and the overlap is the ordinary case
+rather than an edge — a degraded extraction still produces an artifact (the model
+call failed and its stricter retry failed too, or the raw entry's body was
+empty), so such an entry counts in both. The per-entry `outcome` reports the
+single most informative label instead, with a fixed precedence of `failed` over
+`degraded` over `wrote` over `skipped`. A run carrying any failed entry exits
+non-zero; a run that only skipped is a success.
+
+**Progress.** In ranged mode one progress line per entry goes to **stderr** while
+stdout carries only the summary, so a wide window shows forward motion and
+`--json` output stays parseable. Single-entry mode prints the summary alone.
+
+`--json` emits `{mode, since, until, force, attempted, written, skipped,
+degraded, failed, entries}`, where each element of `entries` is `{raw_id,
+outcome}` and `outcome` is one of `wrote`, `skipped`, `degraded`, or `failed`;
+arrays are never null.
+
+**Provider-backed** (the `provider` block, like [`ask`](#ask) and
+[`reflect`](#reflect) — see
+[Provider configuration](#provider-configuration-agentic-verbs)): one model call
+per entry actually structured, and a second when an extraction has to retry. A
+wide window is therefore a long-running command, while a window with nothing new
+in it costs no model call at all.
+
+```sh
+lucid structure raw_2026_01_14_09_30
+lucid structure raw_2026_01_14_09_30 --force
+lucid structure --since 2026-01-01
+lucid structure --since 2026-01-01 --until 2026-01-07 --json
 ```
 
 ## Chat/harness slash commands
