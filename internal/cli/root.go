@@ -138,6 +138,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newMemoryCmd())
 	root.AddCommand(newExcavateCmd())
 	root.AddCommand(newRecallCmd())
+	root.AddCommand(newStructureCmd())
 
 	return root
 }
