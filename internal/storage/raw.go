@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -235,6 +236,91 @@ func earliestRawDateInShard(shard string) (string, error) {
 	return earliest, nil
 }
 
+// ListRawIDsInRange returns the ids of every raw entry whose id-encoded
+// civil date falls within [since, until] inclusive, sorted chronologically.
+// Both bounds are YYYY-MM-DD civil dates; a bound that is not well formed,
+// or a since that falls after until, is an error rather than an empty
+// result, so a caller cannot mistake a typo for a quiet window. An empty or
+// absent raw tree yields no ids and no error.
+//
+// Like [Adapter.EarliestRawDate] it reads directory and file names only: a
+// raw id encodes its own recorded date (raw_YYYY_MM_DD_HH_MM), so no file
+// body is ever opened and enumerating a whole Ledger stays cheap. Every
+// shard is visited rather than descending into the shards the bounds make
+// plausible, so a hand-misfiled entry cannot hide behind an unexpected shard
+// path. A name that is not a well-formed raw id is skipped, not an error: a
+// stray file in the tree must never break a read. Because the id components
+// are zero-padded, sorting the ids sorts them chronologically.
+//
+// It applies no other filter — every raw entry in the window is returned
+// whatever command captured it, per agent-contracts.md §"How contracts
+// compose".
+func (a *Adapter) ListRawIDsInRange(since, until string) ([]string, error) {
+	if !isCivilDate(since) {
+		return nil, fmt.Errorf("storage: malformed since date %q: want YYYY-MM-DD", since)
+	}
+	if !isCivilDate(until) {
+		return nil, fmt.Errorf("storage: malformed until date %q: want YYYY-MM-DD", until)
+	}
+	if since > until {
+		return nil, fmt.Errorf("storage: since date %q is after until date %q", since, until)
+	}
+
+	root := filepath.Join(a.home, rawDirName)
+	years, err := readSubdirNames(root)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []string
+	for _, year := range years {
+		months, merr := readSubdirNames(filepath.Join(root, year))
+		if merr != nil {
+			return nil, merr
+		}
+		for _, month := range months {
+			names, nerr := rawIDsInShard(filepath.Join(root, year, month))
+			if nerr != nil {
+				return nil, nerr
+			}
+			candidates = append(candidates, names...)
+		}
+	}
+
+	ids := make([]string, 0, len(candidates))
+	for _, id := range candidates {
+		date, ok := rawDateFromID(id)
+		if !ok || date < since || date > until {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
+// rawIDsInShard returns the id of every raw entry file in one raw/YYYY/MM
+// shard, without judging whether the id is well formed — the caller decides
+// that, so a malformed name can be skipped rather than raised. A shard that
+// vanished between the directory walk and this read is empty, not an error;
+// any other read failure surfaces.
+func rawIDsInShard(shard string) ([]string, error) {
+	entries, err := os.ReadDir(shard)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("storage: read raw shard %q: %w", shard, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), rawExt) {
+			continue
+		}
+		out = append(out, strings.TrimSuffix(e.Name(), rawExt))
+	}
+	return out, nil
+}
+
 // readSubdirNames lists the subdirectory names of dir, treating an absent
 // dir as empty rather than an error — a Ledger that has never captured
 // anything has no raw/ tree at all. os.ReadDir returns entries sorted by
@@ -271,6 +357,18 @@ func rawDateFromID(id string) (string, bool) {
 		return "", false
 	}
 	return year + "-" + month + "-" + day, true
+}
+
+// isCivilDate reports whether s is a well-formed YYYY-MM-DD civil date. It
+// checks shape only, not that the date exists on a calendar, which is all a
+// bound needs: an impossible date simply matches no id. Keeping the check
+// here rather than reaching for a date parser preserves the storage layer's
+// habit of reading names as names.
+func isCivilDate(s string) bool {
+	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
+		return false
+	}
+	return isDigits(s[0:4], 4) && isDigits(s[5:7], 2) && isDigits(s[8:10], 2)
 }
 
 // isDigits reports whether s is exactly n ASCII digits.
