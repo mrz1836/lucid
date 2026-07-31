@@ -250,6 +250,132 @@ func TestLog_MalformedSourceWritesNothing(t *testing.T) {
 	assert.Equal(t, 0, countFiles(t, home, "sessions"), "no dangling session")
 }
 
+// TestLog_DayYesterday backdates a capture to the prior logical day: the
+// entry records the day it belongs to at approximate precision, while
+// recorded_at — and therefore the raw id and its shard — still carry the real
+// capture instant.
+func TestLog_DayYesterday(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	res, err := r.Log(LogRequest{
+		Text:   "power was out all evening, wrote this up the next morning",
+		Now:    fixedNow(),
+		DayArg: "@yesterday",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-07-04", res.Day)
+	assert.Equal(t, "raw_2026_07_05_18_41", res.RawID, "the raw id still derives from recorded_at")
+
+	doc, err := a.ReadRaw(res.RawID)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-04T00:00:00Z", doc.Fields["occurred_at"])
+	assert.Equal(t, "approximate", doc.Fields["occurred_at_precision"])
+	assert.Equal(t, "2026-07-05T18:41:39Z", doc.Fields["recorded_at"], "the real capture time is kept")
+}
+
+// TestLog_DayYesterdayPreRollover pins the pre-dawn half of the backdating
+// window: at 02:00 a bare capture already files under the day just lived
+// (2026-07-04), so @yesterday steps back from that logical day to 2026-07-03
+// rather than collapsing onto it. Two civil days back is the point of the
+// rollover, not an off-by-one.
+func TestLog_DayYesterdayPreRollover(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	preDawn := time.Date(2026, time.July, 5, 2, 0, 0, 0, time.UTC)
+
+	res, err := r.Log(LogRequest{Text: "catching up on the day just lived", Now: preDawn, DayArg: "@yesterday"})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-07-03", res.Day)
+	assert.Equal(t, "raw_2026_07_05_02_00", res.RawID, "the raw id still derives from recorded_at")
+
+	doc, err := a.ReadRaw(res.RawID)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-03T00:00:00Z", doc.Fields["occurred_at"])
+	assert.Equal(t, "approximate", doc.Fields["occurred_at_precision"])
+}
+
+// TestLog_DayExplicitDate honors @YYYY-MM-DD backdating, with or without the
+// leading @ — the same grammar attach accepts.
+func TestLog_DayExplicitDate(t *testing.T) {
+	for _, arg := range []string{"@2026-07-01", "2026-07-01"} {
+		r, a, _ := newBootedRouter(t)
+
+		res, err := r.Log(LogRequest{Text: "notes from the workshop", Now: fixedNow(), DayArg: arg})
+		require.NoError(t, err)
+		assert.Equalf(t, "2026-07-01", res.Day, "--day %s", arg)
+
+		doc, err := a.ReadRaw(res.RawID)
+		require.NoError(t, err)
+		assert.Equal(t, "2026-07-01T00:00:00Z", doc.Fields["occurred_at"])
+		assert.Equal(t, "approximate", doc.Fields["occurred_at_precision"])
+	}
+}
+
+// TestLog_NoDayKeepsExactNow is the backward-compatibility guard: a bare
+// capture is unchanged by the arrival of --day — occurred_at equals
+// recorded_at at exact precision, and the ack is byte-identical to what it
+// has always been.
+func TestLog_NoDayKeepsExactNow(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	res, err := r.Log(LogRequest{Text: "quiet day, read for an hour", Now: fixedNow()})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-07-05", res.Day, "the no-flag day is still resolved, rollover-aware")
+	assert.Equal(t, "Saved as `raw_2026_07_05_18_41`.", res.Ack)
+
+	doc, err := a.ReadRaw(res.RawID)
+	require.NoError(t, err)
+	assert.Equal(t, doc.Fields["recorded_at"], doc.Fields["occurred_at"])
+	assert.Equal(t, "exact", doc.Fields["occurred_at_precision"])
+}
+
+// TestLog_BadDayArgWritesNothing proves an unparseable --day is refused before
+// anything lands, leaving raw/ and sessions/ empty (error-states.md §St-1).
+func TestLog_BadDayArgWritesNothing(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+
+	_, err := r.Log(LogRequest{Text: "should not land", Now: fixedNow(), DayArg: "@notaday"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Equal(t, 0, countFiles(t, home, "raw"), "nothing written under raw/")
+	assert.Equal(t, 0, countFiles(t, home, "sessions"), "no dangling session")
+}
+
+// TestLog_FutureDayWritesNothing proves a --day that has not happened yet is
+// refused with nothing written — the realistic typo (a wrong year, transposed
+// digits) is caught instead of silently filing an entry far in the future.
+func TestLog_FutureDayWritesNothing(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+
+	_, err := r.Log(LogRequest{Text: "should not land", Now: fixedNow(), DayArg: "@2027-08-01"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Equal(t, 0, countFiles(t, home, "raw"), "nothing written under raw/")
+	assert.Equal(t, 0, countFiles(t, home, "sessions"), "no dangling session")
+}
+
+// TestLog_BackdatedAckNamesTheDay confirms a backdated capture says which day
+// it landed on, so --day confirms itself rather than succeeding silently. The
+// empty-body note still rides along.
+func TestLog_BackdatedAckNamesTheDay(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+	res, err := r.Log(LogRequest{Text: "notes from the workshop", Now: fixedNow(), DayArg: "@yesterday"})
+	require.NoError(t, err)
+	assert.Equal(t, "Saved as `raw_2026_07_05_18_41` for 2026-07-04.", res.Ack)
+
+	empty, _, _ := newBootedRouter(t)
+	emptyRes, err := empty.Log(LogRequest{Now: fixedNow(), DayArg: "@yesterday"})
+	require.NoError(t, err)
+	assert.True(t, emptyRes.EmptyBody)
+	assert.Equal(
+		t,
+		"Saved as `raw_2026_07_05_18_41` for 2026-07-04 — looks like the body was empty.",
+		emptyRes.Ack,
+	)
+}
+
 // TestLog_MalformedHarnessWritesNothing proves a malformed harness token is
 // rejected before the raw entry is written, so no partial state remains even
 // though the harness only reaches the session record.

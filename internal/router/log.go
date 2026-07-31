@@ -21,10 +21,15 @@ const (
 // Source/Harness defaults to the local CLI surface, so a bare CLI call
 // still produces a well-formed entry. A non-empty Source/Harness is
 // normalized through the shared harness-token grammar; Agent and Model are
-// optional provenance recorded on the session record when supplied.
+// optional provenance recorded on the session record when supplied. DayArg
+// is the optional `--day` token (`@yesterday` / `@YYYY-MM-DD`, or the bare
+// forms) resolved through the backdating grammar the capture verbs share; an
+// empty value records the entry at now, at exact precision, under the 04:00
+// rollover.
 type LogRequest struct {
 	Text      string
 	Now       time.Time
+	DayArg    string
 	Source    string
 	Harness   string
 	ChannelID string
@@ -34,10 +39,14 @@ type LogRequest struct {
 }
 
 // LogResult reports what a /log turn wrote and the acknowledgement to
-// show the user.
+// show the user. Day is the logical day the entry was attributed to, always
+// populated — including the rollover-aware value on the no-flag path. It is
+// an in-process result field, not a record field: nothing new is persisted
+// for it.
 type LogResult struct {
 	RawID     string
 	SessionID string
+	Day       string
 	EmptyBody bool
 	Ack       string
 }
@@ -66,11 +75,19 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	if err != nil {
 		return LogResult{}, fmt.Errorf("invalid harness; nothing was saved: %w", err)
 	}
+	// The optional --day rides the same resolver attach uses, so there is one
+	// backdating grammar across the capture verbs. Its error already reads
+	// honestly ("nothing was saved"), so it is surfaced verbatim rather than
+	// re-wrapped.
+	occ, precision, day, err := resolveCaptureDay(req.DayArg, now)
+	if err != nil {
+		return LogResult{}, err
+	}
 
 	res, err := r.store.WriteRaw(storage.RawEntry{
 		RecordedAt:          now,
-		OccurredAt:          now,
-		OccurredAtPrecision: storage.PrecisionExact,
+		OccurredAt:          occ,
+		OccurredAtPrecision: precision,
 		Source:              source,
 		Command:             commandLog,
 		Bootstrap:           false,
@@ -99,11 +116,16 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	}
 
 	empty := strings.TrimSpace(req.Text) == ""
+	ack := logAck(res.RawID, empty)
+	if strings.TrimSpace(req.DayArg) != "" {
+		ack = logAckForDay(res.RawID, day, empty)
+	}
 	return LogResult{
 		RawID:     res.RawID,
 		SessionID: res.SessionID,
+		Day:       day,
 		EmptyBody: empty,
-		Ack:       logAck(res.RawID, empty),
+		Ack:       ack,
 	}, nil
 }
 
@@ -115,6 +137,20 @@ func logAck(rawID string, emptyBody bool) string {
 		return fmt.Sprintf("Saved as `%s` — looks like the body was empty.", rawID)
 	}
 	return fmt.Sprintf("Saved as `%s`.", rawID)
+}
+
+// logAckForDay is [logAck] for a backdated capture: it names the day the
+// entry was attributed to, so a --day that resolved to something other than
+// today confirms itself rather than succeeding silently (provenance over
+// magic, the same way the attach ack names its day). It is a sibling rather
+// than an extra parameter on logAck so the no-flag ack cannot change by
+// construction: the caller reaches this function only when --day was
+// supplied.
+func logAckForDay(rawID, day string, emptyBody bool) string {
+	if emptyBody {
+		return fmt.Sprintf("Saved as `%s` for %s — looks like the body was empty.", rawID, day)
+	}
+	return fmt.Sprintf("Saved as `%s` for %s.", rawID, day)
 }
 
 // orDefaultSource returns v, or the local CLI source when v is empty. It

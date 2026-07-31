@@ -9,16 +9,13 @@ import (
 	"github.com/mrz1836/lucid/internal/router"
 )
 
-// Flag names for `lucid attach`. Caption is the optional verbatim
-// description stored with the media; day is the optional logical-day
-// selector (`@yesterday` / `@YYYY-MM-DD`) reusing the shared rollover
-// grammar. Provenance rides the same accept surface the capture verbs
-// share (flagSource/flagHarness/flagChannel, declared in log.go), so a
-// relaying harness can attribute an attach through flags or LUCID_* env.
-const (
-	flagCaption = "caption"
-	flagDay     = "day"
-)
+// flagCaption is the attach-only flag name: the optional verbatim
+// description stored with the media. The logical-day selector (flagDay) and
+// the provenance cluster (flagSource/flagHarness/flagChannel) ride the accept
+// surface the capture verbs share, declared in log.go — `--day` reuses the
+// one rollover grammar log and attach both resolve through, and provenance
+// lets a relaying harness attribute an attach through flags or LUCID_* env.
+const flagCaption = "caption"
 
 // attachJSON is the machine-readable result emitted by `lucid attach --json`
 // (data-model.md / commands.md §attach): the stored path, its sha256, the
