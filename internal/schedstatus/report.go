@@ -180,6 +180,23 @@ type DBInput struct {
 	Failures  []RunFailure
 }
 
+// JobStorePath is one disposable job store the supervised scheduler writes to:
+// the daemon it belongs to, the path that daemon actually opens, and the
+// environment variable that relocates it.
+//
+// It is reported purely for legibility — it is never classified and can never
+// lower the verdict. It exists because the scheduler runs *four* independent job
+// stores and only the Engine one is pinned into the launchd plist; the other
+// three follow the OS user-config default on their own. That asymmetry is
+// invisible from any single path, so a repair, relocation, or backup keyed on
+// the Engine store alone silently covers a quarter of the surface. Naming all
+// four in one command is what makes it visible.
+type JobStorePath struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Env  string `json:"env"`
+}
+
 // Inputs is everything the impure CLI layer gathers, ready for pure
 // classification. [Assemble] consumes it plus the current time and returns a
 // classified [Report]; nothing in this struct requires I/O to interpret.
@@ -188,6 +205,7 @@ type Inputs struct {
 	Chain         ChainMarks
 	Engine        DBInput
 	CompanionJobs DBInput
+	JobStores     []JobStorePath
 	Receipts      []ReceiptStatus
 	Host          []Check
 }
@@ -205,14 +223,16 @@ type DBReport struct {
 // Report is the fully-classified status document. Verdict is the rolled-up
 // health (`ok`/`warn`/`error`) and mirrors [Report.ExitCode]; Checks is the flat
 // list of every classification that fed the verdict (host checks live in Host,
-// not here); the remaining fields carry the display sections. The JSON tags are
-// the stable machine contract.
+// not here); the remaining fields carry the display sections. JobStores is
+// informational only — it is copied through untouched and contributes no check.
+// The JSON tags are the stable machine contract.
 type Report struct {
 	Verdict       string          `json:"verdict"`
 	Companion     CompanionInfo   `json:"companion"`
 	Chain         ChainMarks      `json:"chain"`
 	Engine        DBReport        `json:"engine"`
 	CompanionJobs DBReport        `json:"companion_jobs"`
+	JobStores     []JobStorePath  `json:"job_stores"`
 	Receipts      []ReceiptStatus `json:"receipts"`
 	Runs          RunSummary      `json:"runs"`
 	Host          []Check         `json:"host"`
@@ -282,6 +302,7 @@ func Assemble(in Inputs, now time.Time) Report {
 	r := Report{
 		Companion: in.Companion,
 		Chain:     in.Chain,
+		JobStores: in.JobStores,
 		Receipts:  in.Receipts,
 		Host:      in.Host,
 		Runs: RunSummary{

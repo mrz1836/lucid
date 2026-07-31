@@ -42,6 +42,9 @@ func (r Report) TextLines() []string {
 	out = append(out, dbLines("Engine periodics", r.Engine)...)
 	out = append(out, dbLines("Companion periodics", r.CompanionJobs)...)
 
+	// Every disposable job store, named together (see jobStoreLines).
+	out = append(out, jobStoreLines(r.JobStores)...)
+
 	// Receipts.
 	add("Receipts:")
 	if len(r.Receipts) == 0 {
@@ -102,6 +105,32 @@ func dbLines(label string, db DBReport) []string {
 	}
 	for _, p := range db.Periodics {
 		out = append(out, periodicLine(p))
+	}
+	return out
+}
+
+// jobStoreLines renders the informational job-store block: every disposable job
+// store the supervised scheduler writes to, each with the environment variable
+// that relocates it. It classifies nothing and never lowers the verdict.
+//
+// It exists because the scheduler runs several independent job stores and only
+// the Engine one is pinned into the launchd plist — the rest resolve their own
+// default under the OS user-config dir. Nothing about a single path reveals
+// that, so an index-drift repair, a relocation, or a backup keyed on the Engine
+// store alone reads as complete while leaving the others untouched, which is
+// exactly how one such repair left three daemons still failing on boot. Listing
+// the whole set costs four lines and removes the guesswork.
+//
+// The count is rendered rather than asserted so the header can never claim more
+// stores than it lists, and an unresolvable path degrades to a dash rather than
+// dropping its row: this is the command you reach for when things are broken.
+func jobStoreLines(stores []JobStorePath) []string {
+	out := []string{fmt.Sprintf("Job stores (%d; only the Engine store is pinned by the launchd plist):", len(stores))}
+	if len(stores) == 0 {
+		return append(out, "  (none resolved)")
+	}
+	for _, s := range stores {
+		out = append(out, fmt.Sprintf("  %-16s %s  (%s)", s.Name, orDash(s.Path), orDash(s.Env)))
 	}
 	return out
 }

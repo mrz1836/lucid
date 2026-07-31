@@ -6,6 +6,8 @@ import (
 	"github.com/mrz1836/lucid/internal/companion"
 	"github.com/mrz1836/lucid/internal/schedrun"
 	"github.com/mrz1836/lucid/internal/schedstatus"
+	"github.com/mrz1836/lucid/internal/witnessreport"
+	"github.com/mrz1836/lucid/internal/workout"
 )
 
 // Flag names for `lucid scheduler status`. The two DB overrides mirror the
@@ -14,6 +16,18 @@ import (
 const (
 	statusFlagSchedulerDB = "scheduler-db"
 	statusFlagCompanionDB = "companion-db"
+)
+
+// The environment variables that relocate each disposable job store, reported
+// beside the path each one resolves to so an operator sees which knob moves
+// which store. They are spelled here rather than imported because each daemon
+// package keeps its own unexported constant; a divergence would surface as a
+// wrong name printed beside a right path, which is visible rather than silent.
+const (
+	envSchedulerDB     = "LUCID_SCHEDULER_DB"
+	envCompanionDB     = "LUCID_COMPANION_DB"
+	envWitnessReportDB = "LUCID_WITNESS_REPORT_DB"
+	envWorkoutDB       = "LUCID_WORKOUT_DB"
 )
 
 // newHostProbe builds the best-effort host/supervisor probe for a resolved
@@ -118,6 +132,7 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 		Store:       r.Store(),
 		SchedulerDB: schedulerDB,
 		CompanionDB: companionDB,
+		JobStores:   jobStorePaths(schedulerDB, companionDB),
 		Probe:       newHostProbe(schedulerDB),
 	})
 	if err != nil {
@@ -136,6 +151,42 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 		return statusExitError{verdict: report.Verdict, code: code}
 	}
 	return nil
+}
+
+// jobStorePaths lists every disposable job store the supervised scheduler
+// writes to, resolved through each daemon's own DefaultDBPath so a printed path
+// is exactly the file that daemon opens. The Engine and companion paths are
+// already resolved above — they are the two stores this report inspects — and
+// are reused rather than resolved a second time.
+//
+// The report names all four because only the Engine store is pinned into the
+// launchd plist (`LUCID_SCHEDULER_DB`); the witness-report and workout stores,
+// and the companion's, each resolve their own default under the OS user-config
+// dir. A repair or a backup keyed on the pinned path alone therefore reads as
+// complete while covering a quarter of the surface — the asymmetry is invisible
+// from any single path and costs real time to rediscover from a crash loop.
+//
+// A resolver that cannot answer blanks its own row (rendered as a dash) instead
+// of failing the command: `status` is what you run when things are already
+// broken, so it must not become the next broken thing.
+func jobStorePaths(schedulerDB, companionDB string) []schedstatus.JobStorePath {
+	return []schedstatus.JobStorePath{
+		{Name: "engine", Path: schedulerDB, Env: envSchedulerDB},
+		{Name: "companion", Path: companionDB, Env: envCompanionDB},
+		{Name: "witness-report", Path: resolvedPathOrBlank(witnessreport.DefaultDBPath), Env: envWitnessReportDB},
+		{Name: "workout", Path: resolvedPathOrBlank(workout.DefaultDBPath), Env: envWorkoutDB},
+	}
+}
+
+// resolvedPathOrBlank runs a daemon's default-path resolver with no override and
+// returns "" when it cannot resolve, so one unresolvable store blanks its own
+// row rather than failing the whole report.
+func resolvedPathOrBlank(resolve func(string) (string, error)) string {
+	path, err := resolve("")
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // statusExitError carries a scheduler-status verdict's non-zero exit code out through

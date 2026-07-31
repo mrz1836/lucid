@@ -50,6 +50,19 @@ func okCompanionDB() DBInput {
 	}
 }
 
+// okJobStores builds the full set of resolved job-store paths the CLI hands the
+// report — the four independent stores the supervised scheduler writes to, each
+// with the environment variable that relocates it. It is informational input
+// only: no case here should ever see it change a verdict.
+func okJobStores() []JobStorePath {
+	return []JobStorePath{
+		{Name: "engine", Path: "/var/lucid/flywheel.db", Env: "LUCID_SCHEDULER_DB"},
+		{Name: "companion", Path: "/var/lucid/companion.db", Env: "LUCID_COMPANION_DB"},
+		{Name: "witness-report", Path: "/var/lucid/witness-report.db", Env: "LUCID_WITNESS_REPORT_DB"},
+		{Name: "workout", Path: "/var/lucid/workout.db", Env: "LUCID_WORKOUT_DB"},
+	}
+}
+
 // okReceipts builds current, verified receipts for both windows. Morning is the
 // most-recent elapsed window at 12:00, so it carries today's date; night last
 // fired yesterday evening.
@@ -583,4 +596,30 @@ func TestAssembleNeverRun(t *testing.T) {
 		require.Equal(t, string(Error), r.Verdict)
 		require.Equal(t, 2, r.ExitCode())
 	})
+}
+
+// TestAssembleJobStoresAreInformational locks the one property that keeps the
+// job-store block safe to add: it is copied through untouched and classified
+// nowhere. Adding, blanking, or dropping the paths must move neither the verdict
+// nor the check list — the block exists to be read, not to be judged.
+func TestAssembleJobStoresAreInformational(t *testing.T) {
+	now := fixedNow()
+
+	bare := Assemble(healthyEnabled(now), now)
+	require.Empty(t, bare.JobStores, "an ungathered report simply has no job stores")
+
+	with := healthyEnabled(now)
+	with.JobStores = okJobStores()
+	full := Assemble(with, now)
+
+	require.Equal(t, okJobStores(), full.JobStores, "copied through verbatim")
+	require.Equal(t, bare.Verdict, full.Verdict)
+	require.Equal(t, bare.Checks, full.Checks, "no check is derived from a job-store path")
+
+	// Even a wholly unresolvable set is inert: a blank path is a rendering
+	// concern, never a fault.
+	blank := healthyEnabled(now)
+	blank.JobStores = []JobStorePath{{Name: "workout", Env: "LUCID_WORKOUT_DB"}}
+	require.Equal(t, bare.Verdict, Assemble(blank, now).Verdict)
+	require.Equal(t, bare.Checks, Assemble(blank, now).Checks)
 }
