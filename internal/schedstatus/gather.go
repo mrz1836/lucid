@@ -37,8 +37,9 @@ const (
 
 // GatherParams carries everything the impure gather step needs: the booted config
 // (the companion/provider block), the Ledger store (chain marks + receipts), the
-// two resolved disposable job-DB paths, and the best-effort host probe. The CLI
-// layer resolves the DB paths (flag → env → default, via schedrun/companion
+// two resolved disposable job-DB paths this report actually inspects, the full
+// set of job-store paths to name for legibility, and the best-effort host probe.
+// The CLI layer resolves every path (flag → env → default, via each daemon's own
 // DefaultDBPath) and boots the router before calling Gather, so this package does
 // no path resolution or router booting itself.
 type GatherParams struct {
@@ -46,6 +47,7 @@ type GatherParams struct {
 	Store       *storage.Adapter
 	SchedulerDB string
 	CompanionDB string
+	JobStores   []JobStorePath
 	Probe       HostProbe
 }
 
@@ -70,6 +72,7 @@ func Gather(ctx context.Context, p GatherParams) (Inputs, error) {
 		Chain:         chain,
 		Engine:        GatherDB(ctx, p.SchedulerDB),
 		CompanionJobs: GatherDB(ctx, p.CompanionDB),
+		JobStores:     p.JobStores,
 		Receipts:      GatherReceipts(p.Store),
 		Host:          host,
 	}, nil

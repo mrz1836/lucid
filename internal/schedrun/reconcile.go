@@ -13,6 +13,8 @@ import (
 	"github.com/mrz1836/go-foundation/models"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
+
+	"github.com/mrz1836/lucid/internal/flynode"
 )
 
 // staleCursorGrace is how far behind an *active* periodic's next run may fall
@@ -134,7 +136,7 @@ func ReconcileStore(ctx context.Context, dbPath string, opts ReconcileOptions) (
 			_ = sqlDB.Close()
 		}
 	}()
-	if err = flywheel.Migrate(db); err != nil {
+	if err = flynode.MigrateJobStore(db); err != nil {
 		return ReconcileReport{}, fmt.Errorf("schedrun: migrate job db: %w", err)
 	}
 	return Reconcile(ctx, db, opts)

@@ -23,6 +23,7 @@ func TestTextLinesSections(t *testing.T) {
 		"Chain:",
 		"Engine periodics",
 		"Companion periodics",
+		"Job stores",
 		"Receipts:",
 		"Recent runs",
 		"Host:",
@@ -118,7 +119,7 @@ func TestReportJSONShape(t *testing.T) {
 	var doc map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(raw, &doc))
 
-	for _, key := range []string{"verdict", "companion", "chain", "engine", "companion_jobs", "receipts", "runs", "host", "checks"} {
+	for _, key := range []string{"verdict", "companion", "chain", "engine", "companion_jobs", "job_stores", "receipts", "runs", "host", "checks"} {
 		require.Contains(t, doc, key, "missing top-level JSON key %q", key)
 	}
 
@@ -155,4 +156,78 @@ func TestPeriodicStatusTimeOmitzero(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(zero), `"next_run"`)
 	require.NotContains(t, string(zero), `"last_enqueue"`)
+}
+
+// TestTextLinesJobStores asserts the human report names every disposable job
+// store together with the environment variable that relocates it. Seeing the
+// whole set in one place is the point: only the Engine store is pinned by the
+// launchd plist, so a reader who knows just that one path has no way to tell
+// there are three more, and a repair applied to it alone looks complete.
+func TestTextLinesJobStores(t *testing.T) {
+	now := fixedNow()
+	in := healthyEnabled(now)
+	in.JobStores = okJobStores()
+
+	r := Assemble(in, now)
+	out := strings.Join(r.TextLines(), "\n")
+
+	require.Contains(t, out, "Job stores (4;")
+	require.Contains(t, out, "only the Engine store is pinned by the launchd plist")
+	for _, want := range []string{
+		"engine", "companion", "witness-report", "workout",
+		"LUCID_SCHEDULER_DB", "LUCID_COMPANION_DB", "LUCID_WITNESS_REPORT_DB", "LUCID_WORKOUT_DB",
+		"/var/lucid/witness-report.db", "/var/lucid/workout.db",
+	} {
+		require.Contains(t, out, want, "job-store block omits %q", want)
+	}
+
+	// The block is informational: a healthy report stays healthy and issue-free.
+	require.Equal(t, string(Ok), r.Verdict)
+	require.NotContains(t, out, "Issues:")
+}
+
+// TestTextLinesJobStoresDegrade covers the two degenerate renders. A store whose
+// path could not be resolved keeps its row and shows a dash — `status` is what
+// you run when things are already broken, so it must not drop a row or fail —
+// and a report assembled without any gathering says so plainly rather than
+// printing a header that claims stores it cannot list.
+func TestTextLinesJobStoresDegrade(t *testing.T) {
+	now := fixedNow()
+
+	in := healthyEnabled(now)
+	in.JobStores = []JobStorePath{{Name: "workout", Env: "LUCID_WORKOUT_DB"}} // unresolved path
+	out := strings.Join(Assemble(in, now).TextLines(), "\n")
+	require.Contains(t, out, "Job stores (1;")
+	require.Contains(t, out, "—  (LUCID_WORKOUT_DB)", "an unresolved path renders as a dash, not a dropped row")
+
+	none := strings.Join(Assemble(healthyEnabled(now), now).TextLines(), "\n")
+	require.Contains(t, none, "Job stores (0;")
+	require.Contains(t, none, "(none resolved)")
+}
+
+// TestReportJSONJobStores locks the machine contract for the job-store block:
+// a stable `job_stores` array whose entries each carry a name, a path, and the
+// env var that overrides it, so an agent can read the full set without parsing
+// the human render.
+func TestReportJSONJobStores(t *testing.T) {
+	now := fixedNow()
+	in := healthyEnabled(now)
+	in.JobStores = okJobStores()
+
+	raw, err := json.Marshal(Assemble(in, now))
+	require.NoError(t, err)
+
+	var doc struct {
+		JobStores []JobStorePath `json:"job_stores"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	require.Len(t, doc.JobStores, 4)
+
+	names := make([]string, 0, len(doc.JobStores))
+	for _, s := range doc.JobStores {
+		require.NotEmpty(t, s.Path, "%s has no resolved path", s.Name)
+		require.NotEmpty(t, s.Env, "%s names no override env var", s.Name)
+		names = append(names, s.Name)
+	}
+	require.Equal(t, []string{"engine", "companion", "witness-report", "workout"}, names)
 }

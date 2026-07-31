@@ -663,6 +663,32 @@ The command resolves the two disposable job-store paths exactly as the daemon do
 (flag → env → OS-user-config default) and **always prints the resolved paths**, so
 an environment / launchd path drift is visible rather than silently green.
 
+**It names all four job stores, not just the two it inspects.** The scheduler runs
+**four** independent disposable job stores — one each for the Engine, the companion,
+the weekly witness report, and the workout companion — and only the Engine store is
+pinned into the launchd plist as `LUCID_SCHEDULER_DB`. The other three resolve their
+own default under the OS user-config dir, independently of it. So a schema repair,
+a relocation, or a backup keyed on the pinned path alone is a fix applied to a
+**quarter** of the surface, and nothing about that path reveals the other three
+exist. `status` therefore prints the whole set — each store's resolved path beside
+the environment variable that moves it — resolved through each daemon's own
+resolver, so a printed path is the file that daemon actually opens:
+
+```
+Job stores (4; only the Engine store is pinned by the launchd plist):
+  engine           /path/to/flywheel.db        (LUCID_SCHEDULER_DB)
+  companion        /path/to/companion.db       (LUCID_COMPANION_DB)
+  witness-report   /path/to/witness-report.db  (LUCID_WITNESS_REPORT_DB)
+  workout          /path/to/workout.db         (LUCID_WORKOUT_DB)
+```
+
+The block is **informational**: it is reported in both the text and `--json`
+output (as a `job_stores` array), classifies nothing, and never lowers the verdict.
+A path that cannot be resolved keeps its row and shows a dash rather than failing
+the command — `status` is what you reach for when something is already broken.
+Only the Engine and companion stores have inspection flags (`--scheduler-db`,
+`--companion-db`); the other two are named, not read.
+
 **Exit-code contract (a deliberate override of the [global table](#global-conventions)).**
 `scheduler status` is a *graded* command: its exit code is the health verdict,
 identical in text and `--json` output, so a health cron or agent can gate on the
@@ -1299,3 +1325,4 @@ replaced the retired monthly heartbeat) run beside them. See
 | `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable Engine job-store path; `--db` (on `run` and `reconcile`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
 | `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status`; `--companion-db` overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
 | `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |
+| `LUCID_WORKOUT_DB` | Optional override for the workout companion's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |

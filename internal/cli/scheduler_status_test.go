@@ -310,6 +310,66 @@ func TestSchedulerStatus_JSON_HasVerdictAndShape(t *testing.T) {
 	require.NotEmpty(t, v.Checks, "the flat check list is present in the JSON document")
 }
 
+// TestSchedulerStatus_NamesEveryJobStore proves the report names all four
+// disposable job stores — in text and in `--json` — resolved through each
+// daemon's own DefaultDBPath, so the printed path is the file that daemon
+// actually opens.
+//
+// It matters because only the Engine store is pinned into the launchd plist:
+// the companion, witness-report, and workout stores each resolve their own
+// default under the OS user-config dir. Nothing about the pinned path reveals
+// the other three exist, so a schema repair or a backup keyed on it alone reads
+// as complete while covering a quarter of the surface.
+func TestSchedulerStatus_NamesEveryJobStore(t *testing.T) {
+	home, schedulerDB, companionDB := seedScheduler(t, true, "PROMPT BODY")
+	seedHealthyDBs(t, home, schedulerDB, companionDB)
+	withClock(t, statusMorning())
+	withHostProbe(t, unknownHost()...)
+
+	// Pin the two stores the report does not inspect so the assertion is about
+	// wiring rather than about this host's user-config dir.
+	witnessDB := filepath.Join(t.TempDir(), "witness-report.db")
+	workoutDB := filepath.Join(t.TempDir(), "workout.db")
+	t.Setenv("LUCID_WITNESS_REPORT_DB", witnessDB)
+	t.Setenv("LUCID_WORKOUT_DB", workoutDB)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "status")
+	require.NoError(t, err, "naming the stores never changes the verdict")
+	for _, want := range []string{
+		"Job stores (4;", schedulerDB, companionDB, witnessDB, workoutDB,
+		"LUCID_SCHEDULER_DB", "LUCID_COMPANION_DB", "LUCID_WITNESS_REPORT_DB", "LUCID_WORKOUT_DB",
+	} {
+		assert.Contains(t, out, want, "text report omits %q", want)
+	}
+
+	jsonOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "status", "--json")
+	require.NoError(t, err)
+
+	var doc struct {
+		Verdict   string `json:"verdict"`
+		JobStores []struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+			Env  string `json:"env"`
+		} `json:"job_stores"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &doc))
+	assert.Equal(t, "ok", doc.Verdict, "the job-store block classifies nothing")
+	require.Len(t, doc.JobStores, 4)
+
+	got := map[string]string{}
+	for _, s := range doc.JobStores {
+		require.NotEmpty(t, s.Path, "%s resolved to no path", s.Name)
+		got[s.Name] = s.Env
+	}
+	assert.Equal(t, map[string]string{
+		"engine":         "LUCID_SCHEDULER_DB",
+		"companion":      "LUCID_COMPANION_DB",
+		"witness-report": "LUCID_WITNESS_REPORT_DB",
+		"workout":        "LUCID_WORKOUT_DB",
+	}, got)
+}
+
 // TestSchedulerStatus_ExitCodeIdenticalTextAndJSON proves the 3-tier exit code is
 // identical in text and --json for the same state: a warn verdict exits 1 in both
 // modes, and the JSON verdict is "warn" (AC-4).
