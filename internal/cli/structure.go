@@ -168,15 +168,18 @@ func structureRequest(cmd *cobra.Command, args []string, now time.Time) (router.
 	case hasArg && hasSince:
 		return router.StructurePassRequest{}, fmt.Errorf(
 			"invalid argument %q for %q flag: one entry and a window are separate modes — pass one or the other",
-			args[0], "--"+structureFlagSince)
+			args[0], "--"+structureFlagSince,
+		)
 	case hasUntil && !hasSince:
 		raw, _ := flags.GetString(structureFlagUntil)
 		return router.StructurePassRequest{}, fmt.Errorf(
 			"invalid argument %q for %q flag: it closes a window opened by --%s, which was not given",
-			raw, "--"+structureFlagUntil, structureFlagSince)
+			raw, "--"+structureFlagUntil, structureFlagSince,
+		)
 	case !hasArg && !hasSince:
 		return router.StructurePassRequest{}, fmt.Errorf(
-			"requires at least a raw entry id or --%s <%s>", structureFlagSince, structureDateLayout)
+			"requires at least a raw entry id or --%s <%s>", structureFlagSince, structureDateLayout,
+		)
 	case hasArg:
 		id := strings.TrimSpace(args[0])
 		if id == "" {
@@ -206,7 +209,8 @@ func structureWindow(cmd *cobra.Command, now time.Time, force bool) (router.Stru
 		return router.StructurePassRequest{}, fmt.Errorf(
 			"invalid argument %q for %q flag: it starts after --%s (%s)",
 			observations.DateString(since), "--"+structureFlagSince,
-			structureFlagUntil, observations.DateString(until))
+			structureFlagUntil, observations.DateString(until),
+		)
 	}
 	return router.StructurePassRequest{Since: since, Until: until, Force: force}, nil
 }
@@ -218,7 +222,8 @@ func structureDay(cmd *cobra.Command, name string, loc *time.Location) (time.Tim
 	day, err := observations.ParseDate(strings.TrimSpace(raw), loc)
 	if err != nil {
 		return time.Time{}, fmt.Errorf(
-			"invalid argument %q for %q flag: needs a %s date", raw, "--"+name, structureDateLayout)
+			"invalid argument %q for %q flag: needs a %s date", raw, "--"+name, structureDateLayout,
+		)
 	}
 	return day, nil
 }
