@@ -202,3 +202,112 @@ func TestBuildMetrics_AnchorsDaysSinceAndSkipMalformed(t *testing.T) {
 	assert.Equal(t, "big one", m.Anchors[0].Note)
 	assert.Equal(t, 5, m.Anchors[0].DaysSince)
 }
+
+// anchorMetrics folds an anchor history and builds the projection at a fixed
+// logical day, so every partition assertion below reads the real fold rather
+// than a hand-built projection.
+func anchorMetrics(t *testing.T, history []Anchor) Metrics {
+	t.Helper()
+	clocks, err := defChain().ClocksFor(DefaultProfile)
+	require.NoError(t, err)
+	return BuildMetrics(MetricsInput{
+		Anchors: LatestAnchors(AnchorLog{Version: AnchorVersion, History: history}),
+		Chain:   defChain(),
+		Now:     time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
+		Clocks:  clocks,
+		Loc:     time.UTC,
+	})
+}
+
+// TestBuildMetrics_SunsetAnchorLeavesAnchors is the partition guard: a retired
+// milestone leaves the counting surface for the retired one, carrying its
+// milestone date and its retirement instant, and never appears in both.
+func TestBuildMetrics_SunsetAnchorLeavesAnchors(t *testing.T) {
+	m := anchorMetrics(t, []Anchor{
+		{ID: "anchor_2026_04_05_a", Label: "quit-x", Date: "2026-04-05", RecordedAt: "2026-04-05T21:00:00Z"},
+		{ID: "anchor_2026_04_05_b", Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-04-05T21:00:00Z"},
+		{
+			ID: "anchor_2026_04_05_b", Label: "gate-30", Date: "2026-02-01", Note: "mistyped label",
+			RecordedAt: "2026-04-08T09:00:00Z", State: AnchorStateSunset,
+		},
+	})
+
+	require.Len(t, m.Anchors, 1, "only the active anchor still counts")
+	assert.Equal(t, "anchor_2026_04_05_a", m.Anchors[0].ID)
+	assert.Equal(t, "quit-x", m.Anchors[0].Label)
+	assert.Equal(t, 5, m.Anchors[0].DaysSince)
+
+	require.Len(t, m.AnchorsSunset, 1, "the retired anchor is surfaced, not dropped")
+	assert.Equal(t, AnchorSunset{
+		ID:       "anchor_2026_04_05_b",
+		Label:    "gate-30",
+		Date:     "2026-02-01", // the milestone date, never the retirement day
+		Note:     "mistyped label",
+		SunsetAt: "2026-04-08T09:00:00Z",
+	}, m.AnchorsSunset[0])
+}
+
+// TestBuildMetrics_SunsetAndLaterSameLabelAreDistinct is the case the identity
+// model exists for: a retired milestone and a later one reusing its display
+// name are two anchors, not one that paused and resumed. They appear once each,
+// in different arrays, under different ids.
+func TestBuildMetrics_SunsetAndLaterSameLabelAreDistinct(t *testing.T) {
+	m := anchorMetrics(t, []Anchor{
+		{ID: "anchor_2026_02_01_a", Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-02-01T09:00:00Z"},
+		{
+			ID: "anchor_2026_02_01_a", Label: "gate-30", Date: "2026-02-01",
+			RecordedAt: "2026-03-05T09:00:00Z", State: AnchorStateSunset,
+		},
+		{ID: "anchor_2026_04_05_a", Label: "gate-30", Date: "2026-04-05", RecordedAt: "2026-04-05T09:00:00Z"},
+	})
+
+	require.Len(t, m.Anchors, 1)
+	require.Len(t, m.AnchorsSunset, 1)
+	assert.Equal(t, "anchor_2026_04_05_a", m.Anchors[0].ID, "the live run counts")
+	assert.Equal(t, "anchor_2026_02_01_a", m.AnchorsSunset[0].ID, "the retired run stays retired")
+	assert.Equal(t, m.Anchors[0].Label, m.AnchorsSunset[0].Label, "they share a display name")
+	assert.NotEqual(t, m.Anchors[0].ID, m.AnchorsSunset[0].ID, "and are still distinguishable")
+	assert.Equal(t, 5, m.Anchors[0].DaysSince, "the new run counts from its own date")
+}
+
+// TestBuildMetrics_LegacyAnchorPublishesLegacyID checks the surface an anchor
+// recorded before ids existed presents: a namespaced synthetic address, so
+// every projected row is addressable even though the store holds no id.
+func TestBuildMetrics_LegacyAnchorPublishesLegacyID(t *testing.T) {
+	m := anchorMetrics(t, []Anchor{
+		{Label: "gate-30", Date: "2026-04-05", RecordedAt: "2026-04-05T21:00:00Z"},
+		{Label: "sobriety", Date: "2026-02-01", RecordedAt: "2026-04-06T21:00:00Z", State: AnchorStateSunset},
+	})
+
+	require.Len(t, m.Anchors, 1)
+	assert.Equal(t, "legacy:gate-30", m.Anchors[0].ID)
+	require.Len(t, m.AnchorsSunset, 1)
+	assert.Equal(t, "legacy:sobriety", m.AnchorsSunset[0].ID, "a retired pre-id anchor is addressable too")
+}
+
+// TestBuildMetrics_SunsetWithMalformedDateIsDropped guards the hand-corruption
+// path on the retired side: an unparseable date is skipped rather than
+// surfaced with a hollow zero, exactly as it is for an active anchor.
+func TestBuildMetrics_SunsetWithMalformedDateIsDropped(t *testing.T) {
+	m := anchorMetrics(t, []Anchor{
+		{ID: "anchor_2026_04_05_a", Label: "bad", Date: "not-a-date", RecordedAt: "2026-04-05T21:00:00Z", State: AnchorStateSunset},
+	})
+
+	assert.Empty(t, m.Anchors)
+	assert.Empty(t, m.AnchorsSunset, "a malformed retired record is skipped, not surfaced")
+}
+
+// TestBuildMetrics_EmptyArraysAreNotNull pins the JSON shape for a store with
+// no anchors: both arrays are present and empty. It asserts on the marshaled
+// bytes on purpose — a nil slice has length zero too, and would render null.
+func TestBuildMetrics_EmptyArraysAreNotNull(t *testing.T) {
+	m := BuildMetrics(MetricsInput{Chain: defChain(), Loc: time.UTC})
+
+	b, err := json.Marshal(m)
+	require.NoError(t, err)
+	s := string(b)
+	assert.Contains(t, s, `"anchors":[]`)
+	assert.Contains(t, s, `"anchors_sunset":[]`)
+	assert.NotContains(t, s, `"anchors":null`)
+	assert.NotContains(t, s, `"anchors_sunset":null`)
+}

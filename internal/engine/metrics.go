@@ -29,22 +29,45 @@ type GateWindow struct {
 	Adherence Window `json:"adherence"`
 }
 
-// AnchorDaysSince is one folded anchor with its running day count (day 0 on
-// the anchor date).
+// AnchorDaysSince is one folded, still-counting anchor with its running day
+// count (day 0 on the anchor date). A retired milestone is not here — it is in
+// AnchorSunset.
+//
+// ID is unconditional: every projected row publishes an address, either the
+// anchor's minted id or the synthetic identity of a record written before ids
+// existed (AnchorIdentity), so a caller can always refer to what it just read.
 type AnchorDaysSince struct {
+	ID        string `json:"id"`
 	Label     string `json:"label"`
 	Date      string `json:"date"`
 	Note      string `json:"note,omitempty"`
 	DaysSince int    `json:"days_since"`
 }
 
+// AnchorSunset is one retired milestone: it no longer counts, but it never
+// leaves the ledger. Date stays the milestone date the anchor counted from —
+// it is not overloaded with the retirement day, which SunsetAt carries. Note is
+// the reason given at retirement, when one was.
+type AnchorSunset struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Date     string `json:"date"`
+	Note     string `json:"note,omitempty"`
+	SunsetAt string `json:"sunset_at"`
+}
+
 // Metrics is the derived `lucid metrics` projection — the committed chain's
 // *quality* read: current/longest streak, adherence over the default 30-day
 // window (plus the 30/60/90 gate rollups), misses in that window, the error
-// budget, and days-since for each recorded anchor. Streak/adherence/misses
+// budget, and days-since for each active anchor. Streak/adherence/misses
 // reuse the existing chain folds; only days-since is new math. Field order is
 // fixed for a stable on-disk form. Ref is the anchoring logical day the
 // rolling windows resolve to (nil when no day is decided yet).
+//
+// Anchors carries only anchors that still count; AnchorsSunset carries the
+// retired ones, so a caller reading Anchors can never accidentally count a
+// milestone that was deliberately retired, and a caller that wants the retired
+// ones does not have to read the store to find them.
 type Metrics struct {
 	CurrentStreak  int               `json:"current_streak"`
 	LongestStreak  int               `json:"longest_streak"`
@@ -53,6 +76,7 @@ type Metrics struct {
 	ErrorBudget    ErrorBudget       `json:"error_budget"`
 	Gates          []GateWindow      `json:"gates"`
 	Anchors        []AnchorDaysSince `json:"anchors"`
+	AnchorsSunset  []AnchorSunset    `json:"anchors_sunset"`
 	Ref            *string           `json:"ref"`
 }
 
@@ -85,12 +109,14 @@ func BuildMetrics(in MetricsInput) Metrics {
 	streaks := ComputeStreaks(records, loc)
 	budget := in.Chain.SLO.IsolatedMissBudgetPer30d
 
+	active, sunset := partitionAnchors(in.Anchors, in.Clocks.BaseLogicalDate(in.Now))
 	m := Metrics{
 		CurrentStreak: streaks.Current,
 		LongestStreak: streaks.Longest,
 		Adherence:     Window{Length: 30},
 		ErrorBudget:   ErrorBudget{Budget: budget, Remaining: budget},
-		Anchors:       anchorDaysSince(in.Anchors, in.Clocks.BaseLogicalDate(in.Now)),
+		Anchors:       active,
+		AnchorsSunset: sunset,
 	}
 
 	ref, hasRef := latestRecordDate(records, loc)
@@ -120,25 +146,58 @@ func gateWindows(records []DayRecord, ref time.Time, hasRef bool, gates []int, l
 	return out
 }
 
-// anchorDaysSince maps each folded anchor to its running day count relative to
-// the current logical day (day 0 on the anchor date). A malformed date is
-// skipped rather than counted, so a hand-corrupted anchors.json cannot panic
-// the read. The output is sorted by label for a stable projection regardless
-// of input order.
-func anchorDaysSince(anchors []Anchor, logicalDay time.Time) []AnchorDaysSince {
-	out := make([]AnchorDaysSince, 0, len(anchors))
+// partitionAnchors splits the folded anchors into the two projected surfaces in
+// a single walk: the ones still counting (with their running day count relative
+// to the current logical day, day 0 on the anchor date) and the retired ones.
+//
+// This is the only place a sunset anchor is filtered out. Every downstream
+// surface — the metrics prose, the anchors[] JSON array, and the witness
+// aging-anchor check — reads Metrics.Anchors, so filtering here is what keeps a
+// retired milestone off all three without a second patch point.
+//
+// A malformed date is skipped on both sides rather than counted, so a
+// hand-corrupted anchors.json cannot panic the read and a retired record with a
+// broken date is dropped rather than surfaced with a hollow zero. Both outputs
+// are sorted by label, then identity, so two records sharing a display name
+// have a total, stable order; both are non-nil so the JSON renders [] and never
+// null.
+func partitionAnchors(anchors []Anchor, logicalDay time.Time) ([]AnchorDaysSince, []AnchorSunset) {
+	active := make([]AnchorDaysSince, 0, len(anchors))
+	sunset := make([]AnchorSunset, 0, len(anchors))
 	for _, a := range anchors {
 		d, err := time.Parse(dateLayout, a.Date)
 		if err != nil {
 			continue
 		}
-		out = append(out, AnchorDaysSince{
+		if a.IsSunset() {
+			sunset = append(sunset, AnchorSunset{
+				ID:       AnchorIdentity(a),
+				Label:    a.Label,
+				Date:     a.Date,
+				Note:     a.Note,
+				SunsetAt: a.RecordedAt,
+			})
+			continue
+		}
+		active = append(active, AnchorDaysSince{
+			ID:        AnchorIdentity(a),
 			Label:     a.Label,
 			Date:      a.Date,
 			Note:      a.Note,
 			DaysSince: DaysSince(d, logicalDay),
 		})
 	}
-	slices.SortFunc(out, func(a, b AnchorDaysSince) int { return cmp.Compare(a.Label, b.Label) })
-	return out
+	slices.SortFunc(active, func(a, b AnchorDaysSince) int {
+		if c := cmp.Compare(a.Label, b.Label); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	slices.SortFunc(sunset, func(a, b AnchorSunset) int {
+		if c := cmp.Compare(a.Label, b.Label); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	return active, sunset
 }

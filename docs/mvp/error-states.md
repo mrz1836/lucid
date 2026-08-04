@@ -199,6 +199,25 @@ total (P10), and an inline date never costs a capture.
 | B-8 | A backdated `storm` event dated before the last recorded storm event | Reject — storm history folds in order, so an out-of-order append would corrupt the standing computation rather than fail loudly. | "That's before the last recorded storm event." | None |
 | B-9 | An unreadable `@`-token inside an `obs` micro-log line | **Not** an error — the permissive tier. The token stays in the note verbatim and the event is written; only a deliberate flag blocks. | The ordinary capture ack. | Event written |
 
+### Anchors (the sunset / rename verbs — deterministic, agent-free)
+
+The rows above cover a *date* the grammar cannot read. These cover the
+**state** of an anchor the verb is aimed at — a label nothing holds, a
+milestone already retired, a name already in use. `anchor sunset` and
+`anchor rename` take no date, so none of the `B-` rows applies to them.
+Both are on the **strict tier**: the rejection is decided from the folded
+store *before* any append, the copy is fixed and model-free, the exit is
+non-zero, and every row below ends with the nothing-was-saved clause of
+St-1. "None" in the disk column means **no record is appended to
+`history[]`** — the silent, idempotent engine scaffold still runs, as it
+does for a plain `metrics` read.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect |
+|---|---------|-----------------|----------------------|------------------|
+| An-1 | `anchor sunset` / `anchor rename` naming a label no anchor holds | Reject before any write. The message **names the labels that are recorded**, so the remedy travels with the error — there is deliberately no `anchor list` verb to send the user to. | `no anchor named "gate-3" — recorded anchors: gate-30, sobriety` (or, on an empty store, that no anchors are recorded yet). | None |
+| An-2 | `anchor sunset` / `anchor rename` targeting an already-sunset label | Reject. A retired anchor is history, not an editable record; re-adding the label is the supported path and starts a new milestone under a new id. | Names the label and the day it was sunset, points at adding it again, then "Nothing was saved." | None |
+| An-3 | `anchor rename` onto a label an **active** anchor already holds, or onto the same label | Reject — at most one active anchor per label is exactly what lets every verb take a bare label instead of an id. Renaming onto a label held only by a **sunset** anchor is *accepted*: that name is free, as it is for `anchor add`. | Names the label that is taken and the remedy (sunset or rename it first), then "Nothing was saved." | None |
+
 ### Scheduler daemon (the send schedule — deterministic, agent-free)
 
 The rows above cover a *message* that fails. These cover the **schedule**

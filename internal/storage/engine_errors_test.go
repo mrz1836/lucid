@@ -106,6 +106,30 @@ func TestAppendAnchor_WriteFails(t *testing.T) {
 	assert.Error(t, err)
 }
 
+// TestAppendAnchors_NoWriteOnUnwritableStore: when the one write fails, the
+// history is exactly as it was — neither record of a pair lands. A rename
+// leans on this: half of it would leave the old and the new label both active.
+func TestAppendAnchors_NoWriteOnUnwritableStore(t *testing.T) {
+	skipIfRoot(t)
+	a := newEngineAdapter(t)
+	require.NoError(t, a.AppendAnchor(engine.Anchor{Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-02-01T21:00:00Z"}))
+	before, err := os.ReadFile(a.anchorsPath())
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chmod(a.anchorsPath(), 0o400)) // still readable, so the failure is the write
+	t.Cleanup(func() { _ = os.Chmod(a.anchorsPath(), 0o600) })
+
+	err = a.AppendAnchors(
+		engine.Anchor{Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-08-04T12:00:00Z", State: engine.AnchorStateSunset},
+		engine.Anchor{ID: "anchor_2026_08_04_a", Label: "gate-thirty", Date: "2026-02-01", RecordedAt: "2026-08-04T12:00:00Z"},
+	)
+	require.Error(t, err)
+
+	after, err := os.ReadFile(a.anchorsPath())
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "a failed write leaves the history byte-unchanged — no partial pair")
+}
+
 func TestRebuildEngineStatus_MissingChainErrors(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), ".lucid"))
 	_, err := a.RebuildEngineStatus(time.UTC)

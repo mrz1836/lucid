@@ -293,26 +293,38 @@ func (a *Adapter) AppendProfileEvent(sw engine.ProfileSwitch) error {
 
 // ReadAnchors reads anchors.json (engine-module.md §anchors.json). A fresh
 // tree yields the scaffolded empty log; the full append-only history is
-// returned unfolded — latest-per-label is a read-time fold
-// ([engine.LatestAnchors]).
+// returned unfolded — the effective set is a read-time fold, one record per
+// identity ([engine.LatestAnchors]).
 func (a *Adapter) ReadAnchors() (engine.AnchorLog, error) {
 	return readJSON[engine.AnchorLog](a.anchorsPath(), "anchors.json")
 }
 
-// AppendAnchor records one milestone by appending it to anchors.json's
-// history (engine-module.md §anchors.json, append-only; latest-per-label
-// wins at read). The body is never rewritten in place beyond the append —
-// mirroring [Adapter.AppendProfileEvent] — so a correction or a reset is a
-// new dated append, never an edit.
-func (a *Adapter) AppendAnchor(anchor engine.Anchor) error {
+// AppendAnchors records one or more milestones in a single write: read the
+// log, append every record, write once (engine-module.md §anchors.json,
+// append-only; the latest record per identity wins at read).
+//
+// One read, one marshal, one write is the point. Either every record lands or
+// none does, which is what lets a rename retire one identity and mint another
+// in the same operation without forking the surface — a half-applied pair
+// would leave both the old and the new label active at once. Callers that need
+// two records written together must pass them here rather than calling twice.
+// Passing no records is a no-op: nothing is read, nothing is written.
+//
+// No record is ever rewritten in place and none is ever removed; the only
+// field this touches outside the history is the envelope's schema version,
+// stamped on every append so the number in a file is always true of that file.
+// A correction or a reset is therefore a new dated append, never an edit —
+// mirroring [Adapter.AppendProfileEvent].
+func (a *Adapter) AppendAnchors(anchors ...engine.Anchor) error {
+	if len(anchors) == 0 {
+		return nil
+	}
 	log, err := a.ReadAnchors()
 	if err != nil {
 		return err
 	}
-	if log.Version == 0 {
-		log.Version = engine.AnchorVersion
-	}
-	log.History = append(log.History, anchor)
+	log.Version = engine.AnchorVersion
+	log.History = append(log.History, anchors...)
 	content, err := marshalJSON(log)
 	if err != nil {
 		return err
@@ -321,6 +333,12 @@ func (a *Adapter) AppendAnchor(anchor engine.Anchor) error {
 		return fmt.Errorf("storage: write anchors.json: %w", err)
 	}
 	return nil
+}
+
+// AppendAnchor records one milestone. It is [Adapter.AppendAnchors] with a
+// single record, so every anchor write — one or many — takes the same path.
+func (a *Adapter) AppendAnchor(anchor engine.Anchor) error {
+	return a.AppendAnchors(anchor)
 }
 
 // RebuildEngineStatus recomputes engine/status.json from the folded day

@@ -8,30 +8,52 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/router"
 )
 
-// errAnchorNotRecorded maps a rejected `anchor add` to a non-zero exit. The
-// fixed reason is already printed to stderr; this sentinel just keeps a script
-// from reading a rejected record as success (mirrors errModeNotAccepted).
+// errAnchorNotRecorded maps a deterministically rejected anchor verb to a
+// non-zero exit. The fixed reason is already printed to stderr; this sentinel
+// just keeps a script from reading a rejected write as success (mirrors
+// errModeNotAccepted). All three verbs share it: whether the rejection was
+// about the input (`add`'s label or date) or about the state of the store
+// (which anchor a bare label means), the caller's contract is the same —
+// nothing was appended, and the exit says so.
 var errAnchorNotRecorded = errors.New("lucid: anchor not recorded")
 
+// anchorRejection maps the router's two deterministic rejection types to the
+// shared exit shape: the fixed reason on stderr, a non-zero exit, and nothing
+// written. [router.ErrAnchorRejected] gates a verb's input;
+// [router.AnchorRejectedError] gates the state of the store. Anything else is a
+// real failure and travels on unchanged.
+func anchorRejection(cmd *cobra.Command, err error) error {
+	var rejected *router.AnchorRejectedError
+	if errors.Is(err, router.ErrAnchorRejected) || errors.As(err, &rejected) {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
+		return errAnchorNotRecorded
+	}
+	return err
+}
+
 // newAnchorCmd wires `lucid anchor` (engine-module.md §Commands): the parent
-// group for the days-since milestone verbs. It currently exposes only `add`;
-// it exists as a group so later anchor subcommands attach without reshaping the
-// tree.
+// group for the days-since milestone verbs — add, sunset, and rename.
 func newAnchorCmd() *cobra.Command {
 	parent := &cobra.Command{
 		Use:   "anchor",
 		Short: "Record days-since milestones (anchors)",
 		Long: `anchor groups the days-since milestone verbs. A milestone is a labeled
 civil date the metrics surface counts elapsed days from — a cessation or a
-gate the practice measures against. Anchors are append-only: a correction or a
-reset is a new dated record, and the latest record per label wins.`,
+gate the practice measures against. Each anchor carries a stable id and the
+label is a display name, so a name can be corrected or renamed without forking
+the milestone. Anchors are append-only: a correction, a reset, a retirement,
+and a rename are all new dated records, and the latest record per identity
+wins.`,
 		Args: cobra.NoArgs,
 	}
 	parent.AddCommand(newAnchorAddCmd())
+	parent.AddCommand(newAnchorSunsetCmd())
+	parent.AddCommand(newAnchorRenameCmd())
 	return parent
 }
 
@@ -42,6 +64,11 @@ reset is a new dated record, and the latest record per label wins.`,
 // for scripts (ADR-0007). A rejected input (empty label, unreadable date, or a
 // partial date) prints the fixed reason on stderr and exits non-zero without
 // writing; the record path is model-free.
+//
+// Which milestone the record lands on follows the identity model: a label an
+// active anchor already holds corrects *that* anchor, and a label whose only
+// holder was retired starts a new one, with an ack that names the earlier
+// retirement.
 func newAnchorAddCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add <label> <date> [note...]",
@@ -53,9 +80,13 @@ with two deliberate carve-outs. A future date is accepted — an anchor may be a
 forward commitment, a date you count toward rather than only since, and this is
 the one date surface with no future ceiling. A partial date (2014, 2014-09) is
 rejected: the whole output is a precise day count, and counting from a guessed
-January 1st would report a confident wrong number. Recording the same label
-again appends a new record and the latest one wins, so a mistyped date and a
-genuine reset are the same operation.`,
+January 1st would report a confident wrong number.
+
+Recording a label an active anchor already holds appends under that same
+anchor and the latest record wins, so a mistyped date and a genuine reset are
+the same operation. Recording a label whose only holder was sunset starts a new
+milestone with its own id — a freed name, not a resumed count — and the ack
+names the earlier retirement.`,
 		Args: cobra.MinimumNArgs(2),
 		Example: `  # Record a cessation milestone.
   lucid anchor add sobriety 2026-01-01
@@ -91,16 +122,122 @@ genuine reset are the same operation.`,
 				Now:   now,
 			})
 			if err != nil {
-				if errors.Is(err, router.ErrAnchorRejected) {
-					// Deterministic rejection: surface the fixed reason and exit
-					// non-zero so a caller never mistakes it for a recorded anchor.
-					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
-					return errAnchorNotRecorded
-				}
-				return err
+				return anchorRejection(cmd, err)
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
-				return writeJSON(cmd.OutOrStdout(), res.Anchor)
+				// Projected, never marshaled raw. An add that corrects an
+				// anchor recorded before ids existed carries no stored id, so
+				// marshaling the record would publish an empty one; the
+				// projection synthesizes the legacy: address instead.
+				return writeJSON(cmd.OutOrStdout(), engine.ProjectAnchor(res.Anchor))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+}
+
+// newAnchorSunsetCmd builds the `sunset` child: retire the milestone a label
+// names. The retirement is an append like every other anchor write, so nothing
+// is deleted and the record stays auditable. Human-first prose ack by default;
+// the appended record as JSON under --json for scripts (ADR-0007). A label no
+// active anchor holds is rejected with the fixed reason on stderr and a
+// non-zero exit, and nothing is appended.
+func newAnchorSunsetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sunset <label> [reason...]",
+		Short: "Retire an anchor from the counting surfaces (the record is kept)",
+		Long: `sunset retires a days-since milestone: it stops counting, and nothing is
+deleted. The store is append-only, so a retirement is a new record mirroring
+the anchor plus the optional trailing reason. The milestone stays in the
+history and appears in ` + "`metrics --json`" + ` under anchors_sunset[]; it drops out
+of the metrics prose, out of anchors[], and out of the witness aging-anchor
+check.
+
+A bare label is enough, because at most one active anchor holds one. Recording
+the label again later is supported and starts a new milestone under that freed
+name, with its own id, so the two runs stay distinct in the ledger. A label no
+active anchor holds — never recorded, or already retired — is rejected with the
+recorded labels named, and nothing is appended.`,
+		Args: cobra.MinimumNArgs(1),
+		Example: `  # Retire a milestone that has stopped being useful.
+  lucid anchor sunset gate-30
+
+  # Say why (trailing words are joined into the record's note).
+  lucid anchor sunset gate-30 mistyped label
+
+  # Machine-readable output for a harness.
+  lucid anchor sunset gate-30 --json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.AnchorSunset(router.AnchorSunsetRequest{
+				Label:  args[0],
+				Reason: strings.Join(args[1:], " "),
+				Now:    clockNow(),
+			})
+			if err != nil {
+				return anchorRejection(cmd, err)
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				return writeJSON(cmd.OutOrStdout(), engine.ProjectAnchor(res.Anchor))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+}
+
+// newAnchorRenameCmd builds the `rename` child: give an active milestone a
+// different display name. It takes exactly two arguments and no trailing
+// reason — nothing is being retired from the user's point of view, so there is
+// nothing to explain. Human-first prose ack by default; the surviving renamed
+// record as JSON under --json for scripts (ADR-0007). Every rejection prints
+// the fixed reason on stderr, exits non-zero, and appends nothing.
+func newAnchorRenameCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <label> <new-label>",
+		Short: "Rename an anchor's display label (the day count carries forward)",
+		Long: `rename gives an active milestone a different display name. The label is a
+display name rather than the identity, so the anchor keeps its id, its date,
+its note, and therefore its running day count — a rename costs the count
+nothing.
+
+Renaming an anchor recorded before anchors carried ids adopts it into the
+identity model: the old name is retired as a stub in anchors_sunset[] under the
+id legacy:<old-label>, and the milestone continues under the new name with a
+minted id. That stub is visible on the retired surface by design. Both records
+are written together or neither is.
+
+A new name an active anchor already holds is rejected; a name held only by a
+retired anchor is free, exactly as it is for ` + "`anchor add`" + `. A label no active
+anchor holds — never recorded, or already retired — is rejected with the
+recorded labels named.`,
+		Args: cobra.ExactArgs(2),
+		Example: `  # Correct a mistyped label without forking the milestone.
+  lucid anchor rename gate-30 gate-thirty
+
+  # Machine-readable output for a harness.
+  lucid anchor rename gate-30 gate-thirty --json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.AnchorRename(router.AnchorRenameRequest{
+				Label:    args[0],
+				NewLabel: args[1],
+				Now:      clockNow(),
+			})
+			if err != nil {
+				return anchorRejection(cmd, err)
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				// The surviving record, not the retirement stub: a caller asked
+				// what the milestone is now, not what its old name became.
+				return writeJSON(cmd.OutOrStdout(), engine.ProjectAnchor(res.Anchor))
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
 			return nil

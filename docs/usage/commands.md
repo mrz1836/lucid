@@ -307,8 +307,14 @@ beyond the silent engine scaffold. `--json` emits the metrics projection:
 | `misses_in_window` | Decided-but-not-completed days in the 30-day window. |
 | `error_budget` | `{budget, burn, remaining, exceeded}` against the isolated-miss budget. |
 | `gates[]` | One `{length, adherence}` per gate window (30, 60, 90) — every gate number, so the harness recomputes nothing. |
-| `anchors[]` | One `{label, date, days_since, note}` per recorded anchor, sorted by label. |
+| `anchors[]` | One `{id, label, date, days_since, note}` per **active** anchor, sorted by label. Sunset anchors are not here. |
+| `anchors_sunset[]` | One `{id, label, date, note, sunset_at}` per retired anchor. `date` is the milestone date the anchor counted from; `note` is the sunset reason when one was given; `sunset_at` is when the retirement was recorded. A retired milestone stops counting but never leaves the ledger. |
 | `ref` | The latest recorded logical day the windows anchor to, or `null` when no day is decided yet. |
+
+A **label may appear in both arrays**: a retired run and a later run of the same
+name are distinct anchors with distinct ids, so a reader that assumes label
+uniqueness across the two would be wrong. The `id` is the address; the label is
+a display name (see [`anchor`](#anchor)).
 
 Days-since counts whole logical days from the anchor date, **anchor day = 0**
 (recorded today reads `0`, tomorrow `1`), incrementing at the chain's rollover
@@ -331,22 +337,43 @@ can never disagree.
 
 ```
 lucid anchor add <label> <date> [note...]
+lucid anchor sunset <label> [reason...]
+lucid anchor rename <label> <new-label>
 ```
 
-Record a dated **milestone anchor** — a "days since X" marker (a cessation, a
-gate cleared, any date you want a running day count from). The record is appended
-to a dedicated, append-only anchors store in the engine tree
-(`engine/anchors.json`); it is never hand-edited, deterministic, no model in the
-path. `<date>` takes the shared date grammar
+A **milestone anchor** is a recorded date the Engine counts a running "days
+since" from — a cessation, a gate cleared, any date you want a running day count
+from. Every record is appended to a dedicated, append-only anchors store in the
+engine tree (`engine/anchors.json`); it is never hand-edited, deterministic, no
+model in the path. All three verbs *append* — nothing is ever deleted or
+rewritten.
+
+**Identity.** Each anchor carries a stable `id` (`anchor_YYYY_MM_DD_a`), minted
+when the milestone is first recorded and never derived from what you called it.
+The **label is a display name**, so it can be corrected or renamed without
+forking the milestone. Anchors recorded before ids existed keep working exactly
+as they always have and publish `id: "legacy:<label>"` — a synthesized address
+so a harness can still refer to them. Nothing about those records is rewritten.
+
+#### `anchor add`
+
+Record a milestone. `<date>` takes the shared date grammar
 ([Backdating with --day](#backdating-with---day)), so `lucid anchor add sober
-@yesterday` works alongside a civil `YYYY-MM-DD`. Re-recording the same
-`<label>` appends again and **the latest record wins**: a typo fix and a genuine
+@yesterday` works alongside a civil `YYYY-MM-DD`. `[note...]` is optional
+trailing free text, joined with spaces.
+
+Re-recording a `<label>` an **active** anchor already holds appends again under
+**that anchor's id**, and **the latest record wins**: a typo fix and a genuine
 reset are the same append-only operation, and days-since then counts from the
-newest. `[note...]` is optional trailing free text, joined with spaces.
-Human-first prose ack by default; `--json` emits the recorded anchor `{label,
-date, note, recorded_at}` (`recorded_at` is the append timestamp, local TZ). An
-empty label or an unparseable date is rejected (prints the fixed copy, exits
-`1`); missing arguments are a usage error (exit `2`).
+newest. Re-recording a label whose only holder is a **sunset** anchor starts a
+**new** milestone with a new id, and the ack says so — the retired run and the
+new one stay distinct in the ledger rather than reading as one milestone that
+paused and resumed.
+
+Human-first prose ack by default; `--json` emits the recorded anchor
+`{id, label, date, note, recorded_at}` (`recorded_at` is the append timestamp,
+local TZ). An empty label or an unparseable date is rejected (prints the fixed
+copy, exits `1`); missing arguments are a usage error (exit `2`).
 
 `anchor add` is the CLI's **two documented exceptions** to the strict tier:
 
@@ -358,14 +385,64 @@ empty label or an unparseable date is rejected (prints the fixed copy, exits
   precise "days since" number, and deriving it from a guessed January 1st would
   report a confident wrong count. Use `YYYY-MM-DD` (or `@yesterday`) instead.
 
+#### `anchor sunset`
+
+Retire a milestone from the counting surfaces **without deleting anything** — a
+mistyped label, a duplicate, an abandoned gate. It appends one record mirroring
+the anchor plus `state: "sunset"`, with the optional `[reason...]` carried in
+that record's `note`.
+
+What changes: the milestone stops appearing in `lucid metrics` prose, leaves
+`anchors[]` in `metrics --json`, and stops raising the witness aging-anchor
+check. What does not: the milestone stays in `history[]` in full, and appears in
+`metrics --json` → `anchors_sunset[]` with the date it counted from, so a
+retired milestone is never invisible — it just stops counting.
+
+Adding the label again later is supported and starts a new milestone under a new
+id (see `anchor add` above). This is the supported way to correct the metrics
+surface; hand-editing the store is not.
+
+#### `anchor rename`
+
+Change an active anchor's display name. Its id, date, note and running day count
+all carry forward, so a rename costs you nothing — it is one more append whose
+label differs. Exactly two arguments: there is no trailing reason, because
+nothing is being retired.
+
+Renaming an anchor **recorded before ids existed** *adopts* it, in a single
+write: a retired stub under the old name appears in `anchors_sunset[]` carrying
+`id: "legacy:<old-label>"`, and the milestone continues under the new name with
+a freshly minted id. That stub is documented behavior, not a caveat — it is how
+the ledger stays honest about a name that is no longer in use, and it is what
+every rename of a pre-id anchor will do.
+
+#### Errors
+
+Each of these prints a fixed reason, exits `1`, and appends nothing:
+
+- **A label no anchor holds** — the error names the labels that *are* recorded,
+  so the remedy is in the message rather than in a separate lookup:
+  `no anchor named "gate-3" — recorded anchors: gate-30, sobriety`.
+- **A label that is already sunset** — a retired anchor is history, not an
+  editable record. Add it again to start a new milestone under that name.
+- **`rename` onto a label an active anchor already holds**, or onto the same
+  label — at most one active anchor per label is what lets every verb take a
+  bare label.
+
+Renaming onto a label held only by a **sunset** anchor succeeds — that name is
+free, exactly as it is for `add`.
+
 ```sh
 lucid anchor add sobriety 2026-01-15
 lucid anchor add gate-30 2026-02-01 cleared the first gate
-lucid anchor add sobriety 2026-01-16    # correction — latest record wins
+lucid anchor add sobriety 2026-01-16    # correction — same anchor, latest wins
 lucid anchor add streak-restart @yesterday
+lucid anchor sunset gate-30 mistyped label
+lucid anchor rename gate-30 gate-thirty
 ```
 
-Read the running counts with [`metrics`](#metrics) (`anchors[]` → `days_since`).
+Read the running counts with [`metrics`](#metrics) (`anchors[]` → `days_since`),
+and the retired ones with `metrics --json` (`anchors_sunset[]`).
 
 ### obs
 

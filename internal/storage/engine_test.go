@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -441,15 +442,107 @@ func TestAppendAnchor_ReadFails(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestAppendAnchor_DefaultsVersionWhenZero(t *testing.T) {
+func TestAppendAnchor_StampsVersionOverZero(t *testing.T) {
 	a := newEngineAdapter(t)
 	require.NoError(t, os.WriteFile(a.anchorsPath(), []byte("{\n  \"version\": 0,\n  \"history\": []\n}\n"), filePerm))
 	require.NoError(t, a.AppendAnchor(engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"}))
 
 	log, err := a.ReadAnchors()
 	require.NoError(t, err)
-	assert.Equal(t, engine.AnchorVersion, log.Version, "a zero version is stamped to the current schema on append")
+	assert.Equal(t, engine.AnchorVersion, log.Version, "every append stamps the current schema version, whatever the file said")
 	require.Len(t, log.History, 1)
+}
+
+// TestAppendAnchors_PairIsOneWrite: a two-record append lands as one write,
+// in order. This is the guarantee a rename leans on — it retires one identity
+// and mints another, and a half-applied pair would leave both labels active.
+func TestAppendAnchors_PairIsOneWrite(t *testing.T) {
+	a := newEngineAdapter(t)
+	stub := engine.Anchor{Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-08-04T12:00:00Z", State: engine.AnchorStateSunset}
+	adopted := engine.Anchor{ID: "anchor_2026_08_04_a", Label: "gate-thirty", Date: "2026-02-01", Note: "kept", RecordedAt: "2026-08-04T12:00:00Z"}
+
+	require.NoError(t, a.AppendAnchors(stub, adopted))
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	require.Len(t, log.History, 2, "both records land in the one write")
+	assert.Equal(t, stub, log.History[0], "order is preserved: the retirement precedes the adoption")
+	assert.Equal(t, adopted, log.History[1])
+	assert.Equal(t, engine.AnchorVersion, log.Version)
+}
+
+// TestAppendAnchors_Empty_IsNoOp: no records means no write at all, so a
+// caller with nothing to record cannot churn the file (or its version).
+func TestAppendAnchors_Empty_IsNoOp(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, os.WriteFile(a.anchorsPath(), []byte("{\n  \"version\": 1,\n  \"history\": []\n}\n"), filePerm))
+	before, err := os.ReadFile(a.anchorsPath())
+	require.NoError(t, err)
+
+	require.NoError(t, a.AppendAnchors())
+
+	after, err := os.ReadFile(a.anchorsPath())
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "an empty append leaves the file byte-identical")
+}
+
+// TestAppendAnchor_StampsVersionOnEveryAppend: a file already stamped with an
+// older version is brought current on the next append, and the record it
+// already held is not touched in the process — history is append-only, so the
+// envelope moves and the history does not.
+func TestAppendAnchor_StampsVersionOnEveryAppend(t *testing.T) {
+	a := newEngineAdapter(t)
+	legacy := engine.Anchor{Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-02-01T21:00:00Z"}
+	seed, err := marshalJSON(engine.AnchorLog{Version: 1, History: []engine.Anchor{legacy}})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(a.anchorsPath(), seed, filePerm))
+	beforeHistory := rawAnchorHistory(t, a.anchorsPath())
+	require.Len(t, beforeHistory, 1)
+
+	require.NoError(t, a.AppendAnchor(engine.Anchor{ID: "anchor_2026_08_04_a", Label: "sobriety", Date: "2026-03-01", RecordedAt: "2026-08-04T12:00:00Z"}))
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	assert.Equal(t, 2, log.Version, "the version in a file is always true of that file")
+	require.Len(t, log.History, 2)
+
+	afterHistory := rawAnchorHistory(t, a.anchorsPath())
+	require.Len(t, afterHistory, 2)
+	assert.JSONEq(t, string(beforeHistory[0]), string(afterHistory[0]), "the pre-existing record is unchanged — no id is stamped onto it")
+	assert.Equal(t, string(beforeHistory[0]), string(afterHistory[0]), "and unchanged byte-for-byte")
+}
+
+// TestReadAnchors_LegacyRecordSurvives: a version 1 file written before ids
+// and states existed reads back cleanly, with both new fields empty. Reads are
+// never version-gated, so the two schemas coexist permanently.
+func TestReadAnchors_LegacyRecordSurvives(t *testing.T) {
+	a := newEngineAdapter(t)
+	v1 := "{\n  \"version\": 1,\n  \"history\": [\n    {\n      \"label\": \"gate-30\",\n      \"date\": \"2026-02-01\",\n      \"recorded_at\": \"2026-02-01T21:00:00Z\"\n    }\n  ]\n}\n"
+	require.NoError(t, os.WriteFile(a.anchorsPath(), []byte(v1), filePerm))
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	assert.Equal(t, 1, log.Version, "a read never rewrites or gates on the version")
+	require.Len(t, log.History, 1)
+	assert.Empty(t, log.History[0].ID, "a record written before ids existed carries none")
+	assert.Empty(t, log.History[0].State, "state absent means active")
+	assert.Equal(t, "gate-30", log.History[0].Label)
+	assert.Equal(t, "2026-02-01", log.History[0].Date)
+}
+
+// rawAnchorHistory returns anchors.json's history entries as their raw JSON
+// bytes, so a test can assert a record was left untouched rather than merely
+// re-marshaled to an equal value.
+func rawAnchorHistory(t *testing.T, path string) []json.RawMessage {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var envelope struct {
+		Version int               `json:"version"`
+		History []json.RawMessage `json:"history"`
+	}
+	require.NoError(t, json.Unmarshal(b, &envelope))
+	return envelope.History
 }
 
 // TestFillEngineDayMode_FillsUndeclaredDay: the ordinary gap-fill shape — a
