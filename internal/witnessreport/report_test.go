@@ -179,6 +179,47 @@ func TestBuildReport_AgingAnchorWatchOut(t *testing.T) {
 	assert.NotContains(t, strings.Join(r.WatchOuts, "\n"), "fresh", "a recent anchor never trips the mark")
 }
 
+// TestBuildReport_SunsetAnchorRaisesNoWatchOut proves the report inherits the
+// retirement filter rather than implementing one: a long-stale anchor raises
+// the aging watch-out while it counts, and stops the moment it is sunset —
+// with no anchor-state logic anywhere in this package. The projection is built
+// by the real engine fold, because a retirement is only expressible upstream:
+// by the time it reaches the report the retired anchor is simply absent.
+func TestBuildReport_SunsetAnchorRaisesNoWatchOut(t *testing.T) {
+	const wantWatchOut = "200 days since gate-30 — worth a check-in."
+	stale := engine.Anchor{
+		ID: "anchor_2025_12_25_a", Label: "gate-30", Date: "2025-12-25",
+		RecordedAt: "2025-12-25T09:00:00Z",
+	}
+	build := func(t *testing.T, anchors []engine.Anchor) Report {
+		t.Helper()
+		clocks, err := engine.DefaultChain().ClocksFor(engine.DefaultProfile)
+		require.NoError(t, err)
+		m := engine.BuildMetrics(engine.MetricsInput{
+			Anchors: anchors,
+			Chain:   engine.DefaultChain(),
+			Now:     reportNow(),
+			Clocks:  clocks,
+			Loc:     reportNow().Location(),
+		})
+		r, err := BuildReport(reportNow(), fakeNumbers{result: router.MetricsResult{Metrics: m}}, fakeRecords{})
+		require.NoError(t, err)
+		return r
+	}
+
+	active := build(t, []engine.Anchor{stale})
+	require.Len(t, active.Anchors, 1)
+	assert.Equal(t, 200, active.Anchors[0].DaysSince, "the anchor is well past the aging mark")
+	assert.Contains(t, active.WatchOuts, wantWatchOut, "while it counts, it is worth a check-in")
+
+	retired := stale
+	retired.RecordedAt = "2026-07-01T09:00:00Z"
+	retired.State = engine.AnchorStateSunset
+	sunset := build(t, []engine.Anchor{retired})
+	assert.Empty(t, sunset.Anchors, "a retired anchor never reaches the report")
+	assert.NotContains(t, sunset.WatchOuts, wantWatchOut, "and so raises no aging watch-out")
+}
+
 // TestBuildReport_ReaderErrorsPropagate guards both read seams: a failing
 // numbers or records reader surfaces a wrapped error rather than a half-built
 // report.

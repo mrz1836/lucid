@@ -123,6 +123,39 @@ func NextAnchorID(log AnchorLog, day time.Time) string {
 	}
 }
 
+// AnchorRecord is the projected single-anchor JSON surface. It exists so a
+// caller never marshals the stored record directly: an anchor written before
+// ids existed carries none, and the surface must still publish a usable
+// address — its synthetic legacy identity. Marshaling the stored record would
+// silently emit an empty id for exactly the anchors every real ledger is full
+// of, so this indirection is load-bearing, not ceremony.
+//
+// Field order mirrors Anchor so the stored and projected forms read the same.
+// State is carried so a retirement is visible to a caller that asked for JSON;
+// it is empty and omitted for an active record.
+type AnchorRecord struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Date       string `json:"date"`
+	Note       string `json:"note,omitempty"`
+	RecordedAt string `json:"recorded_at"`
+	State      string `json:"state,omitempty"`
+}
+
+// ProjectAnchor renders a stored anchor as its published JSON form, resolving
+// the id a pre-id record does not carry (AnchorIdentity). The synthetic value
+// is produced here, at the projection boundary, and is never written back.
+func ProjectAnchor(a Anchor) AnchorRecord {
+	return AnchorRecord{
+		ID:         AnchorIdentity(a),
+		Label:      a.Label,
+		Date:       a.Date,
+		Note:       a.Note,
+		RecordedAt: a.RecordedAt,
+		State:      a.State,
+	}
+}
+
 // ValidateAnchor reports whether label/date are a legal anchor to record: a
 // non-empty label and a date that parses as a civil YYYY-MM-DD. Any past or
 // future civil date is accepted — anchors are backdatable — so only the

@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"encoding/json"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -362,4 +365,44 @@ func TestSunsetDate(t *testing.T) {
 func TestAnchor_IsSunset(t *testing.T) {
 	assert.False(t, Anchor{Label: "gate-30"}.IsSunset(), "state absent means active")
 	assert.True(t, Anchor{Label: "gate-30", State: AnchorStateSunset}.IsSunset())
+}
+
+// TestProjectAnchor_ResolvesID is the projection-boundary guard: a minted id is
+// echoed verbatim, while a record written before ids existed publishes its
+// synthetic identity rather than an empty address. Every other field is carried
+// through unchanged.
+func TestProjectAnchor_ResolvesID(t *testing.T) {
+	minted := Anchor{
+		ID: "anchor_2026_08_04_a", Label: "gate-30", Date: "2026-02-01",
+		Note: "the thirty-day gate", RecordedAt: "2026-08-04T17:03:49Z",
+	}
+	assert.Equal(t, AnchorRecord{
+		ID: "anchor_2026_08_04_a", Label: "gate-30", Date: "2026-02-01",
+		Note: "the thirty-day gate", RecordedAt: "2026-08-04T17:03:49Z",
+	}, ProjectAnchor(minted), "a minted id is echoed verbatim")
+
+	legacy := Anchor{Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-02-01T09:00:00Z"}
+	assert.Equal(t, "legacy:gate-30", ProjectAnchor(legacy).ID, "a pre-id record still publishes an address")
+
+	retired := Anchor{
+		ID: "anchor_2026_08_04_a", Label: "gate-30", Date: "2026-02-01",
+		RecordedAt: "2026-08-04T17:03:49Z", State: AnchorStateSunset,
+	}
+	assert.Equal(t, AnchorStateSunset, ProjectAnchor(retired).State, "a retirement is visible to a JSON caller")
+}
+
+// TestProjectAnchor_JSONShape pins the published key set: id is unconditional
+// so a caller can always address what it read, note and state are omitted when
+// empty, and nothing else leaks from the stored record.
+func TestProjectAnchor_JSONShape(t *testing.T) {
+	b, err := json.Marshal(ProjectAnchor(Anchor{
+		Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-02-01T09:00:00Z",
+	}))
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(b, &got))
+	keys := slices.Sorted(maps.Keys(got))
+	assert.Equal(t, []string{"date", "id", "label", "recorded_at"}, keys)
+	assert.Equal(t, "legacy:gate-30", got["id"])
 }
