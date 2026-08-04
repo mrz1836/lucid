@@ -98,3 +98,95 @@ func TestMetrics_CLI_RejectsArgs(t *testing.T) {
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "metrics", "extra")
 	require.Error(t, err)
 }
+
+// TestMetrics_CLI_JSONShape_Anchors is the shape guard on one anchors[] entry:
+// it asserts the EXACT key set, so a renamed, removed, or unexpected key fails
+// here. `id` is unconditional — a harness must be able to address the milestone
+// it is reading.
+func TestMetrics_CLI_JSONShape_Anchors(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "add", "sobriety", "2026-07-01", "a", "note")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "metrics", "--json")
+	require.NoError(t, err)
+
+	raw := jsonObject(t, out)
+	entries, ok := raw["anchors"].([]any)
+	require.True(t, ok, "anchors[] must be an array")
+	require.Len(t, entries, 1)
+
+	entry, ok := entries[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []string{"date", "days_since", "id", "label", "note"}, sortedKeys(entry))
+	assert.Equal(t, "anchor_2026_07_05_a", entry["id"])
+}
+
+// TestMetrics_CLI_JSONShape_AnchorsSunset is the shape guard on one
+// anchors_sunset[] entry. A retired milestone stops counting — hence no
+// days_since — but never leaves the ledger, so it stays addressable.
+func TestMetrics_CLI_JSONShape_AnchorsSunset(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "add", "gate-30", "2026-02-01")
+	require.NoError(t, err)
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "anchor", "sunset", "gate-30", "mistyped", "label")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "metrics", "--json")
+	require.NoError(t, err)
+
+	raw := jsonObject(t, out)
+	assert.Empty(t, raw["anchors"], "a retired anchor leaves the counting surface")
+
+	entries, ok := raw["anchors_sunset"].([]any)
+	require.True(t, ok, "anchors_sunset[] must be an array")
+	require.Len(t, entries, 1)
+
+	entry, ok := entries[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []string{"date", "id", "label", "note", "sunset_at"}, sortedKeys(entry))
+	assert.Equal(t, "gate-30", entry["label"])
+	assert.Equal(t, "2026-02-01", entry["date"], "the entry keeps the milestone's own date")
+	assert.Equal(t, "mistyped label", entry["note"], "the sunset reason rides the note field")
+}
+
+// TestMetrics_CLI_JSONHasAnchorsSunsetWhenEmpty: the key is unconditional, so a
+// harness never has to distinguish "no retired anchors" from "old binary". An
+// untyped map is the assertion, because a typed struct would hide an omitted key.
+func TestMetrics_CLI_JSONHasAnchorsSunsetWhenEmpty(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "metrics", "--json")
+	require.NoError(t, err)
+
+	raw := jsonObject(t, out)
+	require.Contains(t, raw, "anchors_sunset")
+	assert.NotNil(t, raw["anchors_sunset"], "an empty projection renders [] rather than null")
+	assert.Empty(t, raw["anchors_sunset"])
+}
+
+// TestMetrics_CLI_HumanSurfaceOmitsSunset: one filter at the fold serves both
+// surfaces, so a retired milestone loses its days-since line too.
+func TestMetrics_CLI_HumanSurfaceOmitsSunset(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "add", "sobriety", "2026-07-01")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "metrics")
+	require.NoError(t, err)
+	require.Contains(t, out, "Days since sobriety: 4.")
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "anchor", "sunset", "sobriety")
+	require.NoError(t, err)
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "metrics")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "Days since", "a retired milestone stops counting on the prose surface")
+}
