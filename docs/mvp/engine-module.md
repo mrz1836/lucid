@@ -144,15 +144,15 @@ superseded *only* for these three sends.
 | Command | Plan | Writes |
 |---------|------|--------|
 | `/closeout` | Deterministic guided close-out (see sequence below). No agents. | `engine/days/<day-id>.json`; one raw entry via `storage.write_raw` (`command: /closeout`); `sessions/<sid>.json`; rebuilt `engine/status.json` |
-| `/mode <green\|yellow\|red>` | Declare today's mode. Rejected after today's bell time (engine §2: fixed at the Bell; no retroactive amendment). | `engine/days/<day-id>.json` (mode field, append-style: first declaration wins after bell) |
+| `/mode <green\|yellow\|red> [--day <date>]` | Declare today's mode. Rejected after today's bell time (engine §2: fixed at the Bell; no retroactive amendment). `--day` is **gap-fill only** — see §"`/mode --day` gap-fill" below. | `engine/days/<day-id>.json` (mode field, append-style: first declaration wins after bell) |
 | `/status` | Read-only: current streak, rolling adherence vs declared mode — always co-presented with the floor-day ratio and raw days-accounted (the **honest-number pairing**, engine §3) — error-budget burn, days to next gate; plus `stake_owed` when a breach has outlived the stake execution window (engine §4; **plumbed but reserved in the MVP** — see the tripwire's L3 note in step 5), and "witness lapsed — L2 disarmed" while the witness contract is lapsed (see §`witness.json`). This is the MVP's **L0 ambient surface**. | None |
 | `/closeout skip` | Records an explicit miss for the logical day (honest zero, distinct from silence — silence is what the dead-man tripwire detects). | `engine/days/<day-id>.json` with `missed: true` |
-| `/closeout backfill [yesterday\|<YYYY-MM-DD>] [<compact form>]` | Creates or corrects a record for a recent past day — the chain **ran** but went unrecorded (P10's text-to-self path, now with a command). Deterministic; accepts the same compact form as `/closeout`. See sequence below. | `engine/days/<day-id>.json` (created with `"backfilled": true`, or a `corrections[]` append); one raw entry via `storage.write_raw` (`command: /closeout backfill`); rebuilt `engine/status.json` |
-| `/storm <clause-label\|unwritten>` | Declare a storm citing a Charter clause label (registered in `storm.json`) or `unwritten` (engine §4). Stands only on witness confirmation within the confirmation window (72 hours); ambush windows enter automatically from their `storm.json` dates, no per-event confirmation. Ack while pending: `storm declared (<label>) — pending witness confirmation (72h).` Ack once standing: `storm standing through <date> (<label>) — undeclared days default to red; the stake is stayed; contact continues.` Renewal is the same command re-issued before expiry, once. | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
-| `/storm end` | End a standing storm early; expiry at the duration bound is otherwise automatic. Breach math resets at exit (engine §4). | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
+| `/closeout backfill [yesterday\|<YYYY-MM-DD>] [<compact form>]` (also `--day <date>`, an alias onto the same path) | Creates or corrects a record for a recent past day — the chain **ran** but went unrecorded (P10's text-to-self path, now with a command). Deterministic; accepts the same compact form as `/closeout`. See sequence below. | `engine/days/<day-id>.json` (created with `"backfilled": true`, or a `corrections[]` append); one raw entry via `storage.write_raw` (`command: /closeout backfill`); rebuilt `engine/status.json` |
+| `/storm <clause-label\|unwritten> [--day <date>]` | Declare a storm citing a Charter clause label (registered in `storm.json`) or `unwritten` (engine §4). Stands only on witness confirmation within the confirmation window (72 hours); ambush windows enter automatically from their `storm.json` dates, no per-event confirmation. Ack while pending: `storm declared (<label>) — pending witness confirmation (72h).` Ack once standing: `storm standing through <date> (<label>) — undeclared days default to red; the stake is stayed; contact continues.` Renewal is the same command re-issued before expiry, once. | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
+| `/storm end [--day <date>]` | End a standing storm early; expiry at the duration bound is otherwise automatic. Breach math resets at exit (engine §4). | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
 | `/profile <name>` | Switch to a named clock profile defined in `chain.json` (definitions change only at a Retro — engine §2). Sticky, recorded, **effective from the next logical day, never the current one**; the outgoing day completes under the clocks that started it. | `engine/profile.json` (append-only `history[]`) |
 | `metrics` (read; CLI `lucid metrics [--json]`) | Read-only **practice-quality** rollup: current/longest streak, 30-day adherence (co-presented with its honest co-numbers) **plus the 30/60/90 gate rollups in `--json`**, misses in window, error-budget burn, and a days-since count for each recorded anchor. Assembled from existing Engine folds (`ComputeStreaks`, the adherence/error-budget windows) — no new chain math; the only new arithmetic is the days-since day count. | None (silent scaffold only) |
-| `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` is a backdatable civil `YYYY-MM-DD`; **latest record per label wins**. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` reads the shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)) with two documented carve-outs: a **future date is accepted** (an anchor may be a forward commitment — the CLI's only surface with no future ceiling), and a **partial date is rejected** (a "days since" count needs a real day, never a guessed January 1st). **Latest record per label wins**. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
 
 `/chain` (editing chain config in-channel) is deliberately **not** a
 command: parameters change at most once per weekly Retro (engine §5),
@@ -243,6 +243,69 @@ Retro — a rising count is a capture-friction canary, never a score.
 Correcting an explicit `/closeout skip` to completed is allowed within
 the window; the correction trail stays visible, and that transparency
 (P8) is the guard.
+
+**The `--day` alias.** `closeout --day <date>` routes onto this same
+backfill path — it is a spelling, not a second mechanism. The record is
+stamped `"backfilled": true`, `backfill_window_days` applies unchanged,
+and both a future target and **today** are rejected (a backfill target
+is always a day that has ended). A *relative* token resolves through the
+same profile-aware `yesterday` intent the positional keyword uses, never
+a calendar date computed by the CLI — a naive calendar date collides
+with the in-progress day before the rollover and reads as out of window.
+Passing `--day` alongside anything that names its own day — the
+positional `backfill <target>` form, or the `skip` / `today` sub-forms —
+is a usage error: two targets, one intent.
+
+### `/mode --day` gap-fill
+
+`/mode --day <date>` fills a mode on a **past** logical day whose record
+carries none. It is deliberately narrower than `/closeout backfill`,
+because mode is the one field the bell fixes (engine §2):
+
+* **Gap-fill only, never overwrite.** It writes `mode` and
+  `mode_declared_at` **only** when the target day never declared a mode —
+  read from an empty `mode_declared_at`, not from an empty `mode`. A
+  close-out builds its record with the chain's default mode already in
+  place, so a day that was closed out but never declared carries
+  `mode: green` with no declaration timestamp; that default is a
+  placeholder the record needed in order to exist, not testimony about
+  the day. A day whose mode was declared is rejected — the bell still
+  binds every day you showed up for, and there is still no retroactive
+  amendment of a declared mode. `mode` therefore stays **off** the
+  foldable-field whitelist (§"Day record"): the correction path cannot
+  reach it either, and this fill is its own guarded write rather than a
+  correction.
+* **Bounded by `backfill_window_days`.** The same `chain.json` knob that
+  governs `/closeout backfill` (default 7), so the two retroactive paths
+  cannot drift apart. Because the window rule requires a span of at
+  least one day, **today and any future day are rejected for free**.
+* **Two target shapes.** If the target day has no record at all, one is
+  created carrying the mode, with `profile` derived from the history
+  governing the *target* day (never the state at write time — the same
+  rule a backfilled close-out follows). If a record exists but declared
+  no mode — the ordinary shape of a day closed out and never declared —
+  only the two mode fields are filled.
+* **`status.json` is rebuilt** afterwards, exactly as the same-day path
+  does.
+* The same-day path is unchanged: still bell-gated, still
+  first-declaration-wins.
+
+### Backdated storm events
+
+`/storm … --day <date>` dates the storm event itself, on declare, renew,
+and end. The case it serves is the honest one: the days a storm is worst
+are precisely the days declaring it at the time was not possible. The
+resolved instant becomes the event's `at`, `through` derives from it as
+usual, and standing is evaluated **at that instant** — so a renew or end
+dated to a moment when no storm stood is rejected by the existing checks,
+unchanged, and renew-once still holds.
+
+One invariant is added: storm history is folded in order and the standing
+computation takes the last matching event, so an event dated **before the
+last recorded storm event** is rejected as incoherent input and nothing
+is written. Backdating necessarily re-derives standing for the days it
+now covers; that retroactive recompute is inherent to backdating and is
+accepted.
 
 ## Storage additions — `~/.lucid/engine/`
 
@@ -489,7 +552,10 @@ it is corrected by appended entries, folded at read time:
   stamps derive deterministically from their history files, so
   correcting them by hand would let a bad week's narrator re-file a
   miss as weather; a correction attempting an immutable field is
-  rejected (see §"Error states").
+  rejected (see §"Error states"). `/mode --day` does **not** change
+  this: it is a guarded fill that writes `mode`/`mode_declared_at` only
+  when both are empty, so a *declared* mode is still unreachable from
+  every path, and `mode` stays off the foldable list.
 * **Fold rule:** apply corrections in array order; last write per
   field wins; the original record body stays byte-identical.
 * All derived state — streak, adherence, error-budget burn,
@@ -632,6 +698,10 @@ from falling silent when the companion owns it and its delivery fails.
 |---------|----------|--------------|-------------|----------|
 | `/closeout` twice same logical day | Idempotent no-op | "Already closed out — streak N." | None | — |
 | `/mode` after bell time | Reject | "Mode is fixed at the bell (19:00). Tonight runs as declared; the budget absorbs hard days." | None | Retro annotation |
+| `/mode --day` targeting a day that already has a declared mode | Reject — gap-fill never overwrites | "A mode was already declared for that day — the bell fixed it, and there's no retroactive amendment (engine §2)." | None | Retro annotation |
+| `/mode --day` beyond `backfill_window_days`, or targeting today / a future day | Reject | "That's outside the mode gap-fill window (7 days)." / "A mode gap-fill names a day that has already ended." | None | Retro annotation |
+| `--day` (any Engine verb) given a token the date grammar cannot read, or a day in the future | Reject before any write — the strict tier | The accepted forms, named; "Nothing was saved." | None | Re-type the date |
+| `/storm … --day` dated before the last recorded storm event | Reject — storm history folds in order, so an out-of-order append would corrupt the fold | "That's before the last recorded storm event — storm history is append-only and in order." | None | Re-date the event |
 | Close-out interrupted mid-flow | Write partial | "Saved what we got — floor still counts if the survival link ran." | Day record `partial: true` | `/closeout` again appends corrections |
 | Tripwire can't reach witness channel | Fall back | L1-style message to user: "L2 fired but couldn't reach <witness> — you owe the message." | `escalation_state: l2_fired` | Manual |
 | Clock/rollover ambiguity (e.g., travel TZ) | Trust host clock | — | Local-TZ timestamps per [`data-model.md`](data-model.md) | Away Mode pre-specs the trip |

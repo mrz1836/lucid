@@ -16,6 +16,7 @@ import (
 //	lucid obs pain 6 knee aching after the run
 //	lucid obs bm 4
 //	lucid obs ate eggs, toast, coffee @yesterday 19:30
+//	lucid obs ate eggs, toast --day @yesterday
 //	lucid obs where Lisbon
 //	lucid obs symptom headache 4
 //
@@ -23,6 +24,13 @@ import (
 // are aliases into this one intent; on the chat surface they are separate
 // slashes, here they are the first token. Capture never blocks: an unparseable
 // head is kept verbatim on the partial path, and the ack is inventory only.
+//
+// A date reaches this verb two ways, and they are two different tiers. The
+// in-text @-token is permissive — it is parsed out of a sentence, so an
+// unrecognized one stays in the note and the capture still lands. `--day` is
+// the strict tier: a value the grammar cannot read, or a day that has not
+// happened yet, is a clean error and nothing is written. When both are given
+// the flag wins.
 func newObsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "obs [kind] [value...]",
@@ -33,22 +41,26 @@ func newObsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			day, _ := cmd.Flags().GetString(flagDay)
+
 			res, err := r.Capture(router.CaptureRequest{
 				Tokens:  args,
 				Now:     time.Now(),
+				DayArg:  day,
 				Harness: obsHarness(cmd),
 				Agent:   flagOrEnv(cmd, flagAgent, envAgent, ""),
 				Model:   flagOrEnv(cmd, flagModel, envModel, ""),
 				Channel: flagOrEnv(cmd, flagChannel, envChannel, ""),
 			})
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
 			return nil
 		},
 	}
 	registerProvenanceFlags(cmd)
+	registerDayFlag(cmd)
 	return cmd
 }
 

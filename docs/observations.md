@@ -232,7 +232,24 @@ Grammar, binding:
   `occurred_at_end`). Backdated times are precision `approximate`
   unless a full timestamp is given. This is how the bitemporal
   envelope is reachable from the primary capture surface — yesterday's
-  dinner is `/ate … @yesterday`.
+  dinner is `/ate … @yesterday`. Three rules bind it:
+  * **Same grammar as the `--day` flag.** The inline token and every
+    `--day` flag on the CLI read one parser — the full table is in
+    [`usage/commands.md`](usage/commands.md#backdating-with---day).
+  * **`@yesterday` respects the 04:00 rollover**, exactly as `--day`
+    does: it is the day before the current *logical* day, so before
+    the rollover it steps back past the day a bare capture files
+    under. An explicit date is always literal.
+  * **The inline token is the permissive tier.** Capture is total
+    (P10): a token the grammar cannot read stays in the note as
+    ordinary text and the event is still written — an inline date
+    never blocks a capture. A deliberate `--day` flag is the strict
+    tier and rejects the same input outright, saving nothing.
+  * **Colon-less times stay clock times in prose.** Dictation
+    tolerance (below) means a bare four-digit `@2014` is 20:14 today,
+    *not* the year 2014. On a `--day` flag the same token is the year
+    — the flag is typed on purpose, so a partial date is the likelier
+    reading there.
 * **Defaults for bare forms.** `/pain 6` → valid event, no site
   (curiosity may ask one clarifier). `/bm` → valid elimination event,
   no digit. A shorthand missing its *required* scale digit (`/mood

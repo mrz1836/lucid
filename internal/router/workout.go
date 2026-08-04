@@ -50,6 +50,10 @@ type AnchorCount struct {
 // AnchorItems carries any per-item counts. Harness/Agent/Model/Channel are the
 // optional relay provenance stamped into payload.provenance, exactly as an
 // observation capture stamps it.
+//
+// DayArg is the optional `--day` value, resolved on the strict tier through
+// the same entry point every capture verb uses, so a session done yesterday
+// records as yesterday instead of as a note on today. Empty means now.
 type WorkoutLogRequest struct {
 	Type        string
 	Movements   []string
@@ -61,6 +65,7 @@ type WorkoutLogRequest struct {
 	AnchorItems []AnchorCount
 	Notes       string
 	Now         time.Time
+	DayArg      string
 	Harness     string
 	Agent       string
 	Model       string
@@ -71,10 +76,13 @@ type WorkoutLogRequest struct {
 // (`lucid workout log "did pull, shoulder felt fine, ~50 min"`). The router
 // runs the Workout Extraction agent over Text, then writes the same events as
 // the structured path — falling back to the raw drop as the note when the model
-// degrades, so a spoken capture is never lost.
+// degrades, so a spoken capture is never lost. DayArg backdates the session
+// exactly as it does on the structured path: `--day` is not content, so it
+// composes with a spoken drop rather than competing with it.
 type WorkoutLogTextRequest struct {
 	Text    string
 	Now     time.Time
+	DayArg  string
 	Harness string
 	Agent   string
 	Model   string
@@ -97,10 +105,17 @@ type WorkoutLogResult struct {
 
 // WorkoutLog captures a completed session from structured fields. It scaffolds
 // the observations tree, rejects a disabled workout kind with the enable hint,
-// writes the durable workout event first (so a later body-state failure never
-// leaves a session unrecorded), then writes each body-state reading when that
-// kind is enabled. It reuses the same deterministic envelope build and append
-// the micro-log capture uses — no LLM in this path.
+// resolves the optional backdate before anything is written, writes the durable
+// workout event first (so a later body-state failure never leaves a session
+// unrecorded), then writes each body-state reading when that kind is enabled.
+// It reuses the same deterministic envelope build and append the micro-log
+// capture uses — no LLM in this path.
+//
+// The session and its readings share one resolved occurrence, computed once
+// here and handed to both builders. That is not tidiness: the recovery
+// guardrail reads occurred_at while the progress trend reads logical_date, so a
+// backdate applied to only one of the two events would make them disagree about
+// when the session happened — silently, and only for backdated sessions.
 func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 	now := whenOr(req.Now)
 	if err := r.prepareObservations(); err != nil {
@@ -118,6 +133,11 @@ func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 		}, nil
 	}
 
+	when, err := resolveCaptureWhen(req.DayArg, now)
+	if err != nil {
+		return WorkoutLogResult{}, err
+	}
+
 	provenance, err := buildProvenance(CaptureRequest{
 		Harness: req.Harness, Agent: req.Agent, Model: req.Model, Channel: req.Channel,
 	})
@@ -127,7 +147,7 @@ func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 
 	// The durable record: the workout event is written first, so a body-state
 	// append failure below never leaves the session unrecorded.
-	ev, err := r.store.AppendObservation(r.buildEvent(workoutParseResult(req, now), now, provenance, observations.SourceMicrolog))
+	ev, err := r.store.AppendObservation(r.buildEvent(workoutParseResult(req, when), now, provenance, observations.SourceMicrolog))
 	if err != nil {
 		return WorkoutLogResult{}, fmt.Errorf("could not log the workout; nothing was saved: %w", err)
 	}
@@ -135,7 +155,7 @@ func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 
 	if cfg.KindEnabled(observations.KindBodyState) {
 		for _, bs := range req.BodyStates {
-			parsed, ok := bodyStateParseResult(bs, now)
+			parsed, ok := bodyStateParseResult(bs, when)
 			if !ok {
 				continue
 			}
@@ -157,6 +177,11 @@ func (r *Router) WorkoutLog(req WorkoutLogRequest) (WorkoutLogResult, error) {
 // runs the Workout Extraction agent, then delegates to [Router.WorkoutLog] with
 // the extracted fields — carrying the degrade flag through and preserving the
 // raw drop as the note when the model produced nothing usable.
+//
+// An unreadable `--day` is refused beside the kind gate for the same reason:
+// the request is already doomed, so it should not cost a model call first.
+// [Router.WorkoutLog] resolves it again authoritatively — one resolver, one
+// answer — and that second pass is what the events are actually stamped from.
 func (r *Router) WorkoutLogFromText(ctx context.Context, req WorkoutLogTextRequest, p provider.Provider) (WorkoutLogResult, error) {
 	if err := r.prepareObservations(); err != nil {
 		return WorkoutLogResult{}, err
@@ -173,6 +198,10 @@ func (r *Router) WorkoutLogFromText(ctx context.Context, req WorkoutLogTextReque
 		}, nil
 	}
 
+	if _, dayErr := resolveCaptureWhen(req.DayArg, whenOr(req.Now)); dayErr != nil {
+		return WorkoutLogResult{}, dayErr
+	}
+
 	ext := workout.Extract(ctx, workout.Input{Text: req.Text, AgentVersion: workout.DefaultAgentVersion}, p)
 	res, err := r.WorkoutLog(workoutLogFromExtraction(ext, req))
 	if err != nil {
@@ -185,8 +214,10 @@ func (r *Router) WorkoutLogFromText(ctx context.Context, req WorkoutLogTextReque
 // workoutParseResult builds the deterministic workout event from a structured
 // request. Only stated fields land in the payload; an entirely empty request
 // takes the partial path (kind kept, an empty note) so a bare "I trained"
-// capture is still recorded rather than dropped.
-func workoutParseResult(req WorkoutLogRequest, now time.Time) observations.ParseResult {
+// capture is still recorded rather than dropped. when carries the already
+// resolved occurrence, so this stamps the session's real day rather than the
+// moment it was typed.
+func workoutParseResult(req WorkoutLogRequest, when observations.DayResolution) observations.ParseResult {
 	payload := map[string]any{}
 	if t := strings.TrimSpace(req.Type); t != "" {
 		payload["type"] = t
@@ -218,12 +249,13 @@ func workoutParseResult(req WorkoutLogRequest, now time.Time) observations.Parse
 		payload["parse"] = observations.ParseMarkerPartial
 	}
 	return observations.ParseResult{
-		Kind:       observations.KindWorkout,
-		OccurredAt: now,
-		Precision:  observations.PrecisionExact,
-		Payload:    payload,
-		Refs:       map[string]any{},
-		Partial:    partial,
+		Kind:        observations.KindWorkout,
+		OccurredAt:  when.OccurredAt,
+		Precision:   when.Precision,
+		OccurredEnd: when.End,
+		Payload:     payload,
+		Refs:        map[string]any{},
+		Partial:     partial,
 	}
 }
 
@@ -257,8 +289,10 @@ func anchorPayload(req WorkoutLogRequest) (bool, []map[string]any) {
 
 // bodyStateParseResult builds a body_state event for one reading. It reports
 // ok=false for a blank part or a reading that states neither soreness nor pain
-// — an empty reading is noise, not a capture.
-func bodyStateParseResult(bs BodyStateInput, now time.Time) (observations.ParseResult, bool) {
+// — an empty reading is noise, not a capture. It takes the session's resolved
+// occurrence, so a reading is always dated to the session it was reported
+// alongside rather than to the moment of typing.
+func bodyStateParseResult(bs BodyStateInput, when observations.DayResolution) (observations.ParseResult, bool) {
 	part := strings.TrimSpace(bs.Part)
 	if part == "" || (bs.Soreness == nil && bs.Pain == nil) {
 		return observations.ParseResult{}, false
@@ -271,11 +305,12 @@ func bodyStateParseResult(bs BodyStateInput, now time.Time) (observations.ParseR
 		payload["pain"] = *bs.Pain
 	}
 	return observations.ParseResult{
-		Kind:       observations.KindBodyState,
-		OccurredAt: now,
-		Precision:  observations.PrecisionExact,
-		Payload:    payload,
-		Refs:       map[string]any{},
+		Kind:        observations.KindBodyState,
+		OccurredAt:  when.OccurredAt,
+		Precision:   when.Precision,
+		OccurredEnd: when.End,
+		Payload:     payload,
+		Refs:        map[string]any{},
 	}, true
 }
 
@@ -295,6 +330,7 @@ func workoutLogFromExtraction(ext workout.Result, req WorkoutLogTextRequest) Wor
 		AnchorItems: anchorCounts(ext.AnchorItems),
 		Notes:       ext.Notes,
 		Now:         req.Now,
+		DayArg:      req.DayArg,
 		Harness:     req.Harness,
 		Agent:       req.Agent,
 		Model:       req.Model,

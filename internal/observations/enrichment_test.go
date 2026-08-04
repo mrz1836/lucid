@@ -97,8 +97,10 @@ func TestCalendarFramePayload(t *testing.T) {
 }
 
 func TestBuildContextDayEvent(t *testing.T) {
-	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
-	ev, err := BuildContextDayEvent(EnricherWeather, "2026-07-02", map[string]any{"place_ref": "place_a-river"}, now, time.UTC)
+	// Named rather than `now` so it does not shadow the package-level capture
+	// fixture — this enricher clock is a different day on purpose.
+	recordedAt := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	ev, err := BuildContextDayEvent(EnricherWeather, "2026-07-02", map[string]any{"place_ref": "place_a-river"}, recordedAt, time.UTC)
 	require.NoError(t, err)
 	assert.Equal(t, KindContextDay, ev.Kind)
 	assert.Equal(t, EnricherSource(EnricherWeather), ev.Source)
@@ -107,7 +109,7 @@ func TestBuildContextDayEvent(t *testing.T) {
 	assert.Equal(t, "2026-07-02T12:00:00Z", ev.OccurredAt) // local noon of the logical day
 	require.NoError(t, ev.Validate())
 
-	_, err = BuildContextDayEvent(EnricherWeather, "bad", nil, now, time.UTC)
+	_, err = BuildContextDayEvent(EnricherWeather, "bad", nil, recordedAt, time.UTC)
 	assert.Error(t, err)
 }
 

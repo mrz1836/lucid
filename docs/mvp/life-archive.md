@@ -74,7 +74,7 @@ projection (§6) and browse (§7) surfaces read a stable contract.
 
 | `Fields` key | Type | Meaning | Synthetic example |
 |--------------|------|---------|-------------------|
-| `onset` | string (bitemporal) | When the injury began, backdate-aware (`@yesterday`, `YYYY-MM-DD`, or an approximate year). Precision is recorded alongside. | `"2014-09"` (approximate) |
+| `onset` | string (bitemporal) | When the injury began, backdate-aware (`@yesterday`, `YYYY-MM-DD`, or an approximate `YYYY-MM` / `YYYY` — free text is rejected, see §4 "Registry date values"). A partial value is stored **as typed**; precision is recorded alongside. | `"2014-09"` (approximate) |
 | `timeline` | string | The free-text arc since onset — flares, surgeries, plateaus, the "what happened over the years" line. | `"sprained on a trail run; re-tweaked twice; mostly quiet since 2019"` |
 | `body_area` | string | The region, in the owner's words — matched to nothing, guessed at by nothing. | `"left knee"` |
 | `cause` | string | How it happened, as testimony. | `"landed wrong off a boulder"` |
@@ -146,7 +146,34 @@ through the same append-only merge path as `injury`.
   progress number, no percent, no streak.** A thread's "progress" is
   the narrative its linked events tell. The write verb rejects (omits)
   any progress/percent/streak field so the guard cannot be bypassed by
-  a stray `--field`.
+  a stray `--field`. A thread carries no dated occurrence, so it takes
+  no date flag.
+
+**Registry date values (binding).** `injury --onset` and `era
+--start`/`--end` read the one shared date grammar
+([`../usage/commands.md`](../usage/commands.md#backdating-with---day))
+on its **strict** tier: they accept `@yesterday`, `YYYY-MM-DD`,
+`YYYY-MM`, and `YYYY`, and reject anything else — including free text
+like `"spring 2015"` — before any field is built, so a rejection leaves
+the record byte-unchanged. A future date is rejected too; the ceiling is
+evaluated on the *resolved* instant, so `--start 2027` fails via its
+snapped `2027-01-01` while `--start 2026` (the current year) is accepted.
+
+What the registry stores diverges from a capture on purpose:
+
+* **A partial date is stored as typed** — `--onset 2014-09` writes the
+  string `"2014-09"`, `--start 2014` writes `"2014"` — at `approximate`
+  precision. This is the one place in Lucid that retains the *degree* of
+  imprecision an observation loses when it snaps
+  ([`observations-module.md`](observations-module.md) §"Storage
+  additions"), because a life chapter or an old injury genuinely has no
+  known day, and that is the record rather than a defect in it.
+  Mixed-granularity values sort correctly as plain strings, since ISO
+  prefixes order naturally (`"2014" < "2014-09" < "2014-09-01"`).
+* **A relative word and a full date normalize** to `YYYY-MM-DD`.
+* **A supplied time is parsed but not stored.** These fields are
+  date-granular, so `--onset "2014-09-01 19:30"` records
+  `"2014-09-01"` — an explicit truncation, not a silent one.
 
 ## 5. The excavation ritual (selection + prompts; the conversation lives elsewhere)
 

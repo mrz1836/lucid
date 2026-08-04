@@ -74,23 +74,47 @@ need no enablement.
 
 ## Backdating — placing a record in the past
 
-Injury onsets, era bounds, and stories all accept the same backdating grammar,
-so the archive can hold history without pretending it happened today:
+Injury onsets, era bounds, and stories all accept the same backdating grammar
+the rest of the CLI reads
+([`commands.md`](commands.md#backdating-with---day)), so the archive can hold
+history without pretending it happened today:
 
 | Form | Meaning |
 |------|---------|
 | *(omitted)* | Files under the current logical day. |
-| `@yesterday` | The previous logical day. |
-| `YYYY-MM-DD` | An exact past day. |
+| `@yesterday` | The previous logical day — relative words respect the 04:00 rollover. |
+| `YYYY-MM-DD` | An exact past day, taken literally. |
 | `YYYY-MM` or `YYYY` | An **approximate** date — the precision is recorded alongside, so a later read can weight how sure the placement is. |
 
 A story dated to an approximate year files under that year's logical day and
 never touches a current-day log.
 
+**These are date flags, so they are strict.** `--onset`, `--start`, `--end`, and
+`--day` are values you typed on purpose, so a value the grammar cannot read is a
+clean error and **nothing is written** — better a rejection you can answer than a
+record quietly filed under today. Three consequences worth knowing:
+
+- **Free text no longer works.** `--start "spring 2015"` used to be stored
+  verbatim; it is now rejected with the accepted forms named. Write `2015-03` if
+  you want it dated, or put the phrase in `--note`, where it reads as testimony
+  rather than as a date.
+- **A future date is rejected** on `--onset`, `--start`, and `--end`. A chapter
+  you expect to close on a known date waits until it does, or records the
+  expectation in `--note`.
+- **A registry partial date is kept as typed.** `--onset 2014-09` stores
+  `"2014-09"`, and `--start 2014` stores `"2014"` — the registry is the one
+  place that holds the *degree* of imprecision, because "sometime in 2014" is
+  the ordinary input here. A **story** (`lucid memory --day 2014`) instead snaps
+  to the first instant of the period, since an observation files under one real
+  day; after the write, `2014` and `2014-01-01` read the same on a story.
+
+A time supplied with a registry date is parsed but not stored — these fields are
+date-granular, so `--onset "2014-09-01 19:30"` records `"2014-09-01"`.
+
 ## `lucid injury`
 
 ```
-lucid injury <name> [--status active|managed|resolved] [--onset @yesterday|YYYY-MM-DD]
+lucid injury <name> [--status active|managed|resolved] [--onset <date>]
              [--body-area <text>] [--cause <text>] [--severity <text>]
              [--lasting-effects <text>] [--current-limitations <text>]
              [--treatments <text>] [--uncertainty <text>] [--note <text>] [--json]
@@ -129,7 +153,7 @@ lucid injury "old ankle" --onset 2011 --json
 ## `lucid era`
 
 ```
-lucid era <name> [--start @yesterday|YYYY-MM-DD] [--end @yesterday|YYYY-MM-DD] [--note <text>] [--json]
+lucid era <name> [--start <date>] [--end <date>] [--note <text>] [--json]
 ```
 
 Record or amend a **life chapter** in the `era` registry — a named span of time
@@ -172,7 +196,7 @@ lucid thread "the memoir" --intent "write the messy years down" --status active 
 ```
 lucid memory <text> [--certainty vivid|hazy|reconstructed] [--era <key>] [--place <name>]
              [--people <name>,<name>]... [--tone <text>] [--why <text>] [--followup <text>]
-             [--day @yesterday|YYYY-MM-DD] [--attach <path> [--caption <text>]] [--json]
+             [--day <date>] [--attach <path> [--caption <text>]] [--json]
 ```
 
 Record a **story** from your past as one `memory` observation, written at a

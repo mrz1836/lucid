@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -209,4 +210,55 @@ func readDayFileBytes(t *testing.T, home, date string) []byte {
 	b, err := os.ReadFile(filepath.Join(home, "observations", year, month, name))
 	require.NoError(t, err)
 	return b
+}
+
+// TestWriteMemory_StrictDayWritesNothing proves --day runs on the strict tier:
+// a typo and a day that has not happened yet are both refused before anything
+// is written, where a typo previously recorded the story at now in silence.
+func TestWriteMemory_StrictDayWritesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		day  string
+	}{
+		{name: "typo", day: "@yesterdya"},
+		{name: "future", day: "2027-08-01"},
+		{name: "free text", day: "spring 2015"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, a, _ := bootedMemoryRouter(t)
+
+			_, err := r.WriteMemory(MemoryWriteRequest{Text: "x", Day: tc.day, Now: fixedNow()})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "nothing was saved")
+
+			mems, err := a.ReadObservationsKind(observations.KindMemory)
+			require.NoError(t, err)
+			assert.Empty(t, mems, "a refused day leaves nothing on disk")
+		})
+	}
+}
+
+// TestWriteMemory_DayIsRolloverAware proves the relative word respects the
+// 04:00 rollover here as it does on every other dated verb: at 02:00 a bare
+// capture still files under the previous calendar day, so @yesterday names the
+// day before that one.
+func TestWriteMemory_DayIsRolloverAware(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	preDawn := time.Date(2026, time.July, 5, 2, 0, 0, 0, time.UTC)
+
+	res, err := r.WriteMemory(MemoryWriteRequest{Text: "a late-night recollection", Day: "@yesterday", Now: preDawn})
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-03", res.LogicalDate)
+}
+
+// TestWriteMemory_PartialDaySnaps proves a partial date lands on the period's
+// first day at approximate precision — the representation that keeps
+// logical_date one real day without touching the frozen envelope.
+func TestWriteMemory_PartialDaySnaps(t *testing.T) {
+	r, a, _ := bootedMemoryRouter(t)
+
+	res, err := r.WriteMemory(MemoryWriteRequest{Text: "sometime that autumn", Day: "2014-09", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.Equal(t, "2014-09-01", res.LogicalDate)
+	assert.Equal(t, observations.PrecisionApproximate, readMemoryEvent(t, a, res).OccurredAtPrecision)
 }

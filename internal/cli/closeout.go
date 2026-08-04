@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -42,10 +44,16 @@ func bootedRouter(cmd *cobra.Command) (*router.Router, error) {
 //	lucid closeout today dfx 3 <journal>   force current-logical-day
 //	lucid closeout skip                    record an honest miss
 //	lucid closeout backfill [yesterday|<YYYY-MM-DD>] dfx 3/tag <journal>
+//	lucid closeout --day @yesterday dfx 3/tag <journal>
 //
 // It scaffolds the Ledger on first use so capture never blocks on setup.
+//
+// `--day` is an additive alias for the backfill target: it routes onto the same
+// path as the positional form, so the window, the `backfilled: true` stamp, and
+// the future/today rejection are whatever the router already enforces. The
+// positional form is untouched.
 func newCloseoutCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "closeout [today|skip|backfill] [compact form...]",
 		Short: "Record the day's committed practice",
 		Args:  cobra.ArbitraryArgs,
@@ -57,16 +65,27 @@ func newCloseoutCmd() *cobra.Command {
 			return dispatchCloseout(cmd, r, args)
 		},
 	}
+	cmd.Flags().String(
+		flagDay, "",
+		"Backfill target day, e.g. @yesterday or YYYY-MM-DD "+
+			"(same window as `closeout backfill`; today and future days are rejected)",
+	)
+	return cmd
 }
 
 // dispatchCloseout parses the leading sub-word and routes to the matching
-// router call.
+// router call. `--day` outranks the sub-words that name their own day, and
+// combining the two is a usage error rather than a silent pick between them.
 func dispatchCloseout(cmd *cobra.Command, r *router.Router, args []string) error {
+	now := clockNow()
+	if dayArg, _ := cmd.Flags().GetString(flagDay); strings.TrimSpace(dayArg) != "" {
+		return runFlagBackfill(cmd, r, args, dayArg, now)
+	}
 	if len(args) > 0 && args[0] == "skip" {
-		return runCloseout(cmd, r, router.CloseoutRequest{Now: time.Now(), Skip: true, Source: sourceCLI, Harness: sourceCLI})
+		return runCloseout(cmd, r, router.CloseoutRequest{Now: now, Skip: true, Source: sourceCLI, Harness: sourceCLI})
 	}
 	if len(args) > 0 && args[0] == "backfill" {
-		return runBackfill(cmd, r, args[1:])
+		return runPositionalBackfill(cmd, r, args[1:], now)
 	}
 	forceToday := len(args) > 0 && args[0] == "today"
 	if forceToday {
@@ -77,7 +96,7 @@ func dispatchCloseout(cmd *cobra.Command, r *router.Router, args []string) error
 		return err
 	}
 	return runCloseout(cmd, r, router.CloseoutRequest{
-		Now: time.Now(), Links: links, Capacity: capacity, LimiterTag: tag, Journal: journal,
+		Now: now, Links: links, Capacity: capacity, LimiterTag: tag, Journal: journal,
 		ForceToday: forceToday, Source: sourceCLI, Harness: sourceCLI,
 	})
 }
@@ -92,8 +111,9 @@ func runCloseout(cmd *cobra.Command, r *router.Router, req router.CloseoutReques
 	return nil
 }
 
-// runBackfill parses an optional target then executes the backfill.
-func runBackfill(cmd *cobra.Command, r *router.Router, args []string) error {
+// runPositionalBackfill parses an optional leading target then executes the
+// backfill — the `closeout backfill [yesterday|<date>] …` form, unchanged.
+func runPositionalBackfill(cmd *cobra.Command, r *router.Router, args []string, now time.Time) error {
 	var target *time.Time
 	var yesterday bool
 	if len(args) > 0 {
@@ -112,12 +132,100 @@ func runBackfill(cmd *cobra.Command, r *router.Router, args []string) error {
 			}
 		}
 	}
+	return runBackfill(cmd, r, args, target, yesterday, now)
+}
+
+// runFlagBackfill executes the `--day` alias. It rejects every combination that
+// would name a second day — `skip` and `today` are their own targets, and a
+// positional backfill target alongside the flag is two targets for one intent —
+// rather than quietly preferring one of them. The bare `backfill` sub-word is
+// allowed through as redundant-but-consistent: it names the path the flag
+// already routes onto, without naming a day.
+func runFlagBackfill(cmd *cobra.Command, r *router.Router, args []string, dayArg string, now time.Time) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "skip", "today":
+			return fmt.Errorf(
+				"lucid closeout: --day names a backfill target, so it cannot be combined with `%s`", args[0],
+			)
+		case "backfill":
+			args = args[1:]
+			if len(args) > 0 && positionalBackfillTarget(args[0]) {
+				return fmt.Errorf(
+					"lucid closeout: --day and `backfill %s` both name a target — give one or the other", args[0],
+				)
+			}
+		}
+	}
+	target, yesterday, err := resolveCloseoutDay(dayArg, now)
+	if err != nil {
+		// The fixed reason on stderr, then the error for its exit code: Execute
+		// renders no returned error, so a refusal nobody printed is a bare
+		// non-zero exit the user has to guess at.
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
+		return err
+	}
+	return runBackfill(cmd, r, args, target, yesterday, now)
+}
+
+// positionalBackfillTarget reports whether tok is the target slot of the
+// positional form rather than the head of the compact form.
+func positionalBackfillTarget(tok string) bool {
+	if tok == "yesterday" {
+		return true
+	}
+	_, ok := parseBackfillDate(tok)
+	return ok
+}
+
+// resolveCloseoutDay reads `--day` through the shared grammar on the strict
+// tier: an unreadable token or a future day is a clean error and nothing is
+// written (error-states.md §B-1, §B-2).
+//
+// A *relative* token forwards the `yesterday` intent rather than a date
+// computed here, so the router still resolves it against the rollover boundary
+// — the same reason the positional keyword does. Computing a calendar date
+// CLI-side would collide with the in-progress day before the rollover and read
+// as out-of-window. An explicit or partial date is literal, so it can be passed
+// as the target directly.
+func resolveCloseoutDay(dayArg string, now time.Time) (target *time.Time, yesterday bool, err error) {
+	res, err := observations.ResolveDay(dayArg, now, observations.DayOptions{AllowPartial: true})
+	switch {
+	case errors.Is(err, observations.ErrDayFuture):
+		// The ceiling stays in ResolveDay; this second pass only recovers the
+		// day the value resolved to, so the refusal can name it.
+		future, _ := observations.ResolveDay(dayArg, now, observations.DayOptions{
+			AllowFuture: true, AllowPartial: true,
+		})
+		return nil, false, fmt.Errorf(
+			"lucid closeout: cannot backfill %s — that day has not happened yet; nothing was saved",
+			future.LogicalDate,
+		)
+	case err != nil:
+		return nil, false, fmt.Errorf(
+			"lucid closeout: could not read the day %q (want %s); nothing was saved",
+			dayArg, observations.AcceptedDayForms,
+		)
+	}
+	if res.Relative {
+		return nil, true, nil
+	}
+	occurred := res.OccurredAt
+	return &occurred, false, nil
+}
+
+// runBackfill executes a resolved backfill and prints its ack — the shared tail
+// of the positional form and the `--day` alias, so the two cannot drift.
+func runBackfill(
+	cmd *cobra.Command, r *router.Router, args []string,
+	target *time.Time, yesterday bool, now time.Time,
+) error {
 	links, capacity, tag, journal, err := parseCompactArgs(r, args)
 	if err != nil {
 		return err
 	}
 	res, err := r.Backfill(router.BackfillRequest{
-		Now: time.Now(), Target: target, Yesterday: yesterday, Links: links, Capacity: capacity,
+		Now: now, Target: target, Yesterday: yesterday, Links: links, Capacity: capacity,
 		LimiterTag: tag, Journal: journal, Source: sourceCLI, Harness: sourceCLI,
 	})
 	if err != nil {

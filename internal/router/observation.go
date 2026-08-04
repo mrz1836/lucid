@@ -23,9 +23,15 @@ const obsVerb = "obs"
 // leaving the frozen envelope's own source at microlog. A bare terminal
 // capture leaves them empty, so the event carries no provenance key and stays
 // byte-identical to a pre-provenance event.
+//
+// DayArg is the optional `--day` value: a date the caller typed on purpose, so
+// it runs on the strict tier and overrides any in-text @-token (usage/
+// commands.md §"Backdating with --day"). Empty leaves the prose grammar in
+// charge, exactly as before the flag existed.
 type CaptureRequest struct {
 	Tokens  []string
 	Now     time.Time
+	DayArg  string
 	Harness string
 	Agent   string
 	Model   string
@@ -48,9 +54,10 @@ type CaptureResult struct {
 // Capture executes an observation micro-log (observations-module.md §Commands,
 // observations.md §4). It resolves the verb to a kind, rejects a disabled kind
 // with the enable hint, parses the head deterministically (unparseable →
-// partial, kind preserved), resolves a sticky location to its place registry,
-// derives the logical day, and appends one frozen envelope. The ack is
-// inventory — "logged" plus the id, zero evaluative language (§0).
+// partial, kind preserved), applies an explicit `--day` over whatever the prose
+// grammar dated the capture to, resolves a sticky location to its place
+// registry, derives the logical day, and appends one frozen envelope. The ack
+// is inventory — "logged" plus the id, zero evaluative language (§0).
 func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 	now := whenOr(req.Now)
 	if err := r.prepareObservations(); err != nil {
@@ -95,6 +102,10 @@ func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 		SpelledOK: true,
 	})
 
+	if dayErr := applyCaptureDay(&parsed, req.DayArg, now); dayErr != nil {
+		return CaptureResult{}, dayErr
+	}
+
 	placeKey, err := r.resolvePlace(&parsed, now)
 	if err != nil {
 		return CaptureResult{}, err
@@ -117,6 +128,35 @@ func (r *Router) Capture(req CaptureRequest) (CaptureResult, error) {
 		PlaceKey:    placeKey,
 		Ack:         ack,
 	}, nil
+}
+
+// applyCaptureDay overrides a parsed capture's occurrence with an explicit
+// `--day` value, which is why the flag wins over an in-text @-token: the prose
+// grammar has already run and set its own occurrence by the time this replaces
+// it (usage/commands.md §obs). An empty value is a no-op, so a capture with no
+// flag reads exactly as it always has.
+//
+// The token the prose grammar consumed stays stripped from the note. It was a
+// date either way — leaving it behind so the note reads "ate eggs @yesterday"
+// on an entry filed under a different day would be the worse of the two
+// records.
+//
+// It runs before the place-registry write in resolvePlace, not merely before
+// the event append, so a refused day leaves nothing at all on disk
+// (error-states.md §St-1) — the same discipline the certainty check and the
+// harness-provenance check above it follow.
+func applyCaptureDay(parsed *observations.ParseResult, dayArg string, now time.Time) error {
+	if strings.TrimSpace(dayArg) == "" {
+		return nil
+	}
+	when, err := resolveCaptureWhen(dayArg, now)
+	if err != nil {
+		return err
+	}
+	parsed.OccurredAt = when.OccurredAt
+	parsed.Precision = when.Precision
+	parsed.OccurredEnd = when.End
+	return nil
 }
 
 // packetPointerLine is the deterministic discovery template (observations.md

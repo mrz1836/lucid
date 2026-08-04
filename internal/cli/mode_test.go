@@ -92,3 +92,81 @@ func TestModeCLI_IgnoresJSON(t *testing.T) {
 	assert.Contains(t, out, "Mode set to yellow")
 	assert.NotContains(t, out, "{")
 }
+
+// TestModeCLI_GapFillsPastDay: `--day` fills a mode on a past day that carries
+// none, and says so.
+func TestModeCLI_GapFillsPastDay(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "yellow", "--day", "@yesterday")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Mode set to yellow for 2026-07-04 — a gap filled, not a change.")
+	assert.Equal(t, 1, engineDayCount(t, home))
+}
+
+// TestModeCLI_GapFillWorksAfterBell: the bell fixes the day it rang for, not a
+// day that ended before it.
+func TestModeCLI_GapFillWorksAfterBell(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afterBell())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "red", "--day", "@yesterday")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Mode set to red for 2026-07-04")
+}
+
+// TestModeCLI_GapFillRejectedOnDeclaredDay exits non-zero with the fixed copy
+// and changes nothing.
+func TestModeCLI_GapFillRejectedOnDeclaredDay(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "@yesterday")
+	require.NoError(t, err)
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "red", "--day", "@yesterday")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Equal(t, ExitErr, exitCodeForError(err))
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "A mode was already declared for that day")
+}
+
+// TestModeCLI_GapFillRejectsToday: today is not a gap — it is still live.
+func TestModeCLI_GapFillRejectsToday(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "2026-07-05")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Contains(t, errOut, "already ended")
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
+// TestModeCLI_GapFillUnreadableDay surfaces the strict-tier refusal the way
+// every other deterministic rejection is surfaced — the reason on stderr and a
+// non-zero exit — and writes nothing. A returned error alone would be invisible:
+// Execute renders none.
+func TestModeCLI_GapFillUnreadableDay(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "@yesterdya")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Equal(t, ExitErr, exitCodeForError(err))
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "could not read the day")
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
+// TestModeCLI_GapFillFutureDay names the day it refused, on stderr.
+func TestModeCLI_GapFillFutureDay(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "2026-07-06")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Contains(t, errOut, "2026-07-06")
+	assert.Contains(t, errOut, "has not happened yet")
+	assert.Equal(t, 0, engineDayCount(t, home))
+}

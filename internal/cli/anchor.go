@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/router"
 )
 
@@ -33,22 +35,36 @@ reset is a new dated record, and the latest record per label wins.`,
 	return parent
 }
 
-// newAnchorAddCmd builds the `add` child: record one labeled YYYY-MM-DD
-// milestone with an optional trailing note. Human-first prose ack by default;
-// the recorded anchor as JSON under --json for scripts (ADR-0007). A rejected
-// input (empty label or unparseable date) prints the fixed reason on stderr and
-// exits non-zero without writing; the record path is model-free.
+// newAnchorAddCmd builds the `add` child: record one labeled milestone with an
+// optional trailing note. The date reads the shared grammar
+// ([resolveAnchorDate]), so `@yesterday` works alongside a civil YYYY-MM-DD.
+// Human-first prose ack by default; the recorded anchor as JSON under --json
+// for scripts (ADR-0007). A rejected input (empty label, unreadable date, or a
+// partial date) prints the fixed reason on stderr and exits non-zero without
+// writing; the record path is model-free.
 func newAnchorAddCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add <label> <date> [note...]",
-		Short: "Record a days-since anchor (a labeled YYYY-MM-DD milestone)",
-		Long: `add records one days-since milestone: a label, a civil YYYY-MM-DD date,
-and an optional trailing note. Dates are backdatable — any past or future civil
-date is accepted. Recording the same label again appends a new record and the
-latest one wins, so a mistyped date and a genuine reset are the same operation.`,
+		Short: "Record a days-since anchor (a labeled civil-date milestone)",
+		Long: `add records one days-since milestone: a label, a date, and an optional
+trailing note. The date reads the shared date grammar (usage/commands.md
+"Backdating with --day"), so ` + "`@yesterday`" + ` works alongside a civil YYYY-MM-DD,
+with two deliberate carve-outs. A future date is accepted — an anchor may be a
+forward commitment, a date you count toward rather than only since, and this is
+the one date surface with no future ceiling. A partial date (2014, 2014-09) is
+rejected: the whole output is a precise day count, and counting from a guessed
+January 1st would report a confident wrong number. Recording the same label
+again appends a new record and the latest one wins, so a mistyped date and a
+genuine reset are the same operation.`,
 		Args: cobra.MinimumNArgs(2),
 		Example: `  # Record a cessation milestone.
   lucid anchor add sobriety 2026-01-01
+
+  # The shared grammar: a relative day works too.
+  lucid anchor add streak-restart @yesterday
+
+  # A forward commitment — a date you count toward (no future ceiling here).
+  lucid anchor add gate 2027-01-01
 
   # Add a note (trailing words are joined).
   lucid anchor add gate 2026-03-15 first ninety-day gate
@@ -60,11 +76,19 @@ latest one wins, so a mistyped date and a genuine reset are the same operation.`
 			if err != nil {
 				return err
 			}
+			now := clockNow()
+			date, err := resolveAnchorDate(args[1], now)
+			if err != nil {
+				// Same shape as the router's deterministic rejection: the fixed
+				// reason on stderr, a non-zero exit, and nothing written.
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
+				return errAnchorNotRecorded
+			}
 			res, err := r.AnchorAdd(router.AnchorAddRequest{
 				Label: args[0],
-				Date:  args[1],
+				Date:  date,
 				Note:  strings.Join(args[2:], " "),
-				Now:   clockNow(),
+				Now:   now,
 			})
 			if err != nil {
 				if errors.Is(err, router.ErrAnchorRejected) {
@@ -82,4 +106,48 @@ latest one wins, so a mistyped date and a genuine reset are the same operation.`
 			return nil
 		},
 	}
+}
+
+// resolveAnchorDate reads `anchor add`'s positional date through the shared
+// grammar ([observations.ResolveDay], usage/commands.md §"Backdating with
+// --day") and returns the civil YYYY-MM-DD the anchors store records. It is the
+// CLI's two documented exceptions to the strict tier, and both live here rather
+// than in the engine — [engine.ValidateAnchor] is a pure shape check that
+// accepts any civil date, so neither carve-out can be enforced downstream:
+//
+//   - AllowFuture keeps a forward-dated anchor. An anchor may be a date you are
+//     counting toward, not only since, so this is the one date surface in the
+//     CLI with no future ceiling.
+//   - AllowPartial is off, and the rejection is explicit rather than a
+//     fall-through. A "days since" count is a precise number; deriving it from
+//     the January 1st a partial date snaps to would report a confident wrong
+//     one. The explicitness matters twice over: ResolveDay always reads a bare
+//     four-digit token as a year, so letting `2014` fall through the grammar
+//     instead would resolve it to the clock time 20:14 and silently record an
+//     anchor dated *today*.
+//
+// Every other failure is one message naming the value and the day forms this
+// command takes — nothing is written either way (error-states.md §St-1).
+func resolveAnchorDate(arg string, now time.Time) (string, error) {
+	res, err := observations.ResolveDay(arg, now, observations.DayOptions{
+		AllowFuture:  true,
+		AllowPartial: false,
+	})
+	switch {
+	case errors.Is(err, observations.ErrDayPartial):
+		return "", fmt.Errorf(
+			"cannot anchor to %q — a days-since count needs a real day, not a whole year or month; "+
+				"give a YYYY-MM-DD date (or @yesterday); nothing was saved", arg,
+		)
+	case err != nil:
+		// Deliberately not [observations.AcceptedDayForms]: the shared list
+		// names the partial forms, and offering a caller a form this command
+		// rejects two lines above would be the same broken promise the strict
+		// tier exists to remove.
+		return "", fmt.Errorf(
+			"could not read the anchor date %q (want @yesterday or YYYY-MM-DD; a whole year or month is not a day count); "+
+				"nothing was saved", arg,
+		)
+	}
+	return observations.DateString(res.OccurredAt), nil
 }

@@ -16,12 +16,13 @@ import (
 const sourceCLI = "cli"
 
 // Flag names shared by the capture commands (lucid log, lucid attach,
-// lucid obs). The provenance cluster (source/harness/agent/model/channel/
-// thread) is optional and falls back to its LUCID_* env then the local
-// default, so a relaying harness can attribute a capture through flags or env
-// without a code change. day is the optional logical-day selector
-// (`@yesterday` / `@YYYY-MM-DD`) that log and attach resolve through the one
-// shared rollover grammar; it has no env fallback and is read directly.
+// lucid obs, lucid memory, lucid workout log). The provenance cluster
+// (source/harness/agent/model/channel/thread) is optional and falls back to
+// its LUCID_* env then the local default, so a relaying harness can attribute
+// a capture through flags or env without a code change. day is the optional
+// logical-day selector every capture verb resolves through the one shared
+// grammar (usage/commands.md §"Backdating with --day"); it has no env
+// fallback and is read directly.
 const (
 	flagSource  = "source"
 	flagHarness = "harness"
@@ -75,7 +76,7 @@ func newLogCmd() *cobra.Command {
 				Model:     flagOrEnv(cmd, flagModel, envModel, ""),
 			})
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
@@ -83,15 +84,29 @@ func newLogCmd() *cobra.Command {
 		},
 	}
 	registerProvenanceFlags(cmd)
-	// --day is declared here rather than in registerProvenanceFlags because
-	// lucid obs shares that helper and carries its own in-text day grammar; it
-	// must not grow a --day flag.
+	registerDayFlag(cmd)
+	return cmd
+}
+
+// registerDayFlag declares the shared logical-day selector on a capture
+// command (lucid log, lucid obs, lucid workout log). One declaration means one
+// help string, so the flag cannot come to mean subtly different things on
+// different verbs — the drift this grammar exists to end. `lucid attach` and
+// `lucid memory` keep their own wording because each names what it is dating
+// (the media, the story) rather than "the entry".
+//
+// `lucid obs` carries this flag *and* its own in-text @-grammar. That is the
+// one verb on both tiers, and it is deliberate: the flag is a date you typed on
+// purpose, so it is strict, while a token parsed out of prose must never cost
+// you the capture (product-principles.md P10). The flag wins when both are
+// given.
+func registerDayFlag(cmd *cobra.Command) {
 	cmd.Flags().String(
 		flagDay, "",
-		"Attribute the entry to a logical day, e.g. @yesterday or @YYYY-MM-DD "+
+		"Attribute the capture to a logical day, e.g. @yesterday, @YYYY-MM-DD, "+
+			"\"@yesterday 19:30\", or a partial 2014 / 2014-09 "+
 			"(04:00 rollover aware; a future day is rejected)",
 	)
-	return cmd
 }
 
 // registerProvenanceFlags declares the provenance accept-surface flags on a

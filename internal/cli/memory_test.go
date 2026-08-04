@@ -174,3 +174,48 @@ func TestMemory_CLI_RequiresText(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
 }
+
+// TestMemory_CLI_AttachSharesTheBackdatedDay proves --attach forwards the same
+// --day into `lucid attach`, and that both now resolve it through one strict
+// resolver — so a story and the photo that belongs to it can never land on
+// different days.
+func TestMemory_CLI_AttachSharesTheBackdatedDay(t *testing.T) {
+	withClock(t, time.Date(2026, 7, 5, 18, 41, 0, 0, time.UTC))
+	home := enableMemoryHome(t)
+
+	photo := filepath.Join(t.TempDir(), "beach.jpg")
+	require.NoError(t, os.WriteFile(photo, []byte("synthetic-bytes"), 0o600))
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"memory", "the photo from that night", "--attach", photo, "--day", "1999-06-01", "--json")
+	require.NoError(t, err)
+
+	var view memoryWriteView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.Equal(t, "1999-06-01", view.LogicalDate)
+
+	entry, ok := view.Refs["entry"].(string)
+	require.True(t, ok, "refs.entry is the linked raw id")
+	doc, err := storage.New(home).ReadRaw(entry)
+	require.NoError(t, err)
+	occurred, _ := doc.Fields["occurred_at"].(string)
+	assert.Contains(t, occurred, "1999-06-01", "the attachment shares the story's day")
+}
+
+// TestMemory_CLI_StrictDayWritesNothing proves a mistyped --day now exits
+// non-zero with nothing written, instead of quietly filing the story under
+// today. It is the deliberate behavior change the shared contract documents.
+func TestMemory_CLI_StrictDayWritesNothing(t *testing.T) {
+	home := enableMemoryHome(t)
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"},
+		"memory", "the summer everything changed", "--day", "@yesterdya")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Empty(t, out)
+	// The reason has to reach the user: Execute renders no returned error, so
+	// a refusal nobody prints is indistinguishable from a crash.
+	assert.Contains(t, errOut, "could not read the day")
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Empty(t, readObsEvents(t, home), "a refused day leaves the ledger untouched")
+}

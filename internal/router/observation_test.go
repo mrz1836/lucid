@@ -1,6 +1,7 @@
 package router
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -362,4 +363,106 @@ func TestCapture_WholeLineAppend(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, skipped)
 	assert.Len(t, events, 2)
+}
+
+// TestCapture_DayFlagBeatsInlineToken: `obs` is the one verb on both tiers, and
+// the deliberate flag wins over the token parsed out of the prose. The inline
+// token stays stripped from the note either way — it was a date in both
+// readings, and leaving "@yesterday" in the text of an entry filed under some
+// other day would be the worse record of the two.
+func TestCapture_DayFlagBeatsInlineToken(t *testing.T) {
+	r := bootedObs(t)
+	res, err := r.Capture(CaptureRequest{
+		Tokens: []string{"ate", "eggs,", "toast", "@yesterday"},
+		Now:    nowEDT(),
+		DayArg: "2026-06-01",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "2026-06-01", res.LogicalDate, "the flag's day wins, not the token's")
+	ev := readBack(t, r, res)
+	assert.Equal(t, "2026-06-01", ev.LogicalDate)
+	assert.Equal(t, observations.PrecisionApproximate, ev.OccurredAtPrecision)
+	assert.Contains(t, ev.OccurredAt, "2026-06-01")
+	assert.NotContains(t, fmt.Sprint(ev.Payload), "@yesterday",
+		"a consumed date token never stays in the captured text")
+}
+
+// TestCapture_DayFlagWithTimePromotesToExact: the shared grammar's optional
+// trailing time reaches `obs --day` like every other deliberate flag.
+func TestCapture_DayFlagWithTimePromotesToExact(t *testing.T) {
+	r := bootedObs(t)
+	res, err := r.Capture(CaptureRequest{
+		Tokens: []string{"ate", "eggs"},
+		Now:    nowEDT(),
+		DayArg: "@yesterday 19:30",
+	})
+	require.NoError(t, err)
+
+	ev := readBack(t, r, res)
+	assert.Equal(t, observations.PrecisionExact, ev.OccurredAtPrecision)
+	assert.Contains(t, ev.OccurredAt, "2026-07-01T19:30")
+	assert.Equal(t, "2026-07-01", ev.LogicalDate)
+}
+
+// TestCapture_DayFlagPartialSnaps: a partial date is accepted on the flag and
+// snapped to the period's first instant at approximate precision, so
+// logical_date still names one real day (mvp/observations-module.md).
+func TestCapture_DayFlagPartialSnaps(t *testing.T) {
+	r := bootedObs(t)
+	res, err := r.Capture(CaptureRequest{Tokens: []string{"mood", "3"}, Now: nowEDT(), DayArg: "2014-09"})
+	require.NoError(t, err)
+
+	ev := readBack(t, r, res)
+	assert.Equal(t, "2014-09-01", ev.LogicalDate)
+	assert.Equal(t, observations.PrecisionApproximate, ev.OccurredAtPrecision)
+}
+
+// TestCapture_DayFlagStrictWritesNothing: on the strict tier an unreadable day
+// and a future day are both clean refusals — and the refusal lands before the
+// place-registry write, not merely before the event append, so a rejected
+// `where` capture leaves no half-record behind (error-states.md §St-1).
+func TestCapture_DayFlagStrictWritesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name, day, want string
+	}{
+		{name: "typo", day: "@yesterdya", want: "could not read the day"},
+		{name: "future", day: "2027-01-01", want: "has not happened yet"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bootedObs(t)
+			_, err := r.Capture(CaptureRequest{
+				Tokens: []string{"where", "Lisbon"},
+				Now:    nowEDT(),
+				DayArg: tc.day,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, err.Error(), "nothing was saved")
+
+			events, _, rerr := r.Store().ReadObservationsDay(observations.DateString(observations.DateOf(nowEDT())))
+			require.NoError(t, rerr)
+			assert.Empty(t, events, "a refused day writes no event")
+
+			places, lerr := r.Store().ReadRegistryKind(observations.RegistryPlace)
+			require.NoError(t, lerr)
+			assert.Empty(t, places, "a refused day writes no place either")
+		})
+	}
+}
+
+// TestCapture_NoDayFlagLeavesProseInCharge: with no flag the permissive inline
+// grammar governs exactly as it did before the flag existed — including the
+// colon-less four-digit token, which stays a clock time in dictated prose.
+func TestCapture_NoDayFlagLeavesProseInCharge(t *testing.T) {
+	r := bootedObs(t)
+
+	backdated, err := r.Capture(CaptureRequest{Tokens: []string{"ate", "eggs", "@yesterday"}, Now: nowEDT()})
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-01", backdated.LogicalDate)
+
+	dictated, err := r.Capture(CaptureRequest{Tokens: []string{"ate", "eggs", "@2014"}, Now: nowEDT()})
+	require.NoError(t, err)
+	ev := readBack(t, r, dictated)
+	assert.Contains(t, ev.OccurredAt, "2026-07-02T20:14", "prose keeps colon-less HHMM dictation")
 }

@@ -2,11 +2,14 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mrz1836/lucid/internal/router"
 )
 
 // jsonFlag is the persistent flag name that switches supported
@@ -39,6 +42,23 @@ func containsFold(s, substr string) bool {
 func emitErr(cmd *cobra.Command, err error) error {
 	if err != nil {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
+	}
+	return err
+}
+
+// emitRefusedDay prints a refused `--day` to stderr and returns err unchanged,
+// so a capture verb's strict-tier rejection reaches the user instead of exiting
+// silently — the root sets SilenceErrors and [Execute] renders no returned
+// error, so a refusal nobody prints is a bare non-zero exit the user has to
+// guess at. Only a [router.DayRejectedError] is printed: a refusal is a fixed
+// reason naming the accepted forms and confirming nothing was saved, while a
+// runtime fault stays a plain error and keeps whatever handling its caller
+// gives it. This is the capture verbs' half of the same surfacing the Engine
+// verbs do inline against their own rejection paths.
+func emitRefusedDay(cmd *cobra.Command, err error) error {
+	var refused *router.DayRejectedError
+	if errors.As(err, &refused) {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), refused.Reason)
 	}
 	return err
 }

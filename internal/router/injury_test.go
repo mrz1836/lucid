@@ -66,9 +66,9 @@ func TestWriteInjury_CreateThenAmend(t *testing.T) {
 }
 
 // TestWriteInjury_BackdatedOnset proves the onset field is backdate-aware
-// through the shared observations @-grammar, with the precision recorded
-// alongside — and that a free-form approximate value ("2014-09") is kept
-// verbatim (capture never blocks).
+// through the shared date grammar, with the precision recorded alongside — and
+// that a partial value ("2014-09") is stored as typed rather than snapped to
+// the month's first day (life-archive.md §4, "Registry date values").
 func TestWriteInjury_BackdatedOnset(t *testing.T) {
 	r, _, _ := newBootedRouter(t)
 
@@ -84,7 +84,7 @@ func TestWriteInjury_BackdatedOnset(t *testing.T) {
 
 	approx, err := r.WriteInjury(InjuryWriteRequest{Name: "shoulder", Onset: "2014-09", Now: fixedNow()})
 	require.NoError(t, err)
-	assert.Equal(t, "2014-09", approx.Fields["onset"], "a free-form approximate value is kept verbatim")
+	assert.Equal(t, "2014-09", approx.Fields["onset"], "a partial date is stored as typed, never snapped to 2014-09-01")
 	assert.Equal(t, observations.PrecisionApproximate, approx.Fields["onset_precision"])
 }
 

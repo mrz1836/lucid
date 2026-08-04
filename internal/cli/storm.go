@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mrz1836/lucid/internal/router"
 )
 
 // errStormRejected is returned when `lucid storm` declined the command — an
@@ -36,8 +38,12 @@ type stormView struct {
 // Human-first prose by default; the stormView shape under --json. A rejection
 // prints the fixed copy to stderr (or the rejected view under --json) and exits
 // non-zero.
+//
+// `--day` dates the storm event itself, on declare, renew, and end — the days a
+// storm is worst are the days declaring it at the time was not possible. An
+// event dated before the last recorded one is rejected: history folds in order.
 func newStormCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "storm <clause-label|unwritten|end>",
 		Short: "Declare, renew, or end a storm",
 		Args:  cobra.MinimumNArgs(1),
@@ -46,9 +52,22 @@ func newStormCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := r.Storm(strings.Join(args, " "), clockNow())
+			day, _ := cmd.Flags().GetString(flagDay)
+			res, err := r.StormCommand(router.StormRequest{
+				Arg:    strings.Join(args, " "),
+				DayArg: day,
+				Now:    clockNow(),
+			})
 			if err != nil {
-				return err
+				// A refused `--day` is a deterministic rejection like an unknown
+				// clause label, so it takes the rejection path below — prose on
+				// stderr, or the rejected view under --json — rather than
+				// becoming a silent non-zero exit.
+				var refused *router.DayRejectedError
+				if !errors.As(err, &refused) {
+					return err
+				}
+				res = router.StormResult{Rejected: true, Ack: refused.Reason}
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
 				view := stormView{Event: res.Event, Label: res.Label, Through: res.Through, Rejected: res.Rejected}
@@ -68,4 +87,10 @@ func newStormCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().String(
+		flagDay, "",
+		"Date the storm event itself, e.g. @yesterday or YYYY-MM-DD "+
+			"(an event before the last recorded one is rejected)",
+	)
+	return cmd
 }

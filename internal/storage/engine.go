@@ -135,6 +135,52 @@ func (a *Adapter) ReadEngineDayFolded(dayID string) (rec engine.DayRecord, found
 	return raw.Folded(), true, nil
 }
 
+// FillEngineDayMode fills `mode` and `mode_declared_at` on an existing day
+// record that never declared one — the single guarded write that touches a day
+// record's base after creation (data-model.md §"One guarded exception",
+// engine-module.md §"`/mode --day` gap-fill").
+//
+// The gap is read from `mode_declared_at`, not from `mode`. A close-out builds
+// its record with the chain's default mode already in place, so a day that was
+// closed out but never declared — the ordinary shape a gap-fill exists for —
+// carries `mode: green` and an empty `mode_declared_at`. That default is a
+// placeholder the record needed in order to exist, not testimony about the day;
+// the declaration timestamp is the only field that says a mode was ever chosen.
+//
+// The never-overwrite guard lives here rather than in the caller, so no future
+// call site can reach a declared mode by taking a different route: a record
+// whose mode was declared is refused, and the bell's "no retroactive amendment"
+// (engine §2) therefore holds against every path. Nothing else on the base is
+// touched, and `mode` stays off the foldable-field whitelist, so the correction
+// path cannot reach it either.
+func (a *Adapter) FillEngineDayMode(dayID string, mode engine.Mode, declaredAt string) error {
+	rec, found, err := a.ReadEngineDay(dayID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("storage: cannot fill mode on missing engine day %q", dayID)
+	}
+	if rec.ModeDeclaredAt != "" {
+		return fmt.Errorf("storage: engine day %q already declares a mode (a gap-fill never overwrites)", dayID)
+	}
+	rec.Mode = mode
+	rec.ModeDeclaredAt = declaredAt
+
+	path, err := a.engineDayPath(dayID)
+	if err != nil {
+		return err
+	}
+	content, err := marshalJSON(rec)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, content, filePerm); err != nil {
+		return fmt.Errorf("storage: rewrite engine day %q: %w", dayID, err)
+	}
+	return nil
+}
+
 // AppendEngineCorrection appends a correction to an existing day record
 // and rewrites the file, leaving every original field intact — the only
 // sanctioned mutation of a day record (engine-module.md §corrections[]). A

@@ -109,14 +109,17 @@ func newInjuryCmd() *cobra.Command {
 
 			res, err := r.WriteInjury(req)
 			if err != nil {
-				return err
+				// The root silences returned errors, so a rejected --onset would
+				// otherwise be a bare exit code. A strict date flag has to say
+				// what it wanted (error-states.md §B-3, §B-4).
+				return emitErr(cmd, err)
 			}
 			return renderRegistryWrite(cmd, res)
 		},
 	}
 	f := cmd.Flags()
 	f.String(flagStatus, "", "Status transition: active | managed | resolved")
-	f.String(flagOnset, "", "When it began: @yesterday, YYYY-MM-DD, or an approximate value like 2014-09")
+	f.String(flagOnset, "", "When it began: @yesterday, YYYY-MM-DD, or a partial date like 2014 or 2014-09")
 	f.String(flagTimeline, "", "The arc since onset — flares, surgeries, plateaus")
 	f.String(flagBodyArea, "", "Body region, in your words (e.g. left knee)")
 	f.String(flagCause, "", "How it happened, as testimony")

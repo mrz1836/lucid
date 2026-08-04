@@ -437,3 +437,112 @@ func TestAttachHelpers(t *testing.T) {
 	assert.Contains(t, ack, "raw_1")
 	assert.Equal(t, "abc", shortSHA("abc"))
 }
+
+// TestResolveCaptureWhen_SharedGrammar covers the forms the capture verbs
+// gained by routing --day through the shared resolver: a trailing time, the
+// partial dates, a bare clock time, and a clock range (which is the one form
+// that yields an end, so the record can honor `occurred_at_end`).
+func TestResolveCaptureWhen_SharedGrammar(t *testing.T) {
+	now := fixedNow()
+
+	// A trailing time promotes the day to exact precision at that hour.
+	when, err := resolveCaptureWhen("@yesterday 19:30", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-04", when.LogicalDate)
+	assert.Equal(t, storage.PrecisionExact, when.Precision)
+	assert.Equal(t, 19, when.OccurredAt.Hour())
+	assert.Equal(t, 30, when.OccurredAt.Minute())
+
+	// A partial date snaps to the period's first instant, approximate.
+	when, err = resolveCaptureWhen("2014", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2014-01-01", when.LogicalDate)
+	assert.Equal(t, storage.PrecisionApproximate, when.Precision)
+
+	when, err = resolveCaptureWhen("2014-09", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2014-09-01", when.LogicalDate)
+	assert.Equal(t, storage.PrecisionApproximate, when.Precision)
+
+	// A bare clock time is today at that time, exact.
+	when, err = resolveCaptureWhen("09:15", now)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-05", when.LogicalDate)
+	assert.Equal(t, storage.PrecisionExact, when.Precision)
+	assert.Nil(t, when.End)
+
+	// A clock range is the only form with an end — it must survive to the
+	// record, or `range` precision would name a span the entry never states.
+	when, err = resolveCaptureWhen("09:00-11:00", now)
+	require.NoError(t, err)
+	assert.Equal(t, storage.PrecisionRange, when.Precision)
+	require.NotNil(t, when.End)
+	assert.Equal(t, 9, when.OccurredAt.Hour())
+	assert.Equal(t, 11, when.End.Hour())
+}
+
+// TestResolveCaptureWhen_RejectionsNameTheProblem proves the two strict-tier
+// refusals stay legible: an unreadable token lists the accepted forms, and a
+// future day names the day it resolved to. Both say nothing was saved.
+func TestResolveCaptureWhen_RejectionsNameTheProblem(t *testing.T) {
+	now := fixedNow()
+
+	_, err := resolveCaptureWhen("@yesterdya", now)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not read the day")
+	assert.Contains(t, err.Error(), "@yesterday", "the message teaches the grammar it just refused")
+	assert.Contains(t, err.Error(), "nothing was saved")
+
+	_, err = resolveCaptureWhen("@2027-08-01", now)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "2027-08-01", "the refusal names the day it resolved to")
+	assert.Contains(t, err.Error(), "that day has not happened yet")
+	assert.Contains(t, err.Error(), "nothing was saved")
+}
+
+// TestLogAttach_BootstrapModeStampsHistorical proves `bootstrap` follows the
+// mode rather than the entry path: a capture made while historical-entry mode
+// is on is flagged as historical, and stops being flagged after
+// `/bootstrap done`. Before this, a bulk history load via `lucid log --day`
+// wrote entries the flag called ordinary.
+func TestLogAttach_BootstrapModeStampsHistorical(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	photo := writeTempFile(t, "beach.jpg", []byte("synthetic-bytes"))
+
+	// Off by default: an ordinary capture is not historical.
+	before, err := r.Log(LogRequest{Text: "an ordinary entry", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.False(t, rawBootstrapFlag(t, a, before.RawID))
+
+	_, err = r.Bootstrap(BootstrapRequest{Done: false})
+	require.NoError(t, err)
+
+	logged, err := r.Log(LogRequest{Text: "a story from years ago", Now: fixedNow(), DayArg: "2014"})
+	require.NoError(t, err)
+	assert.True(t, rawBootstrapFlag(t, a, logged.RawID),
+		"a capture made in bootstrap mode is flagged historical")
+
+	attached, err := r.Attach(AttachRequest{Path: photo, Now: fixedNow(), DayArg: "2014"})
+	require.NoError(t, err)
+	assert.True(t, rawBootstrapFlag(t, a, attached.RawID))
+
+	// `/bootstrap done` ends it — the next capture is ordinary again.
+	_, err = r.Bootstrap(BootstrapRequest{Done: true})
+	require.NoError(t, err)
+
+	after, err := r.Log(LogRequest{Text: "back to today", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.False(t, rawBootstrapFlag(t, a, after.RawID))
+}
+
+// rawBootstrapFlag reads the `bootstrap` frontmatter flag off a written raw
+// entry — every raw entry carries one, so a missing value is a failure rather
+// than a false.
+func rawBootstrapFlag(t *testing.T, a *storage.Adapter, rawID string) bool {
+	t.Helper()
+	doc, err := a.ReadRaw(rawID)
+	require.NoError(t, err)
+	flag, ok := doc.Fields["bootstrap"].(bool)
+	require.True(t, ok, "raw entry %s carries no bootstrap flag", rawID)
+	return flag
+}

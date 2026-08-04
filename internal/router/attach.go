@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -84,10 +85,11 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 	if err != nil {
 		return AttachResult{}, fmt.Errorf("invalid harness; nothing was saved: %w", err)
 	}
-	occ, precision, day, err := resolveCaptureDay(req.DayArg, now)
+	when, err := resolveCaptureWhen(req.DayArg, now)
 	if err != nil {
 		return AttachResult{}, err
 	}
+	day := when.LogicalDate
 
 	// The sidecar links to the raw entry emitted alongside it; the raw id is
 	// derived from now (minute precision), so it is known before the media is
@@ -110,11 +112,12 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 	relPath := r.mediaRelPath(rec)
 	res, err := r.store.WriteRaw(storage.RawEntry{
 		RecordedAt:          now,
-		OccurredAt:          occ,
-		OccurredAtPrecision: precision,
+		OccurredAt:          when.OccurredAt,
+		OccurredAtPrecision: when.Precision,
+		OccurredAtEnd:       when.End,
 		Source:              source,
 		Command:             commandAttach,
-		Bootstrap:           false,
+		Bootstrap:           r.cfg.BootstrapMode,
 		Body:                attachBody(relPath, req.Caption),
 	})
 	if err != nil {
@@ -146,60 +149,58 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 	}, nil
 }
 
-// resolveCaptureDay resolves the capture instant, its precision, and the
-// logical day for one capture turn from the optional `--day` token. It is the
-// single backdating grammar the capture verbs share — `lucid log`,
-// `lucid attach`, and `lucid memory --attach` all resolve `--day` here, so
-// there is one rule to learn and one rollover boundary, never a second clock.
-// A leading `@` is optional (the `--day` flag reads naturally either way):
+// resolveCaptureWhen resolves one capture's occurrence from the optional
+// `--day` token: the instant, its precision, the end a clock range yields, and
+// the logical day the entry files under. It is the capture verbs' entry into
+// the strict tier — `lucid log`, `lucid attach`, `lucid memory`, and
+// `lucid memory --attach` all resolve `--day` here, so there is one rule to
+// learn and one rollover boundary, never a second clock.
 //
-//   - "" (empty)  → now at exact precision; the logical day applies the 04:00
-//     rollover, so a pre-dawn capture files under the day just lived.
-//   - "yesterday" → the logical day before the current logical day, at
-//     approximate precision. It steps back from the rollover-adjusted base
-//     date the same way [resolveDayArg] does for `/day`, so before 04:00 it
-//     names the day before the one a bare capture files under rather than
-//     colliding with it — a 02:00 catch-up means the day before the one just
-//     lived.
-//   - "YYYY-MM-DD" → that civil day at approximate precision.
+// The grammar itself lives in [observations.ResolveDay] (usage/commands.md
+// §"Backdating with --day"), which owns every accepted form, the 04:00
+// rollover on the relative word, the literal reading of an explicit date, and
+// the future ceiling. What this function adds is the capture verbs' own copy:
+// an unreadable token or a day that has not happened yet is a clean error
+// naming what was wrong, and nothing is written (error-states.md §St-1). The
+// realistic typo — a wrong year, transposed digits — is caught here rather
+// than filing an entry silently far in the future.
 //
-// A resolved day later than the current civil date is refused: a capture
-// cannot be attributed to a day that has not happened, and the realistic typo
-// (a wrong year, transposed digits) would otherwise file an entry silently far
-// in the future. The ceiling is the civil date rather than the logical day so
-// that before 04:00 the date on the caller's own clock still resolves.
-//
-// An unparseable token or a future day is a clean error and nothing is written
-// (error-states.md §St-1).
-func resolveCaptureDay(dayArg string, now time.Time) (occ time.Time, precision, day string, err error) {
-	arg := strings.TrimPrefix(strings.TrimSpace(dayArg), "@")
+// The refusal is a [DayRejectedError], the same type the Engine verbs' side
+// returns, so a capture surface can tell a fixed reason the user should read
+// from a runtime fault and print it — [cli.Execute] renders no returned error,
+// so a refusal nobody prints reaches the user as a bare non-zero exit.
+func resolveCaptureWhen(dayArg string, now time.Time) (observations.DayResolution, error) {
+	res, err := observations.ResolveDay(dayArg, now, observations.DayOptions{AllowPartial: true})
 	switch {
-	case arg == "":
-		occ, precision = now, storage.PrecisionExact
-		day = observations.DeriveLogicalDate(now, observations.PrecisionExact, observations.DefaultRolloverMin)
-	case strings.EqualFold(arg, "yesterday"):
-		occ = observations.LogicalBaseDate(now, observations.DefaultRolloverMin).AddDate(0, 0, -1)
-		precision, day = storage.PrecisionApproximate, observations.DateString(occ)
-	default:
-		d, perr := observations.ParseDate(arg, now.Location())
-		if perr != nil {
-			return time.Time{}, "", "", fmt.Errorf(
-				"could not read the day %q (want @yesterday or @YYYY-MM-DD); nothing was saved: %w", dayArg, perr,
-			)
-		}
-		occ, precision, day = d, storage.PrecisionApproximate, observations.DateString(d)
-	}
-
-	// Every branch falls through to one ceiling, so the rule is stated once.
-	// The empty and yesterday branches can never trip it; routing them through
-	// it anyway keeps a single comparison site instead of three.
-	if observations.DateOf(occ).After(observations.DateOf(now)) {
-		return time.Time{}, "", "", fmt.Errorf(
-			"cannot capture against %s — that day has not happened yet; nothing was saved", day,
+	case errors.Is(err, observations.ErrDayFuture):
+		// The ceiling stays in ResolveDay; this second pass only recovers the
+		// day the value resolved to, so the refusal can name it.
+		future, _ := observations.ResolveDay(dayArg, now, observations.DayOptions{
+			AllowFuture: true, AllowPartial: true,
+		})
+		return observations.DayResolution{}, rejectDay(
+			"cannot capture against %s — that day has not happened yet; nothing was saved", future.LogicalDate,
+		)
+	case err != nil:
+		// Self-contained rather than wrapped: the sentinel already carries the
+		// value and the accepted forms, and repeating them reads as a stutter.
+		return observations.DayResolution{}, rejectDay(
+			"could not read the day %q (want %s); nothing was saved", dayArg, observations.AcceptedDayForms,
 		)
 	}
+	return res, nil
+}
 
-	return occ, precision, day, nil
+// resolveCaptureDay is the day-level view of [resolveCaptureWhen] — the
+// instant, its precision, and the logical day, without the range end. It
+// states the capture verbs' day contract in the three fields every dated
+// record needs, and is the shape the backdating branches are covered against.
+func resolveCaptureDay(dayArg string, now time.Time) (occ time.Time, precision, day string, err error) {
+	res, err := resolveCaptureWhen(dayArg, now)
+	if err != nil {
+		return time.Time{}, "", "", err
+	}
+	return res.OccurredAt, res.Precision, res.LogicalDate, nil
 }
 
 // predictRawID renders the minute-precision raw id for a capture instant

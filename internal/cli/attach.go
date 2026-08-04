@@ -64,7 +64,7 @@ func newAttachCmd() *cobra.Command {
 				ChannelID: flagOrEnv(cmd, flagChannel, envChannel, sourceCLI),
 			})
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
@@ -82,7 +82,9 @@ func newAttachCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String(flagCaption, "", "Optional caption/alt-text stored verbatim with the attachment")
-	cmd.Flags().String(flagDay, "", "Attribute to a logical day, e.g. @yesterday or @YYYY-MM-DD (04:00 rollover aware)")
+	// The same strict --day the other capture verbs carry: attach resolves through
+	// the shared resolver, so it accepts every form that grammar accepts.
+	registerDayFlag(cmd)
 	// The three provenance fields router.Attach consumes, declared through the
 	// capture verbs' shared flag > env > default accept surface so a relaying
 	// harness can attribute an attach while a bare terminal call stays cli.

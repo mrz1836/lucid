@@ -33,6 +33,99 @@ this reference stays the precise baseline.
 - **Provenance over magic:** stateful commands acknowledge only *after* the
   write lands, and say what was written.
 
+### Backdating with --day
+
+Every verb that stamps a logical day reads **one** date grammar, so a token that
+works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
+the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
+flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
+[`workout log`](#workout), [`mode`](#mode), [`storm`](#storm), and
+[`closeout`](#closeout).
+
+**The grammar.** A leading `@` is optional on every form.
+
+| Form | Resolves to | Precision |
+|------|-------------|-----------|
+| `@yesterday` · `yesterday` | The logical day before the current one | `approximate` |
+| `@YYYY-MM-DD` · `YYYY-MM-DD` | That civil day, taken literally | `approximate` |
+| `YYYY-MM-DDTHH:MM[:SS]` | That exact instant | `exact` |
+| `HH:MM` | Today at that time | `exact` |
+| `HH:MM-HH:MM` | A span within today — also sets `occurred_at_end` | `range` |
+| `<day> <time>` — e.g. `--day "@yesterday 19:30"` | That day at that time | `exact` |
+| `YYYY-MM` | The first day of that month | `approximate` |
+| `YYYY` | January 1st of that year | `approximate` |
+
+**Two tiers, one rule each.**
+
+- **Strict — a date you typed on purpose.** `--day`, the registry's `--start`,
+  `--end`, and `--onset`, and `anchor add`'s positional date. A token the
+  grammar cannot read, or a day in the future, is a clean error: the command
+  exits non-zero, names the accepted forms, and **nothing is written**. A
+  deliberate flag is an assertion, so a typo fails loudly instead of quietly
+  landing on today.
+- **Permissive — an inline `@`-token in `obs` prose.** `lucid obs ate eggs
+  @yesterday` parses the token out of a sentence, and capture is total (P10): an
+  unrecognized token stays in the note as ordinary text and the observation is
+  written anyway. An inline token never blocks a capture.
+
+**The rollover rule.** A relative word respects the 04:00 rollover; an explicit
+date is literal. At 02:00 the logical day has not rolled yet — a bare capture
+still files under the previous calendar day — so `@yesterday` means the day
+*before* that one. `@2026-07-01` means July 1st at any hour. Both tiers follow
+this rule.
+
+**Partial dates.** `--day 2014` records `occurred_at 2014-01-01T00:00` at
+`approximate` precision under `logical_date 2014-01-01`; `--day 2014-09` files
+under `2014-09-01`. A logical day is one real day, so a partial date snaps to
+the period's first instant — which means that on a capture, `2014` and
+`2014-01-01` are indistinguishable once written. The registry
+([`era`](#era), [`injury`](#injury)) is the one place that keeps the string **as
+typed**, because "sometime in 2014" is the normal input there rather than an
+edge case.
+
+**A bare four-digit token reads differently per tier.** On a `--day` flag,
+`2014` is the year. In `obs` prose, `@2014` is still the clock time 20:14 —
+colon-less dictation tolerance ([`../observations.md`](../observations.md) §4)
+predates the flag and is kept.
+
+### Accepted behavior changes
+
+Unifying the grammar moved six shipped behaviors. Each is deliberate:
+
+1. **`memory --day` is strict.** A typo or a future date is now a hard error
+   with nothing written, where it previously recorded *now* in silence.
+2. **`memory --day @yesterday` is rollover-aware.** Before 04:00 it resolves one
+   day earlier than it used to.
+3. **`obs`'s inline `@yesterday` is rollover-aware**, on the same terms.
+4. **The registry date flags reject free text.** `era --start "spring 2015"` was
+   stored verbatim; it is now a clean error naming the accepted forms and
+   pointing at `--note`. **This is the one capability removal** — re-type it as
+   `2015-03`, or keep the prose in `--note`.
+5. **Registry `yesterday` is rollover-aware**, where it was calendar-literal.
+6. **The registry date flags reject future dates.** `era --start`, `era --end`,
+   and `injury --onset` never had a future ceiling; they do now. A planned era
+   end waits until it happens, or goes in `--note`.
+
+### Deliberate divergences
+
+Five behaviors sit outside the strict tier on purpose. Nothing else does — the
+registry now carries the future ceiling, so it is not on this list:
+
+| Divergence | Why |
+|------------|-----|
+| `obs`'s inline prose token stays permissive | Capture is total (P10) — a date token parsed out of a sentence must never cost you the capture. This covers the colon-less `HHMM` reading above. |
+| `anchor add` still accepts a future date | An anchor may be a forward commitment — a date you count *toward*, not only since. |
+| `anchor add` rejects a partial date | An anchor renders a precise day count, and counting from a guessed January 1st would be a confident wrong number. |
+| `closeout --day` carries backfill semantics | It is an alias onto `closeout backfill`, so it keeps that path's `backfill_window_days` window and rejects today as well as the future. |
+| The registry stores a partial date as typed | `--onset 2014-09` stores `"2014-09"`, not the snapped day — the registry is where the *degree* of imprecision is itself the record. |
+
+**The closed write surface.** Every verb that stamps a logical day is named
+above: `log`, `attach`, `obs`, `memory`, `workout log`, `era`, `injury`,
+`anchor`, `mode`, `storm`, `closeout`. Two write verbs are deliberately N/A —
+[`thread`](#thread) is a lifecycle registry with no dated occurrence, and
+[`structure`](#structure) distills raw entries that already exist, selected by
+id or window, rather than capturing a new one.
+
 ## CLI commands
 
 ### init
@@ -54,7 +147,7 @@ LUCID_HOME=/tmp/scratch lucid init --json
 ### log
 
 ```
-lucid log [text] [--day @yesterday|@YYYY-MM-DD]
+lucid log [text] [--day <date>]
 ```
 
 Capture `text` as one immutable raw entry under `~/.lucid/raw/`, with a
@@ -63,7 +156,7 @@ or `insights/`. Scaffolds on first use.
 
 | Flag | Effect |
 |------|--------|
-| `--day @yesterday` (or `@YYYY-MM-DD`) | Attribute the entry to a prior logical day at approximate precision, reusing the same 04:00-rollover backdating grammar as `attach` and `obs`. The real capture time is always kept as `recorded_at`; only `occurred_at` follows the flag. Defaults to now at exact precision. |
+| `--day <date>` | Attribute the entry to a prior logical day. Accepts the shared grammar — a relative word, a full or partial date, and an optional time-of-day — on the strict tier: see [Backdating with --day](#backdating-with---day). The real capture time is always kept as `recorded_at`; only `occurred_at` follows the flag. Defaults to now at exact precision. |
 
 Backdating attributes the entry — it does not move it: the day view still lists
 the entry under the day it was captured. `--day` records the day it belongs to on
@@ -73,12 +166,14 @@ the entry itself.
 lucid log "shower thought about the knee-and-weather thing"
 lucid log "power was out all evening, wrote this up the next morning" --day @yesterday
 lucid log "notes from the workshop" --day @2026-07-28
+lucid log "wrapped the session late" --day "@yesterday 19:30"
+lucid log "the summer I moved north" --day 2014
 ```
 
 ### attach
 
 ```
-lucid attach <path> [--caption <text>] [--day @yesterday|@YYYY-MM-DD]
+lucid attach <path> [--caption <text>] [--day <date>]
 ```
 
 Attach a file to the Ledger: copy **any binary** — a photo, a scanned PDF, a
@@ -95,7 +190,7 @@ media, so the attachment is discoverable by the day view and the Mirror.
 | Flag | Effect |
 |------|--------|
 | `--caption <text>` | Optional description, stored verbatim and used to derive the filename slug. Absent on the frictionless "drop it" path. |
-| `--day @yesterday` (or `@YYYY-MM-DD`) | Attribute the media to a prior logical day, reusing the same 04:00-rollover backdating as `log` and `obs`. `@yesterday` steps back from the current logical day, so before 04:00 it resolves to the day *before* the one a bare capture files under. A day in the future is rejected and nothing is saved. Defaults to the current logical day. |
+| `--day <date>` | Attribute the media to a prior logical day, on the strict tier and the shared grammar — see [Backdating with --day](#backdating-with---day). `@yesterday` steps back from the current logical day, so before 04:00 it resolves to the day *before* the one a bare capture files under. A day in the future is rejected and nothing is saved. Defaults to the current logical day. |
 
 Provenance over magic: the ack lands only *after* the write, naming the stored
 path, the sha256, the logical day, and the linked raw id. `--json` emits
@@ -106,13 +201,15 @@ use.
 lucid attach ~/Pictures/IMG_4823.jpg --caption "handwritten session notes, page 1"
 lucid attach ./scan.pdf --caption "clinic intake form"
 lucid attach ~/Pictures/whiteboard.png --day @yesterday
+lucid attach ./scan-2.pdf --day "2026-07-01 19:30"
+lucid attach ./box-of-negatives.jpg --day 2014-09
 lucid attach ./artifact.bin --json
 ```
 
 ### closeout
 
 ```
-lucid closeout [today|skip|backfill] [compact form...]
+lucid closeout [today|skip|backfill] [compact form...] [--day <date>]
 ```
 
 Record the day's committed practice. Deterministic, agent-free, prose output.
@@ -126,6 +223,10 @@ Mirror journal line (`raw/…`), then rebuilds `engine/status.json`. Sub-forms:
 | `lucid closeout skip` | Record an honest miss (a real zero, distinct from silence). No makeup work is ever owed. |
 | `lucid closeout backfill [yesterday\|YYYY-MM-DD] <chars> <cap>[/<tag>] <journal>` | Create or correct a recent day (7-day window) that ran but went unrecorded. Never unsends an already-fired L1/L2. |
 
+| Flag | Effect |
+|------|--------|
+| `--day <date>` | An alias for the **backfill** target, using the shared grammar ([Backdating with --day](#backdating-with---day)). It routes onto the same path as the positional form: the record is stamped `backfilled: true`, the `backfill_window_days` window (default 7) applies, and both the future **and today** are rejected — a backfill target is always a day that has ended. Passing `--day` together with anything that names its own day — the positional `backfill <target>` form, or the `skip` / `today` sub-forms — is a usage error (two targets, one intent) rather than a silent pick between them. |
+
 **Compact grammar** — `<status-chars> <capacity>[/<limiter>] <journal line>`:
 - `<status-chars>`: one character per link in the chain, in order — **d**one,
   **f**loor, **x** skipped (`dfx` = a three-link chain: done, floored, skipped).
@@ -138,6 +239,7 @@ lucid closeout dfx 3/wrist steady session, wrist held me back
 lucid closeout today ddd 4 all links done, logging late
 lucid closeout skip
 lucid closeout backfill yesterday dfd 4 ran it, forgot to record
+lucid closeout --day @yesterday dfd 4 ran it, forgot to record
 ```
 
 These examples assume a three-link chain like the shipped default; the number of
@@ -148,7 +250,7 @@ sequence and the chain schema are in
 ### mode
 
 ```
-lucid mode <green|yellow|red>
+lucid mode <green|yellow|red> [--day <date>]
 ```
 
 Declare today's Engine mode: `green` (full), `yellow` (reduced), `red`
@@ -156,9 +258,14 @@ Declare today's Engine mode: `green` (full), `yellow` (reduced), `red`
 invalid name, is rejected (prints the fixed copy, exits `1`). First declaration
 of the day wins. Human-first prose; ignores `--json`.
 
+| Flag | Effect |
+|------|--------|
+| `--day <date>` | **Gap-fill only.** Declare the mode for a past logical day whose record carries **no** mode. It never overwrites a mode that was declared — the bell still binds every day you showed up for — and reaches back at most `backfill_window_days` (`chain.json`, default 7). Today and any future day are rejected, as they are for [`closeout backfill`](#closeout). The grammar is the shared one ([Backdating with --day](#backdating-with---day)), on the strict tier. |
+
 ```sh
 lucid mode green
 lucid mode yellow
+lucid mode yellow --day @yesterday    # a Tuesday you never declared
 ```
 
 ### status
@@ -230,19 +337,32 @@ Record a dated **milestone anchor** — a "days since X" marker (a cessation, a
 gate cleared, any date you want a running day count from). The record is appended
 to a dedicated, append-only anchors store in the engine tree
 (`engine/anchors.json`); it is never hand-edited, deterministic, no model in the
-path. `<date>` is a civil `YYYY-MM-DD` and is freely **backdatable** — any past or
-future date is accepted. Re-recording the same `<label>` appends again and **the
-latest record wins**: a typo fix and a genuine reset are the same append-only
-operation, and days-since then counts from the newest. `[note...]` is optional
-trailing free text, joined with spaces. Human-first prose ack by default; `--json`
-emits the recorded anchor `{label, date, note, recorded_at}` (`recorded_at` is the
-append timestamp, local TZ). An empty label or an unparseable date is rejected
-(prints the fixed copy, exits `1`); missing arguments are a usage error (exit `2`).
+path. `<date>` takes the shared date grammar
+([Backdating with --day](#backdating-with---day)), so `lucid anchor add sober
+@yesterday` works alongside a civil `YYYY-MM-DD`. Re-recording the same
+`<label>` appends again and **the latest record wins**: a typo fix and a genuine
+reset are the same append-only operation, and days-since then counts from the
+newest. `[note...]` is optional trailing free text, joined with spaces.
+Human-first prose ack by default; `--json` emits the recorded anchor `{label,
+date, note, recorded_at}` (`recorded_at` is the append timestamp, local TZ). An
+empty label or an unparseable date is rejected (prints the fixed copy, exits
+`1`); missing arguments are a usage error (exit `2`).
+
+`anchor add` is the CLI's **two documented exceptions** to the strict tier:
+
+- **A future date is accepted** — an anchor may be a forward commitment, a date
+  you count *toward* rather than only since. It is the one date surface with no
+  future ceiling.
+- **A partial date is rejected.** `lucid anchor add sober 2014` is a clean error
+  explaining that a day count needs a real day: an anchor's whole output is a
+  precise "days since" number, and deriving it from a guessed January 1st would
+  report a confident wrong count. Use `YYYY-MM-DD` (or `@yesterday`) instead.
 
 ```sh
 lucid anchor add sobriety 2026-01-15
 lucid anchor add gate-30 2026-02-01 cleared the first gate
 lucid anchor add sobriety 2026-01-16    # correction — latest record wins
+lucid anchor add streak-restart @yesterday
 ```
 
 Read the running counts with [`metrics`](#metrics) (`anchors[]` → `days_since`).
@@ -250,7 +370,7 @@ Read the running counts with [`metrics`](#metrics) (`anchors[]` → `days_since`
 ### obs
 
 ```
-lucid obs [kind] [value...]
+lucid obs [kind] [value...] [--day <date>]
 ```
 
 Log a health/context observation micro-log. Deterministic, no LLM. The first
@@ -263,11 +383,24 @@ ack is inventory only (never a streak or score). A kind must be enabled in
 Common kinds and aliases: `pain`, `symptom`, `ate`/`drank` (intake), `bm`
 (elimination), `mood`, `slept` (sleep), `med`, `where` (sticky location).
 
+`obs` is the one verb that carries **both** backdating tiers, because it accepts
+a date two ways ([Backdating with --day](#backdating-with---day)):
+
+| Flag | Effect |
+|------|--------|
+| `--day <date>` | The **strict** tier: an unreadable token or a future day is a clean error and nothing is captured. When `--day` and an inline `@`-token are both supplied, **the flag wins** and the inline token is still stripped from the note. |
+
+The inline `@`-token in the prose stays **permissive** — capture is total (P10),
+so an unrecognized token is left in the note as text and the observation is
+written regardless. A colon-less four-digit token in prose is still a clock time
+(`lucid obs ate eggs @2014` → today at 20:14), while `--day 2014` is the year.
+
 ```sh
 lucid obs pain 6 knee aching after the run
 lucid obs bm 4
 lucid obs ate eggs, toast, coffee @yesterday 19:30
 lucid obs mood 4 restless
+lucid obs ate eggs, toast --day @yesterday
 lucid obs where Lisbon    # enable context.location first
 ```
 
@@ -886,7 +1019,7 @@ lucid scheduler uninstall                  # bootout + remove the plist (macOS)
 ### storm
 
 ```
-lucid storm <clause-label|unwritten|end> [--json]
+lucid storm <clause-label|unwritten|end> [--day <date>] [--json]
 ```
 
 Declare or end a **storm** — the pre-committed incapacity state
@@ -905,10 +1038,15 @@ is a no-op: it prints the fixed copy to stderr and exits `1`, writing nothing.
 `--json` emits `{event, label, through, rejected}` (`event` is `declared`, `renewed`,
 or `ended` on success; a rejection carries `rejected: true`).
 
+| Flag | Effect |
+|------|--------|
+| `--day <date>` | Date the storm event itself — available on **declare, renew, and end** — using the shared grammar on the strict tier ([Backdating with --day](#backdating-with---day)). The case it exists for is the honest one: on the days a storm is worst, declaring it at the time is exactly what you could not do. The `through` date follows from the backdated instant, and a renew or end dated to a moment when no storm stood is rejected as before. Storm history is folded in order, so an event dated **before the last recorded storm event** is rejected as incoherent and nothing is written. |
+
 ```sh
 lucid storm wrist-flare
 lucid storm unwritten
 lucid storm end
+lucid storm unwritten --day @yesterday
 lucid storm wrist-flare --json
 ```
 
@@ -1103,6 +1241,10 @@ are what the recommender reads back for the recovery and pain guardrails.
 anchor** through the same verb — a self-report is enough, counts are inventory when
 given, and an anchor writes no body parts so it opens no recovery window.
 
+| Flag | Effect |
+|------|--------|
+| `--day <date>` | Record the session on a prior logical day, using the shared grammar on the strict tier ([Backdating with --day](#backdating-with---day)). It is not a content flag, so it composes with **both** capture forms — the spoken drop and the structured flags. Every derived `body_state` reading inherits the same instant, precision, and logical day as the session itself, so the recovery guardrail (which reads `occurred_at`) and the progress trend (which reads `logical_date`) can never disagree about when the session happened. |
+
 **Provider-backed** for phrasing (the `provider` block), with a deterministic
 fallback; the recommendation itself and the capture parser are model-free.
 
@@ -1111,6 +1253,8 @@ lucid workout                          # today's recommendation, phrased
 lucid workout --json                   # the decided recommendation + trend
 lucid workout log "did pull, shoulder felt fine, ~50 min"
 lucid workout log --type legs --duration 45 --rpe 7 --soreness quads:5 --pain knee:7
+lucid workout log --type push --rpe 6 --day @yesterday   # yesterday's session
+lucid workout log "2 mile bike ride" --day @yesterday    # spoken, backdated
 lucid workout log --anchor --anchor-item squats:55   # today's daily anchor
 ```
 
@@ -1140,7 +1284,7 @@ invocation contract: [`../adr/0006-model-access.md`](../adr/0006-model-access.md
 ### injury
 
 ```
-lucid injury <name> [--status active|managed|resolved] [--onset @yesterday|YYYY-MM-DD]
+lucid injury <name> [--status active|managed|resolved] [--onset <date>]
              [--body-area <text>] [--cause <text>] [--severity <text>]
              [--lasting-effects <text>] [--current-limitations <text>]
              [--treatments <text>] [--uncertainty <text>] [--note <text>] [--json]
@@ -1157,6 +1301,21 @@ append-only `status_history` (recorded, never overwritten). Backdate-aware onset
 first use. No field is a score, streak, or target (inventory, not obligation).
 `--json` emits `{kind, key, display_name, status, created, fields}`.
 
+`--onset` runs on the **strict** tier of the shared grammar
+([Backdating with --day](#backdating-with---day)) and accepts exactly
+`@yesterday`, `YYYY-MM-DD`, `YYYY-MM`, and `YYYY`:
+
+- **Free text is rejected.** `--onset "spring 2015"` is a clean error naming the
+  accepted forms, and nothing is written. Re-type it as `2015-03`, or keep the
+  prose in `--note` where it reads as testimony rather than a date.
+- **A partial value is stored as typed.** `--onset 2014-09` stores `"2014-09"`
+  at `approximate` precision — the registry is where "I know roughly when"
+  belongs, so the degree of imprecision is kept rather than snapped away.
+- **A future onset is rejected.** An injury cannot have begun on a day that has
+  not happened.
+- **A supplied time is parsed but not stored** — registry dates are
+  date-granular, so `--onset "2014-09-01 19:30"` records `"2014-09-01"`.
+
 ```sh
 lucid injury "left knee"
 lucid injury "left knee" --status managed --onset 2014-09 --current-limitations "no deep squats" --json
@@ -1165,7 +1324,7 @@ lucid injury "left knee" --status managed --onset 2014-09 --current-limitations 
 ### era
 
 ```
-lucid era <name> [--start @yesterday|YYYY-MM-DD] [--end @yesterday|YYYY-MM-DD] [--note <text>] [--json]
+lucid era <name> [--start <date>] [--end <date>] [--note <text>] [--json]
 ```
 
 Record or amend a life chapter in the `era` registry ([`life-archive.md`](life-archive.md);
@@ -1174,6 +1333,13 @@ approximate; omit `--end` for a still-running chapter. Stories attach to an era
 via `lucid memory --era <key>`, so the past becomes browsable by chapter. Same
 create-then-amend, append-only merge, and `{kind, key, display_name, status,
 created, fields}` `--json` shape as `injury`.
+
+`--start` and `--end` take the same **strict** registry date rules as
+[`injury --onset`](#injury) — `@yesterday`, `YYYY-MM-DD`, `YYYY-MM`, `YYYY`
+only; free text rejected; a partial value stored as typed; a future date
+rejected ([Backdating with --day](#backdating-with---day)). A chapter you expect
+to end on a known future date waits until it does, or records the expectation in
+`--note`.
 
 ```sh
 lucid era "wild summer" --start 2010-06-01
@@ -1203,7 +1369,7 @@ lucid thread "the memoir" --intent "write the messy years down" --status active 
 ```
 lucid memory <text> [--certainty vivid|hazy|reconstructed] [--era <key>] [--place <name>]
              [--people <name>,<name>]... [--tone <text>] [--why <text>] [--followup <text>]
-             [--day @yesterday|YYYY-MM-DD] [--attach <path> [--caption <text>]] [--json]
+             [--day <date>] [--attach <path> [--caption <text>]] [--json]
 ```
 
 Record a story from your past as one `memory` observation, written at a backdated
@@ -1212,8 +1378,19 @@ Record a story from your past as one `memory` observation, written at a backdate
 The `memory` kind is **enable-gated** — like every observation kind it ships off;
 a disabled kind prints the enable hint and writes nothing (exit `0`). `--certainty`
 is the honesty field; `--era`/`--place`/`--people` become the story's `refs`;
-`--day` is the backdate grammar (`@yesterday`, `YYYY-MM-DD`, or an approximate
-year). **Optional media, never a gate:** `--attach <path>` reuses
+`--day` is the shared backdate grammar — `@yesterday`, a full date, an optional
+time, or an approximate `YYYY-MM` / `YYYY` (see
+[Backdating with --day](#backdating-with---day)).
+
+**`--day` is strict here.** A token the grammar cannot read, or a day in the
+future, is a hard error and **nothing is written** — where a bad value once
+recorded the story at *now* without saying so. `@yesterday` is also
+rollover-aware: before 04:00 it resolves one day earlier than it used to. Both
+are deliberate — a story filed under the wrong decade is the kind of quietly
+false record the archive exists to avoid. When `--attach` is present the media
+inherits the same resolved day, so a story and its photo never split.
+
+**Optional media, never a gate:** `--attach <path>` reuses
 [`lucid attach`](#attach) and links the returned raw id from `refs.entry`; a
 text-only story omits it and is never blocked. Deterministic, agent-free;
 scaffolds on first use. `--json` emits `{event_id, logical_date, partial,

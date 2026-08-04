@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,11 +20,12 @@ import (
 // InjuryWriteRequest carries one `lucid injury` create/amend turn
 // (life-archive.md §2, the injury Fields convention). Name is required; every
 // other field is optional so a bare `lucid injury "left knee"` is a valid first
-// mention. Onset is backdate-aware (@yesterday / YYYY-MM-DD / an approximate
-// value like "2014-09"); the remaining fields are free-text testimony stored
-// verbatim under the documented Fields keys. Status, when set, is an
-// active/managed/resolved transition recorded in the append-only status_history.
-// A zero Now defaults to the wall clock.
+// mention. Onset is a strict-tier date (@yesterday / YYYY-MM-DD / a partial
+// YYYY-MM or YYYY — free text is rejected, see [resolveRegistryDate]); the
+// remaining fields are free-text testimony stored verbatim under the documented
+// Fields keys. Status, when set, is an active/managed/resolved transition
+// recorded in the append-only status_history. A zero Now defaults to the wall
+// clock.
 type InjuryWriteRequest struct {
 	Name               string
 	Status             string
@@ -98,10 +100,17 @@ func (r *Router) WriteInjury(req InjuryWriteRequest) (RegistryWriteResult, error
 		)
 	}
 
+	// The date resolves before the first field is built, so a rejected onset
+	// leaves the record byte-unchanged (error-states.md §B-3, §B-4).
+	onset, onsetPrec, err := resolveRegistryDate(req.Onset, now)
+	if err != nil {
+		return RegistryWriteResult{}, err
+	}
+
 	fields := map[string]any{}
-	if onset, prec := resolveRegistryDate(req.Onset, now); onset != "" {
+	if onset != "" {
 		fields["onset"] = onset
-		fields["onset_precision"] = prec
+		fields["onset_precision"] = onsetPrec
 	}
 	putField(fields, "timeline", req.Timeline)
 	putField(fields, "body_area", req.BodyArea)
@@ -126,14 +135,25 @@ func (r *Router) WriteEra(req EraWriteRequest) (RegistryWriteResult, error) {
 		return RegistryWriteResult{}, fmt.Errorf("era needs a name; nothing was saved")
 	}
 
-	fields := map[string]any{}
-	if start, prec := resolveRegistryDate(req.Start, now); start != "" {
-		fields["start"] = start
-		fields["start_precision"] = prec
+	// Both bounds resolve before the first field is built, so a rejected end
+	// cannot leave a half-applied range behind (error-states.md §B-3, §B-4).
+	start, startPrec, err := resolveRegistryDate(req.Start, now)
+	if err != nil {
+		return RegistryWriteResult{}, err
 	}
-	if end, prec := resolveRegistryDate(req.End, now); end != "" {
+	end, endPrec, err := resolveRegistryDate(req.End, now)
+	if err != nil {
+		return RegistryWriteResult{}, err
+	}
+
+	fields := map[string]any{}
+	if start != "" {
+		fields["start"] = start
+		fields["start_precision"] = startPrec
+	}
+	if end != "" {
 		fields["end"] = end
-		fields["end_precision"] = prec
+		fields["end_precision"] = endPrec
 	}
 	putField(fields, "note", req.Note)
 
@@ -204,26 +224,68 @@ func (r *Router) writeRegistry(kind, name, status string, fields map[string]any,
 	}, nil
 }
 
-// resolveRegistryDate resolves a backdate-aware registry date field (an injury
-// onset, an era start/end) through the shared observations @-grammar. It is
-// total — capture never blocks (product-principles.md P10) — so a value the
-// grammar does not recognize is kept verbatim as an approximate testimony date
-// (the convention's "2014-09" / "spring 2015" case). An empty arg yields no
-// field. Historical registry dates are placeholders, so a resolved calendar
-// date is recorded at approximate precision, matching `lucid attach --day`.
-func resolveRegistryDate(arg string, now time.Time) (value, precision string) {
-	body := strings.TrimPrefix(strings.TrimSpace(arg), "@")
-	if body == "" {
-		return "", ""
+// acceptedRegistryDateForms names the forms a registry date flag reads, for the
+// error it returns when it cannot read one. These fields are date-granular, so
+// the list stops at a day rather than repeating the shared grammar's clock
+// forms — a rejection should teach the shape that belongs here.
+const acceptedRegistryDateForms = "@yesterday, YYYY-MM-DD, YYYY-MM, or YYYY"
+
+// resolveRegistryDate resolves a registry date field (an injury onset, an era
+// start/end) through the shared date grammar (usage/commands.md §"Backdating
+// with --day") on its strict tier: a value the grammar cannot read — free text
+// naming a season, say — and a day that has not happened yet are both clean
+// errors, returned before any field is built so the record stays byte-unchanged
+// (error-states.md §B-3, §B-4). An empty arg yields no field. Free text is the
+// one capability the unified grammar removed: the phrase now belongs in --note,
+// where it reads as testimony rather than as a date.
+//
+// What the registry *stores* diverges from a capture on purpose
+// (life-archive.md §4, "Registry date values"):
+//
+//   - A partial date is written back exactly as typed — `2014-09` stores
+//     "2014-09", `2014` stores "2014" — never the snapped first instant. This
+//     is the one place in Lucid that keeps the *degree* of imprecision an
+//     observation loses when it files under one real day, because a life
+//     chapter or an old injury genuinely has no known day, and that is the
+//     record rather than a defect in it. The branch is explicit because it has
+//     to be: the shared grammar reads a partial date, so without it the
+//     normalizing path below would quietly rewrite "2014-09" to "2014-09-01".
+//   - A relative word and a full date normalize to YYYY-MM-DD.
+//   - A supplied time is parsed but not stored — `"2014-09-01 19:30"` records
+//     "2014-09-01". An explicit truncation, not a silent one.
+//
+// Precision is always approximate: a registry date is a placeholder for when a
+// life event began, never a timestamp. The future ceiling is evaluated on the
+// *resolved* instant while the *typed* string is what gets stored, so `2027` is
+// rejected via its snapped 2027-01-01 while the current year is accepted and
+// stored as typed.
+func resolveRegistryDate(arg string, now time.Time) (value, precision string, err error) {
+	if strings.TrimSpace(arg) == "" {
+		return "", "", nil
 	}
-	if strings.EqualFold(body, "yesterday") {
-		y := observations.DateOf(now).AddDate(0, 0, -1)
-		return observations.DateString(y), observations.PrecisionApproximate
+
+	res, err := observations.ResolveDay(arg, now, observations.DayOptions{AllowPartial: true})
+	switch {
+	case errors.Is(err, observations.ErrDayFuture):
+		// The ceiling stays in ResolveDay; this second pass only recovers the
+		// day the value resolved to, so the refusal can name it.
+		future, _ := observations.ResolveDay(arg, now, observations.DayOptions{
+			AllowFuture: true, AllowPartial: true,
+		})
+		return "", "", fmt.Errorf(
+			"cannot record %s — that day has not happened yet; nothing was saved", future.LogicalDate,
+		)
+	case err != nil:
+		return "", "", fmt.Errorf(
+			"could not read the date %q (want %s); keep an approximate phrase in --note instead; nothing was saved",
+			arg, acceptedRegistryDateForms,
+		)
 	}
-	if d, err := observations.ParseDate(body, now.Location()); err == nil {
-		return observations.DateString(d), observations.PrecisionApproximate
+
+	if res.Granularity != observations.GranularityDay {
+		return res.Typed, observations.PrecisionApproximate, nil
 	}
-	return body, observations.PrecisionApproximate
+	return observations.DateString(res.OccurredAt), observations.PrecisionApproximate, nil
 }
 
 // validRegistryStatus reports whether s is empty (no transition) or one of the

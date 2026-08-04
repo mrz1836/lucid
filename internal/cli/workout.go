@@ -250,9 +250,16 @@ func runWorkout(cmd *cobra.Command) error {
 // is the milestone anchor, a different concept) so there is exactly one workout
 // capture verb.
 //
+// --day backdates the session to the logical day it actually happened. It is
+// not content, so it composes with both forms — the whole point being that "I
+// did this yesterday" is a fact about the session, not a second way of
+// describing it.
+//
 //	lucid workout log "did pull, shoulder felt fine, ~50 min"
 //	lucid workout log --type push --duration 45 --rpe 7 --parts chest,shoulders
 //	lucid workout log --type legs --soreness quads:5 --pain knee:7
+//	lucid workout log --type push --rpe 6 --day @yesterday
+//	lucid workout log "2 mile bike ride, easy" --day @yesterday
 //	lucid workout log --anchor --anchor-item squats:55 --anchor-item core:50
 func newWorkoutLogCmd() *cobra.Command {
 	var (
@@ -290,7 +297,7 @@ func newWorkoutLogCmd() *cobra.Command {
 			}
 			res, err := r.WorkoutLog(req)
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
 			return nil
@@ -309,6 +316,7 @@ func newWorkoutLogCmd() *cobra.Command {
 	f.StringVar(&notes, flagWNotes, "", "Free-text note kept verbatim on the record")
 	f.StringVar(&text, flagWText, "", "Spoken drop to extract instead of structured flags")
 	registerProvenanceFlags(cmd)
+	registerDayFlag(cmd)
 	return cmd
 }
 
@@ -326,6 +334,7 @@ type workoutLogFlags struct {
 // router request. Ranges are checked here (rpe/soreness/pain 0-10, duration
 // non-negative) and rejected as usage errors rather than clamped.
 func buildWorkoutLogRequest(cmd *cobra.Command, in workoutLogFlags) (router.WorkoutLogRequest, error) {
+	day, _ := cmd.Flags().GetString(flagDay)
 	req := router.WorkoutLogRequest{
 		Type:        in.typ,
 		Movements:   in.movements,
@@ -334,6 +343,7 @@ func buildWorkoutLogRequest(cmd *cobra.Command, in workoutLogFlags) (router.Work
 		Anchor:      in.anchor,
 		Notes:       in.notes,
 		Now:         clockNow(),
+		DayArg:      day,
 		Harness:     obsHarness(cmd),
 		Agent:       flagOrEnv(cmd, flagAgent, envAgent, ""),
 		Model:       flagOrEnv(cmd, flagModel, envModel, ""),
@@ -420,9 +430,11 @@ func runWorkoutLogFromText(cmd *cobra.Command, r *router.Router, text string) er
 	if err != nil {
 		return err
 	}
+	day, _ := cmd.Flags().GetString(flagDay)
 	res, err := r.WorkoutLogFromText(cmd.Context(), router.WorkoutLogTextRequest{
 		Text:    text,
 		Now:     clockNow(),
+		DayArg:  day,
 		Harness: obsHarness(cmd),
 		Agent:   flagOrEnv(cmd, flagAgent, envAgent, ""),
 		Model:   flagOrEnv(cmd, flagModel, envModel, ""),
@@ -438,6 +450,12 @@ func runWorkoutLogFromText(cmd *cobra.Command, r *router.Router, text string) er
 // workoutContentFlagsChanged reports whether any structured content flag was
 // set, so a spoken drop combined with structured flags is rejected rather than
 // silently dropping one form.
+//
+// --day is deliberately absent from this list, as are the provenance flags:
+// they say when and where a capture came from, not what happened, so they
+// compose with either form. Adding --day here would reject the most ordinary
+// backdated capture there is — `lucid workout log "2 mile bike ride" --day
+// @yesterday` — as if the user had asked for two things at once.
 func workoutContentFlagsChanged(cmd *cobra.Command) bool {
 	for _, name := range []string{
 		flagWType, flagWMovements, flagWDuration, flagWRPE, flagWParts,

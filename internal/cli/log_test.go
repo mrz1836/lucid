@@ -292,6 +292,28 @@ func TestLog_CLI_DayFlag(t *testing.T) {
 	assert.Contains(t, readOnlyRaw(t, home), "occurred_at_precision: approximate")
 }
 
+// TestLog_CLI_DayFlagRefusalSurfaces proves a refused --day is legible. The
+// strict tier's whole value is failing loudly instead of filing the entry on
+// the wrong day, and Execute renders no returned error — so the reason, the
+// accepted forms and the "nothing was saved" assurance have to be printed here
+// or the user sees a bare non-zero exit and cannot tell it from a crash.
+func TestLog_CLI_DayFlagRefusalSurfaces(t *testing.T) {
+	home := isolatedHome(t)
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "log", "a note", "--day", "@yesterdya")
+	require.Error(t, err)
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "could not read the day")
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Equal(t, 0, rawFileCount(t, home), "a refused day writes nothing")
+
+	_, errOut, err = runRoot(t, BuildInfo{Version: "dev"}, "log", "a note", "--day", "2099-01-01")
+	require.Error(t, err)
+	assert.Contains(t, errOut, "2099-01-01")
+	assert.Contains(t, errOut, "has not happened yet")
+	assert.Equal(t, 0, rawFileCount(t, home))
+}
+
 // TestLog_CLI_MalformedSourceRejected confirms a malformed --source token is
 // rejected honestly (never coerced to cli) and leaves nothing on disk (AC-8
 // via the router, exercised through the CLI accept surface).
