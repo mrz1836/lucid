@@ -159,6 +159,10 @@ func runFlagBackfill(cmd *cobra.Command, r *router.Router, args []string, dayArg
 	}
 	target, yesterday, err := resolveCloseoutDay(dayArg, now)
 	if err != nil {
+		// The fixed reason on stderr, then the error for its exit code: Execute
+		// renders no returned error, so a refusal nobody printed is a bare
+		// non-zero exit the user has to guess at.
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 		return err
 	}
 	return runBackfill(cmd, r, args, target, yesterday, now)

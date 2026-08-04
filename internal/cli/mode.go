@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -37,7 +38,14 @@ func newModeCmd() *cobra.Command {
 				Now:    clockNow(),
 			})
 			if err != nil {
-				return err
+				// A refused `--day` is a deterministic rejection like any other,
+				// so it takes the rejection path below rather than becoming a
+				// silent non-zero exit — Execute renders no returned error.
+				var refused *router.DayRejectedError
+				if !errors.As(err, &refused) {
+					return err
+				}
+				res = router.ModeResult{Rejected: true, Ack: refused.Reason}
 			}
 			if res.Invalid || res.Rejected {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), res.Ack)

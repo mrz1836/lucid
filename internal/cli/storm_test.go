@@ -161,12 +161,25 @@ func TestStormCLI_BackdatedLabelWithSpaces(t *testing.T) {
 		"the joined label reached the router intact rather than being split by the flag")
 }
 
-// TestStormCLI_UnreadableDay surfaces the strict-tier error.
+// TestStormCLI_UnreadableDay surfaces the strict-tier refusal on stderr with a
+// non-zero exit, like an unknown clause label.
 func TestStormCLI_UnreadableDay(t *testing.T) {
 	isolatedHome(t)
 	withClock(t, afternoon())
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten", "--day", "@yesterdya")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "could not read the day")
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten", "--day", "@yesterdya")
+	require.ErrorIs(t, err, errStormRejected)
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "could not read the day")
+}
+
+// TestStormCLI_UnreadableDayJSON: a harness branching on the JSON shape sees a
+// refusal as rejected, not as a bare exit code.
+func TestStormCLI_UnreadableDayJSON(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten", "--day", "@yesterdya", "--json")
+	require.ErrorIs(t, err, errStormRejected)
+	assert.Contains(t, out, "\"rejected\": true")
 }

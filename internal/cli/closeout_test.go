@@ -184,9 +184,10 @@ func TestCloseoutCLI_DayFlagRejectsFuture(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "--day", "2026-07-06", "dfx", "3", "ran it")
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "--day", "2026-07-06", "dfx", "3", "ran it")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "has not happened yet")
+	assert.Contains(t, errOut, "has not happened yet", "the reason reaches the user, not just the exit code")
 	assert.Equal(t, 0, engineDayCount(t, home))
 }
 
@@ -196,9 +197,10 @@ func TestCloseoutCLI_DayFlagUnreadable(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "--day", "@yesterdya", "dfx", "3", "ran it")
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "--day", "@yesterdya", "dfx", "3", "ran it")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not read the day")
+	assert.Contains(t, errOut, "could not read the day", "the reason reaches the user, not just the exit code")
 	assert.Equal(t, 0, engineDayCount(t, home))
 }
 

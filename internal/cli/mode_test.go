@@ -142,14 +142,31 @@ func TestModeCLI_GapFillRejectsToday(t *testing.T) {
 	assert.Equal(t, 0, engineDayCount(t, home))
 }
 
-// TestModeCLI_GapFillUnreadableDay surfaces the strict-tier error and writes
-// nothing.
+// TestModeCLI_GapFillUnreadableDay surfaces the strict-tier refusal the way
+// every other deterministic rejection is surfaced — the reason on stderr and a
+// non-zero exit — and writes nothing. A returned error alone would be invisible:
+// Execute renders none.
 func TestModeCLI_GapFillUnreadableDay(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "@yesterdya")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "could not read the day")
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "@yesterdya")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Equal(t, ExitErr, exitCodeForError(err))
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "could not read the day")
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
+// TestModeCLI_GapFillFutureDay names the day it refused, on stderr.
+func TestModeCLI_GapFillFutureDay(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "green", "--day", "2026-07-06")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Contains(t, errOut, "2026-07-06")
+	assert.Contains(t, errOut, "has not happened yet")
 	assert.Equal(t, 0, engineDayCount(t, home))
 }

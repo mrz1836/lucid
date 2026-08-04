@@ -9,6 +9,23 @@ import (
 	"github.com/mrz1836/lucid/internal/observations"
 )
 
+// DayRejectedError is a `--day` value the strict tier refused: unreadable, or a
+// day that has not happened yet. It is distinct from a runtime failure because
+// the two want opposite handling at the surface — a refusal is a fixed reason
+// the user should read, while a runtime failure is a fault. The CLI matches it
+// with errors.As and prints Reason the same way it prints any other
+// deterministic rejection, since [cli.Execute] renders no returned error.
+type DayRejectedError struct{ Reason string }
+
+// Error returns the fixed reason, which is already a complete user-facing
+// sentence naming what was wrong and that nothing was saved.
+func (e *DayRejectedError) Error() string { return e.Reason }
+
+// rejectDay builds a [DayRejectedError] from a formatted reason.
+func rejectDay(format string, args ...any) error {
+	return &DayRejectedError{Reason: fmt.Sprintf(format, args...)}
+}
+
 // resolveEngineDay resolves an Engine verb's `--day` value into the instant the
 // event records and the logical day it lands on. It is the Engine-side entry
 // into the strict tier — `lucid mode` and `lucid storm` resolve here — and the
@@ -40,13 +57,13 @@ func resolveEngineDay(dayArg string, now time.Time, clocks engine.Clocks) (occ, 
 		future, _ := observations.ResolveDay(dayArg, now, observations.DayOptions{
 			AllowFuture: true, AllowPartial: true,
 		})
-		return time.Time{}, time.Time{}, fmt.Errorf(
+		return time.Time{}, time.Time{}, rejectDay(
 			"cannot record against %s — that day has not happened yet; nothing was saved", future.LogicalDate,
 		)
 	case resErr != nil:
 		// Self-contained rather than wrapped: the sentinel already carries the
 		// value and the accepted forms, and repeating them reads as a stutter.
-		return time.Time{}, time.Time{}, fmt.Errorf(
+		return time.Time{}, time.Time{}, rejectDay(
 			"could not read the day %q (want %s); nothing was saved", dayArg, observations.AcceptedDayForms,
 		)
 	}

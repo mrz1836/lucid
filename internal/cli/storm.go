@@ -59,7 +59,15 @@ func newStormCmd() *cobra.Command {
 				Now:    clockNow(),
 			})
 			if err != nil {
-				return err
+				// A refused `--day` is a deterministic rejection like an unknown
+				// clause label, so it takes the rejection path below — prose on
+				// stderr, or the rejected view under --json — rather than
+				// becoming a silent non-zero exit.
+				var refused *router.DayRejectedError
+				if !errors.As(err, &refused) {
+					return err
+				}
+				res = router.StormResult{Rejected: true, Ack: refused.Reason}
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
 				view := stormView{Event: res.Event, Label: res.Label, Through: res.Through, Rejected: res.Rejected}
