@@ -76,7 +76,7 @@ func newLogCmd() *cobra.Command {
 				Model:     flagOrEnv(cmd, flagModel, envModel, ""),
 			})
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)

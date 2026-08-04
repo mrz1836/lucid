@@ -208,9 +208,14 @@ func TestMemory_CLI_AttachSharesTheBackdatedDay(t *testing.T) {
 func TestMemory_CLI_StrictDayWritesNothing(t *testing.T) {
 	home := enableMemoryHome(t)
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"},
 		"memory", "the summer everything changed", "--day", "@yesterdya")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Empty(t, out)
+	// The reason has to reach the user: Execute renders no returned error, so
+	// a refusal nobody prints is indistinguishable from a crash.
+	assert.Contains(t, errOut, "could not read the day")
+	assert.Contains(t, errOut, "nothing was saved")
 	assert.Empty(t, readObsEvents(t, home), "a refused day leaves the ledger untouched")
 }

@@ -245,13 +245,30 @@ func TestObs_CLI_DayFlagBeatsInlineToken(t *testing.T) {
 
 // TestObs_CLI_DayFlagStrictRejects: the flag is strict, so a typo is a clean
 // refusal that names the accepted forms and writes nothing — where the same
-// token inside the prose would have been kept as text and captured.
+// token inside the prose would have been kept as text and captured. The reason
+// has to reach stderr, not just the returned error: Execute renders none, so a
+// refusal nobody prints is a bare non-zero exit the user has to guess at.
 func TestObs_CLI_DayFlagStrictRejects(t *testing.T) {
 	home := enableAllObsKinds(t)
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "--day", "@yesterdya", "pain", "6", "knee")
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "--day", "@yesterdya", "pain", "6", "knee")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not read the day")
 	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "could not read the day", "the reason reaches the user, not just the exit code")
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Empty(t, readObsEvents(t, home), "a refused day writes nothing")
+}
+
+// TestObs_CLI_DayFlagFutureSurfacesReason names the refused day on stderr, so a
+// mistyped year is legible rather than a silent non-zero exit.
+func TestObs_CLI_DayFlagFutureSurfacesReason(t *testing.T) {
+	home := enableAllObsKinds(t)
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "--day", "2030-01-01", "pain", "6", "knee")
+	require.Error(t, err)
+	assert.Contains(t, errOut, "2030-01-01")
+	assert.Contains(t, errOut, "has not happened yet")
 	assert.Empty(t, readObsEvents(t, home), "a refused day writes nothing")
 }

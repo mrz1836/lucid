@@ -164,6 +164,11 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 // naming what was wrong, and nothing is written (error-states.md §St-1). The
 // realistic typo — a wrong year, transposed digits — is caught here rather
 // than filing an entry silently far in the future.
+//
+// The refusal is a [DayRejectedError], the same type the Engine verbs' side
+// returns, so a capture surface can tell a fixed reason the user should read
+// from a runtime fault and print it — [cli.Execute] renders no returned error,
+// so a refusal nobody prints reaches the user as a bare non-zero exit.
 func resolveCaptureWhen(dayArg string, now time.Time) (observations.DayResolution, error) {
 	res, err := observations.ResolveDay(dayArg, now, observations.DayOptions{AllowPartial: true})
 	switch {
@@ -173,13 +178,13 @@ func resolveCaptureWhen(dayArg string, now time.Time) (observations.DayResolutio
 		future, _ := observations.ResolveDay(dayArg, now, observations.DayOptions{
 			AllowFuture: true, AllowPartial: true,
 		})
-		return observations.DayResolution{}, fmt.Errorf(
+		return observations.DayResolution{}, rejectDay(
 			"cannot capture against %s — that day has not happened yet; nothing was saved", future.LogicalDate,
 		)
 	case err != nil:
 		// Self-contained rather than wrapped: the sentinel already carries the
 		// value and the accepted forms, and repeating them reads as a stutter.
-		return observations.DayResolution{}, fmt.Errorf(
+		return observations.DayResolution{}, rejectDay(
 			"could not read the day %q (want %s); nothing was saved", dayArg, observations.AcceptedDayForms,
 		)
 	}

@@ -87,6 +87,23 @@ func TestAttach_CLI_CaptionAndDay(t *testing.T) {
 	assert.Equal(t, 1, mediaFileCount(t, home))
 }
 
+// TestAttach_CLI_DayRefusalSurfaces proves a refused --day names its reason on
+// stderr and stores no media. Execute renders no returned error, so an
+// unprinted refusal would reach the user as a bare non-zero exit — on the one
+// verb where a silent failure is easiest to miss, since the file the user
+// pointed at is still sitting there afterwards.
+func TestAttach_CLI_DayRefusalSurfaces(t *testing.T) {
+	home := isolatedHome(t)
+	path := writeTempFile(t, "page.pdf", []byte("%PDF-1.7 opaque non-image bytes"))
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "attach", path, "--day", "@yesterdya")
+	require.Error(t, err)
+	assert.Empty(t, out)
+	assert.Contains(t, errOut, "could not read the day")
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Equal(t, 0, mediaFileCount(t, home), "a refused day stores no media")
+}
+
 // TestAttach_CLI_JSON confirms the --json shape carries the fields a script
 // needs to locate and verify the stored binary (AC-10).
 func TestAttach_CLI_JSON(t *testing.T) {

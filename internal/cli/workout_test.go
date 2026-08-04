@@ -462,9 +462,13 @@ func TestWorkout_Log_DayComposesWithSpokenDrop(t *testing.T) {
 // clean refusal on both capture forms, with nothing written.
 func TestWorkout_Log_DayStrictRejectedCLI(t *testing.T) {
 	home := enableWorkoutKinds(t)
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log",
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log",
 		"--type", "push", "--pain", "knee:7", "--day", "2099-01-01")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "has not happened yet")
+	// The reason reaches the user, not just the exit code — Execute renders no
+	// returned error, so an unprinted refusal is a bare non-zero exit.
+	assert.Contains(t, errOut, "2099-01-01")
+	assert.Contains(t, errOut, "has not happened yet")
 	assert.Empty(t, readObsEvents(t, home), "a refused day writes neither session nor reading")
 }

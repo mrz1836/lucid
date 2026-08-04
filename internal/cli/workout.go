@@ -297,7 +297,7 @@ func newWorkoutLogCmd() *cobra.Command {
 			}
 			res, err := r.WorkoutLog(req)
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
 			return nil

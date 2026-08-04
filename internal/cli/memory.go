@@ -106,14 +106,14 @@ func newMemoryCmd() *cobra.Command {
 					Now:     req.Now,
 				})
 				if aerr != nil {
-					return aerr
+					return emitRefusedDay(cmd, aerr)
 				}
 				req.EntryRef = ares.RawID
 			}
 
 			res, err := r.WriteMemory(req)
 			if err != nil {
-				return err
+				return emitRefusedDay(cmd, err)
 			}
 			return renderMemoryWrite(cmd, res)
 		},
