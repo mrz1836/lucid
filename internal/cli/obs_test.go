@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,4 +225,33 @@ func TestDay_CLI_EmptyDay(t *testing.T) {
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "day", "2026-06-01")
 	require.NoError(t, err)
 	assert.Contains(t, out, "No record for 2026-06-01.")
+}
+
+// TestObs_CLI_DayFlagBeatsInlineToken: obs carries both backdating tiers, and
+// the deliberate flag wins over the token parsed out of the prose — with the
+// consumed token still stripped from the captured text.
+func TestObs_CLI_DayFlagBeatsInlineToken(t *testing.T) {
+	home := enableAllObsKinds(t)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"obs", "--day", "2026-06-01", "ate", "eggs,", "toast", "@yesterday")
+	require.NoError(t, err)
+
+	events := readObsEvents(t, home)
+	require.Len(t, events, 1)
+	assert.Equal(t, "2026-06-01", events[0].LogicalDate)
+	assert.NotContains(t, fmt.Sprint(events[0].Payload), "@yesterday")
+}
+
+// TestObs_CLI_DayFlagStrictRejects: the flag is strict, so a typo is a clean
+// refusal that names the accepted forms and writes nothing — where the same
+// token inside the prose would have been kept as text and captured.
+func TestObs_CLI_DayFlagStrictRejects(t *testing.T) {
+	home := enableAllObsKinds(t)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "--day", "@yesterdya", "pain", "6", "knee")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not read the day")
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Empty(t, readObsEvents(t, home), "a refused day writes nothing")
 }

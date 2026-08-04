@@ -417,3 +417,54 @@ func TestWorkoutFire_RejectsArgs(t *testing.T) {
 	root.SetArgs([]string{"workout", "fire", "extra"})
 	require.Error(t, root.Execute())
 }
+
+// TestWorkout_Log_DayFlagStructuredCLI is the case that started this: a session
+// done on a prior day, logged today. The session and every derived body_state
+// reading must land on that day with the same instant and precision, because
+// the recovery guardrail reads occurred_at and the progress trend reads
+// logical_date.
+func TestWorkout_Log_DayFlagStructuredCLI(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log",
+		"--type", "push", "--pain", "knee:7", "--day", "2026-06-01")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Logged workout as `")
+
+	events := readObsEvents(t, home)
+	workouts := eventsOfKind(events, observations.KindWorkout)
+	states := eventsOfKind(events, observations.KindBodyState)
+	require.Len(t, workouts, 1)
+	require.Len(t, states, 1)
+
+	assert.Equal(t, "2026-06-01", workouts[0].LogicalDate)
+	assert.Equal(t, workouts[0].LogicalDate, states[0].LogicalDate)
+	assert.Equal(t, workouts[0].OccurredAt, states[0].OccurredAt)
+	assert.Equal(t, workouts[0].OccurredAtPrecision, states[0].OccurredAtPrecision)
+}
+
+// TestWorkout_Log_DayComposesWithSpokenDrop: --day says *when*, not *what*, so
+// it is not a content flag — a spoken drop plus --day is an ordinary backdated
+// capture, not a mixed-form usage error.
+func TestWorkout_Log_DayComposesWithSpokenDrop(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	fake := withScriptedProvider(t, provider.Exchange{Content: workoutCLIReply})
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log",
+		"--day", "2026-06-01", "did pull, shoulder felt fine, 50 min")
+	require.NoError(t, err)
+	assert.Equal(t, 1, fake.Calls())
+
+	workouts := eventsOfKind(readObsEvents(t, home), observations.KindWorkout)
+	require.Len(t, workouts, 1)
+	assert.Equal(t, "2026-06-01", workouts[0].LogicalDate)
+}
+
+// TestWorkout_Log_DayStrictRejectedCLI: a day that has not happened yet is a
+// clean refusal on both capture forms, with nothing written.
+func TestWorkout_Log_DayStrictRejectedCLI(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log",
+		"--type", "push", "--pain", "knee:7", "--day", "2099-01-01")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "has not happened yet")
+	assert.Empty(t, readObsEvents(t, home), "a refused day writes neither session nor reading")
+}

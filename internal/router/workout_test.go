@@ -372,3 +372,131 @@ func TestWorkoutLogFromText_DisabledKindNoModelCall(t *testing.T) {
 	assert.True(t, res.Rejected)
 	assert.Equal(t, 0, p.Calls(), "a disabled kind must not spend a model call")
 }
+
+// TestWorkoutLog_BackdatesSessionAndReadings is the driving case of the whole
+// backdating pass: a session done yesterday, logged today. Every derived
+// body_state reading must inherit the session's occurred_at, precision AND
+// logical_date — the recovery guardrail reads occurred_at while the progress
+// trend reads logical_date, so a half-applied backdate makes the two disagree
+// about when the session happened, silently and only for backdated sessions.
+func TestWorkoutLog_BackdatesSessionAndReadings(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout, observations.KindBodyState)
+	res, err := r.WorkoutLog(WorkoutLogRequest{
+		Type:       "push",
+		BodyStates: []BodyStateInput{{Part: "knee", Pain: intPtr(7)}, {Part: "quads", Soreness: intPtr(4)}},
+		Now:        nowEDT(),
+		DayArg:     "@yesterday",
+	})
+	require.NoError(t, err)
+	require.Len(t, res.BodyStateIDs, 2)
+	assert.Equal(t, "2026-07-01", res.LogicalDate, "the session files under the day it happened")
+
+	session := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	for _, id := range res.BodyStateIDs {
+		reading := eventByID(t, r, res.LogicalDate, id)
+		assert.Equal(t, session.OccurredAt, reading.OccurredAt)
+		assert.Equal(t, session.OccurredAtPrecision, reading.OccurredAtPrecision)
+		assert.Equal(t, session.LogicalDate, reading.LogicalDate)
+	}
+
+	// recorded_at stays the real capture time — a backdate moves when it
+	// happened, never when it was written down.
+	assert.Contains(t, session.RecordedAt, "2026-07-02")
+}
+
+// TestWorkoutLog_BackdateWithTimePromotesToExact: the shared grammar's optional
+// trailing time reaches the session and its readings alike, which is what makes
+// a morning session and an evening one distinguishable to the recovery window.
+func TestWorkoutLog_BackdateWithTimePromotesToExact(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout, observations.KindBodyState)
+	res, err := r.WorkoutLog(WorkoutLogRequest{
+		Type:       "legs",
+		BodyStates: []BodyStateInput{{Part: "quads", Soreness: intPtr(5)}},
+		Now:        nowEDT(),
+		DayArg:     "@yesterday 06:00",
+	})
+	require.NoError(t, err)
+	require.Len(t, res.BodyStateIDs, 1)
+
+	session := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	reading := eventByID(t, r, res.LogicalDate, res.BodyStateIDs[0])
+	assert.Equal(t, observations.PrecisionExact, session.OccurredAtPrecision)
+	assert.Contains(t, session.OccurredAt, "2026-07-01T06:00")
+	assert.Equal(t, session.OccurredAt, reading.OccurredAt)
+	assert.Equal(t, session.OccurredAtPrecision, reading.OccurredAtPrecision)
+}
+
+// TestWorkoutLog_NoDayArgStampsNow: the default is untouched — an unbackdated
+// session is still now at exact precision, as every existing caller expects.
+func TestWorkoutLog_NoDayArgStampsNow(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout)
+	res, err := r.WorkoutLog(WorkoutLogRequest{Type: "push", Now: nowEDT()})
+	require.NoError(t, err)
+
+	session := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	assert.Equal(t, observations.PrecisionExact, session.OccurredAtPrecision)
+	assert.Contains(t, session.OccurredAt, "2026-07-02T21:45")
+}
+
+// TestWorkoutLog_StrictDayWritesNothing: `--day` is a deliberate flag, so it
+// runs on the strict tier — a typo or a day that has not happened yet is a
+// clean refusal with no session and no reading on disk.
+func TestWorkoutLog_StrictDayWritesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name, day, want string
+	}{
+		{name: "typo", day: "@yesterdya", want: "could not read the day"},
+		{name: "future", day: "2027-01-01", want: "has not happened yet"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bootedWorkout(t, observations.KindWorkout, observations.KindBodyState)
+			_, err := r.WorkoutLog(WorkoutLogRequest{
+				Type:       "push",
+				BodyStates: []BodyStateInput{{Part: "knee", Pain: intPtr(7)}},
+				Now:        nowEDT(),
+				DayArg:     tc.day,
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Contains(t, err.Error(), "nothing was saved")
+
+			events, _, rerr := r.Store().ReadObservationsDay(observations.DateString(observations.DateOf(nowEDT())))
+			require.NoError(t, rerr)
+			assert.Empty(t, events, "a refused day leaves the day file empty")
+		})
+	}
+}
+
+// TestWorkoutLogFromText_BackdatesSpokenDrop: --day is not content, so it
+// composes with a spoken drop rather than competing with it.
+func TestWorkoutLogFromText_BackdatesSpokenDrop(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout, observations.KindBodyState)
+	p := &provider.Fake{Script: []provider.Exchange{{Content: workoutExtractReply}}}
+	res, err := r.WorkoutLogFromText(context.Background(), WorkoutLogTextRequest{
+		Text:   "did pull, shoulder felt fine, ~50 min",
+		Now:    nowEDT(),
+		DayArg: "@yesterday",
+	}, p)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-07-01", res.LogicalDate)
+
+	session := eventByID(t, r, res.LogicalDate, res.WorkoutID)
+	for _, id := range res.BodyStateIDs {
+		reading := eventByID(t, r, res.LogicalDate, id)
+		assert.Equal(t, session.OccurredAt, reading.OccurredAt)
+		assert.Equal(t, session.LogicalDate, reading.LogicalDate)
+	}
+}
+
+// TestWorkoutLogFromText_StrictDayNoModelCall: an unreadable day is refused
+// beside the disabled-kind gate — a doomed request should not cost a model call
+// before it is turned away.
+func TestWorkoutLogFromText_StrictDayNoModelCall(t *testing.T) {
+	r := bootedWorkout(t, observations.KindWorkout)
+	p := &provider.Fake{Script: []provider.Exchange{{Content: workoutExtractReply}}}
+	_, err := r.WorkoutLogFromText(context.Background(), WorkoutLogTextRequest{
+		Text: "did pull", Now: nowEDT(), DayArg: "@yesterdya",
+	}, p)
+	require.Error(t, err)
+	assert.Equal(t, 0, p.Calls(), "an unreadable day must not spend a model call")
+}
