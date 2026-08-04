@@ -152,7 +152,9 @@ superseded *only* for these three sends.
 | `/storm end [--day <date>]` | End a standing storm early; expiry at the duration bound is otherwise automatic. Breach math resets at exit (engine §4). | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
 | `/profile <name>` | Switch to a named clock profile defined in `chain.json` (definitions change only at a Retro — engine §2). Sticky, recorded, **effective from the next logical day, never the current one**; the outgoing day completes under the clocks that started it. | `engine/profile.json` (append-only `history[]`) |
 | `metrics` (read; CLI `lucid metrics [--json]`) | Read-only **practice-quality** rollup: current/longest streak, 30-day adherence (co-presented with its honest co-numbers) **plus the 30/60/90 gate rollups in `--json`**, misses in window, error-budget burn, and a days-since count for each recorded anchor. Assembled from existing Engine folds (`ComputeStreaks`, the adherence/error-budget windows) — no new chain math; the only new arithmetic is the days-since day count. | None (silent scaffold only) |
-| `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` reads the shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)) with two documented carve-outs: a **future date is accepted** (an anchor may be a forward commitment — the CLI's only surface with no future ceiling), and a **partial date is rejected** (a "days since" count needs a real day, never a guessed January 1st). **Latest record per label wins**. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` reads the shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)) with two documented carve-outs: a **future date is accepted** (an anchor may be a forward commitment — the CLI's only surface with no future ceiling), and a **partial date is rejected** (a "days since" count needs a real day, never a guessed January 1st). **Latest record per identity wins**: the append reuses the id of the **active** anchor holding that label (a correction), and mints a new id only when none does — a first use, or a label whose only holder was sunset. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `anchor sunset <label> [reason]` (record; CLI `lucid anchor sunset`) | Retire a milestone from the counting surfaces without deleting anything: appends one full mirror of the anchor plus `state: "sunset"`, carrying the anchor's own `date` and the optional reason in `note`. The milestone leaves `metrics` prose, `anchors[]`, and the witness aging-anchor check, and appears in `metrics --json` → `anchors_sunset[]`. Rejects an unrecorded label (naming the recorded ones) or an already-sunset one, before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `anchor rename <label> <new-label>` (record; CLI `lucid anchor rename`) | Change an active anchor's display name, keeping its id, date, note and running day count — one append under the same id. Against a **legacy (id-less) anchor** it writes a **pair** in a single write: an id-less sunset stub retiring `legacy:<old-label>`, plus a new id-bearing record carrying the original date and note under the new name. Rejects an unrecorded, already-sunset, identical, or actively-held target label before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
 
 `/chain` (editing chain config in-channel) is deliberately **not** a
 command: parameters change at most once per weekly Retro (engine §5),
@@ -475,12 +477,16 @@ Retro.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "history": [
     {"label": "sobriety", "date": "2026-01-15", "note": "",
      "recorded_at": "2026-01-15T08:04:00-05:00"},
-    {"label": "gate-30", "date": "2026-02-01", "note": "cleared the first gate",
-     "recorded_at": "2026-02-01T21:12:00-05:00"}
+    {"id": "anchor_2026_02_01_a", "label": "gate-30", "date": "2026-02-01",
+     "note": "cleared the first gate",
+     "recorded_at": "2026-02-01T21:12:00-05:00"},
+    {"id": "anchor_2026_02_01_a", "label": "gate-30", "date": "2026-02-01",
+     "note": "mistyped label", "recorded_at": "2026-08-04T09:30:00-04:00",
+     "state": "sunset"}
   ]
 }
 ```
@@ -488,18 +494,54 @@ Retro.
 A **milestone anchor** is a recorded date the Engine counts a running "days
 since" from — a cessation, a gate cleared, any date worth a running day count.
 The store is **append-only** and never hand-edited, the same discipline as
-`storm.json` and `profile.json`: `anchor add <label> <date> [note]` appends one
-`{label, date, note, recorded_at}` record to `history[]`. `date` is a civil
-`YYYY-MM-DD` and is backdatable (any past or future date). **Latest record per
-label wins**, folded at read time by append order (`recorded_at`), so a
-correction whose date is *earlier* than the original still supersedes it — a typo
-fix and a genuine reset are the same append-only operation. Days-since counts
+`storm.json` and `profile.json`: every verb appends one record to `history[]` and
+no record is ever rewritten or removed.
+
+**Identity.** An anchor's identity is its `id` — `anchor_YYYY_MM_DD_<slot>`, a
+per-day bijective base-26 slot (the same grammar the insights store uses),
+minted from the clock and never derived from the label. That makes the **label a
+mutable display name**: it can be corrected or renamed without forking the
+milestone, and two milestones that reuse a name stay distinct. The first record
+above is an **id-less legacy record**: records written before `version: 2` carry
+no `id`, are **never rewritten**, and fold under a synthetic `legacy:<label>`
+identity derived at read time. That identity is published on the JSON surfaces
+(as `"id": "legacy:sobriety"`) but is never written to this file, and a legacy
+anchor therefore behaves exactly as it always has.
+
+**The fold: latest record per `id` wins**, at read time by append order
+(`recorded_at`), where a record's identity is its `id`, or `legacy:<label>` when
+absent. A correction whose date is *earlier* than the original still supersedes
+it — a typo fix and a genuine reset are the same append-only operation.
+`anchor add <label> <date> [note]` appends under the id of the **active** anchor
+holding that label when there is one, and mints a new id when there is not (a
+first use, or a label whose only holder was sunset). `date` is a civil
+`YYYY-MM-DD` and is backdatable (any past or future date). Days-since counts
 whole logical days from the folded anchor date, **anchor day = 0**, at the
-chain's rollover boundary; it is **surfaced by `metrics`, never stored** here. No
-capacity, journal, or Mirror data ever rides this file — it holds labels and
-dates only, the same discipline as the storm clause labels. Because the store
-lives in the engine tree (not a Mirror tree), it carries no schema-kind entry in
-the `validate` schema sweep.
+chain's rollover boundary; it is **surfaced by `metrics`, never stored** here.
+
+**`state`** discriminates a retirement, exactly as `event` does in `storm.json`:
+absent ⇒ active; `"sunset"` ⇒ retired. `anchor sunset <label> [reason]` appends a
+full mirror of the anchor plus `state: "sunset"`, carrying the superseded
+anchor's `date` (never the retirement day) and the optional reason in `note`. A
+retired milestone is filtered out of the counting surfaces — `metrics` prose,
+`anchors[]`, and the witness aging-anchor check — while staying in `history[]` in
+full and surfacing in `metrics --json` → `anchors_sunset[]`. `anchor rename
+<label> <new-label>` appends under the **same id** with a new label; against a
+legacy anchor it writes a **pair** in one write — an id-less sunset stub retiring
+`legacy:<old-label>`, plus a new id-bearing record carrying the original date and
+note forward.
+
+**`version: 2` is a signal, not a gate.** It is stamped on every append, so the
+number in a file is always true of that file, but nothing validates it on read —
+a `version: 1` file still reads. The honest consequence of having no gate: an
+older binary reading a v2 file ignores `state` and would keep counting a sunset
+anchor on its metrics surface.
+
+No capacity, journal, or Mirror data ever rides this file — it holds ids, labels
+and dates only. It no longer shares the storm clause labels' discipline: an
+anchor is addressed by a stable id, while a storm clause is still identified by
+its label string. Because the store lives in the engine tree (not a Mirror
+tree), it carries no schema-kind entry in the `validate` schema sweep.
 
 ### Day record — `engine/days/YYYY/MM/day_YYYY_MM_DD.json`
 
