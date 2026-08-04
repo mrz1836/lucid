@@ -266,3 +266,177 @@ func anchorSunsetAck(a engine.Anchor) string {
 		"Anchor sunset: %s — %s. It no longer counts on the metrics surface; the record is kept.", a.Label, a.Date,
 	)
 }
+
+// AnchorRenameRequest is one `lucid anchor rename` intent: change the display
+// name of the milestone a label names. There is no reason field — nothing is
+// being retired, so there is nothing to explain. Now is the record time — the
+// wall clock when zero — and stamps the append.
+type AnchorRenameRequest struct {
+	Label    string
+	NewLabel string
+	Now      time.Time
+}
+
+// AnchorRenameResult reports the surviving renamed record and the
+// inventory-only ack. Retired carries the retirement stub that adopting a
+// pre-id anchor writes alongside it, and is nil on every other path: that one
+// case is the only anchor write in the store that produces two records.
+type AnchorRenameResult struct {
+	Anchor  engine.Anchor
+	Retired *engine.Anchor
+	Ack     string
+}
+
+// AnchorRename executes `lucid anchor rename <label> <new-label>`
+// (engine-module.md §Commands): give an active milestone a different display
+// name. The label is a display name, not the identity, so on an anchor that
+// carries an id this is one more append under that same id: its date, its
+// annotation, and therefore its running day count all carry forward
+// untouched. A rename costs the user nothing.
+//
+// Renaming an anchor recorded *before* ids existed adopts it into the identity
+// model instead, because such a record folds under an identity derived from its
+// label and the label is exactly what changes here. See renameAdoption for why
+// that path writes two records and why they must land together.
+//
+// Every rejection is decided from the folded store before any append, and the
+// store is untouched when one fires (error-states.md §An-1, §An-2, §An-3): a
+// blank new name, renaming a label to itself, a label no active anchor holds
+// (never recorded, or already retired), or a new name an *active* anchor
+// already holds. A name held only by a retired anchor is free, exactly as it is
+// for `anchor add`.
+func (r *Router) AnchorRename(req AnchorRenameRequest) (AnchorRenameResult, error) {
+	now := whenOr(req.Now)
+
+	// The two pure guards run before any read, so a malformed request never
+	// reaches the store.
+	newLabel := strings.TrimSpace(req.NewLabel)
+	if err := validateRename(req.Label, newLabel); err != nil {
+		return AnchorRenameResult{}, err
+	}
+
+	// Scaffold before reading: a never-scaffolded tree has no anchors.json.
+	if err := r.prepareEngine(); err != nil {
+		return AnchorRenameResult{}, err
+	}
+	log, err := r.store.ReadAnchors()
+	if err != nil {
+		return AnchorRenameResult{}, err
+	}
+	latest := engine.LatestAnchors(log)
+
+	target, err := resolveRenameTarget(latest, req.Label, newLabel)
+	if err != nil {
+		return AnchorRenameResult{}, err
+	}
+
+	// The id is copied verbatim, so the milestone keeps its identity and only
+	// its display name moves. Date and note travel with it.
+	renamed := engine.Anchor{
+		ID:         target.ID,
+		Label:      newLabel,
+		Date:       target.Date,
+		Note:       target.Note,
+		RecordedAt: now.Format(time.RFC3339),
+	}
+	if target.ID == "" {
+		return r.renameAdoption(log, target, renamed, now)
+	}
+
+	if err := r.store.AppendAnchor(renamed); err != nil {
+		return AnchorRenameResult{}, renameWriteError(err)
+	}
+	return AnchorRenameResult{Anchor: renamed, Ack: anchorRenameAck(target.Label, renamed)}, nil
+}
+
+// validateRename gates the two things a rename can get wrong without consulting
+// the store: a blank new name, and renaming a label to the name it already has.
+// A blank name reuses the copy `anchor add` raises, so both verbs refuse an
+// empty label identically.
+func validateRename(label, newLabel string) error {
+	if newLabel == "" {
+		return anchorRejection(newLabel, "")
+	}
+	if strings.TrimSpace(label) == newLabel {
+		return rejectAnchor(ErrAnchorLabelTaken, "%q is already its name; nothing was saved.", newLabel)
+	}
+	return nil
+}
+
+// resolveRenameTarget resolves the anchor a bare label names and confirms the
+// new name is free, returning the fixed rejection copy when either fails.
+//
+// Only an *active* holder blocks the new name. A name held solely by a retired
+// anchor is available — the retirement freed it — which is the same rule
+// `anchor add` follows when a sunset label is recorded again.
+func resolveRenameTarget(latest []engine.Anchor, label, newLabel string) (engine.Anchor, error) {
+	target, ok := engine.FindActiveAnchor(latest, label)
+	if !ok {
+		return engine.Anchor{}, anchorStateRejection(latest, label)
+	}
+	if _, taken := engine.FindActiveAnchor(latest, newLabel); taken {
+		return engine.Anchor{}, rejectAnchor(ErrAnchorLabelTaken,
+			"an active anchor already uses %q — sunset or rename it first; nothing was saved.", newLabel,
+		)
+	}
+	return target, nil
+}
+
+// renameAdoption renames an anchor recorded before ids existed by adopting it
+// into the identity model.
+//
+// Such a record folds under an identity synthesized from its label, so renaming
+// it in place would move it to a *different* synthetic identity and leave the
+// original folding as its own still-active anchor — the same milestone under
+// two live names. Adoption is the honest resolution: retire the synthetic
+// identity with an id-less stub under the old name, and mint a real id for a
+// record that carries the date and note forward under the new one. The stub is
+// deliberately note-free; the original note travels on the surviving record.
+//
+// This is the only path in the anchors store that writes two records, and they
+// must land together — a half-applied pair leaves both names active at once,
+// the exact fork this identity model exists to prevent. AppendAnchors is one
+// read and one write for precisely this reason; it must not be split into two
+// appends. Every other anchor verb writes exactly one record, and that
+// asymmetry is meant to stay visible rather than be generalized away.
+func (r *Router) renameAdoption(
+	log engine.AnchorLog, target, renamed engine.Anchor, now time.Time,
+) (AnchorRenameResult, error) {
+	stub := engine.Anchor{
+		Label:      target.Label,
+		Date:       target.Date,
+		RecordedAt: renamed.RecordedAt,
+		State:      engine.AnchorStateSunset,
+	}
+	renamed.ID = engine.NextAnchorID(log, now)
+
+	// Stub first, adopted second, so the history reads in the order the two
+	// facts happened: the old name retired, the milestone continued.
+	if err := r.store.AppendAnchors(stub, renamed); err != nil {
+		return AnchorRenameResult{}, renameWriteError(err)
+	}
+	return AnchorRenameResult{
+		Anchor: renamed, Retired: &stub, Ack: anchorAdoptedRenameAck(target.Label, renamed),
+	}, nil
+}
+
+// renameWriteError wraps a failed rename append with the nothing-was-saved
+// clause, so a caller that could not write reads the same guarantee the
+// rejection paths give.
+func renameWriteError(err error) error {
+	return fmt.Errorf("could not rename the anchor; nothing was saved: %w", err)
+}
+
+// anchorRenameAck builds the inventory ack for a renamed anchor: the name it
+// had, the name it has, and the date it still counts from.
+func anchorRenameAck(from string, a engine.Anchor) string {
+	return fmt.Sprintf("Anchor renamed: %s → %s — %s.", from, a.Label, a.Date)
+}
+
+// anchorAdoptedRenameAck builds the ack for a rename that adopted a pre-id
+// anchor. It names the retired stub, because that record is visible on the
+// retired surface and a user who found it there without being told would read
+// it as a bug rather than as the documented cost of the rename.
+func anchorAdoptedRenameAck(from string, a engine.Anchor) string {
+	return anchorRenameAck(from, a) + " The old name is retired and appears in anchors_sunset."
+}
