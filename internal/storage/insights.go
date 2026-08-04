@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mrz1836/lucid/internal/engine"
 )
 
 // insightsDirName is the flat Mirror subtree of validated insights, one
@@ -292,18 +294,10 @@ func (a *Adapter) nextInsightID(createdAt time.Time) (string, error) {
 
 // slotLabel renders the nth per-day slot as a bijective base-26 lowercase
 // label: 0→a, 25→z, 26→aa, 27→ab, ... It never returns the empty string, so
-// every insight in a day gets a unique, monotonic id.
-func slotLabel(n int) string {
-	var b []byte
-	for {
-		b = append([]byte{byte('a' + n%26)}, b...)
-		n = n/26 - 1
-		if n < 0 {
-			break
-		}
-	}
-	return string(b)
-}
+// every insight in a day gets a unique, monotonic id. The grammar is shared
+// with anchor ids and lives in one place, engine.SlotLabel — this is a
+// delegation, not a second copy.
+func slotLabel(n int) string { return engine.SlotLabel(n) }
 
 // renderInsight builds the full Markdown-with-frontmatter insight document.
 // The body carries the canonical statement under a fixed "# Insight" heading;
