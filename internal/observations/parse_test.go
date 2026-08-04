@@ -337,6 +337,20 @@ func TestParse_Backdating(t *testing.T) {
 	assert.Equal(t, PrecisionApproximate, ydAlone.Precision)
 	assert.Equal(t, at(2026, 7, 1, 0, 0), ydAlone.OccurredAt)
 
+	// The inline token respects the 04:00 rollover like every other spelling
+	// of the word: a 02:00 capture still belongs to the logical day 2026-07-01,
+	// so @yesterday there names 2026-06-30, not the previous calendar day.
+	preRollover := ParseMicrolog(ParseInput{
+		Kind: KindMood, Args: []string{"3", "@yesterday"}, Now: at(2026, 7, 2, 2, 0), SpelledOK: true,
+	})
+	assert.Equal(t, at(2026, 6, 30, 0, 0), preRollover.OccurredAt)
+
+	// A colon-less four-digit token stays a dictated clock time in prose, even
+	// though the same token names a year on a deliberate date flag.
+	dictated := parse(KindMood, "", "3", "@2014")
+	assert.Equal(t, PrecisionExact, dictated.Precision)
+	assert.Equal(t, at(2026, 7, 2, 20, 14), dictated.OccurredAt)
+
 	// @YYYY-MM-DD → approximate midnight (the excavated-memory case).
 	oldDate := parse(KindMemory, "", "hazy", "second", "job", "@2014-09-01")
 	assert.Equal(t, PrecisionApproximate, oldDate.Precision)
@@ -470,9 +484,11 @@ func TestParseMemoryFields_PartialPath(t *testing.T) {
 }
 
 // TestResolveBackdate covers the single-token --day grammar the story-capture
-// verb reuses: empty is now/exact, a bare date is approximate (its own calendar
-// day, never rolled), @yesterday is approximate, a range yields an end, and an
-// unrecognized token falls back to now/exact (capture never blocks).
+// verb reuses: empty is now/exact, a bare date is approximate on its own
+// literal day, @yesterday is approximate on the prior logical day, a range
+// yields an end, and an unrecognized token falls back to now/exact (capture
+// never blocks). The tier and rollover rules themselves are pinned in
+// day_test.go, beside the resolver that owns them.
 func TestResolveBackdate(t *testing.T) {
 	// Empty → now at exact precision.
 	occ, prec, end := ResolveBackdate("", now)

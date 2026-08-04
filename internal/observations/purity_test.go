@@ -27,6 +27,7 @@ func TestObservationsIsPure_NoIONoLLM(t *testing.T) {
 		`"cmp"`:           true,
 		`"crypto/sha256"`: true,
 		`"encoding/json"`: true,
+		`"errors"`:        true,
 		`"fmt"`:           true,
 		`"maps"`:          true,
 		`"slices"`:        true,

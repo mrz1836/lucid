@@ -724,27 +724,33 @@ func parseSleep(res *ParseResult, tokens []string, now time.Time) {
 	setNote(res, rest)
 }
 
-// ResolveBackdate resolves a single date token (a `--day` flag) through the
-// same @-grammar [ParseMicrolog] applies inline (observations.md §4), so a
-// structured write verb backdates identically to an inline @-token. A leading
-// @ is optional. An empty arg is now at exact precision; a bare date or
-// @yesterday is approximate (a placeholder past date, never rolled over so an
-// old memory keeps its own calendar day); a range yields an end. It never
-// blocks — an unrecognized token falls back to now at exact precision, keeping
-// capture total (product-principles.md P10).
+// ResolveBackdate resolves a single date token through the shared grammar
+// (usage/commands.md §"Backdating with --day"), so every spelling of a date
+// means the same thing wherever it is typed. A leading @ is optional. An empty
+// arg is now at exact precision; a bare date, @yesterday, or a partial year or
+// month is approximate; a trailing time promotes the record to exact; a clock
+// range yields an end.
+//
+// It is the permissive tier: it never blocks, so an unreadable value falls
+// back to now at exact precision rather than returning an error, keeping
+// capture total (product-principles.md P10). [ResolveDay] is the strict
+// counterpart every deliberate date flag calls, where the same value is a
+// clean error and nothing is written.
+//
+// The relative word `yesterday` respects the 04:00 rollover here as it does
+// everywhere else — at 02:00 it names the day before the one a bare capture
+// files under. An explicit date, full or partial, is taken literally.
 func ResolveBackdate(dayArg string, now time.Time) (occ time.Time, precision string, end *time.Time) {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	arg := strings.TrimSpace(dayArg)
-	if arg == "" {
+	// AllowFuture: the permissive tier has no ceiling to enforce — refusing a
+	// value is exactly what this path must never do.
+	res, err := ResolveDay(dayArg, now, DayOptions{AllowFuture: true, AllowPartial: true})
+	if err != nil {
 		return now, PrecisionExact, nil
 	}
-	if !strings.HasPrefix(arg, "@") {
-		arg = "@" + arg
-	}
-	occ, precision, end, _ = extractBackdate([]string{arg}, now)
-	return occ, precision, end
+	return res.OccurredAt, res.Precision, res.End
 }
 
 // extractBackdate scans the argument tokens for an @-token and resolves it to
@@ -781,54 +787,18 @@ func extractBackdate(args []string, now time.Time) (occ time.Time, prec string, 
 	return occ, prec, end, rest
 }
 
-// parseAtToken resolves one @-token body (observations.md §4): a time is
-// today at that time (exact); a range yields occurred_at_end; a bare date is
+// parseAtToken resolves one @-token body found in prose (observations.md §4):
+// a time is today at that time (exact); a range yields occurred_at_end;
+// `yesterday` is the day before the current logical day; a bare date is
 // approximate midnight; a date is promoted to exact when a full time is
 // present (either inside the token or as the following bare token).
+//
+// It is the permissive half of the shared grammar — one thin call into
+// [parseDayToken] with partial dates off, which is what keeps a dictated
+// colon-less token like `@2014` reading as 20:14 rather than as the year.
 func parseAtToken(body, following string, now time.Time) (occ time.Time, prec string, end *time.Time, consumedFollowing, ok bool) {
-	loc := now.Location()
-
-	// Range within today: HH:MM-HH:MM.
-	if a, b, isRange := splitTimeRange(body); isRange {
-		start, sok := parseClockHM(a)
-		fin, fok := parseClockHM(b)
-		if sok && fok {
-			s := atTime(DateOf(now), start)
-			f := atTime(DateOf(now), fin)
-			return s, PrecisionRange, &f, false, true
-		}
-	}
-
-	// Bare time today (exact moment).
-	if hm, isTime := parseClockHM(body); isTime {
-		return atTime(DateOf(now), hm), PrecisionExact, nil, false, true
-	}
-
-	// yesterday, optionally followed by a bare time.
-	if strings.EqualFold(body, "yesterday") {
-		day := DateOf(now).AddDate(0, 0, -1)
-		if hm, isTime := parseClockHM(following); isTime {
-			return atTime(day, hm), PrecisionExact, nil, true, true
-		}
-		return day, PrecisionApproximate, nil, false, true
-	}
-
-	// Full timestamp inside the token: YYYY-MM-DDTHH:MM[:SS].
-	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04"} {
-		if t, err := time.ParseInLocation(layout, body, loc); err == nil {
-			return t, PrecisionExact, nil, false, true
-		}
-	}
-
-	// Bare date (approximate midnight), optionally promoted by a following time.
-	if d, err := time.ParseInLocation(dateLayout, body, loc); err == nil {
-		if hm, isTime := parseClockHM(following); isTime {
-			return atTime(d, hm), PrecisionExact, nil, true, true
-		}
-		return d, PrecisionApproximate, nil, false, true
-	}
-
-	return time.Time{}, "", nil, false, false
+	o, p, e, _, _, consumed, valid := parseDayToken(body, following, now, false)
+	return o, p, e, consumed, valid
 }
 
 // collectTags returns the #tag names (without the leading #) in order,
