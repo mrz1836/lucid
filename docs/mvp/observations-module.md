@@ -67,6 +67,38 @@ offset) is specified in [`../observations.md`](../observations.md) §2
 and is the file-placement rule — a backdated event appends to the file
 for its logical date, not today's.
 
+**Partial dates (`YYYY`, `YYYY-MM`) — representation, binding.** Every
+date surface accepts a partial date, but a capture still needs one real
+day: `logical_date` is required, is a single `YYYY-MM-DD`, and *is* both
+the file path and the event-id prefix. A partial date therefore **snaps
+to the period's first instant at `approximate` precision** — `2014` →
+`occurred_at 2014-01-01T00:00`, `2014-09` → `2014-09-01T00:00` — which
+is the representation this module already documents for a fuzzy date
+(see the phase-11 fixture below: `occurred_at` 2014-09-01T00:00
+approximate → the file for 2014-09-01). Two consequences are binding:
+
+* **The schema is untouched:** there is **no new precision value** and
+  no new envelope field. `exact`,
+  `approximate`, and `range` remain the closed set, `schema` stays `1`,
+  and every reader that switches on precision is untouched — the
+  envelope is frozen ([`../observations.md`](../observations.md) §2,
+  "The envelope never changes"). A partial date is expressed with the
+  existing `approximate`, not with a new `year`/`month` precision.
+* **The degree of fuzziness is not preserved on a capture.** After the
+  write, `2014` and `2014-01-01` are indistinguishable on an
+  observation. That cost is accepted; the registry
+  ([`life-archive.md`](life-archive.md) §4) is the single exception, and
+  it keeps the string as typed rather than snapping it.
+
+The reading of a *bare four-digit token* also depends on which surface
+received it: a deliberate `--day`/date flag reads `2014` as a year, while
+the inline `@`-token in micro-log prose keeps its colon-less clock
+reading (`@2014` → 20:14 today, per
+[`../observations.md`](../observations.md) §4 dictation tolerance). The
+asymmetry is deliberate — a flag is typed on purpose, prose is dictated
+— and it is the only place the two tiers read the same token
+differently.
+
 Two `/packet clinician` rules beyond the table: **every** render
 appends its `projections/exports.log` line — the MVP seed of the
 disclosure log ([`../vision.md`](../vision.md) §7, "Record") — and

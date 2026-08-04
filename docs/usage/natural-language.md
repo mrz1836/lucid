@@ -64,6 +64,10 @@ understands you.
   - *"I ate oatmeal and a coffee."* → `lucid obs ate oatmeal, coffee`
   - *"Log a BM, Bristol four."* → `lucid obs bm 4`
   - *"Mood's about a three, kind of restless."* → `lucid obs mood 3 restless`
+  - *"I ate eggs and toast yesterday evening."* → `lucid obs ate eggs, toast @yesterday 19:30`
+- **`workout log`** (backdated capture) — *"Log the bike ride I did yesterday —
+  about two miles, easy."*
+  → runs `lucid workout log "2 mile bike ride, easy" --day @yesterday`
 - **clinician `export packet`** — *"Export my clinician packet."* / *"Put
   together the whole history for my doctor."*
   → runs `lucid export packet clinician` (or `… clinician all`) — and posts
@@ -106,6 +110,15 @@ runs it after a one-word *"yes"*.
   mode."*
 - **the harness assembles** `lucid mode yellow` (or `red`) and confirms before
   running.
+
+**`mode --day`** — fill in a mode you never declared on a recent day (gap-fill
+only; it never changes a mode you did declare).
+
+- **Instead of typing** `lucid mode yellow --day @yesterday`
+- **you can say** — *"I never called yesterday — it was a yellow day."*
+- **the harness assembles** `lucid mode yellow --day @yesterday` and confirms
+  first. Outside the 7-day window, or on a day you already declared, the command
+  refuses and writes nothing.
 
 ### Lifecycle — declared state changes
 

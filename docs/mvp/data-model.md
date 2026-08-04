@@ -74,6 +74,18 @@ adapter-only access, the `people/` key derivation for registry slugs)
 and add two naming kinds: `day_YYYY_MM_DD` for logical-day records and
 `obs_YYYY_MM_DD_<seq>` for observation events.
 
+**One guarded exception to "a day record's base is written once."** A day
+record is created once and thereafter amended only by appended
+`corrections[]` entries. The single write that touches an existing
+record's base is the **mode gap-fill**
+([`engine-module.md`](engine-module.md) §"`/mode --day` gap-fill"): it
+sets `mode` and `mode_declared_at` on a past day, and **only** when both
+are empty. The guard lives in the storage op itself, not in the caller,
+so no future call site can bypass it; a record whose mode was declared is
+refused there. Nothing else on the base is touched, `mode` stays off the
+foldable-field whitelist, and the correction path therefore still cannot
+reach a declared mode.
+
 **Registry writes are now user-facing.** The `registries/` write path
 was storage-only in the original slice — only the sticky-location verb
 auto-created a `place`. The life-archive module
@@ -353,7 +365,7 @@ folding.
 | `command` | yes | Which command produced it: `/log`, `/checkin`, `/bootstrap`, or `/closeout` (the nightly journal line — see [`engine-module.md`](engine-module.md)). |
 | `intake_questions` | no | Present for `/checkin`; the questions Intake actually asked. |
 | `agent_versions` | yes | Which agent versions touched the entry at write time. |
-| `bootstrap` | yes | `true` when written during a `/bootstrap` session; Reflection.propose is suppressed for these. |
+| `bootstrap` | yes | `true` when the entry was written while **historical-entry (bootstrap) mode is on** — set from the persisted `bootstrap_mode`, whatever verb produced the entry (`/checkin`, `/log`, `/attach`). Reflection.propose is suppressed for these. Observation-backed verbs (`obs`, `memory`, `workout log`) write no raw entry of their own and so carry no bootstrap flag: the observation envelope is frozen and gains no field for it. Bootstrap mode is orthogonal to backdating — it suppresses pattern proposals during a bulk history load, while `--day` decides which logical day an entry lands on; neither relaxes or overrides the other's rules. |
 
 ### Example: `/log` entry (no Intake)
 

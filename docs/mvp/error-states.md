@@ -175,6 +175,30 @@ to the storage table below.
 | La-5 | Registry write (`update_registry`) fails — disk full or permission denied | Surface immediately, St-1 pattern; the append-only merge is atomic, so a failed write leaves the record byte-unchanged. | (see St-1) | None (record not merged) |
 | La-6 | `lucid excavate` / `lucid recall` over an empty or thin store | Honest empty result; **no model call** (there is no LLM in either path). | "Nothing to excavate yet." / "Nothing archived under that era yet." | None (read-only) |
 
+### Backdating (the `--day` and registry date flags — deterministic, agent-free)
+
+Every verb that stamps a logical day reads one date grammar with two
+failure tiers ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)).
+A **deliberate flag** (`--day`, `--start`, `--end`, `--onset`, `anchor
+add`'s positional date) is **strict**: a value the grammar cannot read,
+or one that breaks a documented rule, is rejected **before any write**,
+so every row below has no disk effect and the message ends with the
+nothing-was-saved clause of St-1. An **inline `@`-token in `obs` prose**
+is permissive and appears here only as the row that says so: capture is
+total (P10), and an inline date never costs a capture.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect |
+|---|---------|-----------------|----------------------|------------------|
+| B-1 | A date flag receives a token the grammar cannot read (`--day @yesterdya`) | Reject before any write; never fall back to *now*, which would file the record on the wrong day in silence. | Names the accepted forms — `@yesterday`, `YYYY-MM-DD`, `YYYY-MM`, `YYYY`, optionally with a time — then "Nothing was saved." | None |
+| B-2 | A date flag receives a day in the future | Reject; a capture cannot record something that has not happened. | "That day hasn't happened yet. Nothing was saved." | None |
+| B-3 | A registry date flag receives free text (`era --start "spring 2015"`) | Reject — the registry is on the strict tier. This is the one capability removed by the unified grammar. | Names the accepted forms and suggests keeping the phrase in `--note`. | None |
+| B-4 | A future `era --start` / `era --end` / `injury --onset` | Reject. The ceiling is evaluated on the *resolved* instant, so `--start 2027` fails via its snapped `2027-01-01` while the current year is accepted. | As B-2. | None |
+| B-5 | `anchor add <label> <partial-date>` (`2014`, `2014-09`) | Reject in the CLI front end, before the value is snapped — an anchor renders a precise day count, and counting from a guessed January 1st would be a confident wrong number. | "An anchor counts days, so it needs a real day — try `YYYY-MM-DD` or `@yesterday`." | None |
+| B-6 | `mode --day` targeting a day whose mode was already declared | Reject — gap-fill fills a gap and never overwrites. The guard is in the storage op, so no caller can bypass it. | "A mode was already declared for that day (engine §2)." | None |
+| B-7 | `mode --day` outside `backfill_window_days`, or targeting today / a future day | Reject; the window is the same knob `/closeout backfill` uses, so the two retroactive paths cannot drift. | Names the window; "Nothing was saved." | None |
+| B-8 | A backdated `storm` event dated before the last recorded storm event | Reject — storm history folds in order, so an out-of-order append would corrupt the standing computation rather than fail loudly. | "That's before the last recorded storm event." | None |
+| B-9 | An unreadable `@`-token inside an `obs` micro-log line | **Not** an error — the permissive tier. The token stays in the note verbatim and the event is written; only a deliberate flag blocks. | The ordinary capture ack. | Event written |
+
 ### Scheduler daemon (the send schedule — deterministic, agent-free)
 
 The rows above cover a *message* that fails. These cover the **schedule**

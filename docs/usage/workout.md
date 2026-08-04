@@ -139,6 +139,30 @@ recommender can still protect it). Those readings are exactly what the recovery 
 pain guardrails read back on the next recommendation. Capture is inventory only —
 the acknowledgement names what was written and nothing more (no score, no grade).
 
+### Logging a session you did on a prior day
+
+```sh
+lucid workout log --type push --rpe 6 --day @yesterday
+lucid workout log "2 mile bike ride, easy" --day @yesterday
+```
+
+`--day` records the session on the logical day it actually happened, using the
+same date grammar every other verb reads
+([`commands.md`](commands.md#backdating-with---day)) — a relative word, a full or
+partial date, or a day with a time (`--day "@yesterday 19:30"`). It is **not** a
+content flag, so it composes with both capture paths: a spoken drop plus `--day`
+is fine, and so is the structured set.
+
+The derived `body_state` readings inherit the same instant and the same logical
+day as the session. That matters more than it looks: the recovery guardrail
+reads a reading's `occurred_at` and the progress trend reads its `logical_date`,
+so a half-applied backdate would let the two disagree about when you trained.
+Logging yesterday's leg day today therefore opens yesterday's recovery window —
+not a fresh one starting now.
+
+A day the grammar cannot read, or a day in the future, is a clean error and
+nothing is written.
+
 ### Logging the daily anchor
 
 The daily anchor goes through the same verb — `lucid anchor` is the *milestone*
