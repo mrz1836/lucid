@@ -252,8 +252,9 @@ is always a day that has ended). A *relative* token resolves through the
 same profile-aware `yesterday` intent the positional keyword uses, never
 a calendar date computed by the CLI — a naive calendar date collides
 with the in-progress day before the rollover and reads as out of window.
-Passing `--day` alongside the positional `backfill <target>` form is a
-usage error: two targets, one intent.
+Passing `--day` alongside anything that names its own day — the
+positional `backfill <target>` form, or the `skip` / `today` sub-forms —
+is a usage error: two targets, one intent.
 
 ### `/mode --day` gap-fill
 
@@ -262,22 +263,28 @@ carries none. It is deliberately narrower than `/closeout backfill`,
 because mode is the one field the bell fixes (engine §2):
 
 * **Gap-fill only, never overwrite.** It writes `mode` and
-  `mode_declared_at` **only** when both are empty on the target day. A
-  day whose mode was declared is rejected — the bell still binds every
-  day you showed up for, and there is still no retroactive amendment of
-  a declared mode. `mode` therefore stays **off** the foldable-field
-  whitelist (§"Day record"): the correction path cannot reach it either,
-  and this fill is its own guarded write rather than a correction.
+  `mode_declared_at` **only** when the target day never declared a mode —
+  read from an empty `mode_declared_at`, not from an empty `mode`. A
+  close-out builds its record with the chain's default mode already in
+  place, so a day that was closed out but never declared carries
+  `mode: green` with no declaration timestamp; that default is a
+  placeholder the record needed in order to exist, not testimony about
+  the day. A day whose mode was declared is rejected — the bell still
+  binds every day you showed up for, and there is still no retroactive
+  amendment of a declared mode. `mode` therefore stays **off** the
+  foldable-field whitelist (§"Day record"): the correction path cannot
+  reach it either, and this fill is its own guarded write rather than a
+  correction.
 * **Bounded by `backfill_window_days`.** The same `chain.json` knob that
   governs `/closeout backfill` (default 7), so the two retroactive paths
   cannot drift apart. Because the window rule requires a span of at
   least one day, **today and any future day are rejected for free**.
 * **Two target shapes.** If the target day has no record at all, one is
-  created carrying the mode, with `storm` and `profile` derived from the
-  history governing the *target* day (never the state at write time —
-  the same rule a backfilled close-out follows). If a record exists with
-  an empty `mode` — the ordinary shape of a day closed out but never
-  declared — only the two mode fields are filled.
+  created carrying the mode, with `profile` derived from the history
+  governing the *target* day (never the state at write time — the same
+  rule a backfilled close-out follows). If a record exists but declared
+  no mode — the ordinary shape of a day closed out and never declared —
+  only the two mode fields are filled.
 * **`status.json` is rebuilt** afterwards, exactly as the same-day path
   does.
 * The same-day path is unchanged: still bell-gated, still

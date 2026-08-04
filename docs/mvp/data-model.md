@@ -79,8 +79,10 @@ record is created once and thereafter amended only by appended
 `corrections[]` entries. The single write that touches an existing
 record's base is the **mode gap-fill**
 ([`engine-module.md`](engine-module.md) §"`/mode --day` gap-fill"): it
-sets `mode` and `mode_declared_at` on a past day, and **only** when both
-are empty. The guard lives in the storage op itself, not in the caller,
+sets `mode` and `mode_declared_at` on a past day, and **only** when that
+day never declared a mode — read from an empty `mode_declared_at`, since
+a close-out record already carries the chain's default `mode` as a
+placeholder. The guard lives in the storage op itself, not in the caller,
 so no future call site can bypass it; a record whose mode was declared is
 refused there. Nothing else on the base is touched, `mode` stays off the
 foldable-field whitelist, and the correction path therefore still cannot

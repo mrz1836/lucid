@@ -225,7 +225,7 @@ Mirror journal line (`raw/…`), then rebuilds `engine/status.json`. Sub-forms:
 
 | Flag | Effect |
 |------|--------|
-| `--day <date>` | An alias for the **backfill** target, using the shared grammar ([Backdating with --day](#backdating-with---day)). It routes onto the same path as the positional form: the record is stamped `backfilled: true`, the `backfill_window_days` window (default 7) applies, and both the future **and today** are rejected — a backfill target is always a day that has ended. Passing `--day` together with the positional `backfill <target>` form is a usage error (two targets, one intent). |
+| `--day <date>` | An alias for the **backfill** target, using the shared grammar ([Backdating with --day](#backdating-with---day)). It routes onto the same path as the positional form: the record is stamped `backfilled: true`, the `backfill_window_days` window (default 7) applies, and both the future **and today** are rejected — a backfill target is always a day that has ended. Passing `--day` together with anything that names its own day — the positional `backfill <target>` form, or the `skip` / `today` sub-forms — is a usage error (two targets, one intent) rather than a silent pick between them. |
 
 **Compact grammar** — `<status-chars> <capacity>[/<limiter>] <journal line>`:
 - `<status-chars>`: one character per link in the chain, in order — **d**one,

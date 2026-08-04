@@ -451,3 +451,77 @@ func TestAppendAnchor_DefaultsVersionWhenZero(t *testing.T) {
 	assert.Equal(t, engine.AnchorVersion, log.Version, "a zero version is stamped to the current schema on append")
 	require.Len(t, log.History, 1)
 }
+
+// TestFillEngineDayMode_FillsUndeclaredDay: the ordinary gap-fill shape — a
+// day closed out but never declared — takes the mode and nothing else moves.
+// The record already carries the chain default (green) with no declaration
+// timestamp, which is precisely why the gap is read from the timestamp.
+func TestFillEngineDayMode_FillsUndeclaredDay(t *testing.T) {
+	a := newEngineAdapter(t)
+	rec := completedRecord("2026-07-02", 3)
+	require.Equal(t, engine.ModeGreen, rec.Mode)
+	require.Empty(t, rec.ModeDeclaredAt)
+	rec.RawEntryID = "raw_2026_07_02_22_00"
+	require.NoError(t, a.WriteEngineDay(rec))
+
+	require.NoError(t, a.FillEngineDayMode(rec.DayID, engine.ModeYellow, "2026-07-04T14:00:00Z"))
+
+	got, found, err := a.ReadEngineDay(rec.DayID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, engine.ModeYellow, got.Mode)
+	assert.Equal(t, "2026-07-04T14:00:00Z", got.ModeDeclaredAt)
+	assert.True(t, got.Completed, "the fill touches only the two mode fields")
+	assert.Equal(t, 3, got.Capacity)
+	assert.Equal(t, "raw_2026_07_02_22_00", got.RawEntryID)
+	assert.Equal(t, rec.RecordedAt, got.RecordedAt)
+}
+
+// TestFillEngineDayMode_RefusesDeclaredMode proves the never-overwrite guard
+// lives in the op itself, not in the router: calling it directly against a day
+// whose mode stands is refused, so no future call site can route around the
+// bell's "no retroactive amendment".
+func TestFillEngineDayMode_RefusesDeclaredMode(t *testing.T) {
+	a := newEngineAdapter(t)
+	rec := completedRecord("2026-07-02", 3)
+	rec.ModeDeclaredAt = "2026-07-02T09:00:00Z"
+	require.NoError(t, a.WriteEngineDay(rec))
+
+	err := a.FillEngineDayMode(rec.DayID, engine.ModeRed, "2026-07-04T14:00:00Z")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "never overwrites")
+
+	got, _, readErr := a.ReadEngineDay(rec.DayID)
+	require.NoError(t, readErr)
+	assert.Equal(t, engine.ModeGreen, got.Mode, "the declared mode is untouched")
+	assert.Equal(t, "2026-07-02T09:00:00Z", got.ModeDeclaredAt)
+}
+
+// TestFillEngineDayMode_RefusesDeclaredEvenWithEmptyMode: the guard reads the
+// declaration timestamp, so a record that says a mode was chosen is refused
+// whatever the mode field happens to hold.
+func TestFillEngineDayMode_RefusesDeclaredEvenWithEmptyMode(t *testing.T) {
+	a := newEngineAdapter(t)
+	rec := completedRecord("2026-07-02", 3)
+	rec.Mode = ""
+	rec.ModeDeclaredAt = "2026-07-02T09:00:00Z"
+	require.NoError(t, a.WriteEngineDay(rec))
+
+	require.Error(t, a.FillEngineDayMode(rec.DayID, engine.ModeRed, "2026-07-04T14:00:00Z"))
+}
+
+// TestFillEngineDayMode_MissingRecord: there is no gap to fill on a day that
+// was never recorded — creating one is the caller's decision, not this op's.
+func TestFillEngineDayMode_MissingRecord(t *testing.T) {
+	a := newEngineAdapter(t)
+	err := a.FillEngineDayMode("day_2026_07_02", engine.ModeGreen, "2026-07-04T14:00:00Z")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing engine day")
+}
+
+// TestFillEngineDayMode_MalformedDayID surfaces the id error rather than
+// writing somewhere unexpected.
+func TestFillEngineDayMode_MalformedDayID(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.Error(t, a.FillEngineDayMode("not-a-day-id", engine.ModeGreen, "2026-07-04T14:00:00Z"))
+}

@@ -138,3 +138,35 @@ func TestStormCLI_BootError(t *testing.T) {
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten")
 	require.Error(t, err)
 }
+
+// TestStormCLI_BackdatedDeclare dates the storm event itself.
+func TestStormCLI_BackdatedDeclare(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten", "--day", "@yesterday")
+	require.NoError(t, err)
+	assert.Contains(t, out, "storm declared (unwritten)")
+}
+
+// TestStormCLI_BackdatedLabelWithSpaces: the flag composes with a spaced clause
+// label, which is still joined from the trailing args.
+func TestStormCLI_BackdatedLabelWithSpaces(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "wrist", "flare", "--day", "@yesterday")
+	require.ErrorIs(t, err, errStormRejected)
+	assert.Contains(t, errOut, "No clause or window by that name",
+		"the joined label reached the router intact rather than being split by the flag")
+}
+
+// TestStormCLI_UnreadableDay surfaces the strict-tier error.
+func TestStormCLI_UnreadableDay(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten", "--day", "@yesterdya")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not read the day")
+}

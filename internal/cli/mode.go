@@ -6,15 +6,22 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/router"
 )
 
-// newModeCmd wires `lucid mode <green|yellow|red>` (engine-module.md
-// §Commands): declare today's Engine mode, fixed at the bell. It is
-// human-first prose only — mode is not a script-facing surface, so it does
-// not honor --json. A rejected (post-bell) or invalid declaration prints the
-// fixed copy and exits non-zero so a caller never mistakes it for a success.
+// newModeCmd wires `lucid mode <green|yellow|red> [--day <date>]`
+// (engine-module.md §Commands): declare today's Engine mode, fixed at the bell.
+// It is human-first prose only — mode is not a script-facing surface, so it
+// does not honor --json. A rejected (post-bell) or invalid declaration prints
+// the fixed copy and exits non-zero so a caller never mistakes it for a
+// success.
+//
+// `--day` is gap-fill only: it declares the mode for a past logical day whose
+// record carries none, never overwriting one that was declared, and reaching
+// back at most backfill_window_days. A rejected gap-fill — out of window, or a
+// day whose mode already stands — takes the same non-zero exit.
 func newModeCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "mode <green|yellow|red>",
 		Short: "Declare today's Engine mode (green|yellow|red)",
 		Args:  cobra.ExactArgs(1),
@@ -23,7 +30,12 @@ func newModeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := r.Mode(engine.Mode(args[0]), clockNow())
+			day, _ := cmd.Flags().GetString(flagDay)
+			res, err := r.DeclareMode(router.ModeRequest{
+				Mode:   engine.Mode(args[0]),
+				DayArg: day,
+				Now:    clockNow(),
+			})
 			if err != nil {
 				return err
 			}
@@ -35,4 +47,10 @@ func newModeCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().String(
+		flagDay, "",
+		"Gap-fill a past logical day that carries no mode, e.g. @yesterday or YYYY-MM-DD "+
+			"(within backfill_window_days; never overwrites a declared mode)",
+	)
+	return cmd
 }
