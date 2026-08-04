@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.1.0"
+min_lucid_version: "0.12.0"
 ---
 
 # Lucid
@@ -45,20 +45,20 @@ its output. Acknowledge *after* the binary persists, never before.
 
 | Message | Router intent | How the skill drives it |
 |---------|---------------|-------------------------|
-| `/log <text>` | capture | `lucid log <text>` |
-| media/file attachment | media capture | `lucid attach <path> [--caption <text>] [--day @yesterday|@YYYY-MM-DD]` |
+| `/log <text>` | capture | `lucid log <text> [--day <date>]` |
+| media/file attachment | media capture | `lucid attach <path> [--caption <text>] [--day <date>]` |
 | `/checkin` | guided Intake → structure → ≤1 proposal | router check-in (thread-driven, provider-backed) |
 | `/closeout …` | Engine close-out | `lucid closeout …` — **verbatim passthrough** |
 | `/closeout skip` | honest miss | `lucid closeout skip` — **verbatim passthrough** |
 | `/closeout backfill [yesterday\|<date>] [<compact>]` | correct a recent day | `lucid closeout backfill …` — **verbatim passthrough** |
-| `/mode <green\|yellow\|red>` | declare today's mode | `lucid mode <…>` — **verbatim passthrough** |
-| `/storm <label\|unwritten>` / `/storm end` | declare/end a storm | `lucid storm <label\|unwritten\|end>` |
+| `/mode <green\|yellow\|red>` | declare today's mode | `lucid mode <…> [--day <date>]` — **verbatim passthrough** |
+| `/storm <label\|unwritten>` / `/storm end` | declare/end a storm | `lucid storm <label\|unwritten\|end> [--day <date>]` |
 | `/profile <name>` | switch clock profile | `lucid profile <name>` |
 | `/status` | read-only L0 surface | `lucid status` — **verbatim passthrough** |
 | `/reflect [gate]` | weekly recall (never proposes) | router recall intent (provider-backed) |
 | `/ask <question>` | grounded, cited Q&A | router grounded-answer intent (provider-backed) |
 | `/person <name>` | deterministic person join | `lucid person <name>` (no model) |
-| `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs <kind> …` | observation micro-log | `lucid obs <kind> …` |
+| `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs <kind> …` | observation micro-log | `lucid obs <kind> … [--day <date>]` (also an inline `@yesterday` token) |
 | `/obs where <place>` | sticky stated location | `lucid obs where <place>` |
 | `/day [date]` | read-only day view | `lucid day [date]` |
 | `/packet clinician [@<date>\|all]` | clinician packet export | `lucid export packet clinician …` (post only the path) |
@@ -86,6 +86,29 @@ conversational verbs; the rest are reached by their documented CLI forms:
 
 The skill never invents a command, an agent, or a field.
 
+### Backdating with `--day`
+
+Every verb that stamps a logical day reads **one** shared date grammar, so a
+capture or a state record can be attributed to a prior day. The grammar and the
+per-verb precision tiers are specified once in the command reference —
+[Backdating with `--day`](../../docs/usage/commands.md#backdating-with---day) —
+never re-decided here. In brief:
+
+* **Which verbs carry it.** `log`, `obs`, `attach`, `mode`, `storm`, `memory`,
+  and `closeout` (where `--day` is an alias onto `closeout backfill`). `obs` also
+  accepts an inline `@yesterday` token in its value stream.
+* **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
+  04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
+  literally), a partial `2014` or `2014-09` (snaps to the period's first day),
+  and an optional time — `--day "@yesterday 19:30"`. A future day is always
+  rejected; the real capture time is always kept as `recorded_at`.
+* **Additive vs. gap-fill.** A backdated `log` / `obs` / `attach` is still an
+  additive capture — it files under a prior day and overwrites nothing — so it
+  runs immediately, no confirmation. `mode --day` is **gap-fill only** (never
+  overwrites a mode that was declared) and `closeout --day` routes onto `closeout
+  backfill` (`backfill_window_days` window, both today and the future rejected);
+  both are state writes, so they follow the echo-and-confirm rule below.
+
 ## Natural-language translation (voice-first)
 
 The slash/CLI verbs above are the **canonical baseline** — precise,
@@ -103,9 +126,9 @@ Engine write lands an immutable day record, so the two verb classes are handled
 differently:
 
 * **Read verbs run immediately.** `status`, `day`, `metrics`, `log`, and `obs`
-  change no day record (a capture is additive, never an overwrite), so the skill
-  assembles and runs them as soon as it understands the message — no
-  confirmation step.
+  change no day record (a capture is additive, never an overwrite — which holds
+  for a backdated `--day` capture too), so the skill assembles and runs them as
+  soon as it understands the message — no confirmation step.
 * **State-writing verbs are echoed and confirmed.** For `closeout`,
   `closeout backfill`, `mode`, and `closeout skip`, the skill **assembles the
   compact command, shows it back, and waits for a one-word confirmation** before
