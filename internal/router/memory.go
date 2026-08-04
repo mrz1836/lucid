@@ -27,7 +27,8 @@ import (
 // exactly as a sticky location; People are names kept as testimony and linked to
 // any person key that already resolves. Tone/WhyItMatters/FollowUp are the
 // convention payload keys. Day backdates the occurred_at through the shared
-// @-grammar (approximate for a past date). EntryRef is the raw entry id of an
+// strict grammar (approximate for a past date); an unreadable or future value
+// is refused with nothing written. EntryRef is the raw entry id of an
 // attached photo (set by the CLI after `lucid attach`), referenced from
 // refs.entry. A zero Now defaults to the wall clock.
 type MemoryWriteRequest struct {
@@ -60,12 +61,13 @@ type MemoryWriteResult struct {
 
 // WriteMemory captures one excavated story as a KindMemory event on the frozen
 // bitemporal envelope (mvp/life-archive.md §3). It rejects a disabled memory
-// kind with the enable hint (like Capture), validates the certainty before any
-// write (error-states.md §St-1: nothing saved on a bad enum), backdates the
-// occurred_at through the shared @-grammar so the story files under its own
-// logical day (never overwriting a current-day log), resolves the era/place/
-// people/media refs, and appends one frozen event sourced as excavation. It is
-// deterministic and agent-free.
+// kind with the enable hint (like Capture), validates the certainty and the
+// backdate before any write (error-states.md §St-1: nothing saved on a bad
+// enum or an unreadable day), backdates the occurred_at through the shared
+// strict grammar so the story files under its own logical day (never
+// overwriting a current-day log), resolves the era/place/people/media refs,
+// and appends one frozen event sourced as excavation. It is deterministic and
+// agent-free.
 func (r *Router) WriteMemory(req MemoryWriteRequest) (MemoryWriteResult, error) {
 	now := whenOr(req.Now)
 	if err := r.prepareObservations(); err != nil {
@@ -86,7 +88,19 @@ func (r *Router) WriteMemory(req MemoryWriteRequest) (MemoryWriteResult, error) 
 		)
 	}
 
-	occ, precision, end := observations.ResolveBackdate(req.Day, now)
+	// --day is a deliberate flag, so it runs on the strict tier
+	// ([observations.ResolveDay], reached through the capture verbs' shared
+	// entry point) alongside the certainty check above: an unreadable token or
+	// a day that has not happened yet is refused before anything is written,
+	// rather than silently recording the story at now. `lucid memory --attach`
+	// forwards the same value into [Router.Attach], which resolves it through
+	// this very function — so the story and its photo can never land on
+	// different days.
+	when, err := resolveCaptureWhen(req.Day, now)
+	if err != nil {
+		return MemoryWriteResult{}, err
+	}
+
 	payload, partial := observations.ParseMemoryFields(observations.MemoryInput{
 		Text:         req.Text,
 		Certainty:    req.Certainty,
@@ -98,9 +112,9 @@ func (r *Router) WriteMemory(req MemoryWriteRequest) (MemoryWriteResult, error) 
 
 	parsed := observations.ParseResult{
 		Kind:        observations.KindMemory,
-		OccurredAt:  occ,
-		Precision:   precision,
-		OccurredEnd: end,
+		OccurredAt:  when.OccurredAt,
+		Precision:   when.Precision,
+		OccurredEnd: when.End,
 		Payload:     payload,
 		Refs:        map[string]any{},
 		Partial:     partial,

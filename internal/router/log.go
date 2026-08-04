@@ -79,18 +79,25 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	// backdating grammar across the capture verbs. Its error already reads
 	// honestly ("nothing was saved"), so it is surfaced verbatim rather than
 	// re-wrapped.
-	occ, precision, day, err := resolveCaptureDay(req.DayArg, now)
+	when, err := resolveCaptureWhen(req.DayArg, now)
 	if err != nil {
 		return LogResult{}, err
 	}
+	day := when.LogicalDate
 
+	// bootstrap follows the mode, not the entry path: a history load done with
+	// `lucid log --day` is as historical as the same content typed into
+	// /checkin, and the flag's name promises exactly that. Only raw entries can
+	// carry it — the observation envelope is frozen and has no field for it, so
+	// the observation-backed verbs (obs, memory, workout) record nothing here.
 	res, err := r.store.WriteRaw(storage.RawEntry{
 		RecordedAt:          now,
-		OccurredAt:          occ,
-		OccurredAtPrecision: precision,
+		OccurredAt:          when.OccurredAt,
+		OccurredAtPrecision: when.Precision,
+		OccurredAtEnd:       when.End,
 		Source:              source,
 		Command:             commandLog,
-		Bootstrap:           false,
+		Bootstrap:           r.cfg.BootstrapMode,
 		Body:                req.Text,
 	})
 	if err != nil {

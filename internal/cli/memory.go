@@ -126,7 +126,7 @@ func newMemoryCmd() *cobra.Command {
 	f.String(flagTone, "", "The emotional color, one phrase")
 	f.String(flagWhy, "", "Why it still matters")
 	f.String(flagFollowup, "", "The thread to pull next time")
-	f.String(flagDay, "", "When it happened: @yesterday or YYYY-MM-DD (approximate backdating)")
+	f.String(flagDay, "", "When it happened: @yesterday, YYYY-MM-DD, or a partial date like 2014 or 2014-09")
 	f.String(flagAttach, "", "Optional photo/media file to attach and link to this story")
 	f.String(flagCaption, "", "Caption for the attached media")
 	return cmd
