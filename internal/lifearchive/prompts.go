@@ -13,7 +13,7 @@ import "fmt"
 // injuryPrompts maps an injury convention gap (life-archive.md §2) to a generic
 // question. Every key in injuryGapKeys has an entry.
 var injuryPrompts = map[string]string{ //nolint:gochecknoglobals // fixed generic prompt copy, keyed by the §2 convention
-	"onset":               "When did it start? Even a rough year or season is enough.",
+	"onset":               "When did it start? A rough year — or year and month — is enough.",
 	"timeline":            "Walk me through what happened with it over the years — flares, quiet stretches, anything that changed it.",
 	"body_area":           "Where in the body is it, in your own words?",
 	"cause":               "How did it happen?",

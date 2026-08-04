@@ -44,14 +44,17 @@ func newEraCmd() *cobra.Command {
 
 			res, err := r.WriteEra(req)
 			if err != nil {
-				return err
+				// The root silences returned errors, so a rejected --start/--end
+				// would otherwise be a bare exit code. A strict date flag has to
+				// say what it wanted (error-states.md §B-3, §B-4).
+				return emitErr(cmd, err)
 			}
 			return renderRegistryWrite(cmd, res)
 		},
 	}
 	f := cmd.Flags()
-	f.String(flagStart, "", "When the chapter began: @yesterday, YYYY-MM-DD, or an approximate value like 2014")
-	f.String(flagEnd, "", "When it ended (omit for a still-running chapter)")
+	f.String(flagStart, "", "When the chapter began: @yesterday, YYYY-MM-DD, or a partial date like 2014 or 2014-09")
+	f.String(flagEnd, "", "When it ended, same forms as --start (omit for a still-running chapter)")
 	f.String(flagNote, "", "A free-text note kept verbatim")
 	return cmd
 }
