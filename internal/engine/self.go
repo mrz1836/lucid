@@ -209,21 +209,25 @@ func ValidateSelfKey(key string) error {
 	if !ok {
 		return fmt.Errorf(
 			"engine: self fact key %q must be <namespace>.<leaf> using one of %s, or misc. when nothing else fits",
-			key, selfNamespaceList())
+			key, selfNamespaceList(),
+		)
 	}
 	if slices.Index(selfNamespaceOrder(), ns) < 0 {
 		return fmt.Errorf(
 			"engine: self fact key %q has an unknown namespace %q — use one of %s, or file it under misc. when nothing else fits",
-			key, ns, selfNamespaceList())
+			key, ns, selfNamespaceList(),
+		)
 	}
 	if leaf == "" {
 		return fmt.Errorf(
-			"engine: self fact key %q needs a leaf after the namespace, for example %s.generation", key, ns)
+			"engine: self fact key %q needs a leaf after the namespace, for example %s.generation", key, ns,
+		)
 	}
 	if !validSelfLeaf(leaf) {
 		return fmt.Errorf(
 			"engine: self fact key %q may use only lowercase letters, digits, dots, underscores and hyphens after the namespace",
-			key)
+			key,
+		)
 	}
 	return nil
 }
