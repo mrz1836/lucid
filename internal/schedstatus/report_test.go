@@ -40,12 +40,17 @@ func okEngine(companionEnabled bool, now time.Time) DBInput {
 	}
 }
 
+// okCompanionDB builds a healthy companion job DB: all three periodics — the
+// morning and night sends and the morning backstop that catches a morning send
+// that never went out — registered and active. None carries a recorded cursor,
+// which is deliberately not evidence of a frozen one.
 func okCompanionDB() DBInput {
 	return DBInput{
 		Path: "/var/lucid/companion.db",
 		Periodics: []PeriodicStatus{
 			{Slug: SlugCompanionMorning, Cron: "0 6 * * *", Active: true, Present: true},
 			{Slug: SlugCompanionNight, Cron: "0 19 * * *", Active: true, Present: true},
+			{Slug: SlugCompanionMorningBackstop, Cron: "0 7 * * *", Active: true, Present: true},
 		},
 	}
 }
@@ -515,6 +520,116 @@ func TestBackstopStoodDownIsIntendedOK(t *testing.T) {
 	p, ok := periodicFor(r, SlugBellFallback)
 	require.True(t, ok)
 	require.Contains(t, p.Note, "stood down")
+}
+
+// ── companion periodics ──────────────────────────────────────────────────────
+
+// companionReport builds the classifier's input the way Assemble does: a DBReport
+// over the healthy companion store, ready for a case to park one row.
+func companionReport() DBReport {
+	in := okCompanionDB()
+	return DBReport{Path: in.Path, State: Ok, Periodics: in.Periodics}
+}
+
+// parkCompanion switches one companion periodic off in a DBReport, the state a
+// transient outage leaves behind.
+func parkCompanion(rep *DBReport, slug string) {
+	for i := range rep.Periodics {
+		if rep.Periodics[i].Slug == slug {
+			rep.Periodics[i].Active = false
+			return
+		}
+	}
+}
+
+// TestClassifyCompanionPeriodics_HealthyStoreIsSilent: three registered, active
+// periodics with no frozen cursor produce no checks at all. A classifier that
+// spoke on a healthy store would make every real fault harder to see.
+func TestClassifyCompanionPeriodics_HealthyStoreIsSilent(t *testing.T) {
+	rep := companionReport()
+	require.Empty(t, classifyCompanionPeriodics(&rep, fixedNow()))
+	require.Len(t, rep.Periodics, 3, "and no placeholder row is invented")
+}
+
+// TestClassifyCompanionPeriodics_InactiveNamesReconcile: a companion send
+// switched off in its own store is the silent failure repair exists for, so it is
+// an error that names the exact command that fixes it — the half the report used
+// to report while deliberately naming no remedy.
+func TestClassifyCompanionPeriodics_InactiveNamesReconcile(t *testing.T) {
+	rep := companionReport()
+	parkCompanion(&rep, SlugCompanionNight)
+
+	checks := classifyCompanionPeriodics(&rep, fixedNow())
+	require.Len(t, checks, 1)
+	require.Equal(t, "periodic."+SlugCompanionNight, checks[0].Name)
+	require.Equal(t, Error, checks[0].State)
+	require.Contains(t, checks[0].Detail, "is inactive")
+	require.Contains(t, checks[0].Detail, "run: lucid scheduler reconcile --slug "+SlugCompanionNight)
+}
+
+// TestClassifyCompanionPeriodics_StuckCursorNamesReconcile covers the other
+// parked shape — active, but with a cursor a full day behind and nothing
+// advancing it. This is precisely the half a daily upsert never repaired, so
+// without a fault naming `reconcile` the repair lever would have nothing pointing
+// at it.
+func TestClassifyCompanionPeriodics_StuckCursorNamesReconcile(t *testing.T) {
+	now := fixedNow()
+	rep := companionReport()
+	rep.Periodics[0].NextRun = now.Add(-48 * time.Hour)
+
+	checks := classifyCompanionPeriodics(&rep, now)
+	require.Len(t, checks, 1)
+	require.Equal(t, "periodic."+SlugCompanionMorning, checks[0].Name)
+	require.Equal(t, Error, checks[0].State)
+	require.Contains(t, checks[0].Detail, "stuck at")
+	require.Contains(t, checks[0].Detail, "run: lucid scheduler reconcile --slug "+SlugCompanionMorning)
+
+	// A cursor merely due — the normal state between a mark and the next tick —
+	// is not stuck, so the pass stays silent on a running daemon.
+	due := companionReport()
+	due.Periodics[0].NextRun = now.Add(-1 * time.Hour)
+	require.Empty(t, classifyCompanionPeriodics(&due, now))
+}
+
+// TestClassifyCompanionPeriodics_AbsentBackstopIsReported: the morning backstop is
+// classified like its two siblings, and a slug the store has no row for cannot be
+// re-armed — there is nothing to re-arm — so the fault points at the one thing
+// that seeds it, a daemon start. The absent slug still renders as a row.
+func TestClassifyCompanionPeriodics_AbsentBackstopIsReported(t *testing.T) {
+	rep := companionReport()
+	rep.Periodics = rep.Periodics[:2] // drop the backstop row entirely
+
+	checks := classifyCompanionPeriodics(&rep, fixedNow())
+	require.Len(t, checks, 1)
+	require.Equal(t, "periodic."+SlugCompanionMorningBackstop, checks[0].Name)
+	require.Equal(t, Error, checks[0].State)
+	require.Contains(t, checks[0].Detail, "not registered")
+	require.Contains(t, checks[0].Detail, "run: lucid scheduler run")
+
+	require.Len(t, rep.Periodics, 3, "the absent slug is appended as a visible placeholder")
+	require.Equal(t, SlugCompanionMorningBackstop, rep.Periodics[2].Slug)
+	require.False(t, rep.Periodics[2].Present)
+}
+
+// TestAssemble_CompanionStuckCursorLowersTheVerdict is the same fault end to end:
+// a frozen companion cursor reaches the rolled-up verdict and the exit code a
+// health cron gates on, not just the classifier that found it.
+func TestAssemble_CompanionStuckCursorLowersTheVerdict(t *testing.T) {
+	now := fixedNow()
+	in := healthyEnabled(now)
+	in.CompanionJobs.Periodics[2].NextRun = now.Add(-36 * time.Hour) // the backstop
+
+	r := Assemble(in, now)
+	require.Equal(t, string(Error), r.Verdict)
+	require.Equal(t, 2, r.ExitCode())
+
+	c, ok := checkFor(r, "periodic."+SlugCompanionMorningBackstop)
+	require.True(t, ok)
+	require.Equal(t, Error, c.State)
+	require.Contains(t, c.Detail, "run: lucid scheduler reconcile --slug "+SlugCompanionMorningBackstop)
+
+	require.Contains(t, strings.Join(r.TextLines(), "\n"), "lucid scheduler reconcile",
+		"the remedy reaches the rendered report, not only the JSON check list")
 }
 
 // TestAbsentEnginePeriodicPointsAtTheDaemon: a slug the store has no row for

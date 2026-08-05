@@ -758,7 +758,7 @@ UPDATE_CHANNEL=edge lucid upgrade
 ```
 lucid scheduler run       [--db <path>]
 lucid scheduler status    [--scheduler-db <path>] [--companion-db <path>] [--json]
-lucid scheduler reconcile [--slug <slug>] [--no-fire] [--db <path>] [--json]
+lucid scheduler reconcile [--slug <slug>] [--no-fire] [--db <path>] [--companion-db <path>] [--json]
 lucid scheduler install   [--out <dir> | --apply] [--force] [--json]
 lucid scheduler uninstall [--dry-run] [--label <label>] [--json]
 ```
@@ -808,13 +808,28 @@ duplicates them:
 | `lucid-bell` | `bell_time` | the companion is **disabled** (otherwise the companion owns the evening user send and the bell is deliberately suppressed) |
 | `lucid-bell-fallback` | the [evening backstop mark](#the-evening-backstop-lucid-bell-fallback) | the companion is **enabled** |
 
+**The companion seeds its own.** That table is the Engine's set. When the
+[companion](companion.md) is enabled, its node seeds three more periodics — the
+morning window, the night window, and the
+[morning backstop](#the-morning-backstop-lucid-companion-morning-backstop) —
+in its **own** job store, on the same chain marks, idempotently by slug:
+
+| Slug | Fires | Active when |
+|------|-------|-------------|
+| `lucid-companion-morning` | `tripwire_time` | the companion is **enabled** |
+| `lucid-companion-night` | `bell_time` | the companion is **enabled** |
+| `lucid-companion-morning-backstop` | the [morning backstop mark](#the-morning-backstop-lucid-companion-morning-backstop) | the companion is **enabled** |
+
 **Startup self-heal.** After seeding, the daemon runs the same reconcile pass
 that [`scheduler reconcile`](#scheduler-reconcile) exposes: any periodic that is
 *intended active* but found parked — inactive, or with its next run stuck in the
 past — is re-armed on the spot, and the missed occurrence fires. It is a no-op on
 a healthy store, and it never re-arms a periodic that is *intended inactive*
 (a companion-suppressed bell stays suppressed). A transient outage can therefore
-cost at most one restart, not a silently dead send.
+cost at most one restart, not a silently dead send. The companion node runs that
+same pass over its own store on every boot, so a parked companion send self-heals
+on a restart exactly as an Engine one does — seeding declares the schedule,
+the pass repairs it, and the two are not the same job.
 
 ```sh
 lucid scheduler run
@@ -855,6 +870,52 @@ posts the ordinary pre-committed bell template only if nothing was delivered.
   ([`../architecture.md`](../architecture.md) §2, P10).
 - **Only when the companion owns the window.** With the companion disabled the
   backstop periodic is inactive and the real bell fires at `bell_time`, exactly as
+  before.
+
+#### The morning backstop (`lucid-companion-morning-backstop`)
+
+The morning has the same exposure as the evening, and one more: when the
+[companion](companion.md) is enabled it presents the morning window, and the
+Engine tripwire's own user-channel send is suppressed so the window never
+double-posts. The tripwire still runs its full modeless decision — it evaluates
+the dead-man, persists escalation state, and fires the witness escalation — but
+its *user* line is the companion's to speak. So a morning send that fails
+outright is not a degraded morning; it is a **silent** one. The morning backstop
+closes that gap the way the evening one does: a dedicated periodic that fires
+after the primary has had its full run at delivery, and speaks only if nothing
+was delivered.
+
+- **What it sends.** The **real morning companion card**, re-composed — not a
+  placeholder template. This is a deliberate asymmetry with the evening backstop,
+  which re-sends the plain bell: the evening backstop belongs to the Engine, which
+  is agent-free by contract, while the companion node already reaches a provider,
+  so re-running it breaches no ceiling. If the provider is unreachable the
+  composer's existing [deterministic degradation](companion.md#when-things-go-wrong)
+  renders the same well-formed scaffold it always would — only the model's warmth
+  is lost, never the send.
+- **When it fires.** At the **morning backstop mark**: the chain's `tripwire_time`
+  mark plus a 60-minute grace (`06:00` → `07:00`). The mark is **derived** from the
+  same chain mark the morning companion rides, so the two can never drift — move
+  `tripwire_time` and the backstop moves with it. An hour is clear of the primary
+  send's retry ladder, still honestly "morning", and comfortably inside the `10:00`
+  morning cut-off.
+- **What gates it.** Today's companion `morning` delivery receipt. A receipt for
+  today's logical day with a delivered, verified message id makes the backstop a
+  **no-op** — the morning was already spoken for. It is the same receipt the
+  companion writes on every verified delivery, read through the same guard the
+  primary send uses, so **at most one morning send per day** holds by construction
+  rather than by timing.
+- **What it says.** A backstop-specific note, distinct from the
+  `(late — host was asleep)` prefix a backfilled fire carries. A send that failed
+  at `06:00` on a healthy, awake host is not the same event as a host that was off,
+  and the message says which one happened rather than guessing.
+- **When it stands down.** Past the `10:00` morning cut-off it does nothing at all,
+  and says nothing: no send, and **no alert**. The primary morning periodic already
+  alerts for that window, so a second copy would be noise about a fault that has
+  already been reported once.
+- **Only when the companion owns the window.** The backstop lives in the
+  companion's own job store and runs only while the companion is enabled. Disable
+  the companion and the tripwire sends for itself at `tripwire_time`, exactly as
   before.
 
 #### scheduler status
@@ -948,6 +1009,7 @@ verdict is the most severe check — `error` beats `warn` beats `ok`, and an
 | An intended-active periodic parked (inactive, or next run stuck in the past) | `error` — the line names `lucid scheduler reconcile` |
 | Engine bell inactive while the companion owns the night send | not a fault (*suppressed by companion (intended)*) |
 | Evening backstop (`lucid-bell-fallback`) inactive while the companion owns the night send | `error` |
+| A companion periodic (`lucid-companion-morning`, `lucid-companion-night`, `lucid-companion-morning-backstop`) parked — inactive, or its next run stuck a full day behind | `error` — the line names `lucid scheduler reconcile` |
 | Latest companion receipt present but unverified | `warn` |
 | Most-recent already-elapsed window has no receipt, or only a stale one | `error` |
 | On-disk build newer than the running supervised daemon (stale daemon) | `warn` |
@@ -971,7 +1033,7 @@ lucid scheduler status --scheduler-db /var/lib/lucid/flywheel.db
 #### scheduler reconcile
 
 ```
-lucid scheduler reconcile [--slug <slug>] [--no-fire] [--db <path>] [--json]
+lucid scheduler reconcile [--slug <slug>] [--no-fire] [--db <path>] [--companion-db <path>] [--json]
 ```
 
 Re-arm a **parked** scheduled send. A periodic is parked when it is *intended
@@ -990,20 +1052,35 @@ do not want to bounce the daemon — and the one
 [`scheduler status`](#scheduler-status) points at when it reports a parked
 periodic.
 
+**It spans both job stores.** The pass covers the Engine store **and** the
+companion store by default — the same two
+[`scheduler status`](#scheduler-status) inspects. The two commands are a matched
+pair: `status` names a parked send, `reconcile` re-arms it. A repair lever that
+reached only half of what the report can name would leave the other half with a
+fault and no remedy, so it reaches both.
+
 **The intended-active guard.** Whether a periodic *should* be running is derived
 from configuration, per slug — never guessed from the job store:
 
-| Slug | Intended active when |
-|------|----------------------|
-| `lucid-tripwire` | always — the morning dead-man is unconditional |
-| `lucid-bell` | the companion is **disabled** |
-| `lucid-bell-fallback` | the companion is **enabled** |
-| anything else | never — an unrecognized slug is left untouched |
+| Slug | Store | Intended active when |
+|------|-------|----------------------|
+| `lucid-tripwire` | engine | always — the morning dead-man is unconditional |
+| `lucid-bell` | engine | the companion is **disabled** |
+| `lucid-bell-fallback` | engine | the companion is **enabled** |
+| `lucid-companion-morning` | companion | the companion is **enabled** |
+| `lucid-companion-night` | companion | the companion is **enabled** |
+| `lucid-companion-morning-backstop` | companion | the companion is **enabled** |
+| anything else | — | never — an unrecognized slug is left untouched |
 
 The guard is what keeps the command from fighting a deliberate configuration: a
 bell suppressed because the companion owns the evening send is *intended
 inactive*, so `reconcile` leaves it inactive and says so. It re-arms what was
 parked; it never re-enables what you turned off.
+
+The companion's three are unconditional within their own store, because the
+companion node only runs at all when the companion is enabled — there is no
+setting that trades one companion window for another, the way the bell and its
+backstop trade the evening.
 
 **What counts as stuck.** An active periodic whose next run has just passed is
 *due*, not parked — the scheduler advances its cursor past now on the next tick.
@@ -1017,10 +1094,27 @@ the next tick delivers the send that was missed — late, but delivered. Pass
 
 | Flag | Effect |
 |------|--------|
-| `--slug <slug>` | Reconcile one periodic instead of all of them. An unknown slug is a no-op, never a silent guess. |
+| `--slug <slug>` | Reconcile one periodic instead of all of them. Matches across **both** stores. An unknown slug is a no-op, never a silent guess. |
 | `--no-fire` | Re-arm without delivering the missed occurrence: the cursor is reset forward and the next send is the next scheduled one. |
-| `--db <path>` | Path to the durable job store. Same resolution as `run`: flag → `LUCID_SCHEDULER_DB` → the default under the OS user-config dir. |
-| `--json` | Emit `{reconciled: [{slug, was_active, next_run, fires_missed}], scanned}`. |
+| `--db <path>` | Path to the **Engine** job store — unchanged. Same resolution as `run`: flag → `LUCID_SCHEDULER_DB` → the default under the OS user-config dir. |
+| `--companion-db <path>` | Path to the **companion** job store. Same resolution as [`status`](#scheduler-status)'s flag of the same name: flag → `LUCID_COMPANION_DB` → the default under the OS user-config dir. |
+| `--json` | Emit `{stores: [{name, path}], reconciled: [{store, slug, was_active, next_run, fires_missed}], scanned}`. |
+
+`--db` still means the Engine store and nothing else, so no existing invocation
+changes behavior — a command that repaired the Engine before repairs the Engine
+now, and additionally reaches the companion. Every re-armed row names the store
+it came from, in the text output and in `--json`. The `--json` keys that existed
+before are unchanged: `reconciled[]` rows keep `slug`, `was_active`, `next_run`,
+and `fires_missed`, `scanned` keeps its meaning as a total, and the `store` field
+and the top-level `stores` array are additions beside them.
+
+**When the companion store isn't there.** With the companion **disabled**, its
+store is skipped outright and the output says so — there is nothing to repair. With
+the companion enabled but its store absent (the daemon has never run), the store
+is **named, not fatal**: the line reports it missing, the Engine's result stands,
+and the command still succeeds. Passing `--companion-db` explicitly changes that —
+you named that target, so a missing file there is an error, exactly as it is for
+`--db`.
 
 **Safe to run any time.** It is idempotent — running it when nothing is parked
 changes nothing and reports nothing re-armed. It never creates a duplicate
@@ -1030,9 +1124,10 @@ it re-arms the periodic, and the daemon's next tick does the sending.
 Deterministic, no model.
 
 ```sh
-lucid scheduler reconcile                          # repair everything parked
-lucid scheduler reconcile --slug lucid-tripwire    # just the morning dead-man
-lucid scheduler reconcile --no-fire                # re-arm, skip the missed send
+lucid scheduler reconcile                                  # repair everything parked, both stores
+lucid scheduler reconcile --slug lucid-tripwire            # just the morning dead-man
+lucid scheduler reconcile --slug lucid-companion-morning   # just the morning companion
+lucid scheduler reconcile --no-fire                        # re-arm, skip the missed send
 lucid scheduler reconcile --json
 ```
 
@@ -1854,6 +1949,6 @@ replaced the retired monthly heartbeat) run beside them. See
 | `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
 | `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2 escalation, weekly witness report). Injected, never committed. |
 | `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable Engine job-store path; `--db` (on `run` and `reconcile`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
-| `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status`; `--companion-db` overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
+| `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status` and `lucid scheduler reconcile`; the `--companion-db` flag on either command overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
 | `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |
 | `LUCID_WORKOUT_DB` | Optional override for the workout companion's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |

@@ -26,12 +26,19 @@ The companion composes for two windows a day:
 - **Morning** — fires on the chain's **tripwire** mark (default `06:00`).
 - **Night** — fires on the chain's **bell** mark (default `19:00`).
 
-Both are in your host's local time and follow the same DST-correct clock the
+A third scheduled item rides beside them, and it is a **safety net, not a third
+daily message**: the [morning backstop](#how-it-coexists-with-the-engine) fires an
+hour after the tripwire mark (default `07:00`) and speaks **only** if the morning
+send failed outright. On any ordinary day it is a no-op and you never see it.
+
+Both windows are in your host's local time and follow the same DST-correct clock the
 Engine uses. **The fire times are not companion settings.** The companion inherits
 the `chain.json` `bell_time` / `escalation.tripwire_time` marks so it can never
 drift from the deterministic pair — the companion and the Engine fire at the same
 instant, and you get exactly **one message per window**. To move a window, change
-the chain mark (see [`../engine.md`](../engine.md)); the companion follows.
+the chain mark (see [`../engine.md`](../engine.md)); the companion follows, and so
+does the backstop, whose mark is derived from the tripwire's rather than set
+alongside it.
 
 ## Turning it on
 
@@ -296,6 +303,17 @@ The companion degrades in layers and is designed to **never fall silent** — a 
   [evening backstop](#how-it-coexists-with-the-engine) posts the ordinary
   pre-committed Bell after the cut-off, so the accountability window itself is not
   lost — only its warmth.
+- **A missed morning window** (same): the
+  [morning backstop](#how-it-coexists-with-the-engine) re-runs the real morning
+  card an hour after the tripwire mark, so a failed `06:00` send costs the morning
+  an hour rather than the whole day. It stands down when the receipt shows the
+  primary send landed, and stands down silently past the `10:00` cut-off — the
+  primary already alerted for that window.
+- **A parked periodic** (a companion window whose durable row went inactive, or
+  whose next run froze in the past): `lucid scheduler status` reports it, and
+  `lucid scheduler reconcile` re-arms it — the same sanctioned lever the Engine's
+  periodics have. It repairs the companion's own job store, so no companion window
+  can be left parked with nothing to fix it but a hand edit of the store.
 
 ## How it coexists with the Engine
 
@@ -318,6 +336,19 @@ day. If the companion delivered — on time or late — the backstop stands down
 most one evening send per day, either way. It runs only while the companion is
 enabled; disable the companion and the real Bell resumes at `bell_time`. Full
 behavior: [`commands.md`](commands.md#the-evening-backstop-lucid-bell-fallback).
+
+**The morning backstop.** The morning is the window that can pass in *total*
+silence. In the evening a failed companion still leaves the Engine's bell template
+behind it; in the morning the tripwire's user-channel send is suppressed while the
+companion presents that line, so a morning send that fails outright leaves nothing
+at all on your channel that day. So the morning gets a backstop of its own
+(`lucid-companion-morning-backstop`), and it differs from the evening's in one
+deliberate way: it re-runs **the real morning card**, an hour after the tripwire
+mark, rather than posting a plain template. The evening backstop is the Engine's,
+and the Engine is agent-free; this one is the companion's own, and the companion
+already composes through a provider. It stands down the moment the receipt says the
+`06:00` send landed — at most one morning send per day, either way. Full behavior:
+[`commands.md`](commands.md#the-morning-backstop-lucid-companion-morning-backstop).
 
 ## Operational notes
 

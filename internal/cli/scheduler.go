@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/companion"
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/schedrun"
@@ -36,6 +38,23 @@ const (
 // report — minute resolution with the zone named, the same layout
 // `scheduler status` prints its next-run column in, so the two read alike.
 const reconcileTimeLayout = "2006-01-02 15:04 MST"
+
+// The two job stores `reconcile` spans, named in the report and in the `store`
+// field of every re-armed row. They are the same two `scheduler status` inspects,
+// which is what makes the documented status -> reconcile pair whole: a report that
+// can name a parked companion send is now matched by a lever that reaches it.
+const (
+	storeEngine    = "engine"
+	storeCompanion = "companion"
+)
+
+// The two reasons the companion store contributes no scan, said plainly rather
+// than left as an absent line — a store silently skipped reads exactly like a
+// store that was clean.
+const (
+	noteCompanionDisabled = "not enabled — skipped"
+	noteCompanionMissing  = "not found — start the daemon once to create it"
+)
 
 // newSchedulerCmd wires `lucid scheduler run` — the composition root for the
 // autonomous accountability daemon (ADR-0004, build-plan Stage 6). It joins
@@ -123,8 +142,12 @@ binary. The job store is disposable machinery kept outside the ~/.lucid Ledger
 // wanted, and the command `scheduler status` names when it reports a parked
 // periodic. It is credential-dumb and sends nothing itself: it re-arms the
 // periodic, and the daemon's next tick does the sending.
+//
+// It spans both disposable job stores — the Engine's and the companion's — which
+// is the same pair `status` inspects. A repair lever reaching only half of what
+// the report can name would leave the other half with a fault and no remedy.
 func newSchedulerReconcileCmd() *cobra.Command {
-	var slug, dbPath string
+	var slug, dbPath, companionDBPath string
 	var noFire bool
 	cmd := &cobra.Command{
 		Use:   "reconcile",
@@ -133,64 +156,171 @@ func newSchedulerReconcileCmd() *cobra.Command {
 should be running, while the job store has it inactive or its next run stuck in
 the past so the due scan never reaches it again.
 
+The pass covers both disposable job stores — the Engine's and the companion's —
+the same two ` + "`scheduler status`" + ` inspects, so the pair is whole: status
+names a parked send, reconcile re-arms it.
+
 Whether a send should be running is derived from configuration per slug — the
 morning tripwire always, the evening bell when the companion is disabled, the
-evening backstop when it is enabled — so the pass never fights a deliberate
-setting: a bell suppressed because the companion owns the evening send is left
-suppressed. Re-arming leaves the stale cursor in place, so the occurrence that
-was missed is delivered late rather than never; --no-fire skips it and resumes
-at the next scheduled one.
+evening backstop when it is enabled, and the companion's three sends whenever the
+companion is enabled — so the pass never fights a deliberate setting: a bell
+suppressed because the companion owns the evening send is left suppressed.
+Re-arming leaves the stale cursor in place, so the occurrence that was missed is
+delivered late rather than never; --no-fire skips it and resumes at the next
+scheduled one.
+
+--db still means the Engine store alone, so no existing invocation changes
+behavior. With the companion disabled its store is skipped; with the companion
+enabled but its store absent the line names it and the pass still succeeds,
+unless --companion-db pointed at it explicitly.
 
 It is safe to run any time: idempotent, it creates no periodic, edits no cron
 expression, moves no healthy periodic's next run, and sends nothing itself.`,
 		Args: cobra.NoArgs,
-		Example: `  # Repair everything parked.
+		Example: `  # Repair everything parked, in both stores.
   lucid scheduler reconcile
 
   # Just the morning dead-man.
   lucid scheduler reconcile --slug lucid-tripwire
 
+  # Just the morning companion (the slug matches across both stores).
+  lucid scheduler reconcile --slug lucid-companion-morning
+
   # Re-arm, but skip the send that was missed.
   lucid scheduler reconcile --no-fire`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSchedulerReconcile(cmd, slug, dbPath, noFire)
+			return runSchedulerReconcile(cmd, slug, dbPath, companionDBPath, noFire)
 		},
 	}
-	cmd.Flags().StringVar(&slug, reconcileFlagSlug, "", "Reconcile one periodic instead of all of them (an unknown slug is a no-op)")
+	cmd.Flags().StringVar(&slug, reconcileFlagSlug, "", "Reconcile one periodic instead of all of them (an unknown slug is a no-op); matches across both stores")
 	cmd.Flags().BoolVar(&noFire, reconcileFlagNoFire, false, "Re-arm without delivering the missed occurrence: reset the cursor to the next scheduled run")
-	cmd.Flags().StringVar(&dbPath, schedulerFlagDB, "", "Override the durable job-store path (default: LUCID_SCHEDULER_DB or a flywheel.db under the OS user-config dir, outside ~/.lucid)")
+	cmd.Flags().StringVar(&dbPath, schedulerFlagDB, "", "Override the Engine job-store path (default: LUCID_SCHEDULER_DB or a flywheel.db under the OS user-config dir, outside ~/.lucid)")
+	cmd.Flags().StringVar(&companionDBPath, statusFlagCompanionDB, "", "Override the companion job-store path (default: LUCID_COMPANION_DB or the daemon's default)")
 	return cmd
 }
 
 // runSchedulerReconcile is the wiring the cobra layer delegates to: boot the
-// router for the one configuration input the guard needs (who owns the evening
-// window), resolve the job store exactly as the daemon does, run the pass, and
-// report it. The store is opened inside [schedrun.ReconcileStore] so the command
-// layer never touches a database directly and the daemon's own path resolution
-// stays the single source of the store's location.
+// router for the configuration the guards need (who owns the evening window, and
+// whether the companion runs at all), resolve each job store exactly as its own
+// daemon does, run the pass over both, and report them together. Each store is
+// opened inside its package's ReconcileStore so the command layer never touches a
+// database directly and each daemon's own path resolution stays the single source
+// of its store's location.
 //
 // A failure is named on stderr as "lucid: scheduler: <message>" before it is
 // returned, mirroring `run`: the root silences cobra's own error printing, and a
 // repair lever that exited non-zero without saying what it could not repair
 // would be the same silence it exists to end.
-func runSchedulerReconcile(cmd *cobra.Command, slug, dbFlag string, noFire bool) error {
+func runSchedulerReconcile(cmd *cobra.Command, slug, dbFlag, companionDBFlag string, noFire bool) error {
 	r, err := bootedRouter(cmd)
 	if err != nil {
 		return reconcileError(cmd, err)
 	}
+	companionEnabled := r.Config().Companion.Enabled
+
+	out := reconcileOutput{Stores: []reconcileStoreLine{}, Reconciled: []reconciledRow{}}
+
 	dbPath, err := schedrun.DefaultDBPath(dbFlag)
 	if err != nil {
 		return reconcileError(cmd, err)
 	}
 	report, err := schedrun.ReconcileStore(cmd.Context(), dbPath, schedrun.ReconcileOptions{
-		CompanionEnabled: r.Config().Companion.Enabled,
+		CompanionEnabled: companionEnabled,
 		NoFire:           noFire,
 		Slug:             slug,
 	})
 	if err != nil {
 		return reconcileError(cmd, err)
 	}
-	return emit(cmd, report, reconcileLines(report, dbPath))
+	out.add(storeEngine, dbPath, report)
+
+	if err = reconcileCompanionStore(cmd, &out, companionEnabled, companionDBFlag, slug, noFire); err != nil {
+		return reconcileError(cmd, err)
+	}
+	return emit(cmd, out, reconcileLines(out))
+}
+
+// reconcileCompanionStore runs the pass over the companion's own job store and
+// folds the result into out. It returns an error only for a failure that should
+// stop the command.
+//
+// Three shapes are not failures. A disabled companion has no store to repair, so
+// it is skipped and said so. An enabled companion whose store does not exist has
+// simply never run here — a real condition worth naming, but not one that should
+// discard the Engine repair that already succeeded, so the line reports it and the
+// command still exits zero. Passing --companion-db reverses that last case: an
+// operator who named the target explicitly gets the missing file as an error,
+// exactly as --db has always behaved.
+func reconcileCompanionStore(cmd *cobra.Command, out *reconcileOutput, enabled bool, dbFlag, slug string, noFire bool) error {
+	if !enabled {
+		out.skip(storeCompanion, "", noteCompanionDisabled)
+		return nil
+	}
+	dbPath, err := companion.DefaultDBPath(dbFlag)
+	if err != nil {
+		return err
+	}
+	report, err := companion.ReconcileStore(cmd.Context(), dbPath, companion.ReconcileOptions{
+		NoFire: noFire,
+		Slug:   slug,
+	})
+	switch {
+	case err == nil:
+		out.add(storeCompanion, dbPath, report)
+		return nil
+	case errors.Is(err, flynode.ErrJobStoreMissing) && dbFlag == "":
+		out.skip(storeCompanion, dbPath, noteCompanionMissing)
+		return nil
+	default:
+		return err
+	}
+}
+
+// reconcileStoreLine is one job store the pass covered: which daemon it belongs
+// to, the path that was resolved for it, and — when it contributed no scan — the
+// short reason why. A store that was skipped is reported rather than omitted: an
+// absent line reads exactly like a store that was clean.
+type reconcileStoreLine struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Note string `json:"note,omitempty"`
+}
+
+// reconciledRow is one re-armed periodic tagged with the store it came from, so a
+// report spanning two stores says where each repair landed. The embedded struct is
+// anonymous, so its fields stay flat in JSON and every key a --json consumer read
+// before is unchanged.
+type reconciledRow struct {
+	flynode.ReconciledPeriodic
+
+	Store string `json:"store"`
+}
+
+// reconcileOutput is the whole pass as both surfaces render it: the stores
+// covered, every periodic re-armed across them, and the total inspected.
+//
+// The pre-existing keys keep their names and meanings — reconciled[] rows still
+// carry slug/was_active/next_run/fires_missed, and scanned is still the count of
+// definitions inspected, now summed across stores — so automation written against
+// the single-store shape still parses.
+type reconcileOutput struct {
+	Stores     []reconcileStoreLine `json:"stores"`
+	Reconciled []reconciledRow      `json:"reconciled"`
+	Scanned    int                  `json:"scanned"`
+}
+
+// add folds one store's report into the output, tagging its rows with the store.
+func (o *reconcileOutput) add(name, path string, report flynode.ReconcileReport) {
+	o.Stores = append(o.Stores, reconcileStoreLine{Name: name, Path: path})
+	for _, p := range report.Reconciled {
+		o.Reconciled = append(o.Reconciled, reconciledRow{Store: name, ReconciledPeriodic: p})
+	}
+	o.Scanned += report.Scanned
+}
+
+// skip records a store that contributed no scan, with the reason.
+func (o *reconcileOutput) skip(name, path, note string) {
+	o.Stores = append(o.Stores, reconcileStoreLine{Name: name, Path: path, Note: note})
 }
 
 // reconcileError prints one "lucid: scheduler: <message>" line to stderr and
@@ -202,24 +332,39 @@ func reconcileError(cmd *cobra.Command, err error) error {
 }
 
 // reconcileLines renders the pass as the calm, human-first output the command
-// prints by default. It always names the resolved job store — a path drift is
+// prints by default. It always names every resolved job store — a path drift is
 // the difference between repairing the daemon's schedule and repairing nothing —
 // and says plainly when there was nothing to repair, so a healthy run reads as
 // an answer rather than as silence.
-func reconcileLines(report schedrun.ReconcileReport, dbPath string) []string {
-	lines := []string{
-		fmt.Sprintf("Job store: %s", dbPath),
-		fmt.Sprintf("Scanned: %d periodic(s)", report.Scanned),
+func reconcileLines(out reconcileOutput) []string {
+	lines := make([]string, 0, len(out.Stores)+len(out.Reconciled)+2)
+	for _, s := range out.Stores {
+		lines = append(lines, storeLine(s))
 	}
-	if len(report.Reconciled) == 0 {
+	lines = append(lines, fmt.Sprintf("Scanned: %d periodic(s)", out.Scanned))
+	if len(out.Reconciled) == 0 {
 		return append(lines, "Nothing parked — no periodic needed re-arming.")
 	}
-	lines = append(lines, fmt.Sprintf("Re-armed: %d", len(report.Reconciled)))
-	for _, p := range report.Reconciled {
-		lines = append(lines, fmt.Sprintf("  %s: %s; next run %s%s",
-			p.Slug, wasState(p.WasActive), p.NextRun.Format(reconcileTimeLayout), missedSuffix(p.FiresMissed)))
+	lines = append(lines, fmt.Sprintf("Re-armed: %d", len(out.Reconciled)))
+	for _, p := range out.Reconciled {
+		lines = append(lines, fmt.Sprintf("  [%s] %s: %s; next run %s%s",
+			p.Store, p.Slug, wasState(p.WasActive), p.NextRun.Format(reconcileTimeLayout), missedSuffix(p.FiresMissed)))
 	}
 	return lines
+}
+
+// storeLine names one store on its own line, keeping the resolved path visible
+// even when a note explains why the store contributed nothing.
+func storeLine(s reconcileStoreLine) string {
+	label := fmt.Sprintf("Job store (%s): ", s.Name)
+	switch {
+	case s.Note == "":
+		return label + s.Path
+	case s.Path == "":
+		return label + s.Note
+	default:
+		return label + s.Path + " — " + s.Note
+	}
 }
 
 // wasState names the state the periodic was repaired from, so the report says

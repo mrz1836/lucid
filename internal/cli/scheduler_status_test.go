@@ -145,9 +145,10 @@ func seedStatusJobDB(t *testing.T, path string, specs ...flywheel.PeriodicSpec) 
 
 // seedHealthyDBs seeds the engine and companion job DBs and both delivery receipts
 // for a fully-healthy companion at statusMorning: tripwire active, bell suppressed
-// with its evening backstop armed (the companion owns the night send), morning +
-// night companion periodics active, and verified receipts whose morning date
-// matches the most recent elapsed window.
+// with its evening backstop armed (the companion owns the night send), all three
+// companion periodics active (morning, night, and the morning backstop that
+// catches a morning send that never went out), and verified receipts whose morning
+// date matches the most recent elapsed window.
 func seedHealthyDBs(t *testing.T, home, schedulerDB, companionDB string) {
 	t.Helper()
 	seedStatusJobDB(
@@ -160,6 +161,7 @@ func seedHealthyDBs(t *testing.T, home, schedulerDB, companionDB string) {
 		t, companionDB,
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionMorning, Kind: "lucid_companion_morning", Cron: "0 6 * * *", Queue: "lucid-companion", Active: true},
 		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionNight, Kind: "lucid_companion_night", Cron: "0 19 * * *", Queue: "lucid-companion", Active: true},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionMorningBackstop, Kind: "lucid_companion_morning_backstop", Cron: "0 7 * * *", Queue: "lucid-companion", Active: true},
 	)
 	store := storage.New(home)
 	require.NoError(t, store.WriteCompanionReceipt(storage.CompanionReceipt{

@@ -198,6 +198,7 @@ func healthyInputs() Inputs {
 		CompanionJobs: DBInput{Path: "/c.db", Periodics: []PeriodicStatus{
 			{Slug: SlugCompanionMorning, Present: true, Active: true},
 			{Slug: SlugCompanionNight, Present: true, Active: true},
+			{Slug: SlugCompanionMorningBackstop, Present: true, Active: true},
 		}},
 		Receipts: []ReceiptStatus{
 			{Window: windowMorning, Present: true, Verified: true, Date: today},
