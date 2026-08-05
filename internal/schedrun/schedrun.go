@@ -217,7 +217,7 @@ func Run(ctx context.Context, opts Options) error {
 	reg := buildRegistry(sc, clock, opts.Store, opts.SuppressUserChannel)
 
 	return flynode.Boot(ctx, flynode.BootConfig{
-		Pkg:      "schedrun",
+		Pkg:      pkgName,
 		Queue:    queueName,
 		DBPath:   dbPath,
 		Clock:    clock,
@@ -244,20 +244,11 @@ func Run(ctx context.Context, opts Options) error {
 	})
 }
 
-// startupErr grades a failure from the boot sequence: a stop signal that lands
-// mid-startup aborts the in-flight DB work with a context error, and that is an
-// ordinary shutdown, not a failure. Reporting it as one would put a spurious
-// error line in the supervised log every time the daemon is stopped or restarted
-// during its first moments — the drain path a supervisor exercises constantly.
-// A genuine startup failure (a malformed clock mark, an unusable job store) has
-// no canceled context and still surfaces.
-//
-//nolint:nilerr // discarding the error is the point: a canceled boot is a stop request, and node.Run reports the same clean nil for a canceled drain
+// startupErr grades a failure from the boot sequence: a stop that lands
+// mid-startup is an ordinary shutdown, not a failure. See [flynode.StartupErr],
+// which every daemon shares so none of them invents its own answer.
 func startupErr(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
-		return nil
-	}
-	return err
+	return flynode.StartupErr(ctx, err)
 }
 
 // buildRegistry registers the bell, backstop, and tripwire workers over one
