@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,6 +171,15 @@ func TestSend_MalformedBaseFailsToBuildRequest(t *testing.T) {
 	err := d.Send(context.Background(), engine.ChannelUser, "hi")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build request")
+}
+
+// TestHTTPTimeoutBudget pins the single-POST budget. The number is load-bearing
+// rather than arbitrary: the notifier gets exactly one attempt, so a budget too
+// tight to cover a cold DNS lookup plus a TLS handshake at the fire second turns
+// a momentary blip into a full job-layer retry ladder — minutes of backoff for a
+// send that would have landed a moment later.
+func TestHTTPTimeoutBudget(t *testing.T) {
+	assert.Equal(t, 20*time.Second, httpTimeout)
 }
 
 func TestNewDefaultsDoerToBoundedClient(t *testing.T) {

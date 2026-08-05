@@ -36,14 +36,22 @@ const (
 // point the base at an httptest server via the same field.
 const defaultBaseURL = "https://discord.com/api/v10"
 
-// httpTimeout bounds a single message POST (mirrors the enrichment fetcher's
-// 10s budget); errBodyCap bounds how much of a non-2xx response body is echoed
-// into the returned error so a failure never dumps an unbounded payload;
-// respBodyCap bounds how much of a 2xx body is read when a caller needs the
-// created message id (a Discord message object is a few KB — the cap only
-// guards against a pathological reply).
+// httpTimeout bounds one Discord REST call. This notifier makes exactly one
+// attempt and holds no in-line retry — retry lives at the job layer, where an
+// idempotent delivery receipt makes a second try safe (Discord's create-message
+// carries no idempotency key, so retrying here could double-post). The budget is
+// therefore sized for the worst honest first attempt rather than the typical one:
+// a cold DNS lookup plus a TLS handshake at the exact second a scheduled send
+// fires can outrun a tighter budget, which costs a whole retry cycle for a blip
+// that would have completed a moment later. The same bounded client serves the
+// read-back verify, deliberately — the verify gets the same headroom.
+// errBodyCap bounds how much of a non-2xx response body is echoed into the
+// returned error so a failure never dumps an unbounded payload; respBodyCap
+// bounds how much of a 2xx body is read when a caller needs the created message
+// id (a Discord message object is a few KB — the cap only guards against a
+// pathological reply).
 const (
-	httpTimeout = 10 * time.Second
+	httpTimeout = 20 * time.Second
 	errBodyCap  = 512
 	respBodyCap = 1 << 16
 )
