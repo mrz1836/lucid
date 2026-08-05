@@ -26,6 +26,7 @@ const (
 	stormFile        = "storm.json"
 	profileFile      = "profile.json"
 	anchorsFile      = "anchors.json"
+	selfFile         = "self.json"
 	engineStatusFile = "status.json"
 	engineDayExt     = ".json"
 	engineDayPrefix  = "day_"
@@ -48,11 +49,12 @@ func (a *Adapter) chainPath() string   { return filepath.Join(a.engineDir(), cha
 func (a *Adapter) profilePath() string { return filepath.Join(a.engineDir(), profileFile) }
 func (a *Adapter) stormPath() string   { return filepath.Join(a.engineDir(), stormFile) }
 func (a *Adapter) anchorsPath() string { return filepath.Join(a.engineDir(), anchorsFile) }
+func (a *Adapter) selfPath() string    { return filepath.Join(a.engineDir(), selfFile) }
 func (a *Adapter) statusPath() string  { return filepath.Join(a.engineDir(), engineStatusFile) }
 
 // ScaffoldEngine creates the engine/ tree and writes the default
-// chain.json, witness.json, storm.json, profile.json, and an empty
-// anchors.json if missing (engine-module.md §"Storage additions"). It is
+// chain.json, witness.json, storm.json, profile.json, and empty anchors.json
+// and self.json files if missing (engine-module.md §"Storage additions"). It is
 // idempotent: existing files are never overwritten, so a hand-edited
 // chain.json survives a re-scaffold. status.json is not written here — it is
 // derived, produced by the first RebuildEngineStatus.
@@ -70,6 +72,13 @@ func (a *Adapter) ScaffoldEngine() error {
 	if err != nil {
 		return err
 	}
+	// The history is an empty slice rather than nil so the scaffolded file
+	// reads "history": [] like its anchors.json sibling — a fresh store says
+	// "nothing recorded yet", not "null".
+	selfBytes, err := marshalJSON(engine.SelfLog{Version: engine.SelfVersion, History: []engine.SelfFact{}})
+	if err != nil {
+		return err
+	}
 	files := []struct {
 		path    string
 		content []byte
@@ -79,6 +88,7 @@ func (a *Adapter) ScaffoldEngine() error {
 		{filepath.Join(a.engineDir(), stormFile), []byte(stormStub)},
 		{a.profilePath(), mustMarshalProfile(engine.DefaultProfileState())},
 		{a.anchorsPath(), anchorsBytes},
+		{a.selfPath(), selfBytes},
 	}
 	for _, f := range files {
 		if _, err := writeExcl(f.path, f.content); err != nil {
@@ -339,6 +349,76 @@ func (a *Adapter) AppendAnchors(anchors ...engine.Anchor) error {
 // single record, so every anchor write — one or many — takes the same path.
 func (a *Adapter) AppendAnchor(anchor engine.Anchor) error {
 	return a.AppendAnchors(anchor)
+}
+
+// ReadSelfFacts reads self.json (engine-module.md §self.json). The full
+// append-only history is returned unfolded — the effective profile is a
+// read-time fold, one record per identity ([engine.LatestSelfFacts]).
+//
+// A missing file is not an error here, which is the one place this diverges
+// from [Adapter.ReadAnchors], and the divergence is deliberate. ReadAnchors
+// treats the record as required because every anchor verb scaffolds first;
+// this store's most important reader does not. Router.Ask is contractually
+// read-only — it never scaffolds — so on a Ledger scaffolded before this store
+// existed, a required-file read would make /ask fail outright rather than
+// simply ground on no facts. An absent file therefore reads as the empty log,
+// and the read stays a read.
+//
+// The zero log it returns carries Version 0 rather than SelfVersion, and that
+// is correct: nothing on any read path gates on the version, and every append
+// stamps the current one. A read that repaired the envelope would be a read
+// that writes, which is exactly what the tolerance exists to avoid.
+//
+// A malformed body is still a parse error. A corrupt self-profile must surface
+// rather than silently reading as empty and inviting an append that buries it.
+func (a *Adapter) ReadSelfFacts() (engine.SelfLog, error) {
+	log, _, err := readJSONOptional[engine.SelfLog](a.selfPath(), "self.json")
+	return log, err
+}
+
+// AppendSelfFacts records one or more self facts in a single write: read the
+// log, append every record, write once (engine-module.md §self.json,
+// append-only; the latest record per identity wins at read).
+//
+// One read, one marshal, one write, mirroring [Adapter.AppendAnchors]: either
+// every record lands or none does. This store's verbs each need only a single
+// record — a move is one append, because no record here predates ids — but the
+// contract is kept so a caller that ever does need two written together has a
+// path that cannot half-apply. Passing no records is a no-op: nothing is read,
+// nothing is written.
+//
+// The write goes through [writeFileAtomic] rather than os.WriteFile, the second
+// deliberate divergence from the anchors path. This file accumulates for years
+// and holds the only copy of the subject's semantic memory, so a write
+// interrupted partway must leave the previous file intact rather than truncate
+// it.
+//
+// No record is ever rewritten in place and none is ever removed; the only field
+// this touches outside the history is the envelope's schema version, stamped on
+// every append so the number in a file is always true of that file. A
+// correction, a move and a retirement are therefore each a new append, never an
+// edit.
+func (a *Adapter) AppendSelfFacts(facts ...engine.SelfFact) error {
+	if len(facts) == 0 {
+		return nil
+	}
+	log, err := a.ReadSelfFacts()
+	if err != nil {
+		return err
+	}
+	log.Version = engine.SelfVersion
+	log.History = append(log.History, facts...)
+	content, err := marshalJSON(log)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(a.selfPath(), content, "self.json")
+}
+
+// AppendSelfFact records one self fact. It is [Adapter.AppendSelfFacts] with a
+// single record, so every self-fact write — one or many — takes the same path.
+func (a *Adapter) AppendSelfFact(fact engine.SelfFact) error {
+	return a.AppendSelfFacts(fact)
 }
 
 // RebuildEngineStatus recomputes engine/status.json from the folded day

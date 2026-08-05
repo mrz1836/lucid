@@ -194,6 +194,15 @@ type Config struct {
 	IntakeMaxQuestions int    `json:"intake_max_questions"`
 	AskInsightsCap     int    `json:"ask_insights_cap"`
 	AskReflectionsCap  int    `json:"ask_reflections_cap"`
+	// SelfFactsCap is the ceiling on the self-facts grounding slice /ask sees.
+	// Unlike the two caps above it does not slice by recency — the slice is
+	// ordered by namespace priority, then key — because a self fact is
+	// atemporal: recency would evict a first-year fact in favor of last
+	// week's. The default sits between the two: self facts are short
+	// one-liners bounded by the store's own value ceiling, so forty active
+	// facts is a generous profile whose token cost stays roughly flat as the
+	// store grows past it.
+	SelfFactsCap int `json:"self_facts_cap"`
 	// ReflectWeekMaxDays is the ceiling on the weekly deep-dive's
 	// since-last-reflection catch-up window, in days. The unit that matters is
 	// weeks — the thing being caught up on is a weekly sit-down — so the
@@ -243,6 +252,7 @@ func Default() Config {
 		IntakeMaxQuestions: 4,
 		AskInsightsCap:     50,
 		AskReflectionsCap:  12,
+		SelfFactsCap:       40,
 		ReflectWeekMaxDays: 35,
 		ProposalPause: ProposalPause{
 			UnansweredThreshold: 3,
@@ -401,6 +411,9 @@ func (c Config) Validate() error {
 	}
 	if c.AskReflectionsCap < 1 {
 		return fmt.Errorf("config: ask_reflections_cap must be >= 1, got %d", c.AskReflectionsCap)
+	}
+	if c.SelfFactsCap < 1 {
+		return fmt.Errorf("config: self_facts_cap must be >= 1, got %d", c.SelfFactsCap)
 	}
 	if c.ReflectWeekMaxDays < 1 {
 		return fmt.Errorf("config: reflect_week_max_days must be >= 1, got %d", c.ReflectWeekMaxDays)

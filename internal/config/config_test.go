@@ -22,6 +22,7 @@ func TestDefault_MatchesDocumentedSchema(t *testing.T) {
 	assert.Equal(t, 4, c.IntakeMaxQuestions)
 	assert.Equal(t, 50, c.AskInsightsCap)
 	assert.Equal(t, 12, c.AskReflectionsCap)
+	assert.Equal(t, 40, c.SelfFactsCap)
 	assert.Equal(t, 35, c.ReflectWeekMaxDays)
 	assert.Equal(t, 3, c.ProposalPause.UnansweredThreshold)
 	assert.Equal(t, 14, c.ProposalPause.PauseDays)
@@ -674,6 +675,8 @@ func TestValidate_Failures(t *testing.T) {
 		"bad recent_window_max":          func(c *Config) { c.RecentWindowMax = 0 },
 		"bad ask_insights_cap":           func(c *Config) { c.AskInsightsCap = 0 },
 		"bad ask_reflectionscap":         func(c *Config) { c.AskReflectionsCap = 0 },
+		"zero self_facts_cap":            func(c *Config) { c.SelfFactsCap = 0 },
+		"negative self_facts_cap":        func(c *Config) { c.SelfFactsCap = -1 },
 		"zero reflect_week_max_days":     func(c *Config) { c.ReflectWeekMaxDays = 0 },
 		"negative reflect_week_max_days": func(c *Config) { c.ReflectWeekMaxDays = -1 },
 	}
@@ -684,6 +687,32 @@ func TestValidate_Failures(t *testing.T) {
 			assert.Error(t, c.Validate())
 		})
 	}
+}
+
+// TestSelfFactsCap_ValidationAndRoundTrip covers the self-facts grounding cap
+// end to end: the documented default, the >= 1 rejection message for both a
+// zero and a negative value, and an explicit value surviving a write/read cycle.
+func TestSelfFactsCap_ValidationAndRoundTrip(t *testing.T) {
+	assert.Equal(t, 40, Default().SelfFactsCap, "documented default")
+
+	for _, bad := range []int{0, -1} {
+		c := Default()
+		c.SelfFactsCap = bad
+		err := c.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "self_facts_cap must be >= 1")
+	}
+
+	c := Default()
+	c.SelfFactsCap = 7
+	require.NoError(t, c.Validate())
+	b, err := c.Marshal()
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"self_facts_cap": 7`)
+
+	got, err := Unmarshal(b)
+	require.NoError(t, err)
+	assert.Equal(t, 7, got.SelfFactsCap)
 }
 
 // TestMarshalUnmarshal_RoundTrip proves a default config survives a

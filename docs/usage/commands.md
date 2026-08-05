@@ -58,11 +58,11 @@ flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 **Two tiers, one rule each.**
 
 - **Strict — a date you typed on purpose.** `--day`, the registry's `--start`,
-  `--end`, and `--onset`, and `anchor add`'s positional date. A token the
-  grammar cannot read, or a day in the future, is a clean error: the command
-  exits non-zero, names the accepted forms, and **nothing is written**. A
-  deliberate flag is an assertion, so a typo fails loudly instead of quietly
-  landing on today.
+  `--end`, and `--onset`, `anchor add`'s positional date, and [`self
+  set`](#self)'s `--since`. A token the grammar cannot read, or a day in the
+  future, is a clean error: the command exits non-zero, names the accepted forms,
+  and **nothing is written**. A deliberate flag is an assertion, so a typo fails
+  loudly instead of quietly landing on today.
 - **Permissive — an inline `@`-token in `obs` prose.** `lucid obs ate eggs
   @yesterday` parses the token out of a sentence, and capture is total (P10): an
   unrecognized token stays in the note as ordinary text and the observation is
@@ -78,10 +78,11 @@ this rule.
 `approximate` precision under `logical_date 2014-01-01`; `--day 2014-09` files
 under `2014-09-01`. A logical day is one real day, so a partial date snaps to
 the period's first instant — which means that on a capture, `2014` and
-`2014-01-01` are indistinguishable once written. The registry
-([`era`](#era), [`injury`](#injury)) is the one place that keeps the string **as
-typed**, because "sometime in 2014" is the normal input there rather than an
-edge case.
+`2014-01-01` are indistinguishable once written. Two surfaces keep the string
+**as typed** instead: the registry ([`era`](#era), [`injury`](#injury)), because
+"sometime in 2014" is the normal input there rather than an edge case, and
+[`self set`](#self)'s `--since`, because nothing derives a day count from a self
+fact and a snapped January 1st would fabricate a precision you do not have.
 
 **A bare four-digit token reads differently per tier.** On a `--day` flag,
 `2014` is the year. In `obs` prose, `@2014` is still the clock time 20:14 —
@@ -108,7 +109,7 @@ Unifying the grammar moved six shipped behaviors. Each is deliberate:
 
 ### Deliberate divergences
 
-Five behaviors sit outside the strict tier on purpose. Nothing else does — the
+Seven behaviors sit outside the strict tier on purpose. Nothing else does — the
 registry now carries the future ceiling, so it is not on this list:
 
 | Divergence | Why |
@@ -118,13 +119,17 @@ registry now carries the future ceiling, so it is not on this list:
 | `anchor add` rejects a partial date | An anchor renders a precise day count, and counting from a guessed January 1st would be a confident wrong number. |
 | `closeout --day` carries backfill semantics | It is an alias onto `closeout backfill`, so it keeps that path's `backfill_window_days` window and rejects today as well as the future. |
 | The registry stores a partial date as typed | `--onset 2014-09` stores `"2014-09"`, not the snapped day — the registry is where the *degree* of imprecision is itself the record. |
+| `self set` accepts a partial `--since`, stored as typed | The mirror image of `anchor add`'s rejection: no day count is derived from a self fact, so `1985` is an honest origin where a snapped `1985-01-01` would be a fabricated one. |
+| `self set`'s date is optional entirely | It is the one write surface where a date is not required at all. A self fact is atemporal by definition — most have no origin worth recording, and inventing one would be worse than the silence. |
 
 **The closed write surface.** Every verb that stamps a logical day is named
 above: `log`, `attach`, `obs`, `memory`, `workout log`, `era`, `injury`,
-`anchor`, `mode`, `storm`, `closeout`. Two write verbs are deliberately N/A —
-[`thread`](#thread) is a lifecycle registry with no dated occurrence, and
+`anchor`, `mode`, `storm`, `closeout`. Three write verbs are deliberately N/A —
+[`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
-id or window, rather than capturing a new one.
+id or window, rather than capturing a new one, and [`self`](#self) records
+attributes rather than occurrences: its optional `--since` is an *origin* read
+with the same grammar, not a logical day.
 
 ## CLI commands
 
@@ -1170,6 +1175,189 @@ lucid person "Sam Rivera"
 lucid person Alex --json
 ```
 
+### self
+
+```
+lucid self [<key-or-prefix>] [--json] [--history]
+lucid self set <key> <value...> [--since <date>] [--note <text>]
+lucid self retire <key> [reason...]
+lucid self move <key> <new-key>
+```
+
+A **self fact** is a durable, atemporal attribute of the subject — something that
+is simply true of you, rather than something that happened. Every record is
+appended to a dedicated, append-only store in the engine tree
+(`engine/self.json`); it is never hand-edited, deterministic, no model in the
+path. All three write verbs *append* — nothing is ever deleted or rewritten.
+
+This is the Ledger's one **semantic** surface. Everything else here is episodic,
+and four neighbors already own their material:
+
+- something that **happened** → the journal ([`log`](#log), [`obs`](#obs))
+- a **chapter** with a start and an end → [`era`](#era)
+- a **body event** with an onset and a course → [`injury`](#injury)
+- another **person** → [`person`](#person)
+
+`self` is for what is left: who you are, what stands, what does not move. It
+closes the asymmetry where the Ledger could profile everyone except its owner.
+
+#### Keys and namespaces
+
+A key is `<namespace>.<leaf>`. The namespace is one of five, fixed. The leaf is
+free-form and may itself contain dots, so `constraint.diet.dairy` is a legal key.
+
+| Namespace | What belongs there |
+|-----------|--------------------|
+| `identity.` | Who you are on paper — name, generation, birthplace, the handles that follow you around. |
+| `body.` | Durable physical attributes — height, handedness, blood type. |
+| `constraint.` | Something standing that binds — a dietary limit, an allergy, a hard boundary. |
+| `pref.` | A stable preference — how you like to work, what you reach for by default. |
+| `misc.` | The catch-all. Anything true and durable that the other four do not fit. |
+
+An unrecognized namespace is **rejected**, and the error names both the accepted
+set and `misc.` — so a fact is never turned away for want of a category; it just
+needs one named landing spot. It is deliberately **not** auto-filed into `misc.`:
+silently accepting `identify.name` would hide the typo forever, and a store meant
+to be read in ten years cannot afford a class of error it never reports.
+
+#### Identity and the fold
+
+Each fact carries a stable `id` (`self_YYYY_MM_DD_a`), minted when it is first
+recorded and never derived from what you called it. **The key is a mutable
+address**, the way an anchor's label is a display name: the latest record per
+**id** wins, so correcting a value and re-categorizing a fact are the same
+append-only operation and neither forks the fact's history. At most one *active*
+fact holds a given key.
+
+Every record in this store carries an id. Unlike [`anchor`](#anchor) there is no
+pre-id era here, and no `legacy:` form to go looking for.
+
+#### `self set`
+
+Record a fact. Trailing words join into the value with spaces, so quoting is
+optional — `lucid self set identity.generation elder millennial`. `--note`
+annotates the record; `--since` records an origin.
+
+Re-setting a key an **active** fact already holds appends again under **that
+fact's id**, and the latest record wins: a typo fix and a genuine change are the
+same append. Re-setting a key whose only holder was **retired** starts a **new**
+fact under that freed key with a new id, and the ack says so.
+
+`--since` is optional, and this is the CLI's **one write surface where a date is
+not required at all** — a self fact is atemporal by definition. When you do
+supply it, it reads the shared grammar
+([Backdating with --day](#backdating-with---day)) with one carve-out:
+
+- **A future date is rejected**, on the strict tier's usual terms.
+- **A partial date is accepted and stored as typed.** `--since 1985` stays
+  `"1985"`; `--since 2014-09` stays `"2014-09"`. Neither is snapped to the
+  period's first day. This is the exact inverse of [`anchor add`](#anchor), for
+  the inverse reason: an anchor's whole output is a precise "days since" count,
+  so a guessed January 1st would be a confident wrong number — while nothing
+  derives a day count from a self fact, so "sometime in 1985" is an honest origin
+  and `1985-01-01` would fabricate a precision you do not have.
+
+#### `self retire`
+
+Retire a fact that has stopped being true — a value that no longer holds, a key
+recorded in error. It appends one record mirroring the fact plus
+`state: "retired"`, carrying the fact's own `since` (never the retirement day)
+and the optional `[reason...]` in that record's `note`.
+
+What changes: the key leaves the rendered profile, `--json`, and the [`ask`](#ask)
+grounding slice. What does not: the record stays in the store in full and is
+still read by `--history` and `--json --history`. Nothing is deleted, so a
+retired fact is never invisible — it just stops being part of who you are now.
+
+Setting the key again later starts a new fact under a new id (see `self set`).
+
+#### `self move`
+
+Re-categorize a fact. One append under the **same id** with the new key; value,
+origin, note, and the fact's whole history all carry forward.
+
+That is the payoff of a key being an address rather than an identity: **no
+key-naming decision is a one-way door.** A fact filed under `body.blood_type` on
+day one can become `health.blood_type` in year four — if a `health.` namespace is
+ever added — without orphaning a single record or forking the fact in two. The
+taxonomy is allowed to be wrong and then repaired, instead of being a schema you
+have to get right before you know what you will record.
+
+Exactly two arguments: there is no trailing reason, because nothing is being
+retired.
+
+#### Reading the profile
+
+`lucid self` with no argument renders the whole active profile **grouped by
+namespace**, in priority order — `identity`, `constraint`, `body`, `pref`,
+`misc`. That grouping is what keeps the read surface usable when the store holds
+hundreds of facts rather than a dozen.
+
+- `lucid self <key>` — an argument that exactly matches an **active** key reads
+  that one fact.
+- `lucid self <prefix>` — anything else filters by prefix, so `lucid self body`
+  reads the whole `body.` group and `lucid self constraint.diet` reads one branch
+  of it.
+- `--json` emits the folded profile.
+- `--history` emits the append log for whatever the argument selected —
+  **resolved by id**, so a moved fact's records written under its *old* key are
+  still part of its history. Combine with `--json` for the raw log.
+
+Retired facts appear under `--history` only.
+
+#### The boundary
+
+Two rules keep this from becoming a junk drawer.
+
+- **The namespace set is the limit.** If a fact fits none of the five, it is
+  probably not a durable attribute of you.
+- **This is not a time series.** A value that changes on a schedule — a daily
+  weight, a weekly reading, today's mood — is an *observation* and belongs in
+  [`obs`](#obs), which is built to carry a series. This store tolerates the
+  occasional correction, not routine churn. The test is not "does it change" but
+  "does it change *on a schedule*": a blood type never moves, a home city moves
+  twice a decade, a body weight moves daily. The first two belong here; the third
+  does not.
+
+#### Errors
+
+Each of these prints a fixed reason, exits `1`, and appends nothing:
+
+- **A key no fact holds** — the error names the keys that *are* recorded, so the
+  remedy is in the message rather than in a separate lookup.
+- **An unrecognized namespace** — the error names the accepted five and points at
+  `misc.`, so there is always somewhere to put it.
+- **An empty value**, or one past the 500-character ceiling. The ceiling is a
+  size guard on the grounding slice, not a judgment about the content.
+- **A key that is already retired** — a retired fact is history, not an editable
+  record. Set it again to start a new fact under that key.
+- **`move` onto a key an active fact already holds**, or onto the same key.
+
+Moving onto a key held only by a **retired** fact succeeds — that key is free,
+exactly as it is for `set`.
+
+#### Grounding
+
+The active profile grounds [`ask`](#ask) as a capped slice (`self_facts_cap`,
+default 40), ordered by **namespace priority then key — never recency**. Recency
+is backwards for an atemporal store: it would evict a blood type recorded in year
+one in favor of last week's trivia. Facts enter the slice by id, so `ask` can
+**cite** one (`kind: "self_fact"`) rather than merely read it.
+
+```sh
+lucid self                                       # the whole active profile
+lucid self set identity.generation elder millennial
+lucid self set pref.editor vim
+lucid self set misc.handedness left
+lucid self move misc.handedness body.handedness  # re-categorize — history intact
+lucid self set body.handedness ambidextrous      # correction — same fact, latest wins
+lucid self set identity.birthplace Portland --since 1985
+lucid self body                                  # just the body. group
+lucid self body.handedness --history             # every record, misc. ones included
+lucid self retire pref.editor switched years ago
+lucid self --json
+```
+
 ### bootstrap
 
 ```
@@ -1270,13 +1458,19 @@ lucid reflect week close
 lucid ask <question...>
 ```
 
-Grounded, cited **Q&A** over your validated insights and weekly reflections only —
-surfaces, never new patterns, never advice. Read-only: it writes nothing. Prints the
-answer with in-slice citations, the fixed calm fallback when the Safety gate holds an
-out-of-slice citation, or an "not enough validated material yet" message when the
-slice is empty. Trailing arguments are joined, so quoting the question is optional.
-**Provider-backed** (the `provider` block); the answer passes the Safety/Consent
-gate.
+Grounded, cited **Q&A** over your validated insights, weekly reflections, and
+[self facts](#self) only — surfaces, never new patterns, never advice. Read-only: it
+writes nothing. Prints the answer with in-slice citations, the fixed calm fallback
+when the Safety gate holds an out-of-slice citation, or an "not enough validated
+material yet" message when all three slices are empty. Trailing arguments are joined,
+so quoting the question is optional. **Provider-backed** (the `provider` block); the
+answer passes the Safety/Consent gate.
+
+Every citation carries a **kind** and an id — `insight`, `reflection`, or
+`self_fact`. The three slices are capped independently (`ask_insights_cap`,
+`ask_reflections_cap`, `self_facts_cap`); insights and reflections are sliced by
+recency, self facts by namespace priority then key, since recency means nothing to
+an atemporal fact.
 
 ```sh
 lucid ask "what tends to trip me up in group settings?"

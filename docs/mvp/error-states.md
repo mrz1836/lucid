@@ -88,7 +88,7 @@ The cross-cutting principles below bind all three tables.
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
 |---|---------|-----------------|----------------------|------------------|----------|
-| R-10 | Both `insights_slice` and `reflections_slice` empty | Return `outcome: "insufficient"` without an LLM call. | "I don't have anything validated yet — try `/checkin` or `/log` first." | None (`/ask` never writes). | User can `/log` or `/checkin`. |
+| R-10 | `insights_slice`, `reflections_slice` **and** `self_facts_slice` all empty | Return `outcome: "insufficient"` without an LLM call. | "I don't have anything validated yet — try `/checkin` or `/log` first." | None (`/ask` never writes). | User can `/log` or `/checkin`. |
 | R-11 | LLM returns malformed output (1st attempt) | Retry once. | (none) | (none) | If retry succeeds, continue. |
 | R-12 | LLM returns malformed output (2nd attempt) | Return `outcome: "insufficient"` with a short fallback. | "I had trouble pulling that together — want to ask it differently?" | None. | User retries `/ask`. |
 | R-13 | Output cites an id not in the supplied slice | Validation fires; retry once with the slice ids restated in the prompt. If still invalid, Safety/Consent blocks the answer (see Safety section below). | "I held that response — let me ask differently." | None. | User retries `/ask`. |

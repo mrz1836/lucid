@@ -223,6 +223,154 @@ func TestAsk_SliceCapsRespected(t *testing.T) {
 	assert.Equal(t, 2, strings.Count(captured.String(), "- id:"), "insights slice is capped at ask_insights_cap")
 }
 
+// seedSelfFact records one self fact through the router's own write path and
+// returns its minted id. Values are synthetic throughout.
+func seedSelfFact(t *testing.T, r *Router, key, value string) string {
+	t.Helper()
+	res, err := r.SelfSet(SelfSetRequest{Key: key, Value: value, Now: reflectWeekNow()})
+	require.NoError(t, err)
+	return res.Fact.ID
+}
+
+// askSelfFactAnswer builds a valid grounded-answer completion citing one
+// self-fact id.
+func askSelfFactAnswer(id string) provider.Exchange {
+	return provider.Exchange{Content: fmt.Sprintf(
+		`{"outcome":"answer","answer_text":"You recorded that about yourself.","citations":[{"kind":"self_fact","id":%q}]}`,
+		id,
+	)}
+}
+
+// TestAsk_SelfFactsEnterTheSlice confirms the router composes active self facts
+// into the agent's slice — as values, never as a location — and that /ask stays
+// read-only over the store it just read.
+func TestAsk_SelfFactsEnterTheSlice(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+	seedSelfFact(t, r, "identity.generation", "elder millennial")
+
+	before := hashTree(t, home)
+	captured := &strings.Builder{}
+	p := &recordingProvider{
+		inner: &provider.Fake{Script: []provider.Exchange{{Content: `{"outcome":"insufficient","answer_text":"nope","citations":[]}`}}},
+		seen:  captured,
+	}
+	_, err := r.Ask(context.Background(), AskRequest{Question: "what generation am I?", Provider: p})
+	require.NoError(t, err)
+
+	body := captured.String()
+	assert.Contains(t, body, "SELF FACTS")
+	assert.Contains(t, body, "identity.generation")
+	assert.Contains(t, body, "elder millennial")
+	assert.NotContains(t, body, "engine/", "a fact grounds as a composed value, never as a path")
+	assert.Equal(t, before, hashTree(t, home), "/ask writes nothing")
+}
+
+// TestAsk_SelfFactCitationIsAuthorized is the payoff of the minted-id identity
+// model: a self fact in the slice is in Safety's authorized set, so a grounded
+// self-fact citation passes rather than being blocked as unverified (§Sf-7).
+func TestAsk_SelfFactCitationIsAuthorized(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+	id := seedSelfFact(t, r, "identity.generation", "elder millennial")
+
+	before := hashTree(t, home)
+	p := &provider.Fake{Script: []provider.Exchange{askSelfFactAnswer(id)}}
+	res, err := r.Ask(context.Background(), AskRequest{Question: "what generation am I?", Provider: p})
+	require.NoError(t, err)
+
+	assert.Equal(t, reflection.OutcomeAnswer, res.Outcome)
+	assert.Equal(t, safety.Pass, res.Decision, "an in-slice self-fact citation passes Safety")
+	assert.False(t, res.Blocked)
+	require.Len(t, res.Citations, 1)
+	assert.Equal(t, reflection.CitationSelfFact, res.Citations[0].Kind)
+	assert.Equal(t, id, res.Citations[0].ID)
+	assert.Equal(t, before, hashTree(t, home))
+}
+
+// TestAsk_SelfFactCitationOutOfSliceIsBlocked confirms the authorized set is a
+// real boundary and not a formality: a fact pushed past the cap is not in the
+// slice, so citing it is blocked to the fallback (§Sf-7).
+func TestAsk_SelfFactCitationOutOfSliceIsBlocked(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+	inSlice := seedSelfFact(t, r, "identity.generation", "elder millennial")
+	pastCap := seedSelfFact(t, r, "pref.tea", "strong")
+	r.cfg.SelfFactsCap = 1 // only the identity fact survives the cap
+
+	before := hashTree(t, home)
+	// Cited twice, so the agent's retry cannot recover and the answer reaches Safety.
+	p := &provider.Fake{Script: []provider.Exchange{askSelfFactAnswer(pastCap), askSelfFactAnswer(pastCap)}}
+	res, err := r.Ask(context.Background(), AskRequest{Question: "q?", Provider: p})
+	require.NoError(t, err)
+
+	assert.NotEqual(t, inSlice, pastCap)
+	assert.True(t, res.Blocked)
+	assert.Equal(t, safety.Block, res.Decision)
+	assert.Equal(t, safety.ReasonUnverifiedClaim, res.ReasonCode)
+	assert.Equal(t, askFallback, res.Message)
+	assert.Equal(t, before, hashTree(t, home))
+}
+
+// TestAsk_SelfFactsSliceOrderIsNamespacePriorityNotRecency is the load-bearing
+// ordering guard. Self facts are atemporal, so the slice is ordered by namespace
+// priority then key — never by recency, which would evict a first-year fact
+// (blood type) in favor of last week's trivia. The facts are recorded in
+// deliberately adversarial order and the cap is set to one, so a recency sort
+// would demonstrably have produced a different slice.
+func TestAsk_SelfFactsSliceOrderIsNamespacePriorityNotRecency(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+	// Lowest-priority namespaces recorded FIRST and LAST; identity in between.
+	seedSelfFact(t, r, "misc.trivia", "collects stamps")
+	seedSelfFact(t, r, "identity.generation", "elder millennial")
+	newest := seedSelfFact(t, r, "pref.tea", "strong")
+	r.cfg.SelfFactsCap = 1
+
+	captured := &strings.Builder{}
+	p := &recordingProvider{
+		inner: &provider.Fake{Script: []provider.Exchange{{Content: `{"outcome":"insufficient","answer_text":"nope","citations":[]}`}}},
+		seen:  captured,
+	}
+	_, err := r.Ask(context.Background(), AskRequest{Question: "q?", Provider: p})
+	require.NoError(t, err)
+
+	body := captured.String()
+	assert.Contains(t, body, "identity.generation", "the highest-priority namespace leads the slice")
+	assert.NotContains(t, body, "pref.tea", "the most recently recorded fact is not the one kept")
+	assert.NotContains(t, body, "misc.trivia")
+	assert.NotContains(t, body, newest, "a recency sort would have kept this id instead")
+}
+
+// TestAsk_LeavesSelfFactsStoreAlone extends the read-only guarantee to the new
+// store, both ways: an existing self.json is byte-identical after /ask, and a
+// Ledger scaffolded before this release — one with no self.json at all — does
+// not gain one, because the read tolerates the absence rather than scaffolding.
+func TestAsk_LeavesSelfFactsStoreAlone(t *testing.T) {
+	t.Run("absent stays absent", func(t *testing.T) {
+		r, _, home := newBootedRouter(t)
+		selfPath := filepath.Join(home, "engine", "self.json")
+		require.NoFileExists(t, selfPath, "the engine tree is unscaffolded here, as on a pre-upgrade Ledger")
+
+		p := &provider.Fake{}
+		_, err := r.Ask(context.Background(), AskRequest{Question: "q?", Provider: p})
+		require.NoError(t, err, "a missing self.json is not an error on the read-only path")
+		assert.NoFileExists(t, selfPath, "/ask never scaffolds")
+	})
+
+	t.Run("present stays byte-identical", func(t *testing.T) {
+		r, _, home := newBootedRouter(t)
+		id := seedSelfFact(t, r, "identity.generation", "elder millennial")
+		selfPath := filepath.Join(home, "engine", "self.json")
+		before, err := os.ReadFile(selfPath)
+		require.NoError(t, err)
+
+		p := &provider.Fake{Script: []provider.Exchange{askSelfFactAnswer(id)}}
+		_, err = r.Ask(context.Background(), AskRequest{Question: "q?", Provider: p})
+		require.NoError(t, err)
+
+		after, err := os.ReadFile(selfPath)
+		require.NoError(t, err)
+		assert.Equal(t, before, after, "engine/self.json is byte-identical after /ask")
+	})
+}
+
 // recordingProvider records the last slice body sent, then delegates.
 type recordingProvider struct {
 	inner *provider.Fake

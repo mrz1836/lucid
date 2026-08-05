@@ -618,3 +618,168 @@ func TestFillEngineDayMode_MalformedDayID(t *testing.T) {
 	a := newEngineAdapter(t)
 	require.Error(t, a.FillEngineDayMode("not-a-day-id", engine.ModeGreen, "2026-07-04T14:00:00Z"))
 }
+
+// TestScaffoldEngine_WritesEmptySelfFacts: the store exists from scaffold, so
+// the engine tree is complete before a single fact is recorded.
+func TestScaffoldEngine_WritesEmptySelfFacts(t *testing.T) {
+	a := newEngineAdapter(t)
+	_, err := os.Stat(a.selfPath())
+	require.NoError(t, err)
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	assert.Equal(t, engine.SelfVersion, log.Version)
+	assert.Empty(t, log.History)
+
+	// An empty slice, not nil: a fresh store reads "history": [].
+	raw, err := os.ReadFile(a.selfPath())
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "\"history\": []")
+}
+
+// TestScaffoldEngine_IdempotentPreservesSelfFacts: a re-scaffold rides
+// writeExcl like every other engine file, so a recorded profile survives one.
+func TestScaffoldEngine_IdempotentPreservesSelfFacts(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, a.AppendSelfFact(syntheticSelfFact("self_2026_08_05_a", "identity.generation", "elder millennial")))
+
+	require.NoError(t, a.ScaffoldEngine())
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	require.Len(t, log.History, 1)
+	assert.Equal(t, "identity.generation", log.History[0].Key)
+}
+
+// TestReadSelfFacts_MissingIsEmptyNotAnError is the divergence from
+// ReadAnchors, and the reason /ask can stay read-only: a Ledger scaffolded
+// before this store existed grounds on no facts instead of failing outright.
+func TestReadSelfFacts_MissingIsEmptyNotAnError(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid")) // never scaffolded ⇒ no self.json
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	assert.Empty(t, log.History)
+	assert.Equal(t, 0, log.Version, "a tolerant read reports what is there; it never repairs the envelope")
+
+	_, statErr := os.Stat(a.selfPath())
+	require.Error(t, statErr, "and the read creates nothing — a read that scaffolds is a read that writes")
+}
+
+// TestReadSelfFacts_ParseError: tolerance covers an absent file only. A
+// corrupt profile must surface rather than read as empty and invite an append
+// that buries it.
+func TestReadSelfFacts_ParseError(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, os.WriteFile(a.selfPath(), []byte("{not json"), filePerm))
+	_, err := a.ReadSelfFacts()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "self.json")
+}
+
+func TestAppendSelfFact_RoundTrips(t *testing.T) {
+	a := newEngineAdapter(t)
+	fact := engine.SelfFact{
+		ID:         "self_2026_08_05_a",
+		Key:        "identity.generation",
+		Value:      "elder millennial",
+		Since:      "1985",
+		Note:       "self-described",
+		RecordedAt: "2026-08-05T12:00:00Z",
+	}
+	require.NoError(t, a.AppendSelfFact(fact))
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	require.Len(t, log.History, 1)
+	assert.Equal(t, fact, log.History[0])
+	assert.Equal(t, engine.SelfVersion, log.Version)
+}
+
+// TestAppendSelfFact_PreservesPriorHistory: a correction under the same
+// identity is a second record, not an edit of the first.
+func TestAppendSelfFact_PreservesPriorHistory(t *testing.T) {
+	a := newEngineAdapter(t)
+	first := syntheticSelfFact("self_2026_08_05_a", "body.handedness", "right")
+	second := syntheticSelfFact("self_2026_08_05_a", "body.handedness", "left")
+	require.NoError(t, a.AppendSelfFact(first))
+	require.NoError(t, a.AppendSelfFact(second))
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	require.Len(t, log.History, 2, "append-only history keeps both records")
+	assert.Equal(t, "right", log.History[0].Value)
+
+	latest := engine.LatestSelfFacts(log)
+	require.Len(t, latest, 1, "the two records share one identity")
+	assert.Equal(t, "left", latest[0].Value)
+}
+
+// TestAppendSelfFacts_PairIsOneWrite: the one-read-one-write contract holds
+// for a multi-record append, so a caller that ever needs two records together
+// has a path that cannot half-apply.
+func TestAppendSelfFacts_PairIsOneWrite(t *testing.T) {
+	a := newEngineAdapter(t)
+	first := syntheticSelfFact("self_2026_08_05_a", "identity.generation", "elder millennial")
+	second := syntheticSelfFact("self_2026_08_05_b", "pref.tea", "oolong")
+
+	require.NoError(t, a.AppendSelfFacts(first, second))
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	require.Len(t, log.History, 2, "both records land in the one write")
+	assert.Equal(t, first, log.History[0], "order is preserved")
+	assert.Equal(t, second, log.History[1])
+}
+
+// TestAppendSelfFacts_Empty_IsNoOp: no records means no write at all, so a
+// caller with nothing to record cannot churn the file (or its version).
+func TestAppendSelfFacts_Empty_IsNoOp(t *testing.T) {
+	a := newEngineAdapter(t)
+	before, err := os.ReadFile(a.selfPath())
+	require.NoError(t, err)
+
+	require.NoError(t, a.AppendSelfFacts())
+
+	after, err := os.ReadFile(a.selfPath())
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "an empty append leaves the file byte-identical")
+}
+
+// TestAppendSelfFact_StampsVersionOverZero: a tolerant read of a missing file
+// yields version 0, and the append that follows brings the envelope current —
+// which is why the read never needs to repair it.
+func TestAppendSelfFact_StampsVersionOverZero(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, os.WriteFile(a.selfPath(), []byte("{\n  \"version\": 0,\n  \"history\": []\n}\n"), filePerm))
+
+	require.NoError(t, a.AppendSelfFact(syntheticSelfFact("self_2026_08_05_a", "misc.handedness", "left")))
+
+	log, err := a.ReadSelfFacts()
+	require.NoError(t, err)
+	assert.Equal(t, engine.SelfVersion, log.Version, "every append stamps the current schema version, whatever the file said")
+	require.Len(t, log.History, 1)
+}
+
+// TestAppendSelfFact_OnUnscaffoldedTreeFails: the store's writers scaffold
+// first (the router's prepareEngine), so an append into a tree that has no
+// engine/ directory surfaces rather than creating one behind the caller.
+func TestAppendSelfFact_OnUnscaffoldedTreeFails(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), ".lucid"))
+	require.Error(t, a.AppendSelfFact(syntheticSelfFact("self_2026_08_05_a", "identity.name", "sample")))
+}
+
+// TestAppendSelfFacts_LeavesNoTempResidue: the append writes atomically, and
+// a successful one stages nothing that outlives it.
+func TestAppendSelfFacts_LeavesNoTempResidue(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, a.AppendSelfFact(syntheticSelfFact("self_2026_08_05_a", "identity.name", "sample")))
+
+	assert.Empty(t, stagedTempFiles(t, a.engineDir()))
+}
+
+// syntheticSelfFact builds an active self fact for the adapter tests. Every
+// value in these tests is synthetic.
+func syntheticSelfFact(id, key, value string) engine.SelfFact {
+	return engine.SelfFact{ID: id, Key: key, Value: value, RecordedAt: "2026-08-05T12:00:00Z"}
+}

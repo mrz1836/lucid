@@ -244,8 +244,112 @@ func TestAnswer_StrictRetryRestatesReflectionIDs(t *testing.T) {
 	assert.Contains(t, strict, "reflection_2026_w18")
 }
 
+// oneSelfFact is the standard single-self-fact slice the self-fact tests ground
+// on. Synthetic throughout — no real attribute of any user reaches this repo.
+func oneSelfFact() []SelfFactView {
+	return []SelfFactView{{ID: "self_2026_08_05_a", Key: "identity.generation", Value: "elder millennial"}}
+}
+
+// selfFactExchange builds a valid answer completion citing the given self-fact id.
+func selfFactExchange(id string) provider.Exchange {
+	return provider.Exchange{Content: fmt.Sprintf(
+		`{"outcome":"answer","answer_text":"You recorded that about yourself.","citations":[{"kind":"self_fact","id":%q}]}`,
+		id,
+	)}
+}
+
+// TestAnswer_SelfFactCitationInSlice confirms a self-fact citation is grounded
+// against the self-facts slice and passes the in-slice check.
+func TestAnswer_SelfFactCitationInSlice(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{selfFactExchange("self_2026_08_05_a")}}
+	in := AnswerInput{Question: "what generation am I?", SelfFacts: oneSelfFact()}
+	res := AnswerGrounded(context.Background(), in, p)
+
+	assert.Equal(t, OutcomeAnswer, res.Outcome)
+	require.Len(t, res.Citations, 1)
+	assert.Equal(t, Citation{Kind: CitationSelfFact, ID: "self_2026_08_05_a"}, res.Citations[0])
+	assert.False(t, res.Fallback)
+	assert.Equal(t, 1, p.Calls())
+}
+
+// TestAnswer_OutOfSliceSelfFact confirms a self-fact citation absent from the
+// self-facts slice is out-of-slice, so it is returned for Safety to block
+// rather than silently accepted (the self-fact branch of the check).
+func TestAnswer_OutOfSliceSelfFact(t *testing.T) {
+	bad := selfFactExchange("self_2026_99_99_z")
+	p := &provider.Fake{Script: []provider.Exchange{bad, bad}}
+	in := AnswerInput{Question: "q?", SelfFacts: oneSelfFact()}
+	res := AnswerGrounded(context.Background(), in, p)
+
+	assert.Equal(t, OutcomeAnswer, res.Outcome, "still an answer so Safety can block it (Sf-7)")
+	assert.True(t, res.Fallback)
+	assert.Equal(t, 2, p.Calls(), "one retry with the slice ids restated")
+}
+
+// TestAnswer_SelfFactsAloneDoNotShortCircuit is the AC-14 behavior change: the
+// deterministic no-material path fires only when all three slices are empty, so
+// a Ledger holding self facts and nothing else can still answer.
+func TestAnswer_SelfFactsAloneDoNotShortCircuit(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{selfFactExchange("self_2026_08_05_a")}}
+	res := AnswerGrounded(context.Background(), AnswerInput{Question: "q?", SelfFacts: oneSelfFact()}, p)
+
+	assert.False(t, res.NoLLM, "self facts alone are material enough to ask the model")
+	assert.Equal(t, OutcomeAnswer, res.Outcome)
+	assert.Equal(t, 1, p.Calls())
+
+	// With all three empty the short-circuit still fires, unchanged.
+	empty := &provider.Fake{}
+	got := AnswerGrounded(context.Background(), AnswerInput{Question: "q?"}, empty)
+	assert.True(t, got.NoLLM)
+	assert.Equal(t, answerEmptyStore, got.AnswerText)
+	assert.Equal(t, 0, empty.Calls())
+}
+
+// TestAnswer_SelfFactsRenderInSlice confirms the composed slice carries a SELF
+// FACTS block with each fact id-anchored beside its key and value — and that it
+// carries values only, never a location the agent could go read (Sanctuary).
+func TestAnswer_SelfFactsRenderInSlice(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{answerExchange("i_2026_05_05_a")}}
+	in := AnswerInput{Question: "q?", Insights: oneInsight(), SelfFacts: oneSelfFact()}
+	AnswerGrounded(context.Background(), in, p)
+
+	require.Len(t, p.Requests, 1)
+	require.Len(t, p.Requests[0].Messages, 1)
+	body := p.Requests[0].Messages[0].Content
+	assert.Contains(t, body, "SELF FACTS")
+	assert.Contains(t, body, "self_2026_08_05_a")
+	assert.Contains(t, body, "identity.generation")
+	assert.Contains(t, body, "elder millennial")
+	assert.NotContains(t, body, "self.json", "a fact grounds as a value, never as a location")
+}
+
+// TestAnswer_StrictRetryRestatesSelfFactIDs exercises the strict-retry prompt
+// with a self fact in the slice, so citableIDs enumerates all three kinds.
+func TestAnswer_StrictRetryRestatesSelfFactIDs(t *testing.T) {
+	in := AnswerInput{
+		Question:    "anything?",
+		Insights:    oneInsight(),
+		Reflections: []WeeklyReflectionView{{ID: "reflection_2026_w18", Summary: "Confirmed one."}},
+		SelfFacts:   oneSelfFact(),
+	}
+	p := &provider.Fake{Script: []provider.Exchange{
+		answerExchange("i_2026_99_99_z"),
+		selfFactExchange("self_2026_08_05_a"),
+	}}
+	res := AnswerGrounded(context.Background(), in, p)
+
+	assert.Equal(t, OutcomeAnswer, res.Outcome)
+	assert.False(t, res.Fallback)
+	require.Len(t, p.Requests, 2)
+	strict := p.Requests[1].System
+	assert.Contains(t, strict, "i_2026_05_05_a")
+	assert.Contains(t, strict, "reflection_2026_w18")
+	assert.Contains(t, strict, "self_2026_08_05_a")
+	assert.Contains(t, strict, "self_fact", "the prompt names the third citation kind")
+}
+
 // TestAnswer_SliceIsBounded confirms the agent sends only the question and the
-// two slices — never a Ledger handle (the slice is the whole authorized input).
+// three slices — never a Ledger handle (the slice is the whole authorized input).
 func TestAnswer_SliceIsBounded(t *testing.T) {
 	p := &provider.Fake{Script: []provider.Exchange{answerExchange("i_2026_05_05_a")}}
 	AnswerGrounded(context.Background(), AnswerInput{Question: "how do I act in groups?", Insights: oneInsight()}, p)

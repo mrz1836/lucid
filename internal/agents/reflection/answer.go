@@ -21,10 +21,12 @@ const (
 )
 
 // Citation kinds (agent-contracts.md §3 answer_grounded Outputs). A citation is
-// either a validated insight or a weekly reflection record.
+// a validated insight, a weekly reflection record, or a self fact — the three
+// record kinds the router is allowed to put in front of a grounded answer.
 const (
 	CitationInsight    = "insight"
 	CitationReflection = "reflection"
+	CitationSelfFact   = "self_fact"
 )
 
 // The fixed answer_grounded fallback copy. Each is deliberately clean of every
@@ -53,6 +55,17 @@ type WeeklyReflectionView struct {
 	Summary string
 }
 
+// SelfFactView is the slice of one self fact answer_grounded sees: its id, its
+// key, and its value. That is the whole of it — no origin date, no note, no
+// recorded-at stamp, and never a path. The router composes these values itself,
+// so a fact grounds an answer as a projection rather than as a location the
+// agent could go read (Sanctuary; the same shape the companion panel uses).
+type SelfFactView struct {
+	ID    string
+	Key   string
+	Value string
+}
+
 // Citation is one grounded reference the model returned: the kind of record and
 // its id. Every citation's id must appear in the supplied slice of that kind
 // (agent-contracts.md §3 forbidden behavior; error-states.md §Sf-7).
@@ -63,20 +76,21 @@ type Citation struct {
 
 // AnswerInput is the authorized slice for one answer_grounded call
 // (agent-contracts.md §3 Inputs): the user's verbatim question, the validated
-// insights the router included, the weekly reflections it included, and the
-// agent version. Reflection has no access to raw entries, processed artifacts,
-// or people records — only this slice.
+// insights the router included, the weekly reflections it included, the self
+// facts it included, and the agent version. Reflection has no access to raw
+// entries, processed artifacts, or people records — only this slice.
 type AnswerInput struct {
 	Question     string
 	Insights     []InsightView
 	Reflections  []WeeklyReflectionView
+	SelfFacts    []SelfFactView
 	AgentVersion string
 }
 
 // AnswerResult is Reflection's answer_grounded payload. For an answer,
 // AnswerText and Citations are set; for insufficient, AnswerText carries the
 // fallback and Citations is empty. NoLLM records that the outcome was reached
-// deterministically (both slices empty — no model call). Fallback records that
+// deterministically (every slice empty — no model call). Fallback records that
 // a degrade fired: two malformed / transport failures, or an answer whose
 // citations stayed out-of-slice after the retry (which the router then lets
 // Safety block per §Sf-7).
@@ -103,17 +117,18 @@ type answerCiteYML struct {
 
 // AnswerGrounded runs one reflection.answer_grounded turn. Like the other
 // sub-modes it never returns an error: an empty slice short-circuits with no
-// model call (error-states.md §R-10), and every other failure degrades to
-// insufficient (§R-11/§R-12/§N-3). It is read-only — it returns data, and the
-// router writes nothing on /ask (agent-contracts.md §3; acceptance-criteria.md
-// Phase 7).
+// model call (error-states.md §R-10) — and "empty" means all three slices, so a
+// Ledger holding only self facts can still answer — and every other failure
+// degrades to insufficient (§R-11/§R-12/§N-3). It is read-only — it returns
+// data, and the router writes nothing on /ask (agent-contracts.md §3;
+// acceptance-criteria.md Phase 7).
 //
 // Citation grounding is defense in depth: an answer whose citations fall
 // outside the slice is retried once with the slice ids restated (§R-13); if it
 // is still out-of-slice, the answer is returned unchanged so the router's Safety
 // gate blocks it (§Sf-7) rather than the agent silently swallowing the miss.
 func AnswerGrounded(ctx context.Context, in AnswerInput, p provider.Provider) AnswerResult {
-	if len(in.Insights) == 0 && len(in.Reflections) == 0 {
+	if len(in.Insights) == 0 && len(in.Reflections) == 0 && len(in.SelfFacts) == 0 {
 		return AnswerResult{Outcome: OutcomeInsufficient, AnswerText: answerEmptyStore, NoLLM: true}
 	}
 
@@ -197,7 +212,8 @@ func validAnswer(reply answerReply) bool {
 
 // citationsInSlice reports whether every citation names a record in the
 // supplied slice of its kind — insight ids in Insights, reflection ids in
-// Reflections. An unknown kind is out-of-slice by construction.
+// Reflections, self-fact ids in SelfFacts. An unknown kind is out-of-slice by
+// construction.
 func citationsInSlice(reply answerReply, in AnswerInput) bool {
 	insightIDs := make(map[string]bool, len(in.Insights))
 	for _, v := range in.Insights {
@@ -207,6 +223,10 @@ func citationsInSlice(reply answerReply, in AnswerInput) bool {
 	for _, v := range in.Reflections {
 		reflectionIDs[v.ID] = true
 	}
+	selfFactIDs := make(map[string]bool, len(in.SelfFacts))
+	for _, v := range in.SelfFacts {
+		selfFactIDs[v.ID] = true
+	}
 	for _, c := range reply.Citations {
 		switch c.Kind {
 		case CitationInsight:
@@ -215,6 +235,10 @@ func citationsInSlice(reply answerReply, in AnswerInput) bool {
 			}
 		case CitationReflection:
 			if !reflectionIDs[c.ID] {
+				return false
+			}
+		case CitationSelfFact:
+			if !selfFactIDs[c.ID] {
 				return false
 			}
 		default:
@@ -234,7 +258,7 @@ func fromAnswerReply(reply answerReply) AnswerResult {
 	return AnswerResult{Outcome: OutcomeAnswer, AnswerText: reply.AnswerText, Citations: cites}
 }
 
-// answerSlice renders the question and the two slices as the single user
+// answerSlice renders the question and the three slices as the single user
 // message in the authorized context — the entirety of what answer_grounded
 // sees. Each record is shown id-anchored so the model can cite it by id.
 func answerSlice(in AnswerInput) []provider.Message {
@@ -251,6 +275,12 @@ func answerSlice(in AnswerInput) []provider.Message {
 		b.WriteString("- id: " + v.ID + "\n")
 		b.WriteString("  summary: " + oneLine(v.Summary) + "\n")
 	}
+	b.WriteString("\nSELF FACTS\n")
+	for _, v := range in.SelfFacts {
+		b.WriteString("- id: " + v.ID + "\n")
+		b.WriteString("  key: " + oneLine(v.Key) + "\n")
+		b.WriteString("  value: " + oneLine(v.Value) + "\n")
+	}
 	return []provider.Message{{Role: provider.RoleUser, Content: b.String()}}
 }
 
@@ -262,13 +292,13 @@ func answerSlice(in AnswerInput) []provider.Message {
 func answerSystem(in AnswerInput, strict bool) string {
 	var b strings.Builder
 	b.WriteString("You are Lucid's Reflection agent answering a question from validated material only. ")
-	b.WriteString("Quote or paraphrase the insights and weekly reflections below to answer; cite every ")
-	b.WriteString("record you lean on by its exact id. Introduce no new pattern, add no advice, and use ")
-	b.WriteString("tentative framing. If the material cannot answer the question, say so honestly. ")
+	b.WriteString("Quote or paraphrase the insights, weekly reflections and self facts below to answer; ")
+	b.WriteString("cite every record you lean on by its exact id. Introduce no new pattern, add no advice, ")
+	b.WriteString("and use tentative framing. If the material cannot answer the question, say so honestly. ")
 	b.WriteString("Reply ONLY with JSON, one of:\n")
 	b.WriteString(`{"outcome":"answer","answer_text":"...","citations":[{"kind":"insight","id":"i_..."}]}` + "\n")
 	b.WriteString(`{"outcome":"insufficient","answer_text":"...","citations":[]}` + "\n")
-	b.WriteString("A citation kind is \"insight\" or \"reflection\"; every cited id must be one shown below. ")
+	b.WriteString("A citation kind is \"insight\", \"reflection\" or \"self_fact\"; every cited id must be one shown below. ")
 	if strict {
 		b.WriteString("Your previous reply was not valid. Cite only these ids: " + citableIDs(in) + ". ")
 		b.WriteString("Reply with one JSON object and nothing else.")
@@ -277,14 +307,17 @@ func answerSystem(in AnswerInput, strict bool) string {
 }
 
 // citableIDs joins every id in the slice for the strict-retry prompt, insights
-// then reflections, so a corrected attempt has the exact allow-list in front of
-// it (error-states.md §R-13).
+// then reflections then self facts, so a corrected attempt has the exact
+// allow-list in front of it (error-states.md §R-13).
 func citableIDs(in AnswerInput) string {
-	ids := make([]string, 0, len(in.Insights)+len(in.Reflections))
+	ids := make([]string, 0, len(in.Insights)+len(in.Reflections)+len(in.SelfFacts))
 	for _, v := range in.Insights {
 		ids = append(ids, v.ID)
 	}
 	for _, v := range in.Reflections {
+		ids = append(ids, v.ID)
+	}
+	for _, v := range in.SelfFacts {
 		ids = append(ids, v.ID)
 	}
 	return strings.Join(ids, ", ")
