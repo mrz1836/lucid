@@ -724,6 +724,114 @@ func TestRun_ReconcilesThenDrainsCleanly(t *testing.T) {
 	}
 }
 
+// TestRun_StartupSelfHealArmsTheCompanionPeriodics is the boot-time guarantee,
+// driven through the production Run wiring: a node started against a store whose
+// every definition was switched off comes up with all three sends armed. Seeding
+// and the reconcile pass both defend this invariant — the test asserts the
+// invariant rather than which of them repaired it, because the point of running
+// both is that neither is load-bearing alone.
+func TestRun_StartupSelfHealArmsTheCompanionPeriodics(t *testing.T) {
+	store := newStore(t)
+	companionCfg := writePrompts(t)
+	dbPath := filepath.Join(t.TempDir(), "companion.db")
+
+	// A fully parked store, seeded with the production marks so the boot
+	// reconcile preserves each cursor rather than re-declaring the schedule.
+	seedAt := at(2026, 7, 5, 12, 0)
+	seed, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
+	require.NoError(t, err)
+	require.NoError(t, flywheel.Migrate(seed))
+	require.NoError(t, upsertPeriodics(ctxAt(seedAt), seed, store))
+	for _, slug := range []string{slugMorning, slugNight, slugMorningBackstop} {
+		require.NoError(t, flywheel.SetPeriodicActive(ctxAt(seedAt), seed, slug, false))
+	}
+	closeGorm(seed)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Store:    store,
+			Notifier: &fakeDeliverer{},
+			Numbers:  fakeNumbers{},
+			Verdict:  fakeVerdict{},
+			Config:   companionCfg,
+			Provider: defaultProvider(),
+			DBPath:   dbPath,
+		})
+	}()
+
+	require.Eventually(t, func() bool {
+		db, oerr := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
+		if oerr != nil {
+			return false
+		}
+		defer closeGorm(db)
+		views, lerr := flywheel.ListPeriodics(context.Background(), db)
+		if lerr != nil || len(views) != 3 {
+			return false
+		}
+		for _, v := range views {
+			if !v.Active {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 25*time.Millisecond, "a parked store boots back to armed sends")
+
+	cancel()
+	select {
+	case rerr := <-done:
+		require.NoError(t, rerr, "a canceled node drains cleanly")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+}
+
+// TestRun_StartupSequenceReconcilesAfterSeeding pins the boot order at the unit
+// level: seed the schedule, then repair it. Reconciling before the seed would
+// inspect definitions that do not exist yet on a first boot; reconciling after
+// means the pass runs against exactly the schedule the node is about to serve.
+func TestRun_StartupSequenceReconcilesAfterSeeding(t *testing.T) {
+	seedAt := at(2026, 7, 5, 12, 0)
+	now := at(2026, 7, 5, 13, 0)
+	store := newStore(t)
+	db := newJobDB(t)
+
+	require.NoError(t, upsertPeriodics(ctxAt(seedAt), db, store))
+	// Drift the seed cannot have caused, but a boot must still not leave behind.
+	require.NoError(t, flywheel.SetPeriodicActive(ctxAt(seedAt), db, slugMorningBackstop, false))
+
+	report, err := Reconcile(ctxAt(now), db, ReconcileOptions{})
+	require.NoError(t, err)
+	require.Len(t, report.Reconciled, 1)
+	assert.Equal(t, slugMorningBackstop, report.Reconciled[0].Slug)
+}
+
+// TestRun_StopDuringStartupIsACleanDrain: a stop signal that lands while the
+// node is still seeding and repairing its schedule is an ordinary shutdown — the
+// supervisor stops and restarts this daemon constantly, and a canceled boot
+// reported as a failure would put a spurious error in the supervised log every
+// time.
+func TestRun_StopDuringStartupIsACleanDrain(t *testing.T) {
+	store := newStore(t)
+	companionCfg := writePrompts(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // stopped before the boot sequence can finish
+
+	require.NoError(t, Run(ctx, Options{
+		Store:    store,
+		Notifier: &fakeDeliverer{},
+		Numbers:  fakeNumbers{},
+		Verdict:  fakeVerdict{},
+		Config:   companionCfg,
+		Provider: defaultProvider(),
+		DBPath:   filepath.Join(t.TempDir(), "companion.db"),
+	}))
+}
+
 // closeGorm closes a gorm handle's underlying pool so the poll loop leaks no FDs.
 func closeGorm(db *gorm.DB) {
 	if sqlDB, err := db.DB(); err == nil {

@@ -407,11 +407,11 @@ func (w morningBackstopWorker) Work(ctx context.Context, _ *flywheel.Job[compani
 }
 
 // Run opens the disposable job DB, migrates it, registers the morning, night,
-// and morning-backstop workers, reconciles the three periodics from the chain's
-// bell/tripwire marks, and runs the flywheel node until ctx is canceled
-// (SIGINT/SIGTERM upstream). It returns nil on a clean drain. It runs beside the
-// Engine daemon in the same process (config-gated), so it is up whenever the
-// scheduler is.
+// and morning-backstop workers, seeds the three periodics from the chain's
+// bell/tripwire marks and repairs any that were left parked, and runs the
+// flywheel node until ctx is canceled (SIGINT/SIGTERM upstream). It returns nil
+// on a clean drain. It runs beside the Engine daemon in the same process
+// (config-gated), so it is up whenever the scheduler is.
 func Run(ctx context.Context, o Options) error {
 	if o.Store == nil {
 		return errNoStore
@@ -445,7 +445,22 @@ func Run(ctx context.Context, o Options) error {
 		Store:    o.Store,
 		Registry: reg,
 		Reconcile: func(ctx context.Context, db *gorm.DB) error {
-			return upsertPeriodics(ctx, db, o.Store)
+			if err := upsertPeriodics(ctx, db, o.Store); err != nil {
+				return flynode.StartupErr(ctx, err)
+			}
+			// Seeding declares the schedule; this pass repairs it. They are not the
+			// same job: an upsert restores each periodic's active flag but
+			// deliberately preserves its cursor, so a periodic whose next run was
+			// left frozen in the past would come back up still unreachable by the
+			// due scan. Running the same pass `lucid scheduler reconcile` exposes —
+			// rather than a second, boot-only notion of "parked" — is what keeps the
+			// node and the command agreeing on what a healthy schedule looks like.
+			// It is a no-op on a healthy store, and the intended-active guard means
+			// it never reaches a slug that is not this node's.
+			if _, err := Reconcile(ctx, db, ReconcileOptions{}); err != nil {
+				return flynode.StartupErr(ctx, err)
+			}
+			return nil
 		},
 	})
 }
