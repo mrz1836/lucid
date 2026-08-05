@@ -847,10 +847,22 @@ worse than one that visibly fails (P10: the record serves the practice):
    ([ADR-0004](../adr/0004-core-dependencies.md)), never the record, and
    is never hand-edited — the same discipline the Ledger's derived
    `status.json` follows.
+4. **The rules cover every scheduled send, not only the Engine's.** The
+   companion runs its own periodics in its own job store, so rules 2 and
+   3 apply there too: its node runs the same startup self-heal, and
+   `scheduler reconcile` spans both stores. A fault the report can name
+   is a fault the lever can fix — otherwise a parked companion window
+   would be a send that stopped existing with nothing but a hand edit to
+   bring it back, which is exactly the outcome this section forbids.
 
-The **evening backstop** (§"Consent amendment") completes the set: rules
-1–3 keep a *periodic* alive, and the backstop keeps the evening *window*
-from falling silent when the companion owns it and its delivery fails.
+Two **backstops** complete the set: rules 1–4 keep a *periodic* alive, and
+the backstops keep a *window* from falling silent when the send that owns
+it fails outright. The evening backstop (§"Consent amendment") covers the
+night; the morning backstop
+([`../usage/commands.md`](../usage/commands.md#the-morning-backstop-lucid-companion-morning-backstop))
+covers the morning, which needs it most — with the companion presenting
+that window the tripwire's own user-channel send is suppressed, so an
+unbacked morning failure is total silence rather than a plainer message.
 
 ## Error states (extends [`error-states.md`](error-states.md))
 
@@ -879,6 +891,9 @@ from falling silent when the companion owns it and its delivery fails.
 | A periodic is *intended inactive* (companion-suppressed bell, `bell.enabled: false`) | Left inactive by every reconcile pass | `scheduler status` reports "suppressed by companion (intended)" — OK, not a fault | None | (none — this is designed behavior, not a failure) |
 | Companion owns the evening window and left no verified `night` receipt for the logical day by the backstop mark | Evening backstop fires the bell template verbatim | The ordinary bell prompt (late) | Job store only | (none — the backstop *is* the recovery) |
 | Companion already delivered a verified `night` receipt for the logical day | Backstop is a no-op — at most one evening send per day | (none) | None | (none — designed) |
+| Companion left no verified `morning` receipt for the logical day by the backstop mark | Morning backstop re-runs the companion card | The real morning card (late), carrying a backstop note | Job store only | (none — the backstop *is* the recovery) |
+| Companion already delivered a verified `morning` receipt for the logical day | Backstop is a no-op — at most one morning send per day | (none) | None | (none — designed) |
+| The morning backstop mark falls past the companion's `10:00` morning cut-off | Backstop stands down — no send, and no alert | (none — the primary morning send already alerted for that window) | None | (none — designed; a second alert would report the same fault twice) |
 
 ## Acceptance criteria (build phases 8–10)
 
