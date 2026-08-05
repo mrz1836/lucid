@@ -6,6 +6,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/agents/reflection"
 	"github.com/mrz1836/lucid/internal/agents/safety"
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -43,14 +44,17 @@ type AskResult struct {
 }
 
 // Ask executes /ask: it builds the insights slice (accepted, cap
-// ask_insights_cap, most recent by the last status transition) and the
-// reflections slice (cap ask_reflections_cap, most recent ISO-week), runs
-// reflection.answer_grounded over them and the question, and gates an answer
-// through Safety. It is strictly read-only — nothing under ~/.lucid/ changes
-// (agent-contracts.md §3; acceptance-criteria.md Phase 7; S-6). Both slices
-// empty short-circuits to the insufficient message with no model call
-// (error-states.md §R-10). An answer citing an id outside the slice, or giving
-// advice, is blocked by Safety and the fallback is surfaced (§Sf-7/§Sf-8).
+// ask_insights_cap, most recent by the last status transition), the reflections
+// slice (cap ask_reflections_cap, most recent ISO-week), and the self-facts
+// slice (active only, cap self_facts_cap, ordered by namespace priority then
+// key), runs reflection.answer_grounded over them and the question, and gates an
+// answer through Safety. It is strictly read-only — nothing under ~/.lucid/
+// changes (agent-contracts.md §3; acceptance-criteria.md Phase 7; S-6), which is
+// why the self-facts read tolerates an absent file rather than scaffolding one.
+// Every slice empty short-circuits to the insufficient message with no model
+// call (error-states.md §R-10). An answer citing an id outside the slice, or
+// giving advice, is blocked by Safety and the fallback is surfaced
+// (§Sf-7/§Sf-8).
 func (r *Router) Ask(ctx context.Context, req AskRequest) (AskResult, error) {
 	insights, err := r.store.ReadAcceptedInsights(r.cfg.AskInsightsCap)
 	if err != nil {
@@ -60,11 +64,17 @@ func (r *Router) Ask(ctx context.Context, req AskRequest) (AskResult, error) {
 	if err != nil {
 		return AskResult{}, fmt.Errorf("ask: read reflections slice: %w", err)
 	}
+	selfLog, err := r.store.ReadSelfFacts()
+	if err != nil {
+		return AskResult{}, fmt.Errorf("ask: read self facts slice: %w", err)
+	}
+	facts := engine.GroundingSelfFacts(engine.LatestSelfFacts(selfLog), r.cfg.SelfFactsCap)
 
 	ans := reflection.AnswerGrounded(ctx, reflection.AnswerInput{
 		Question:     req.Question,
 		Insights:     toInsightViews(insights),
 		Reflections:  toWeeklyReflectionViews(reflections),
+		SelfFacts:    toSelfFactViews(facts),
 		AgentVersion: r.cfg.AgentVersions.Reflection,
 	}, req.Provider)
 
@@ -79,7 +89,7 @@ func (r *Router) Ask(ctx context.Context, req AskRequest) (AskResult, error) {
 		Intent:        safety.IntentAnswer,
 		Text:          ans.AnswerText,
 		Citations:     citationIDs(ans.Citations),
-		AuthorizedIDs: sliceIDs(insights, reflections),
+		AuthorizedIDs: sliceIDs(insights, reflections, facts),
 	}, safety.SessionContext{Command: commandAsk}, req.Provider)
 
 	res := AskResult{Outcome: ans.Outcome, Decision: dec.Decision, ReasonCode: dec.ReasonCode, Citations: ans.Citations}
@@ -102,6 +112,18 @@ func toWeeklyReflectionViews(recs []storage.Reflection) []reflection.WeeklyRefle
 	return out
 }
 
+// toSelfFactViews maps folded self facts to the agent's answer slice: id, key
+// and value. Reflection sees nothing else of a fact — no origin date, no note,
+// no recorded-at stamp — and never a path, because the router composes the
+// values itself (Sanctuary; the projection shape the companion panel uses).
+func toSelfFactViews(facts []engine.SelfFact) []reflection.SelfFactView {
+	out := make([]reflection.SelfFactView, 0, len(facts))
+	for _, f := range facts {
+		out = append(out, reflection.SelfFactView{ID: f.ID, Key: f.Key, Value: f.Value})
+	}
+	return out
+}
+
 // citationIDs flattens the answer's citations to their ids for the Safety
 // out-of-slice check (§Sf-7).
 func citationIDs(cites []reflection.Citation) []string {
@@ -113,14 +135,21 @@ func citationIDs(cites []reflection.Citation) []string {
 }
 
 // sliceIDs is the authorized-id set Safety checks citations against: every
-// insight id and every reflection id the router put in front of the agent.
-func sliceIDs(insights []storage.Insight, reflections []storage.Reflection) []string {
-	out := make([]string, 0, len(insights)+len(reflections))
+// insight id, every reflection id, and every self-fact id the router put in
+// front of the agent. The self-fact arm is the whole reason a fact carries a
+// stable minted id rather than being addressed by its (mutable) key — without
+// it Safety would block a correctly grounded self-fact citation as
+// out-of-slice (§Sf-7) and the grounding would be inert.
+func sliceIDs(insights []storage.Insight, reflections []storage.Reflection, facts []engine.SelfFact) []string {
+	out := make([]string, 0, len(insights)+len(reflections)+len(facts))
 	for _, ins := range insights {
 		out = append(out, ins.ID)
 	}
 	for _, rec := range reflections {
 		out = append(out, rec.ID)
+	}
+	for _, f := range facts {
+		out = append(out, f.ID)
 	}
 	return out
 }

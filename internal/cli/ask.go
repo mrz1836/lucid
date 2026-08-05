@@ -10,8 +10,9 @@ import (
 )
 
 // askCitationView is one grounded reference under --json: the record kind
-// (insight | reflection) and its id. Every id is in-slice by construction — an
-// out-of-slice citation is blocked upstream by Safety before it reaches here.
+// (insight | reflection | self_fact) and its id. Every id is in-slice by
+// construction — an out-of-slice citation is blocked upstream by Safety before
+// it reaches here.
 type askCitationView struct {
 	Kind string `json:"kind"`
 	ID   string `json:"id"`
@@ -32,10 +33,11 @@ type askView struct {
 }
 
 // newAskCmd wires `lucid ask <question...>`: grounded, cited Q&A over the user's
-// validated insights and weekly reflections only. It is provider-backed (the
-// lucid.json `provider` block) and strictly **read-only** — nothing under
-// ~/.lucid/ changes (agent-contracts.md §3; S-6). The router builds the two
-// authorized slices, runs the grounded-answer agent, and gates the answer
+// validated insights, weekly reflections and self facts only. It is
+// provider-backed (the lucid.json `provider` block) and strictly **read-only** —
+// nothing under ~/.lucid/ changes (agent-contracts.md §3; S-6). The router
+// builds the three authorized slices, runs the grounded-answer agent, and gates
+// the answer
 // through Safety: a pass prints the answer with its in-slice citations, an
 // out-of-slice citation or advice is blocked to the fixed calm fallback, and an
 // empty store yields the honest insufficient message with no model call.
