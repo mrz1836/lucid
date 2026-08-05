@@ -261,8 +261,30 @@ func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
 
 // reconcileJSON mirrors the documented `lucid scheduler reconcile --json` shape:
 // what was re-armed, and how many definitions were inspected.
+//
+// It is deliberately the *pre-two-store* shape, with no knowledge of the `store`
+// field or the `stores` array added beside it. Decoding the current output through
+// it is what proves automation written against the older shape still parses.
 type reconcileJSON struct {
 	Reconciled []struct {
+		Slug        string `json:"slug"`
+		WasActive   bool   `json:"was_active"`
+		NextRun     string `json:"next_run"`
+		FiresMissed bool   `json:"fires_missed"`
+	} `json:"reconciled"`
+	Scanned int `json:"scanned"`
+}
+
+// reconcileStoresJSON is the grown shape: every store the pass covered, and the
+// store each re-armed row came from.
+type reconcileStoresJSON struct {
+	Stores []struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+		Note string `json:"note"`
+	} `json:"stores"`
+	Reconciled []struct {
+		Store       string `json:"store"`
 		Slug        string `json:"slug"`
 		WasActive   bool   `json:"was_active"`
 		NextRun     string `json:"next_run"`
@@ -306,8 +328,32 @@ func readPeriodicActive(t *testing.T, path string) map[string]bool {
 	return active
 }
 
+// seedReconcileBothStores seeds the Engine store exactly as [seedReconcileEnv]
+// does and the companion store beside it with its three production definitions,
+// the morning send parked. That is the two-store shape the repair lever exists
+// for: one parked send in each store, and healthy siblings around them that must
+// be left alone.
+func seedReconcileBothStores(t *testing.T) (schedulerDB, companionDB string) {
+	t.Helper()
+	_, schedulerDB, companionDB = seedScheduler(t, true, "PROMPT\n")
+	seedStatusJobDB(
+		t, schedulerDB,
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: false},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugBell, Kind: "lucid_bell", Cron: "0 19 * * *", Queue: "lucid", Active: false},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugBellFallback, Kind: "lucid_bell_fallback", Cron: "0 23 * * *", Queue: "lucid", Active: true},
+	)
+	seedStatusJobDB(
+		t, companionDB,
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionMorning, Kind: "lucid_companion_morning", Cron: "0 6 * * *", Queue: "lucid-companion", Active: false},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionNight, Kind: "lucid_companion_night", Cron: "0 19 * * *", Queue: "lucid-companion", Active: true},
+		flywheel.PeriodicSpec{Slug: schedstatus.SlugCompanionMorningBackstop, Kind: "lucid_companion_morning_backstop", Cron: "0 7 * * *", Queue: "lucid-companion", Active: true},
+	)
+	return schedulerDB, companionDB
+}
+
 // TestSchedulerReconcile_TreeExposesReconcile proves the `reconcile` child is
-// registered under the `scheduler` parent and carries its three flags.
+// registered under the `scheduler` parent and carries its four flags — including
+// the companion-store override that mirrors the one `status` already carries.
 func TestSchedulerReconcile_TreeExposesReconcile(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
 
@@ -317,6 +363,124 @@ func TestSchedulerReconcile_TreeExposesReconcile(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup(reconcileFlagSlug), "reconcile exposes --slug")
 	assert.NotNil(t, cmd.Flags().Lookup(reconcileFlagNoFire), "reconcile exposes --no-fire")
 	assert.NotNil(t, cmd.Flags().Lookup(schedulerFlagDB), "reconcile exposes --db")
+	assert.NotNil(t, cmd.Flags().Lookup(statusFlagCompanionDB), "reconcile exposes --companion-db")
+}
+
+// TestSchedulerReconcile_SpansBothStores is the whole point of the two-store pass:
+// one invocation repairs a parked Engine send and a parked companion send, each
+// row naming the store it was repaired in, while the healthy siblings in both
+// stores are left untouched.
+func TestSchedulerReconcile_SpansBothStores(t *testing.T) {
+	schedulerDB, companionDB := seedReconcileBothStores(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, schedulerDB, "the report names the Engine store")
+	assert.Contains(t, out, companionDB, "and the companion store beside it")
+	assert.Contains(t, out, "[engine] "+schedstatus.SlugTripwire, "each row names the store it was repaired in")
+	assert.Contains(t, out, "[companion] "+schedstatus.SlugCompanionMorning)
+
+	assert.True(t, readPeriodicActive(t, schedulerDB)[schedstatus.SlugTripwire], "the parked Engine send is armed again")
+
+	companionActive := readPeriodicActive(t, companionDB)
+	assert.True(t, companionActive[schedstatus.SlugCompanionMorning], "the parked companion send is armed again")
+	assert.True(t, companionActive[schedstatus.SlugCompanionNight], "its healthy sibling is untouched")
+	assert.True(t, companionActive[schedstatus.SlugCompanionMorningBackstop], "and so is the backstop")
+}
+
+// TestSchedulerReconcile_CompanionDisabledSkipsThatStore: with the companion off
+// there is no companion store to repair. The line says so rather than being
+// omitted — a store silently skipped reads exactly like a store that was clean.
+func TestSchedulerReconcile_CompanionDisabledSkipsThatStore(t *testing.T) {
+	_, schedulerDB, _ := seedScheduler(t, false, "PROMPT\n")
+	seedStatusJobDB(t, schedulerDB, flywheel.PeriodicSpec{
+		Slug: schedstatus.SlugTripwire, Kind: "lucid_tripwire", Cron: "0 6 * * *", Queue: "lucid", Active: false,
+	})
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, "not enabled — skipped", "the skipped store is named with its reason")
+	assert.Contains(t, out, "[engine] "+schedstatus.SlugTripwire, "and the Engine repair still happens")
+}
+
+// TestSchedulerReconcile_MissingCompanionStoreIsNamedNotFatal: an enabled
+// companion whose store does not exist has simply never run here. That is worth
+// naming, but discarding a successful Engine repair over it would make the lever
+// fail exactly when a half-installed host needs it most — so the line reports it
+// and the command still succeeds.
+func TestSchedulerReconcile_MissingCompanionStoreIsNamedNotFatal(t *testing.T) {
+	schedulerDB := seedReconcileEnv(t) // seeds the Engine store only
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err, "a companion store that was never created is not a failure")
+	assert.Contains(t, out, "not found — start the daemon once to create it")
+	assert.Contains(t, out, "[engine] "+schedstatus.SlugTripwire, "the Engine repair stands")
+	assert.True(t, readPeriodicActive(t, schedulerDB)[schedstatus.SlugTripwire])
+}
+
+// TestSchedulerReconcile_ExplicitCompanionDBMissingIsFatal is the other half of
+// that rule: an operator who named the target explicitly gets a missing file as an
+// error, exactly as --db has always behaved. Softening it would silently repair
+// something other than what was asked for.
+func TestSchedulerReconcile_ExplicitCompanionDBMissingIsFatal(t *testing.T) {
+	seedReconcileEnv(t)
+	absent := filepath.Join(t.TempDir(), "absent", "companion.db")
+
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile", "--companion-db", absent)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), absent)
+	assert.Contains(t, stderr, "lucid: scheduler:", "the failure is named, not left to a bare exit code")
+	assert.Contains(t, stderr, absent, "and it names the store it looked for")
+}
+
+// TestSchedulerReconcile_HealthyBothStoresReportsNothingParked: with both stores
+// healthy the command still says so in one sentence. A repair lever that printed
+// nothing would be indistinguishable from one that failed silently.
+func TestSchedulerReconcile_HealthyBothStoresReportsNothingParked(t *testing.T) {
+	schedulerDB, companionDB := seedReconcileBothStores(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Nothing parked")
+	assert.Contains(t, out, schedulerDB, "both stores are still named on a clean pass")
+	assert.Contains(t, out, companionDB)
+}
+
+// TestSchedulerReconcile_JSONKeepsExistingKeys pins the compatibility promise: the
+// grown document still decodes through the pre-two-store struct with every key
+// meaning what it did, and the additions — a `store` per row and the top-level
+// `stores` array — sit beside them rather than replacing anything.
+func TestSchedulerReconcile_JSONKeepsExistingKeys(t *testing.T) {
+	seedReconcileBothStores(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "reconcile", "--json")
+	require.NoError(t, err)
+
+	var legacy reconcileJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &legacy), "the older shape still parses")
+	assert.Equal(t, 6, legacy.Scanned, "scanned is the total across both stores")
+	require.Len(t, legacy.Reconciled, 2)
+	for _, row := range legacy.Reconciled {
+		assert.NotEmpty(t, row.Slug)
+		assert.False(t, row.WasActive)
+		assert.NotEmpty(t, row.NextRun)
+	}
+
+	var full reconcileStoresJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &full))
+	require.Len(t, full.Stores, 2)
+	assert.Equal(t, "engine", full.Stores[0].Name)
+	assert.Equal(t, "companion", full.Stores[1].Name)
+	assert.NotEmpty(t, full.Stores[1].Path, "a scanned store names its resolved path")
+
+	stores := map[string]string{}
+	for _, row := range full.Reconciled {
+		stores[row.Slug] = row.Store
+	}
+	assert.Equal(t, "engine", stores[schedstatus.SlugTripwire])
+	assert.Equal(t, "companion", stores[schedstatus.SlugCompanionMorning])
 }
 
 // TestSchedulerReconcile_RejectsArgs: `scheduler reconcile` is a no-args verb —

@@ -45,11 +45,12 @@ const (
 // a divergence would surface as a "not registered" check, which is the honest
 // signal anyway.
 const (
-	SlugBell             = "lucid-bell"
-	SlugBellFallback     = "lucid-bell-fallback"
-	SlugTripwire         = "lucid-tripwire"
-	SlugCompanionMorning = "lucid-companion-morning"
-	SlugCompanionNight   = "lucid-companion-night"
+	SlugBell                     = "lucid-bell"
+	SlugBellFallback             = "lucid-bell-fallback"
+	SlugTripwire                 = "lucid-tripwire"
+	SlugCompanionMorning         = "lucid-companion-morning"
+	SlugCompanionNight           = "lucid-companion-night"
+	SlugCompanionMorningBackstop = "lucid-companion-morning-backstop"
 )
 
 // The two repair levers a fault line names, so a report is actionable without a
@@ -286,6 +287,8 @@ func worst(groups ...[]Check) CheckState {
 //   - required periodic inactive/missing (companion on)    -> error
 //   - intended-active engine periodic parked (off, or its
 //     cursor stuck a full day behind)                      -> error, naming the repair command
+//   - companion periodic parked (off, or its cursor stuck
+//     a full day behind)                                   -> error, naming the repair command
 //   - engine bell inactive while the companion owns the send-> not a fault (suppressed, intended)
 //   - evening backstop inactive while the companion owns
 //     the send                                             -> error, naming the repair command
@@ -327,7 +330,7 @@ func Assemble(in Inputs, now time.Time) Report {
 		checks = append(checks, classifyEnginePeriodics(&r.Engine, in.Companion.Enabled, now)...)
 	}
 	if in.Companion.Enabled && r.CompanionJobs.State == Ok {
-		checks = append(checks, classifyCompanionPeriodics(&r.CompanionJobs)...)
+		checks = append(checks, classifyCompanionPeriodics(&r.CompanionJobs, now)...)
 	}
 
 	// Receipts are a companion concept — only checked when it is enabled.
@@ -534,33 +537,54 @@ func remedy(cmd, slug string) string {
 	return "run: " + cmd + " --slug " + slug
 }
 
-// classifyCompanionPeriodics checks the companion job DB's morning and night
-// periodics, both required active whenever the companion is enabled. They live in
-// the companion's own job store, which the engine repair lever does not own, so
-// their faults name no reconcile command.
-func classifyCompanionPeriodics(rep *DBReport) []Check {
-	checks := requireActive(rep, SlugCompanionMorning, "morning companion")
-	return append(checks, requireActive(rep, SlugCompanionNight, "night companion")...)
+// classifyCompanionPeriodics checks the companion job DB's three periodics — the
+// morning and night sends and the morning backstop — all required active whenever
+// the companion is enabled. They live in the companion's own job store, which the
+// repair lever now reaches too (it spans both stores), so their faults name the
+// same reconcile command the engine's do.
+func classifyCompanionPeriodics(rep *DBReport, now time.Time) []Check {
+	checks := classifyCompanionPeriodic(rep, SlugCompanionMorning, "morning companion", now)
+	checks = append(checks, classifyCompanionPeriodic(rep, SlugCompanionNight, "night companion", now)...)
+	return append(checks, classifyCompanionPeriodic(rep, SlugCompanionMorningBackstop, "morning backstop", now)...)
 }
 
-// requireActive locates slug among the report's periodics and faults it when the
-// store does not have it running. A missing slug is recorded as a Present:false
-// placeholder so it renders visibly; a present slug that is inactive is flagged.
-func requireActive(rep *DBReport, slug, label string) []Check {
+// classifyCompanionPeriodic locates slug among the report's periodics and faults
+// it when the store does not have it running. A missing slug is recorded as a
+// Present:false placeholder so it renders visibly rather than vanishing from the
+// list.
+//
+// The three fault shapes mirror [classifyEnginePeriodic] exactly, wording
+// included: unregistered is seeded by one daemon start, while an inactive
+// periodic and one whose cursor is stuck a full day behind are both *parked* —
+// the silent failure repair exists for — so each names the command that fixes it.
+// There is no intended-inactive case here: unlike the engine's evening pair,
+// nothing in the companion store trades windows, so all three are unconditionally
+// intended active whenever this classification runs at all.
+func classifyCompanionPeriodic(rep *DBReport, slug, label string, now time.Time) []Check {
+	name := "periodic." + slug
 	p, found := findPeriodic(rep.Periodics, slug)
 	switch {
 	case !found:
 		rep.Periodics = append(rep.Periodics, PeriodicStatus{Slug: slug, Present: false})
 		return []Check{{
-			Name:   "periodic." + slug,
-			State:  Error,
-			Detail: fmt.Sprintf("%s (%s) is not registered", label, slug),
+			Name:  name,
+			State: Error,
+			Detail: fmt.Sprintf("%s (%s) is not registered — start the daemon once to seed it; %s",
+				label, slug, remedy(cmdRun, "")),
 		}}
 	case !p.Active:
 		return []Check{{
-			Name:   "periodic." + slug,
-			State:  Error,
-			Detail: fmt.Sprintf("%s (%s) is inactive", label, slug),
+			Name:  name,
+			State: Error,
+			Detail: fmt.Sprintf("%s (%s) is inactive — the send will never fire again; %s",
+				label, slug, remedy(cmdReconcile, slug)),
+		}}
+	case stuckCursor(p, now):
+		return []Check{{
+			Name:  name,
+			State: Error,
+			Detail: fmt.Sprintf("%s (%s) is active but its next run is stuck at %s — nothing is advancing it; %s",
+				label, slug, p.NextRun.Format(timeLayout), remedy(cmdReconcile, slug)),
 		}}
 	default:
 		return nil

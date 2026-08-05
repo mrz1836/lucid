@@ -218,6 +218,7 @@ func TestGather_AssemblesEndToEnd(t *testing.T) {
 		t, comp,
 		flywheel.PeriodicSpec{Slug: SlugCompanionMorning, Kind: "lucid_companion_morning", Cron: "0 6 * * *", Queue: "lucid-companion", Active: true},
 		flywheel.PeriodicSpec{Slug: SlugCompanionNight, Kind: "lucid_companion_night", Cron: "0 19 * * *", Queue: "lucid-companion", Active: true},
+		flywheel.PeriodicSpec{Slug: SlugCompanionMorningBackstop, Kind: "lucid_companion_morning_backstop", Cron: "0 7 * * *", Queue: "lucid-companion", Active: true},
 	)
 
 	promptDir := t.TempDir()
