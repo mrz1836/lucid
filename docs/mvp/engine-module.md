@@ -155,6 +155,9 @@ superseded *only* for these three sends.
 | `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` reads the shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)) with two documented carve-outs: a **future date is accepted** (an anchor may be a forward commitment — the CLI's only surface with no future ceiling), and a **partial date is rejected** (a "days since" count needs a real day, never a guessed January 1st). **Latest record per identity wins**: the append reuses the id of the **active** anchor holding that label (a correction), and mints a new id only when none does — a first use, or a label whose only holder was sunset. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
 | `anchor sunset <label> [reason]` (record; CLI `lucid anchor sunset`) | Retire a milestone from the counting surfaces without deleting anything: appends one full mirror of the anchor plus `state: "sunset"`, carrying the anchor's own `date` and the optional reason in `note`. The milestone leaves `metrics` prose, `anchors[]`, and the witness aging-anchor check, and appears in `metrics --json` → `anchors_sunset[]`. Rejects an unrecorded label (naming the recorded ones) or an already-sunset one, before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
 | `anchor rename <label> <new-label>` (record; CLI `lucid anchor rename`) | Change an active anchor's display name, keeping its id, date, note and running day count — one append under the same id. Against a **legacy (id-less) anchor** it writes a **pair** in a single write: an id-less sunset stub retiring `legacy:<old-label>`, plus a new id-bearing record carrying the original date and note under the new name. Rejects an unrecorded, already-sunset, identical, or actively-held target label before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `self set <key> <value> [--since <date>] [--note <text>]` (record; CLI `lucid self set`) | Record a **self fact** — a durable, atemporal attribute of the subject — to the append-only self-facts store. The `<key>` is `<namespace>.<leaf>` over a fixed five-namespace set (`identity.`, `body.`, `constraint.`, `pref.`, `misc.`) with a free-form leaf; an unrecognized namespace is rejected with the accepted set **and** `misc.` named, so no fact is ever turned away. **Latest record per identity wins**: the append reuses the id of the **active** fact holding that key (a correction), and mints a new id only when none does — a first use, or a key whose only holder was retired. `--since` is **optional** (the only write surface where a date is not required at all) and reads the shared date grammar with `AllowPartial`: a partial origin is stored **as typed**, never snapped, because nothing derives a day count from a self fact. Deterministic, no model in the path. | `engine/self.json` (append-only `history[]`) |
+| `self retire <key> [reason]` (record; CLI `lucid self retire`) | Retire a fact that has stopped being true, without deleting anything: appends one full mirror of the fact plus `state: "retired"`, carrying the fact's own `since` (never the retirement day) and the optional reason in `note`. The key leaves the rendered profile, `--json`, and the `/ask` grounding slice, while staying in `history[]` in full and readable under `--history`. Rejects an unrecorded key (naming the recorded ones) or an already-retired one, before any write. Deterministic, no model in the path. | `engine/self.json` (append-only `history[]`) |
+| `self move <key> <new-key>` (record; CLI `lucid self move`) | Re-categorize a fact, keeping its id, value, origin, note and whole history — **exactly one append** under the same id with the new key. There is no legacy pair-write here: every record in this store carries an id, so the `anchor rename` adoption path has no analogue. Rejects an unrecorded, already-retired, identical, or actively-held target key before any write; a key held only by a retired fact is free. Deterministic, no model in the path. | `engine/self.json` (append-only `history[]`) |
 
 `/chain` (editing chain config in-channel) is deliberately **not** a
 command: parameters change at most once per weekly Retro (engine §5),
@@ -318,6 +321,7 @@ accepted.
 ├── storm.json               # storm clauses, ambush windows, append-only history
 ├── profile.json             # active clock profile + append-only switch history
 ├── anchors.json             # milestone anchors ("days since X") — append-only history
+├── self.json                # self facts ("about me") — append-only history, atemporal
 ├── days/                    # one record per logical day (append-only per day)
 │   └── 2026/07/day_2026_07_02.json
 └── status.json              # derived projection — rebuildable, never hand-edited
@@ -327,7 +331,8 @@ New storage-adapter named ops: `write_engine_day`, `read_engine_day`,
 `read_engine_days(window)`, `rebuild_engine_status`,
 `read_engine_status`, `read_chain_config`, `read_witness_contract`,
 `read_storm_state`, `append_storm_event`, `read_profile_state`,
-`append_profile_event`, `read_anchors`, `append_anchor`.
+`append_profile_event`, `read_anchors`, `append_anchor`,
+`read_self_facts`, `append_self_fact`.
 Same discipline as [`architecture.md`](architecture.md) §4: only the
 adapter touches disk; `days/` is append-only per day-id (corrections
 append a `corrections[]` entry, never rewrite — the mode ledger is
@@ -542,6 +547,119 @@ and dates only. It no longer shares the storm clause labels' discipline: an
 anchor is addressed by a stable id, while a storm clause is still identified by
 its label string. Because the store lives in the engine tree (not a Mirror
 tree), it carries no schema-kind entry in the `validate` schema sweep.
+
+### `self.json`
+
+```json
+{
+  "version": 1,
+  "history": [
+    {"id": "self_2026_08_05_a", "key": "identity.generation",
+     "value": "elder millennial",
+     "recorded_at": "2026-08-05T09:12:00-04:00"},
+    {"id": "self_2026_08_05_b", "key": "misc.handedness", "value": "left",
+     "recorded_at": "2026-08-05T09:13:00-04:00"},
+    {"id": "self_2026_08_05_b", "key": "body.handedness", "value": "left",
+     "recorded_at": "2026-08-06T18:40:00-04:00"},
+    {"id": "self_2026_08_05_b", "key": "body.handedness",
+     "value": "ambidextrous", "note": "throws right",
+     "recorded_at": "2026-09-01T07:55:00-04:00"},
+    {"id": "self_2026_08_05_c", "key": "pref.editor", "value": "vim",
+     "since": "2014-09", "recorded_at": "2026-08-05T09:15:00-04:00"},
+    {"id": "self_2026_08_05_c", "key": "pref.editor", "value": "vim",
+     "since": "2014-09", "note": "switched years ago",
+     "recorded_at": "2026-09-02T11:20:00-04:00", "state": "retired"}
+  ]
+}
+```
+
+Six records, four shapes: a **plain fact** (`…_a`); a **move** (`…_b`'s second
+record — same id, new key, `misc.handedness` re-filed as `body.handedness`); a
+**correction** (`…_b`'s third — same id, same key, new value); and a
+**retirement** (`…_c`'s second, carrying `state`). The whole file is those four
+shapes repeated.
+
+A **self fact** is a durable, atemporal attribute of the subject — a *semantic*
+record, where every other store in the Ledger is episodic. The store is
+**append-only** and never hand-edited, the same discipline as `anchors.json`,
+`storm.json` and `profile.json`: every verb appends one record to `history[]` and
+no record is ever rewritten or removed.
+
+**Identity.** A fact's identity is its `id` — `self_YYYY_MM_DD_<slot>`, the same
+per-day bijective base-26 slot grammar the insights and anchors stores use,
+minted from the clock and never derived from the key. That makes the **key a
+mutable address**: it can be corrected or re-categorized without forking the
+fact, and two facts that reuse a key over time stay distinct. Slots are minted
+against the **whole history**, never the folded set, so a slot held by a retired
+fact is never reissued.
+
+**Every record carries an `id`.** This store is `version: 1` from birth, so
+unlike `anchors.json` there is no id-less legacy era, no synthetic
+`legacy:<key>` identity, and no read-time identity derivation — a record without
+an `id` is corrupt, not historical. The consequence worth naming: `self move`
+is **always exactly one append**, where `anchor rename` writes a pair against a
+legacy anchor. That asymmetry is deliberate and should not be "restored".
+
+**The fold: latest record per `id` wins**, at read time by **append order** — not
+by `recorded_at`. A correction whose timestamp is *earlier* than the record it
+supersedes still supersedes it, exactly as in `anchors.json`. `self set <key>
+<value>` appends under the id of the **active** fact holding that key when there
+is one, and mints a new id when there is not (a first use, or a key whose only
+holder was retired). At most one *active* fact may hold a given key, which is
+what lets every verb take a bare key.
+
+**Keys** are `<namespace>.<leaf>` over a fixed five-namespace set — `identity.`,
+`constraint.`, `body.`, `pref.`, `misc.` — with a free-form leaf that may itself
+contain dots (`constraint.diet.dairy`). That list is in **priority order**, and
+it is one ordered list serving two consumers: the grouped render and the `/ask`
+grounding slice. An unrecognized namespace is rejected with the accepted set
+**and** `misc.` named, and is never auto-coerced into `misc.` — silently filing a
+typo'd namespace would hide the typo permanently. `value` is a single free-text
+string bounded by a 500-rune ceiling, which is a size guard on the grounding
+slice rather than a judgment about content.
+
+**`since`** is an optional origin, not a logical day: it is the one date field in
+the tree with **no** required value and with partial dates stored **as typed**
+(`"1985"`, `"2014-09"`), because nothing here derives a day count from it. See
+[`../usage/commands.md`](../usage/commands.md#deliberate-divergences).
+
+**`state`** discriminates a retirement, exactly as it does in `anchors.json`:
+absent ⇒ active; `"retired"` ⇒ retired. `self retire <key> [reason]` appends a
+full mirror of the fact plus `state: "retired"`, carrying the superseded fact's
+own `since` (never the retirement day) and the optional reason in `note`. A
+retired fact leaves the rendered profile, the `--json` profile, and the `/ask`
+grounding slice, while staying in `history[]` in full and readable under
+`--history`.
+
+**Two divergences from the sibling stores, both deliberate.**
+
+1. **The append is atomic** — written to a temp file in the same directory,
+   synced, then `rename`d over the target. Every other engine file is written
+   with a plain whole-file write, which for a few dozen anchors costs a small,
+   recoverable loss. This store is expected to accumulate for years, so a torn
+   write would cost the user's entire self-profile. Making the rest of the tree
+   atomic is a separate change; this file does not wait for it.
+2. **The read tolerates an absent file** — a missing `self.json` reads as an
+   empty log, not an error, where `read_anchors` requires the file. `/ask`
+   grounds on this store and is contractually read-only, so it must never
+   scaffold in order to answer; a Ledger created before this store existed has to
+   keep answering. A *malformed* file is still a hard error — a corrupt
+   self-profile must surface, never silently reset.
+
+**Grounding.** `/ask` reads the active profile as a router-composed slice capped
+at `self_facts_cap` (default 40) and ordered by **namespace priority then key,
+never recency** — recency is meaningless for an atemporal fact and would evict a
+year-one blood type in favor of last week's trivia. Facts enter the slice by id,
+so a self fact can be *cited* (`kind: "self_fact"`) and not merely read; see
+[`agent-contracts.md`](agent-contracts.md) §3 `reflection.answer_grounded`. The
+file itself is inside the Sanctuary (`engine/`), so an agent reaches these facts
+only as composed values — never by path.
+
+**`version: 1` is a signal, not a gate**, on the same terms as `anchors.json`: it
+is stamped on every append, but nothing validates it on read. Because the store
+lives in the engine tree (not a Mirror tree), it carries no schema-kind entry in
+the `validate` schema sweep — the same as `anchors.json`, and for the same
+reason.
 
 ### Day record — `engine/days/YYYY/MM/day_YYYY_MM_DD.json`
 

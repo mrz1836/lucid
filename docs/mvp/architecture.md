@@ -132,7 +132,7 @@ narrow job and only the data access required for that job.
 |-------|-----|-------|--------|
 | **Intake** | If `/checkin`, ask 2–4 follow-up questions and bundle the user's answers into one raw entry. | The current thread only. | One raw entry. |
 | **Structuring** | Extract emotions, themes, people mentions from a raw entry. | One raw entry. | One processed artifact, written via `storage.update_person` (which back-fills `person_key` for each mention) followed by `storage.write_processed`. |
-| **Reflection** | Three sub-modes: on `/checkin`, propose at most one possible pattern from a processed artifact + small recent window; on `/reflect`, surface validated insights for the past week (no new patterns); on `/ask`, answer a free-form question by quoting validated insights and weekly reflections only. | Per sub-mode: one processed artifact + last N processed artifacts (default 7); validated insights for the week; or `insights_slice` (cap 50) + `reflections_slice` (cap 12). | A proposal in the thread; on user accept, one insight record. On `/reflect`, status updates + append to weekly reflection. On `/ask`, a grounded answer with citations — no writes. |
+| **Reflection** | Three sub-modes: on `/checkin`, propose at most one possible pattern from a processed artifact + small recent window; on `/reflect`, surface validated insights for the past week (no new patterns); on `/ask`, answer a free-form question by quoting validated insights, weekly reflections and self facts only. | Per sub-mode: one processed artifact + last N processed artifacts (default 7); validated insights for the week; or `insights_slice` (cap 50) + `reflections_slice` (cap 12) + `self_facts_slice` (cap 40). | A proposal in the thread; on user accept, one insight record. On `/reflect`, status updates + append to weekly reflection. On `/ask`, a grounded answer with citations — no writes. |
 | **Safety/Consent** | Gate any output that looks like diagnosis, autonomous action, or unbounded context use. | The output of any other agent. | Either passes the output through, or rewrites/blocks it with a flagged reason. |
 
 **Minimal-now agents.**
@@ -244,11 +244,14 @@ be obvious in code, not implicit in agent prompts.
 
 1. storage.read_insights(status=accepted, cap=50) → insights_slice.
 2. storage.read_reflections(cap=12) → reflections_slice.
-3. If both slices empty: return a grounded "nothing validated yet"
+3. storage.read_self_facts(active, cap=40, ordered by namespace
+   priority then key) → self_facts_slice.
+4. If all three slices empty: return a grounded "nothing validated yet"
    message and stop (no LLM call, no writes).
-4. Reflection.answer_grounded(question, insights_slice,
-   reflections_slice) → `answer` (with citations) or `insufficient`.
-5. Safety.evaluate(answer_text) → outbound message.
+5. Reflection.answer_grounded(question, insights_slice,
+   reflections_slice, self_facts_slice) → `answer` (with citations) or
+   `insufficient`.
+6. Safety.evaluate(answer_text) → outbound message.
 
 `/ask` never writes. Citations must be a subset of the supplied
 slices.

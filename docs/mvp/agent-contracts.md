@@ -337,8 +337,8 @@ to its slice; none of them reads raw entries.
   proposes new patterns.
 * **`reflection.answer_grounded`** (used by `/ask`) — answer the
   user's free-form question by quoting or paraphrasing the supplied
-  validated insights and weekly reflections only. Never proposes new
-  patterns; never reads raw entries.
+  validated insights, weekly reflections, and self facts only. Never
+  proposes new patterns; never reads raw entries.
 
 Reflection is the only place a hypothesis is ever introduced; that
 only happens in `reflection.propose`.
@@ -435,6 +435,7 @@ For free-form Q&A (`/ask`):
   "question": "<the user's question, verbatim>",
   "insights_slice":    [ { ...validated insights the router included... } ],
   "reflections_slice": [ { ...weekly reflection records the router included... } ],
+  "self_facts_slice":  [ { ...self facts the router included: id, key, value... } ],
   "agent_versions": { "reflection": "reflection-2026.05.0" }
 }
 ```
@@ -443,8 +444,15 @@ The router builds the slice deterministically: all insights with
 `status: accepted` are eligible, capped at the 50 most recent by
 `status_history[].at` of the last accept/confirm; weekly reflections
 are included by recency, capped at the 12 most recent ISO-week
-records. Reflection sees only this slice — it has no read access to
-raw entries, processed artifacts, or people records.
+records; **active** self facts are eligible, capped at
+`self_facts_cap` (40) and ordered by **namespace priority then key —
+never recency**, since an atemporal fact has no recency to sort on and
+a recency slice would evict a year-one fact in favor of last week's.
+Each self fact enters as `id`, `key` and `value` only — no origin,
+note, or timestamp. Reflection sees only this slice: it has no read
+access to raw entries, processed artifacts, people records, or the
+self-facts store itself, which lives inside the Sanctuary and reaches
+the agent only as these composed values.
 
 ### Outputs
 
@@ -509,7 +517,8 @@ For `reflection.answer_grounded`, exactly one of:
   "answer_text": "Based on what you've validated so far, ...",
   "citations": [
     {"kind": "insight",    "id": "i_2026_05_05_a"},
-    {"kind": "reflection", "id": "reflection_2026_w18"}
+    {"kind": "reflection", "id": "reflection_2026_w18"},
+    {"kind": "self_fact",  "id": "self_2026_08_05_a"}
   ]
 }
 
@@ -534,8 +543,9 @@ the user back at `/log` or `/checkin`.
   `unanswered_shape_tags` unions for the same window.
 * For `reflection.surface_for_recall`: the validated insights window
   only.
-* For `reflection.answer_grounded`: the supplied `insights_slice` and
-  `reflections_slice` and the user's `question` only.
+* For `reflection.answer_grounded`: the supplied `insights_slice`,
+  `reflections_slice` and `self_facts_slice`, and the user's
+  `question` only.
 * One LLM call per invocation, with the slice above.
 * `lucid.json` for `recent_window` and `recent_window_max` (passed in
   by the router; Reflection does not open the file).
@@ -569,15 +579,16 @@ in, or any external system.
   nothing else; if the slice cannot answer the question, the only
   honest output is `outcome: "insufficient"`.
 * Citing ids in `answer_grounded.citations[]` that are not present in
-  the supplied `insights_slice` or `reflections_slice`. No invented
-  ids, no general-knowledge citations.
+  the supplied `insights_slice`, `reflections_slice`, or
+  `self_facts_slice`. No invented ids, no general-knowledge citations.
 * Advice, recommendations, or therapeutic framing in any output —
   including `/ask` answers ("you should journal more", "consider
   therapy", "this means you have anxious attachment").
 * Referencing supporting entries Reflection was not given. Citations
   must be to ids inside the supplied slice (for `propose`,
   `recent_window`; for `surface_for_recall`, `insights_window`; for
-  `answer_grounded`, `insights_slice` ∪ `reflections_slice`).
+  `answer_grounded`, `insights_slice` ∪ `reflections_slice` ∪
+  `self_facts_slice`).
 * Smuggling personal opinions, framework theory, or meta-commentary
   ("you should consider therapy", "this looks like attachment style
   X") into any output.
@@ -602,9 +613,11 @@ in, or any external system.
   `propose` returns `outcome: "no_pattern"`.
 * If the current artifact has empty `emotions`, `themes`, **and**
   `people`, `propose` returns `outcome: "no_pattern"`.
-* If both `insights_slice` and `reflections_slice` are empty,
-  `answer_grounded` returns `outcome: "insufficient"` without an LLM
-  call.
+* If `insights_slice`, `reflections_slice` **and** `self_facts_slice`
+  are all empty, `answer_grounded` returns `outcome: "insufficient"`
+  without an LLM call. All three — a Ledger holding only self facts
+  has material to answer from, and short-circuiting it would be a
+  false "nothing here yet".
 * **Validation rules:**
   * `outcome` is one of `proposal`, `no_pattern`, `soft_contradiction`,
     `recall`, `answer`, `insufficient`.
@@ -621,7 +634,7 @@ in, or any external system.
   * For `answer`: `answer_text` is non-empty; `citations[]` is
     non-empty; every `citations[].id` appears in the supplied slice
     (insight ids in `insights_slice`, reflection ids in
-    `reflections_slice`).
+    `reflections_slice`, self-fact ids in `self_facts_slice`).
   * For `insufficient`: `answer_text` is non-empty; `citations[]` is
     `[]`.
   * For all outcomes: phrase blocklist regex
@@ -1068,11 +1081,14 @@ surface.
 /ask <question>
   ├── storage.read_insights(status=accepted, cap=50)   → insights_slice
   ├── storage.read_reflections(cap=12)                 → reflections_slice
-  ├── (router handles empty slice → returns "I don't have anything
-  │    validated yet — try /checkin or /log first.")
+  ├── storage.read_self_facts(active, cap=40,
+  │                           order=namespace,key)     → self_facts_slice
+  ├── (router handles all three slices empty → returns "I don't have
+  │    anything validated yet — try /checkin or /log first.")
   ├── Reflection.answer_grounded(question,
   │                              insights_slice,
-  │                              reflections_slice)    → answer | insufficient
+  │                              reflections_slice,
+  │                              self_facts_slice)     → answer | insufficient
   └── Safety.evaluate(answer_text)                     → outbound message
 ```
 

@@ -53,6 +53,7 @@ These rules trace directly to
 │   ├── storm.json
 │   ├── profile.json
 │   ├── anchors.json
+│   ├── self.json
 │   ├── days/2026/07/day_2026_07_02.json
 │   └── status.json
 ├── observations/           # frozen-envelope events — owned by observations-module.md
@@ -193,6 +194,7 @@ The single global config file. Tiny, hand-editable, agent-readable.
   "intake_max_questions": 4,
   "ask_insights_cap": 50,
   "ask_reflections_cap": 12,
+  "self_facts_cap": 40,
   "proposal_pause": {"unanswered_threshold": 3, "pause_days": 14},
   "person_dominance_threshold": 0.5,
   "agent_versions": {
@@ -239,6 +241,13 @@ The single global config file. Tiny, hand-editable, agent-readable.
   router applies to `/ask` (see
   [`agent-contracts.md`](agent-contracts.md) §3
   `reflection.answer_grounded`).
+* `self_facts_cap` is the third `/ask` slice cap — the self facts
+  (`engine/self.json`, owned by
+  [`engine-module.md`](engine-module.md)) the router grounds an answer
+  on. Unlike the other two it is **ordered by namespace priority then
+  key, never by recency**: an atemporal fact has no recency worth
+  sorting on, and a recency slice would evict a blood type recorded in
+  year one in favor of last week's trivia.
 * `proposal_pause` configures the router-level proposal pause: after
   `unanswered_threshold` consecutive unanswered proposals, the router
   stops invoking `reflection.propose` for `pause_days` days (see

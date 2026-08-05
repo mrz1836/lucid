@@ -282,8 +282,9 @@ when the slice cannot answer the question, the system says so.
 * `/ask` never proposes new patterns. New patterns come from
   `/checkin`, period.
 * `/ask` never reads raw entries or processed artifacts. The
-  validated insights and weekly reflections are the user's curated,
-  signed-off material — those are the only sources it speaks from.
+  validated insights, weekly reflections and self facts are the user's
+  curated, signed-off material — those are the only sources it speaks
+  from.
 * `/ask` never gives advice, recommendations, or therapeutic framing.
   If the user wants action, they ask `/checkin`; if they want a
   pattern check, they validate one. `/ask` is a mirror, not a coach.
