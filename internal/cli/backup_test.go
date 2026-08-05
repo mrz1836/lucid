@@ -76,6 +76,23 @@ func TestBackupCmd_JSON(t *testing.T) {
 	assert.Equal(t, 1, payload.Files)
 }
 
+// TestBackupCmd_CarriesTheSelfStore: a fact recorded through the real verb
+// rides the real backup. This closes a gap the storage round-trip cannot: that
+// test mirrors the manifest by hand, so it would still pass if the shipped
+// deploy.BackupManifest() ever stopped covering engine/. Here the command
+// builds the archive from the shipped manifest, so a narrowing would fail.
+func TestBackupCmd_CarriesTheSelfStore(t *testing.T) {
+	home := isolatedHome(t)
+	seedRawEntry(t, home)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "self", "set", "identity.generation", "elder", "millennial")
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "b.tar.gz")
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "backup", "--out", out)
+	require.NoError(t, err)
+	assert.Contains(t, archiveNames(t, out), "engine/self.json")
+}
+
 // TestBackupCmd_DefaultFilename: with --out unset, the archive name is derived
 // from the pinned clock, in the current directory.
 func TestBackupCmd_DefaultFilename(t *testing.T) {

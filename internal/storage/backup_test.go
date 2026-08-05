@@ -43,6 +43,56 @@ func writeHomeFile(t *testing.T, home, rel, content string) {
 	require.NoError(t, os.WriteFile(p, []byte(content), filePerm))
 }
 
+// selfLogFixture is a four-state self.json: an active fact, a correction under
+// the same id, a re-categorization (move) under a second id, and a retirement.
+// It exists so the round-trip proves the whole grammar survives a backup, not
+// just a single trivial record.
+//
+// The self store rides the manifest's whole-engine/ walk by construction — the
+// "engine" entry is a directory that excludes only the derived status.json —
+// so this fixture proves a free ride rather than new plumbing. Do NOT add an
+// "engine/self.json" entry to backupManifest(): the file would then be listed
+// twice.
+const selfLogFixture = `{
+  "version": 1,
+  "history": [
+    {
+      "id": "self_2026_07_29_a",
+      "key": "identity.generation",
+      "value": "elder millennial",
+      "recorded_at": "2026-07-29T09:00:00Z"
+    },
+    {
+      "id": "self_2026_07_29_a",
+      "key": "identity.generation",
+      "value": "elder millennial (born 1984)",
+      "since": "1984",
+      "recorded_at": "2026-07-29T09:05:00Z"
+    },
+    {
+      "id": "self_2026_07_29_b",
+      "key": "body.handedness",
+      "value": "left",
+      "recorded_at": "2026-07-29T09:10:00Z"
+    },
+    {
+      "id": "self_2026_07_29_b",
+      "key": "misc.handedness",
+      "value": "left",
+      "recorded_at": "2026-07-29T09:15:00Z"
+    },
+    {
+      "id": "self_2026_07_29_c",
+      "key": "pref.coffee",
+      "value": "black",
+      "note": "no longer true",
+      "recorded_at": "2026-07-29T09:20:00Z",
+      "state": "retired"
+    }
+  ]
+}
+`
+
 // seedBackupHome populates a home with a file in every manifest tree plus the
 // excluded status, a rebuildable tree, and lucid.json — the latter three must
 // never ride along in a backup. It returns the home and the expected
@@ -59,6 +109,7 @@ func seedBackupHome(t *testing.T) (home string, want map[string]string) {
 		"registries/threads.json":     `[]`,
 		"engine/chain.json":           `{"bell_time":"21:30"}`,
 		"engine/days/2026-07-29.json": `{"closed":true}`,
+		"engine/self.json":            selfLogFixture,
 		"projections/exports.log":     "2026-07-29 export series\n",
 	}
 	for rel, content := range want {
@@ -144,6 +195,37 @@ func TestBackupRestore_RoundTrip(t *testing.T) {
 	di, statErr := os.Stat(filepath.Join(dstHome, "raw"))
 	require.NoError(t, statErr)
 	assert.Equal(t, dirPerm, di.Mode().Perm())
+}
+
+// TestBackupRestore_CarriesTheSelfStore names the self-facts property the
+// generic round-trip proves generically: a decade of semantic memory backs up
+// and restores byte-for-byte, across the store's whole grammar (an active
+// fact, a correction, a move, and a retirement — see selfLogFixture).
+//
+// This costs no plumbing. The store lives at engine/self.json, and the
+// manifest's "engine" entry is a whole-directory walk excluding only the
+// derived status.json, so the file is in the backup set by construction. The
+// test exists to keep that free ride honest if the manifest is ever narrowed.
+func TestBackupRestore_CarriesTheSelfStore(t *testing.T) {
+	srcHome, _ := seedBackupHome(t)
+
+	var buf bytes.Buffer
+	res, err := New(srcHome).BackupTo(&buf, backupManifest())
+	require.NoError(t, err)
+	assert.Contains(t, res.Files, "engine/self.json", "the self store is in the backup set")
+
+	dstHome := t.TempDir()
+	rres, err := New(dstHome).RestoreFrom(&buf, RestoreOptions{AllowedRoots: manifestRoots()})
+	require.NoError(t, err)
+	assert.Contains(t, rres.Files, "engine/self.json", "the self store is in the restore set")
+
+	got, err := os.ReadFile(filepath.Join(dstHome, "engine", "self.json"))
+	require.NoError(t, err)
+	// Byte equality, deliberately not JSON equality: a semantic compare would
+	// pass on a store whose formatting or record order had shifted in transit,
+	// and an append-only history is exactly the thing that must come back as
+	// it went in.
+	assert.True(t, bytes.Equal([]byte(selfLogFixture), got), "the restored self store is byte-identical")
 }
 
 // TestBackupTo_Deterministic pins the reproducibility property: two in-process

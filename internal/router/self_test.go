@@ -1,6 +1,7 @@
 package router
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -536,6 +537,53 @@ func TestSelfFacts_StayInsideTheSanctuary(t *testing.T) {
 		composed := strings.Join([]string{f.ID, f.Key, f.Value, f.Since, f.Note}, " ")
 		assert.NotContains(t, composed, "engine/", "a composed fact carries values, never a Ledger path")
 	}
+}
+
+// TestSelfStore_IsNamedInNoPromptOrTemplate is the build-time half of the
+// Sanctuary guard. CheckSanctuaryTree already scans agent prompt literals for
+// a sanctuary path at runtime (lucid validate); this makes the same violation
+// a failing test, and widens the sweep to the Engine's rendered templates —
+// the other place a model-facing string is authored.
+//
+// The rule it enforces: the self store grounds an agent as a router-composed
+// projection of fact *values*, never as a path an agent could be told to read.
+// So neither an agent prompt nor an Engine template may name self.json at all.
+//
+// Why internal/validate/schema.go has no "self" entry, for whoever notices the
+// gap and reaches to close it: schemaKinds walks per-record families that list
+// ids and read one record per id (processed, insights, reflections, people).
+// self.json is a single versioned envelope, so it has no id listing to walk —
+// exactly like anchors.json, which is deliberately absent for the same reason.
+// An entry there would not validate more; it would not typecheck.
+func TestSelfStore_IsNamedInNoPromptOrTemplate(t *testing.T) {
+	// Relative to internal/router: the Engine's rendered templates, and every
+	// agent package. Non-test sources only — the same discipline the Engine
+	// purity guard uses, since a test may legitimately name a store path.
+	roots := []string{
+		filepath.Join("..", "engine", "templates"),
+		filepath.Join("..", "agents"),
+	}
+	var scanned int
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			body, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return readErr
+			}
+			assert.NotContainsf(t, string(body), "self.json",
+				"%s names the self store; grounding carries values, never a Ledger path", path)
+			scanned++
+			return nil
+		})
+		require.NoErrorf(t, err, "walk %s", root)
+	}
+	require.Positive(t, scanned, "expected to scan at least one prompt/template source")
 }
 
 // seedSelfProfile records one fact per namespace, deliberately out of priority
