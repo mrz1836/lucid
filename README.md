@@ -176,8 +176,8 @@ everything under a user-owned Ledger at `~/.lucid/`.
 > layout may still change before 1.0. The whole command surface below runs
 > today — the deterministic daily loop (capture, close-out, observations, the
 > day view, exports) needs no model and no network, while the autonomous sends
-> (bell, companion, witness report) need a delivery channel and the reflective
-> verbs need an LLM provider configured. PRs are welcome.
+> (bell, companion, witness report, workout slot) need a delivery channel and
+> the reflective verbs need an LLM provider configured. PRs are welcome.
 
 <br/>
 
@@ -229,74 +229,132 @@ Channel selection follows the `UPDATE_CHANNEL` environment variable
 (`stable | beta | edge`, default `stable`); `--channel` overrides it. The
 install target is the resolved path of the running binary — if its directory
 is not writable, `upgrade` exits with a clear error naming the directory rather
-than installing elsewhere.
+than installing elsewhere. On a supervised host, `--managed` honors the drain
+window (never between the evening bell and the morning close-out) and runs a
+post-upgrade tripwire self-check.
 
 <br/>
 
 ## 🗺️ Command reference
 
-Every `lucid` command, grouped by what you're doing. The daily loop is
+Every `lucid` command and flag, grouped by what you're doing. The daily loop is
 deterministic — no model, no network — so capture and the close-out never wait
 on a provider (P9).
 
+**Everywhere:** `--json` is persistent on every command (commands with a
+structured shape emit it; the human-first ones — `log`, `obs`, `mode`,
+`closeout` — print prose), and `-h` / `--help` works at every level. Exit codes
+are stable: `0` success, `1` runtime error or breached gate, `2` usage /
+flag-parse error.
+
+<br/>
+
 **The daily loop**
 
-| Command | What it does |
-|---------|--------------|
-| `log <text>` | Capture one immutable raw entry — no structure imposed at capture time. |
-| `closeout [skip \| backfill …]` | The two-minute nightly close-out — record the day's committed practice. Idempotent per logical day. |
-| `mode <green\|yellow\|red>` | Declare today's capacity mode; the floor drops with it (rejected after the bell). |
-| `obs <kind> [value…]` | One-line health/context micro-log — pain, mood, sleep, place. Inventory, never obligation. |
-| `attach <file>` | Attach a photo or file to a logical day. |
+| Command | Flags | What it does |
+|---------|-------|--------------|
+| `log [text]` | `--day` `--source` `--channel` `--thread` `--agent` `--model` `--harness` | Capture one immutable raw entry — no structure imposed at capture time. |
+| `obs [kind] [value…]` | *same as `log`* | One-line health/context micro-log — pain, mood, sleep, place. Inventory, never obligation. |
+| `attach <path>` | `--caption` `--day` `--source` `--channel` `--harness` | Attach a photo or file to a logical day. |
+| `mode <green\|yellow\|red>` | `--day` | Declare today's capacity mode; the floor drops with it (rejected after the bell). |
+| `closeout [today\|skip\|backfill] [compact form…]` | `--day` | The two-minute nightly close-out — record the day's committed practice. Idempotent per logical day. |
+
+<br/>
 
 **Read the record**
 
-| Command | What it does |
-|---------|--------------|
-| `day [date]` | The joined day view — engine record + observations + enrichment + raw entries. |
-| `status` · `metrics` · `stats` | Engine state (streak, mode-relative adherence, error budget); derived practice metrics; Ledger volume over a window. |
-| `reflect` · `ask` | Recall your validated insights; grounded, cited Q&A across your insights and reflections. |
-| `recall` · `excavate` | Browse the archive by era / thread / injury, or pick the next memory cluster to excavate — both read-only. |
+| Command | Flags | What it does |
+|---------|-------|--------------|
+| `day [date\|yesterday]` | — | The joined day view — engine record + observations + enrichment + raw entries. |
+| `status` | — | Ambient Engine state: streak, adherence vs. declared mode with its honest co-numbers, error-budget burn, days to the next gate. |
+| `metrics` | — | Practice-quality rollup: current/longest streak, 30-day adherence (30/60/90 gate rollups under `--json`), misses, error budget, days-since per anchor. |
+| `stats` | `--last` `--from` `--to` | Ledger volume over a window of logical days — counts only, never content. |
+| `reflect [gate]` | — | Recall your validated insights; never proposes a new pattern. |
+| `reflect week` | `--days` `--since` `--week` | Read-only weekly deep-dive since your last reflection. `reflect week apply` persists a candidate through the resonance gate (JSON on stdin); `reflect week close` stamps the cursor. |
+| `ask <question…>` | — | Grounded, cited Q&A across your validated insights and reflections. |
+| `recall` | `--era` `--injury` `--thread` | Browse the archive by era, thread, or injury (never writes). |
+| `excavate` | — | Select the next memory cluster to excavate (never writes). |
+| `person <name>` | — | Look up a person you've mentioned. |
+
+<br/>
 
 **Build your history**
 
-| Command | What it does |
-|---------|--------------|
-| `memory` | Record a story from your past — backdated, linked, kept. |
-| `injury` · `era` · `thread` · `anchor` | Record or amend body history, life chapters, ongoing threads, and days-since milestones. |
-| `person` | Look up a person you've mentioned. |
-| `bootstrap` | Toggle historical-entry mode to backfill the past without disturbing today. |
+| Command | Flags | What it does |
+|---------|-------|--------------|
+| `memory <text>` | `--day` `--era` `--people` `--place` `--tone` `--why` `--certainty` `--followup` `--attach` `--caption` | Record a story from your past — backdated, linked, kept. |
+| `era <name>` | `--start` `--end` `--note` | Record or amend a life chapter. |
+| `injury <name>` | `--onset` `--status` `--body-area` `--severity` `--cause` `--timeline` `--treatments` `--lasting-effects` `--current-limitations` `--uncertainty` `--note` | Record or amend an injury in your body history — testimony, not a clinical scale. |
+| `thread <name>` | `--intent` `--status` `--domain` `--note` | Record or amend an ongoing thread. |
+| `self [<key-or-prefix>]` | `--history` | Read the durable self-profile — atemporal facts under `identity.` `body.` `constraint.` `pref.` `misc.` |
+| `self set <key> <value…>` | `--note` `--since` | Record one durable fact. Append-only: a correction is just another `set`. |
+| `self move <key> <new-key>`<br>`self retire <key> [reason…]` | — | Re-categorize a fact, or retire one that stopped being true. History carries forward; nothing is ever deleted. |
+| `anchor add <label> <date> [note…]` | — | Record a days-since milestone. A future date is accepted — an anchor may be a date you count *toward*. |
+| `anchor rename <label> <new-label>`<br>`anchor sunset <label> [reason…]` | — | Rename a milestone's display label (the day count carries forward), or retire it from the counting surfaces (the record is kept). |
+| `structure [raw_id]` | `--since` `--until` `--force` | Run the Structuring pass over raw entries a check-in did not capture — one id, or an inclusive date window. |
+| `bootstrap [done]` | — | Toggle historical-entry mode to backfill the past without disturbing today. |
+
+<br/>
 
 **Accountability & autonomous sends**
 
-| Command | What it does |
-|---------|--------------|
-| `scheduler` | The send daemon — evening bell + morning tripwire on the chain's clocks. `scheduler install`/`uninstall` render (and, with `--apply`, load) the supervised launchd + `hush` artifacts that keep it alive across reboots. |
-| `companion` · `witness` · `workout` | Config-gated sends: the daily companion, the weekly witness report, the training slot. |
-| `storm` · `profile` | Declare / renew / end a storm (a grace window); switch clock profile. |
+| Command | Flags | What it does |
+|---------|-------|--------------|
+| `scheduler run` | `--db` | The send daemon — evening bell + morning tripwire on the chain's clocks; blocks until interrupted. Deterministic and agent-free. |
+| `scheduler status` | `--scheduler-db` `--companion-db` | Read-only health verdict: what fires next, what happened last, what is broken. Exits `0` ok / `1` warn / `2` error. |
+| `scheduler reconcile` | `--slug` `--no-fire` `--db` | Re-arm a parked scheduled send — the sanctioned repair. Idempotent, and sends nothing itself. |
+| `scheduler install` | `--apply` `--out` `--force` `--lucid` `--hush` `--hush-server` `--machine-index` `--scheduler-db` `--supervise-config` | Render and lint the supervised launchd + `hush` artifacts. Prints by default, `--out` writes them, `--apply` performs the host install (macOS). |
+| `scheduler uninstall` | `--dry-run` `--label` | Bootout and remove the supervised launchd job (idempotent). |
+| `companion fire` | `--mode` `--deliver` `--dry-run` | Compose one daily companion message now — `--mode morning\|night` is required. Dry-run unless `--deliver`. |
+| `witness report` | `--deliver` `--dry-run` | Compose the weekly witness report now. Dry-run unless `--deliver`. |
+| `workout` | — | Compose today's training recommendation — a deterministic core decides, the model only phrases it. |
+| `workout fire` | `--deliver` `--dry-run` | Compose the daily workout message now. Dry-run unless `--deliver`. |
+| `workout log [drop…]` | `--type` `--duration` `--rpe` `--parts` `--movements` `--soreness` `--pain` `--notes` `--anchor` `--anchor-item` `--text` + `log`'s capture flags | Log a completed workout — structured flags, or a spoken drop via `--text`. |
+| `storm <clause-label\|unwritten\|end>` | `--day` | Declare, renew, or end a storm (a grace window). |
+| `profile <name>` | — | Switch to a named clock profile. |
+
+<br/>
 
 **System & data**
 
-| Command | What it does |
-|---------|--------------|
-| `init` | Scaffold the `~/.lucid/` Ledger (idempotent; most verbs also self-scaffold). |
-| `export [series \| packet clinician [@date\|all]]` | Export a CSV series or a clinician packet — zero journal content by default. |
-| `backup [--out <file>]` | Write the must-keep Ledger trees to a single `.tar.gz`. |
-| `restore [--in <file>] [--force]` | Rebuild a Ledger from a backup archive (refuses to overwrite occupied data without `--force`). |
-| `validate` | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
-| `serve` | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
-| `version` · `upgrade` | Print build metadata; self-update in place from a GitHub release (`--check`, `--channel`, `--force`). |
+| Command | Flags | What it does |
+|---------|-------|--------------|
+| `init` | — | Scaffold the `~/.lucid/` Ledger (idempotent; most verbs also self-scaffold). |
+| `export [series \| packet clinician [@date\|all]]` | — | Export a CSV series or a clinician packet — zero journal content by default. |
+| `backup` | `--out` | Write the must-keep Ledger trees to a single `.tar.gz`. Never writes into `~/.lucid/`, never clobbers an existing file. |
+| `restore [<file>]` | `--in` `--force` | Overlay a backup archive back into the Ledger; refuses an occupied home without `--force`. |
+| `validate` | — | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
+| `serve` | — | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
+| `version` | — | Print build metadata: version, commit, build date. |
+| `upgrade` | `--check` `--channel` `--force` `--managed` | Self-update in place from a GitHub release. `--managed` honors the drain window on a supervised host. |
+| `completion <bash\|zsh\|fish\|powershell>` | — | Emit the shell autocompletion script. |
 
-Global `--json` works where output is structured; exit codes are `0` (ok),
-`1` (error), `2` (usage). Full synopsis, flags, and examples for every command
-and its sub-forms live in [`docs/usage/commands.md`](docs/usage/commands.md).
+<br/>
+
+**Environment**
+
+| Variable | Effect |
+|----------|--------|
+| `LUCID_HOME` | Override the Ledger location (default `~/.lucid/`). |
+| `UPDATE_CHANNEL` | Default release channel for `upgrade` (`stable` \| `beta` \| `edge`); `--channel` overrides it. |
+| `LUCID_HARNESS_TOKEN` | The chat-bot token `scheduler run` posts with. Injected at spawn — vaulted in `hush`, never committed. |
+| `LUCID_USER_CHANNEL_ID` · `LUCID_WITNESS_CHANNEL_ID` | Real channel IDs the logical `user` and `witness` sends resolve to. Injected, never committed. |
+| `LUCID_SCHEDULER_DB` · `LUCID_COMPANION_DB` · `LUCID_WITNESS_REPORT_DB` · `LUCID_WORKOUT_DB` | Override a disposable job-store path. All default **outside** `~/.lucid/` — machinery, never the record. |
+| `LUCID_SOURCE` · `LUCID_HARNESS` · `LUCID_CHANNEL` · `LUCID_THREAD` · `LUCID_AGENT` · `LUCID_MODEL` | Default capture provenance so a relaying harness attributes an entry without repeating flags. Resolution is flag > env > default; each capture verb reads the ones it exposes as flags. |
+
+Full synopsis, examples, and error behavior for every command live in
+[`docs/usage/commands.md`](docs/usage/commands.md); the config-gated sends have
+their own guides ([companion](docs/usage/companion.md),
+[witness report](docs/usage/witness-report.md),
+[workout](docs/usage/workout.md)).
 
 > 💬 **Chat-driven, optionally.** `lucid serve` speaks a stdin/JSON protocol so a
-> chat client can drive the interactive close-out and the agentic Mirror verbs
-> (`/checkin`, `/reflect`, `/ask`, `/person`) — which structure entries, propose
-> one resonance-gated pattern, and recall it later. Those verbs need an LLM
-> provider; every one is also a direct CLI command, so the CLI is fully usable
-> standalone.
+> chat client can drive the interactive close-out. Three provider-backed Mirror
+> verbs ride it — `/checkin`, `/reflect`, `/ask` — structuring entries, proposing
+> one resonance-gated pattern, and recalling it later; the rest (`/log`,
+> `/closeout`, `/mode`, `/status`, `/day`, `/storm`, `/profile`, `/person`,
+> `/bootstrap`) are verbatim passthroughs to the CLI verbs above. Every one is
+> also a direct command, so the CLI is fully usable standalone.
 
 <br/>
 
@@ -386,7 +444,12 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 |-----|---------|
 | [`docs/usage/install.md`](docs/usage/install.md) | Get the `lucid` binary (from source, `go install`, or a release), verify it, and scaffold the `~/.lucid/` Ledger. |
 | [`docs/usage/getting-started.md`](docs/usage/getting-started.md) | The mental model, the morning/evening daily rhythm, a first-week walkthrough, configuration, and data &amp; privacy. |
-| [`docs/usage/commands.md`](docs/usage/commands.md) | Every `lucid` CLI command and sub-form, plus the chat/harness slash commands — synopsis, flags, and examples. |
+| [`docs/usage/commands.md`](docs/usage/commands.md) | Every `lucid` CLI command and sub-form, plus the chat/harness slash commands — synopsis, flags, examples, and the shared date grammar. |
+| [`docs/usage/natural-language.md`](docs/usage/natural-language.md) | The voice-first layer: talk in plain language and let a harness map it onto the exact documented command. The CLI stays the contract. |
+| [`docs/usage/weekly-reflection.md`](docs/usage/weekly-reflection.md) | `lucid reflect week` — the read-only weekly deep-dive, the window it resolves, and the resonance gate behind `week apply`. |
+| [`docs/usage/life-archive.md`](docs/usage/life-archive.md) | Excavating the past: the injury/body-history track and the story track, kept separate so a session opens exactly one. |
+| [`docs/usage/companion.md`](docs/usage/companion.md) · [`witness-report.md`](docs/usage/witness-report.md) · [`workout.md`](docs/usage/workout.md) | The three config-gated, off-by-default sends: the daily companion, the friend-facing weekly report, and the training loop. |
+| [`docs/usage/harness-setup.md`](docs/usage/harness-setup.md) | Driving Lucid's deterministic loop from a chat surface — no LLM provider and no secrets inside Lucid. |
 
 </details>
 
