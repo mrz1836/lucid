@@ -191,9 +191,9 @@ func TestCompanionFire_DisabledWarns(t *testing.T) {
 // TestRunScheduler_CompanionEnabled_WiresSuppression drives the full scheduler
 // composition root with the companion enabled: the engine comes up with the bell
 // periodic suppressed (the companion owns the night user send) and the companion
-// node comes up with its own morning + night periodics — proving the suppression
-// flag and the concurrent companion node are wired. A cancel drains both to a
-// clean nil return.
+// node comes up with its own morning, night, and morning-backstop periodics —
+// proving the suppression flag and the concurrent companion node are wired. A
+// cancel drains both to a clean nil return.
 func TestRunScheduler_CompanionEnabled_WiresSuppression(t *testing.T) {
 	_ = seedCompanionHome(t) // sets LUCID_HOME + an enabled companion config
 	t.Setenv("LUCID_HARNESS_TOKEN", "test-bot-token")
@@ -212,9 +212,9 @@ func TestRunScheduler_CompanionEnabled_WiresSuppression(t *testing.T) {
 	go func() { done <- runScheduler(ctx, &stderr, engineDB) }()
 
 	// Wait until both nodes reconciled: the engine (bell inactive, tripwire
-	// active) and the companion (morning + night).
+	// active) and the companion (morning + night + morning backstop).
 	require.Eventually(t, func() bool {
-		return bellSuppressed(t, engineDB) && companionPeriodics(t, companionDB) == 2
+		return bellSuppressed(t, engineDB) && companionPeriodics(t, companionDB) == 3
 	}, 10*time.Second, 25*time.Millisecond, "both nodes reconcile with the bell suppressed")
 
 	cancel()

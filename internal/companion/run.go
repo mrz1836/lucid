@@ -19,15 +19,17 @@ import (
 )
 
 // Job runtime identifiers. The companion runs its own disposable flywheel node
-// beside the Engine's, so its queue, kinds, and slugs are distinct: the two
+// beside the Engine's, so its queue, kinds, and slugs are distinct: the three
 // periodics never collide with the bell/tripwire pair, and a restart reconciles
 // them by slug without duplicating.
 const (
-	queueName   = "lucid-companion"
-	kindMorning = "lucid_companion_morning"
-	kindNight   = "lucid_companion_night"
-	slugMorning = "lucid-companion-morning"
-	slugNight   = "lucid-companion-night"
+	queueName           = "lucid-companion"
+	kindMorning         = "lucid_companion_morning"
+	kindNight           = "lucid_companion_night"
+	kindMorningBackstop = "lucid_companion_morning_backstop"
+	slugMorning         = "lucid-companion-morning"
+	slugNight           = "lucid-companion-night"
+	slugMorningBackstop = "lucid-companion-morning-backstop"
 
 	// backfillCap is the bounded missed-fire catch-up the flynode boot spine
 	// applies (a single most-recent bucket). It is mirrored here only so the
@@ -55,6 +57,27 @@ const (
 	// lateNote prefixes a message delivered materially after its scheduled mark
 	// — an honest "this is late, the machine was down" rather than a silent slip.
 	lateNote = "(late — host was asleep)"
+
+	// morningBackstopGrace is how long after the morning mark the backstop waits
+	// before it speaks. The primary send's retry ladder is spent well inside it,
+	// so an hour is clear of the send it backs up rather than racing it — and it
+	// is still honestly "morning", far inside the 10:00 cut-off. Deriving the
+	// backstop from the morning mark rather than the cut-off is the mirror image
+	// of the evening backstop's reasoning: the morning window re-runs the *same*
+	// send behind the same receipt, so it cannot double-post and needs no
+	// cut-off-relative separation.
+	morningBackstopGrace = 60 * time.Minute
+
+	// minutesPerDay is the wrap modulus for clock-mark arithmetic.
+	minutesPerDay = 24 * 60
+
+	// backstopNote prefixes a message the morning backstop delivers. It is
+	// deliberately not lateNote: every backstop fire lands past lateGrace, so
+	// reusing the late note would stamp "host was asleep" on every one of them —
+	// false for the case the backstop actually exists to cover, a send that
+	// failed on a healthy, awake host. The message says which event happened
+	// rather than guessing.
+	backstopNote = "(backstop — the scheduled morning send did not go out on time)"
 )
 
 var (
@@ -125,6 +148,29 @@ type Outcome struct {
 // send failure fires a best-effort alert and returns a loud error — silence is
 // the one outcome it never produces.
 func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, error) {
+	return r.fire(ctx, mode, now, lateNote)
+}
+
+// FireBackstop re-runs the *real* morning card on the morning backstop's behalf
+// — the same compose-and-deliver path [Runner.Fire] takes, so the backstop
+// inherits every guarantee rather than reimplementing any of them. In
+// particular it reads the same delivery receipt through the same guard, so a
+// morning the primary send already delivered is an idempotent skip and a
+// double-post is impossible by construction.
+//
+// It differs from Fire in exactly one respect: the note a late fire carries.
+// Every backstop fire is late by definition (it sits an hour past the mark), so
+// reusing the late note would misreport a delivery failure as a sleeping host.
+func (r *Runner) FireBackstop(ctx context.Context, now time.Time) (Outcome, error) {
+	return r.fire(ctx, ModeMorning, now, backstopNote)
+}
+
+// fire is the shared body behind [Runner.Fire] and [Runner.FireBackstop]. The
+// prefix a late fire carries is the only axis the two differ on; everything
+// else — the cut-off, the receipt guard, the compose, the read-back, the alerts
+// — is identical for both callers, which is what keeps the backstop honest
+// about exactly-once.
+func (r *Runner) fire(ctx context.Context, mode Mode, now time.Time, note string) (Outcome, error) {
 	win, err := windowFor(mode)
 	if err != nil {
 		return Outcome{}, err
@@ -165,7 +211,7 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 			return r.compose.Compose(cctx, mode, cnow)
 		},
 		LatePrefix: func(res Result) Result {
-			res.Text = lateNote + "\n\n" + res.Text
+			res.Text = note + "\n\n" + res.Text
 			return res
 		},
 		Send: func(sctx context.Context, channel string, res Result) (string, error) {
@@ -327,11 +373,45 @@ func (w nightWorker) Work(ctx context.Context, _ *flywheel.Job[companionArgs]) (
 	return flywheel.Result{}, nil
 }
 
-// Run opens the disposable job DB, migrates it, registers the morning and night
-// workers, reconciles the two periodics from the chain's bell/tripwire marks,
-// and runs the flywheel node until ctx is canceled (SIGINT/SIGTERM upstream). It
-// returns nil on a clean drain. It runs beside the Engine daemon in the same
-// process (config-gated), so it is up whenever the scheduler is.
+// morningBackstopWorker re-fires the morning companion an hour after its mark,
+// so a morning whose primary send failed outright is not a silent one. It is
+// the morning counterpart of the Engine's evening bell fallback.
+type morningBackstopWorker struct {
+	r     *Runner
+	clock models.Clock
+}
+
+// Kind names the worker dispatched for kindMorningBackstop.
+func (morningBackstopWorker) Kind() string { return kindMorningBackstop }
+
+// Work re-runs the morning card unless the window has gone stale, in which case
+// it stands down without a word.
+func (w morningBackstopWorker) Work(ctx context.Context, _ *flywheel.Job[companionArgs]) (flywheel.Result, error) {
+	now := w.clock.Now(ctx)
+	cutoffAt, err := atClock(now, morningCutoff)
+	if err != nil {
+		return flywheel.Result{}, err
+	}
+	// Past the cut-off the backstop says nothing at all — not even the stale-window
+	// alert. The primary morning periodic reaches that cut-off first and already
+	// alerted for this window, so a second copy would only be noise about a fault
+	// that has been reported once. Returning cleanly (rather than erroring) keeps
+	// a backstop that had nothing to do off the job-failure ladder.
+	if !now.Before(cutoffAt) {
+		return flywheel.Result{}, nil
+	}
+	if _, err := w.r.FireBackstop(ctx, now); err != nil {
+		return flywheel.Result{}, err
+	}
+	return flywheel.Result{}, nil
+}
+
+// Run opens the disposable job DB, migrates it, registers the morning, night,
+// and morning-backstop workers, reconciles the three periodics from the chain's
+// bell/tripwire marks, and runs the flywheel node until ctx is canceled
+// (SIGINT/SIGTERM upstream). It returns nil on a clean drain. It runs beside the
+// Engine daemon in the same process (config-gated), so it is up whenever the
+// scheduler is.
 func Run(ctx context.Context, o Options) error {
 	if o.Store == nil {
 		return errNoStore
@@ -370,18 +450,26 @@ func Run(ctx context.Context, o Options) error {
 	})
 }
 
-// buildRegistry registers the morning and night workers over one runner.
+// buildRegistry registers the morning, night, and morning-backstop workers over
+// one runner.
 func buildRegistry(r *Runner, clock models.Clock) *flywheel.Registry {
 	reg := flywheel.NewRegistry()
 	flywheel.Register(reg, morningWorker{r: r, clock: clock})
 	flywheel.Register(reg, nightWorker{r: r, clock: clock})
+	flywheel.Register(reg, morningBackstopWorker{r: r, clock: clock})
 	return reg
 }
 
-// upsertPeriodics reconciles the morning and night periodics from the default
-// profile's clock marks (chain.json): the morning fires on the tripwire mark and
-// the night on the bell mark, so the companion and the deterministic pair fire
-// at the same instant. It is idempotent by slug, safe to call on every boot.
+// upsertPeriodics reconciles the three periodics from the default profile's
+// clock marks (chain.json): the morning fires on the tripwire mark and the night
+// on the bell mark, so the companion and the deterministic pair fire at the same
+// instant, and the morning backstop fires a grace period after the morning. It
+// is idempotent by slug, safe to call on every boot.
+//
+// No SetPeriodicActive call follows the upserts, unlike the Engine's evening
+// pair: nothing here toggles by configuration, because the companion node only
+// runs at all when the companion is enabled — so all three of its periodics are
+// intended active whenever this code is reachable.
 func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter) error {
 	chain, err := store.ReadChainConfig()
 	if err != nil {
@@ -391,10 +479,15 @@ func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter) e
 	if err != nil {
 		return fmt.Errorf("companion: resolve clock marks: %w", err)
 	}
-	morningCron, err := cronFromHM(tripwireMark)
+	// The tripwire mark is parsed once and both morning-side crons are derived
+	// from the resulting minutes, so the backstop can never disagree with the
+	// morning send about a mark they both read.
+	tripwireMin, err := markMinutes(tripwireMark)
 	if err != nil {
 		return err
 	}
+	morningCron := cronFromMinutes(tripwireMin)
+	backstopCron := cronFromMinutes(morningBackstopMinutes(tripwireMin))
 	nightCron, err := cronFromHM(bellMark)
 	if err != nil {
 		return err
@@ -409,7 +502,25 @@ func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter) e
 	}); err != nil {
 		return fmt.Errorf("companion: upsert night periodic: %w", err)
 	}
+	if err := flywheel.UpsertPeriodic(ctx, db, flywheel.PeriodicSpec{
+		Slug: slugMorningBackstop, Kind: kindMorningBackstop, Cron: backstopCron, Queue: queueName, Active: true,
+	}); err != nil {
+		return fmt.Errorf("companion: upsert morning backstop periodic: %w", err)
+	}
 	return nil
+}
+
+// morningBackstopMinutes derives the morning backstop's mark from the morning
+// send it backs up, both in minutes since local midnight (usage/commands.md
+// §"The morning backstop"): the tripwire mark plus a grace, wrapped at midnight.
+//
+// It is derived rather than configured so the two can never drift — move
+// tripwire_time and the backstop moves with it. There is no clamp against the
+// morning cut-off, because the backstop is self-limiting: past the cut-off its
+// worker stands down without a word, so an exotic mark makes it inert rather
+// than noisy.
+func morningBackstopMinutes(tripwireMin int) int {
+	return (tripwireMin + int(morningBackstopGrace/time.Minute)) % minutesPerDay
 }
 
 // atClock builds the instant at the "HH:MM" wall-clock mark on now's calendar
@@ -430,11 +541,29 @@ func atClock(now time.Time, hm string) (time.Time, error) {
 // "19:00" -> "0 19 * * *". A malformed mark is rejected rather than silently
 // mis-scheduled.
 func cronFromHM(hm string) (string, error) {
+	total, err := markMinutes(hm)
+	if err != nil {
+		return "", err
+	}
+	return cronFromMinutes(total), nil
+}
+
+// markMinutes parses an "HH:MM" clock mark into minutes since local midnight —
+// the form the morning-side mark arithmetic works in. A malformed mark (wrong
+// shape, out-of-range hour or minute, non-numeric field) is rejected rather than
+// silently mis-scheduled.
+func markMinutes(hm string) (int, error) {
 	mark, err := clockmark.Parse(hm)
 	if err != nil {
-		return "", fmt.Errorf("companion: %w", err)
+		return 0, fmt.Errorf("companion: %w", err)
 	}
-	return mark.Cron(), nil
+	return mark.Minutes(), nil
+}
+
+// cronFromMinutes renders minutes since local midnight as a daily 5-field cron
+// expression: 1290 -> "30 21 * * *".
+func cronFromMinutes(total int) string {
+	return fmt.Sprintf("%d %d * * *", total%60, total/60)
 }
 
 // parseHM parses an "HH:MM" clock mark into its hour and minute, rejecting a
