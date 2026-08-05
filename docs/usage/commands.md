@@ -759,16 +759,23 @@ UPDATE_CHANNEL=edge lucid upgrade
 lucid scheduler run       [--db <path>]
 lucid scheduler status    [--scheduler-db <path>] [--companion-db <path>] [--json]
 lucid scheduler reconcile [--slug <slug>] [--no-fire] [--db <path>] [--json]
+lucid scheduler install   [--out <dir> | --apply] [--force] [--json]
+lucid scheduler uninstall [--dry-run] [--label <label>] [--json]
 ```
 
-The `scheduler` parent has three subcommands: **`run`** starts the autonomous
-daemon, **[`status`](#scheduler-status)** is its read-only health sibling — it
-inspects local state and reports a verdict, sending nothing and touching no
-secret — and **[`reconcile`](#scheduler-reconcile)** is the sanctioned repair
-lever that re-arms a scheduled send whose periodic got parked. `status` names
-the problem; `reconcile` is the one command that fixes it. Between them, job
-state is never repaired by hand: the durable job store is machinery the binary
-owns, and editing it directly is unsupported.
+Three subcommands drive the daemon at runtime: **`run`** starts it,
+**[`status`](#scheduler-status)** is its read-only health sibling — it inspects
+local state and reports a verdict, sending nothing and touching no secret — and
+**[`reconcile`](#scheduler-reconcile)** is the sanctioned repair lever that
+re-arms a scheduled send whose periodic got parked. `status` names the problem;
+`reconcile` is the one command that fixes it. Between them, job state is never
+repaired by hand: the durable job store is machinery the binary owns, and
+editing it directly is unsupported.
+
+Two more manage the host install:
+**[`install`](#scheduler-install)** renders (and, with `--apply`, loads) the
+supervised launchd + `hush` artifacts, and
+**[`uninstall`](#scheduler-uninstall)** tears the launchd job back down.
 
 #### scheduler run
 
