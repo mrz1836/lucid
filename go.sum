@@ -51,6 +51,8 @@ github.com/mrz1836/go-flywheel v0.20.1 h1:ijuXsbyT/fYjA68/ar9rTY67Npt5wx3f0wLZr1
 github.com/mrz1836/go-flywheel v0.20.1/go.mod h1:xtMKNEQx315ZES7iqb8C6wMSjHGt5N2fzeZlepgKUMQ=
 github.com/mrz1836/go-foundation v0.4.1 h1:r4RkrXoDF97MC8yetoQ3U1POZGNkt80zoeJFOPkKaYs=
 github.com/mrz1836/go-foundation v0.4.1/go.mod h1:fEd3BxyNkc70k2FwXJttWNm1toeFedz5GPmGLSjn9hs=
+github.com/mrz1836/go-selfupdate v0.1.3 h1:jcAe4FP7ayObOhYsTjHdfwAT2RSlHsuReJjUQg/2zqA=
+github.com/mrz1836/go-selfupdate v0.1.3/go.mod h1:w9jWTnJEqpKjjUkgc9YN7RYwdUPFIwhEYKl/mp1Lhjc=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

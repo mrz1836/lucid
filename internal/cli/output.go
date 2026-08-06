@@ -13,8 +13,8 @@ import (
 )
 
 // jsonFlag is the persistent flag name that switches supported
-// commands (status, day, export, validate, version, upgrade --check)
-// into machine-readable output. Human-first prose is the default so
+// commands (status, day, export, validate, version) into
+// machine-readable output. Human-first prose is the default so
 // automation never scrapes formatted text (ADR-0007).
 const jsonFlag = "json"
 

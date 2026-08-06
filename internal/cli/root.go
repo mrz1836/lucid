@@ -33,7 +33,7 @@ var errModeNotAccepted = errors.New("lucid: mode declaration not accepted")
 
 // BuildInfo carries the build metadata injected into cmd/lucid/main.go
 // via ldflags. It is threaded through the command tree so `version`
-// and `upgrade` report the running build without a mutable package
+// and `update` report the running build without a mutable package
 // global.
 type BuildInfo struct {
 	Version string
@@ -87,7 +87,7 @@ func exitCodeForError(err error) int {
 // newRootCmd constructs the cobra root command fresh on every call
 // (no mutable package-level command state). It registers the full
 // command spine from ADR-0003 (`init|log|closeout|mode|status|day|
-// stats|validate|export`) plus the `version` and `upgrade` verbs added
+// stats|validate|export`) plus the `version` and `update` verbs added
 // in ADR-0007. `stats` is the read-only Ledger-volume sibling of `day`.
 func newRootCmd(bi BuildInfo) *cobra.Command {
 	root := &cobra.Command{
@@ -103,7 +103,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.PersistentFlags().Bool(jsonFlag, false, "Emit machine-readable JSON output where supported")
 
 	// Full command spine. Feature verbs are stubs until their build
-	// stage lands; version + upgrade are wired now (Stage 0).
+	// stage lands; version + update are wired now (Stage 0).
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newLogCmd())
 	root.AddCommand(newAttachCmd())
@@ -118,7 +118,6 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newBackupCmd())
 	root.AddCommand(newRestoreCmd())
 	root.AddCommand(newVersionCmd(bi))
-	root.AddCommand(newUpgradeCmd(bi))
 	root.AddCommand(newSchedulerCmd())
 	root.AddCommand(newCompanionCmd())
 	root.AddCommand(newWitnessCmd())
@@ -140,6 +139,11 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newExcavateCmd())
 	root.AddCommand(newRecallCmd())
 	root.AddCommand(newStructureCmd())
+
+	// Self-update (alias: upgrade) plus the passive "a new version is available"
+	// notice. Wired last so the banner chains onto the root's run hooks; the
+	// resolved build version tells a real release apart from a development build.
+	attachUpdateCommand(root, bi.Version)
 
 	return root
 }

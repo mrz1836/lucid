@@ -44,17 +44,17 @@ before the Mirror thread, deliberately.
 
 ### Stage 0 — Repo bootstrap
 
-Copy the scaffolding wholesale from a reference binary repo (`hush`
-or `atlas`) per [ADR-0007](../adr/0007-cli-conventions.md): `.github/`
+Copy the scaffolding wholesale from the house template per
+[ADR-0007](../adr/0007-cli-conventions.md): `.github/`
 CI, `.goreleaser.yml`, magex task surface, lint/codecov/editorconfig,
 LICENSE, `cmd/lucid/` + `internal/` layout. Wire `lucid version` and
-`lucid upgrade` (the house self-upgrade: release via `gh` with REST
+`lucid update` (the house self-update: release via `gh` with REST
 fallback, SHA-256 verify, atomic swap) before any feature exists, and
 cut `v0.0.x` releases from day one.
 
 **Done when:** fresh clone builds green through magex; a tagged
 release installs itself over a previous one via
-`lucid upgrade` on the target host. Every later stage now ships in
+`lucid update` on the target host. Every later stage now ships in
 place.
 
 ### Stage 1 — Scaffold + capture (phases 1–2)

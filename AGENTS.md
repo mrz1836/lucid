@@ -88,7 +88,7 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
 
 - [`cmd/lucid/main.go`](cmd/lucid/main.go) → [`internal/cli`](internal/cli) —
   Cobra entry; verbs: `init log closeout mode status obs day validate export
-  version upgrade` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
+  version update` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
 - [`internal/router`](internal/router) — dispatch spine; verb→intent 1:1;
   holds the storage adapter + resolved config; orders agent calls.
 - [`internal/engine`](internal/engine) — pure, deterministic, agent-free Engine
@@ -108,9 +108,9 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   (`iface.go`, `fake.go`).
 - [`internal/validate`](internal/validate) — `lucid validate`, the read-only
   architecture-gate sweep (boundary, diagnostic-language, links, schema).
-- `internal/{config,upgrade,isoweek,deps}` + `data/` — config, self-update,
-  ISO-week math, pinned core deps (`go-flywheel`, `go-foundation`), embedded
-  person-key wordlist.
+- `internal/{config,isoweek,deps}` + `data/` — config, ISO-week math,
+  pinned core deps (`go-flywheel`, `go-foundation`), embedded
+  person-key wordlist. (Self-update is wired into `internal/cli`.)
 
 ## Build, verify, commit
 

@@ -727,31 +727,37 @@ lucid version
 lucid version --json
 ```
 
-### upgrade
+### update
 
 ```
-lucid upgrade [--check] [--force] [--channel <stable|beta|edge>] [--managed] [--json]
+lucid update [--check] [--force] [--verbose]
 ```
 
-Upgrade the running binary in place from a GitHub release: download the matching
+Update the running binary in place from a GitHub release: download the matching
 platform archive, verify it against the published SHA-256, and swap it into
-place atomically (so a running scheduler is never corrupted mid-run). The target
-is the resolved path of the running binary; if that directory isn't writable,
-`upgrade` exits with a clear error naming it.
+place atomically (so a running scheduler is never corrupted mid-run). Nothing is
+written until the download has been verified; the target is the resolved path of
+the running binary, and if that directory isn't writable, `update` exits with a
+clear error naming it. A binary owned by another installer (`go install`'s
+`~/go/bin`, or a Homebrew prefix) is refused rather than overwritten. Also
+available as `lucid upgrade`.
 
 | Flag | Effect |
 |------|--------|
-| `--check` | Report whether a newer release is available; install nothing. `--json` emits the check info. |
+| `--check` | Report whether a newer release is available; install nothing. |
 | `--force` | Reinstall the latest release even when already current. |
-| `--channel <stable\|beta\|edge>` | Release channel; overrides `UPDATE_CHANNEL`. |
-| `--managed` | Supervised upgrade: honor the drain window (never between the evening bell and the morning close-out) and run a post-upgrade tripwire self-check. |
+| `--verbose` | Narrate each step, and print the release notes with `--check`. |
 
 ```sh
-lucid upgrade --check
-lucid upgrade
-lucid upgrade --channel beta
-UPDATE_CHANNEL=edge lucid upgrade
+lucid update --check
+lucid update
+lucid update --force
 ```
+
+Every other command also runs a passive, cached background check and prints a
+one-line "a new version is available" notice to stderr. It never blocks a
+command, is skipped for development builds and under CI, and is silenced by
+`LUCID_NO_UPDATE_CHECK=1` (or the shared `NO_UPDATE_CHECK`).
 
 ### scheduler
 
@@ -1944,7 +1950,7 @@ replaced the retired monthly heartbeat) run beside them. See
 | Variable | Effect |
 |----------|--------|
 | `LUCID_HOME` | Override the Ledger location (default `~/.lucid/`). |
-| `UPDATE_CHANNEL` | Default release channel for `lucid upgrade` (`stable` \| `beta` \| `edge`); `--channel` overrides it. |
+| `LUCID_NO_UPDATE_CHECK` | Silence the passive "a new version is available" notice (`1`/`true`); the shared `NO_UPDATE_CHECK` and `CI` also disable it. |
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `lucid scheduler run` posts with (a Discord bot token). Injected at spawn — vaulted in `hush` and never committed (ADR-0005); the binary reads it only from the environment. |
 | `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
 | `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2 escalation, weekly witness report). Injected, never committed. |

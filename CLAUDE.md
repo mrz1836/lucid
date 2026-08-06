@@ -90,7 +90,7 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
 
 - [`cmd/lucid/main.go`](cmd/lucid/main.go) → [`internal/cli`](internal/cli) —
   Cobra entry; verbs: `init log closeout mode status obs day validate export
-  backup restore version upgrade` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
+  backup restore version update` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
 - [`internal/router`](internal/router) — dispatch spine; verb→intent 1:1;
   holds the storage adapter + resolved config; orders agent calls.
 - [`internal/engine`](internal/engine) — pure, deterministic, agent-free Engine
@@ -132,8 +132,8 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   (`iface.go`, `fake.go`).
 - [`internal/validate`](internal/validate) — `lucid validate`, the read-only
   architecture-gate sweep (boundary, diagnostic-language, links, schema).
-- `internal/{config,upgrade,isoweek,deps,keyderive,clockmark}` + `data/` —
-  config, self-update, ISO-week math, pinned core deps (`go-flywheel`,
+- `internal/{config,isoweek,deps,keyderive,clockmark}` + `data/` —
+  config, ISO-week math, pinned core deps (`go-flywheel`,
   `go-foundation`), the pure salted slug-derivation core shared by person_keys
   and registry keys, the embedded person-key wordlist, and the single strict
   `HH:MM` clock-mark parse/render rule shared by the Engine, config, and the

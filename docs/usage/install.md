@@ -17,9 +17,23 @@ the binary onto your host and scaffolds that Ledger.
 
 ## Install
 
-Pick one path. All three produce the same `lucid` binary.
+### Install the binary (recommended)
 
-### 1. Build from source (recommended while iterating)
+Install the latest prebuilt release into `~/.local/bin` — a user-writable directory, so
+no `sudo`, and `lucid update` can self-update in place afterward:
+
+```sh
+VER=$(curl -fsSL https://api.github.com/repos/mrz1836/lucid/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | tr -d v)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+mkdir -p ~/.local/bin
+curl -fsSL "https://github.com/mrz1836/lucid/releases/download/v${VER}/lucid_${VER}_${OS}_${ARCH}.tar.gz" | tar -xzf - -C ~/.local/bin lucid
+```
+
+Make sure `~/.local/bin` is on your `PATH` (add `export PATH="$HOME/.local/bin:$PATH"`
+to your shell profile if needed). From then on the binary updates itself in place — see
+[Keeping it up to date](#keeping-it-up-to-date).
+
+### Build from source
 
 ```sh
 git clone https://github.com/mrz1836/lucid.git
@@ -32,40 +46,26 @@ go build -o lucid ./cmd/lucid
 The module path is `github.com/mrz1836/lucid` and the entrypoint is
 `cmd/lucid/main.go`. `magex build` injects version/commit/build-date via
 ldflags; a plain `go build` produces a working `dev` build (its `version`
-reports `dev`, which `lucid upgrade` treats as older than any real release).
+reports `dev`, which `lucid update` treats as older than any real release). Put
+the resulting binary on your `PATH`, e.g. `install -m 0755 lucid ~/.local/bin/lucid`.
 
-Put the resulting binary somewhere on your `PATH`, e.g.:
+## Keeping it up to date
 
-```sh
-install -m 0755 lucid /usr/local/bin/lucid   # or ~/bin, ~/.local/bin, …
-```
-
-### 2. `go install`
-
-```sh
-go install github.com/mrz1836/lucid/cmd/lucid@latest
-```
-
-Installs `lucid` into `$(go env GOBIN)` (or `$(go env GOPATH)/bin`). Make sure
-that directory is on your `PATH`.
-
-### 3. Release binary + self-upgrade
-
-Download the archive for your platform from the project's GitHub Releases,
-unpack it, and place `lucid` on your `PATH`. From then on the binary updates
-itself in place:
+`lucid update` (alias `lucid upgrade`) downloads the latest release, verifies its
+SHA-256 checksum against the published `lucid_<ver>_checksums.txt`, and atomically
+replaces the running binary — no `sudo` when it lives in `~/.local/bin`:
 
 ```sh
-lucid upgrade --check     # is a newer release available? (no install)
-lucid upgrade             # download, verify SHA-256, atomic swap
+lucid update --check     # is a newer release available? (no install)
+lucid update             # download, verify SHA-256, atomic swap
+lucid update --force     # reinstall the latest even if already current
 ```
 
-Channel selection follows the `UPDATE_CHANNEL` environment variable
-(`stable | beta | edge`, default `stable`); `--channel` overrides it. The
-install target is the resolved path of the running binary — if its directory
-isn't writable, `upgrade` exits with a clear error naming the directory rather
-than installing elsewhere. See [`commands.md`](commands.md#upgrade) for the full
-flag set, including `--managed` (drain-window-aware, for supervised hosts).
+Every other command also runs a passive, cached background check and prints a one-line
+"a new version is available" notice, silenced by `LUCID_NO_UPDATE_CHECK=1` (or the
+shared `NO_UPDATE_CHECK` / `CI`). A binary owned by another installer (`go install`'s
+`~/go/bin`, a Homebrew prefix) is refused rather than overwritten. See
+[`commands.md`](commands.md#update) for the full flag set.
 
 ## Verify the install
 

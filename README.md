@@ -181,7 +181,27 @@ everything under a user-owned Ledger at `~/.lucid/`.
 
 <br/>
 
-### Build from source (recommended while iterating)
+### Install the binary
+
+Install the latest prebuilt release into `~/.local/bin` — a user‑writable directory, so
+no `sudo`, and `lucid update` can self‑update in place afterward:
+
+```bash
+# Install the latest lucid release into ~/.local/bin
+VER=$(curl -fsSL https://api.github.com/repos/mrz1836/lucid/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | tr -d v)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+mkdir -p ~/.local/bin
+curl -fsSL "https://github.com/mrz1836/lucid/releases/download/v${VER}/lucid_${VER}_${OS}_${ARCH}.tar.gz" | tar -xzf - -C ~/.local/bin lucid
+lucid version
+```
+
+If `lucid` isn't found afterward, add `~/.local/bin` to your `PATH` (put
+`export PATH="$HOME/.local/bin:$PATH"` in your `~/.zshrc` or `~/.bashrc`).
+
+<details>
+<summary><strong>Build from source (contributors)</strong></summary>
+
+Requires [Go 1.26+](https://golang.org/doc/devel/release.html#policy) and git.
 
 ```bash
 git clone https://github.com/mrz1836/lucid.git && cd lucid
@@ -190,15 +210,9 @@ magex build          # emits ./cmd/lucid/lucid
 go build -o lucid ./cmd/lucid
 ```
 
-Put the resulting binary on your `PATH`, e.g. `install -m 0755 lucid /usr/local/bin/lucid`.
+Put the resulting binary on your `PATH`, e.g. `install -m 0755 lucid ~/.local/bin/lucid`.
 
-<br/>
-
-### `go install`
-
-```bash
-go install github.com/mrz1836/lucid/cmd/lucid@latest
-```
+</details>
 
 <br/>
 
@@ -214,24 +228,29 @@ use, so capture never blocks on setup. Override the location with
 
 <br/>
 
-### Upgrade
+### Keep lucid up to date
 
-Once `lucid` is on your `PATH`, the binary can upgrade itself in place from the
-[GitHub releases](https://github.com/mrz1836/lucid/releases):
+`lucid update` (alias `lucid upgrade`) downloads the latest release, verifies its
+SHA‑256 checksum against the published `lucid_<ver>_checksums.txt`, and atomically
+replaces the running binary — no `sudo` when it lives in `~/.local/bin`.
 
 ```bash
-lucid upgrade --check   # report the latest available version without installing
-lucid upgrade           # download, verify SHA-256, atomic swap
-lucid upgrade --force   # reinstall the latest release even when already current
+lucid update            # download & install the latest release
+lucid update --check    # report whether a newer version is available
+lucid update --force    # reinstall the latest even if already current
+lucid update --verbose  # narrate each step
 ```
 
-Channel selection follows the `UPDATE_CHANNEL` environment variable
-(`stable | beta | edge`, default `stable`); `--channel` overrides it. The
-install target is the resolved path of the running binary — if its directory
-is not writable, `upgrade` exits with a clear error naming the directory rather
-than installing elsewhere. On a supervised host, `--managed` honors the drain
-window (never between the evening bell and the morning close-out) and runs a
-post-upgrade tripwire self-check.
+Every other command also runs a passive, cached background check and prints a one‑line
+"a new version is available" notice. It never blocks or fails a command, is skipped for
+development builds, and is silenced by `LUCID_NO_UPDATE_CHECK=1` (or the shared
+`NO_UPDATE_CHECK` / `CI`). If you hit GitHub API rate limits, a token is read from
+`LUCID_GITHUB_TOKEN`, then `GITHUB_TOKEN`, then `GH_TOKEN`.
+
+> **Heads up:** a binary that another installer owns — `go install`'s `~/go/bin`, or a
+> Homebrew prefix — is **refused** by `lucid update` rather than overwritten (that would
+> break the tool that owns it). Install the release binary into `~/.local/bin` as above
+> to keep self‑update working.
 
 <br/>
 
@@ -326,7 +345,7 @@ flag-parse error.
 | `validate` | — | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
 | `serve` | — | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
 | `version` | — | Print build metadata: version, commit, build date. |
-| `upgrade` | `--check` `--channel` `--force` `--managed` | Self-update in place from a GitHub release. `--managed` honors the drain window on a supervised host. |
+| `update` | `--check` `--force` `--verbose` | Self-update in place from a GitHub release (alias: `upgrade`). |
 | `completion <bash\|zsh\|fish\|powershell>` | — | Emit the shell autocompletion script. |
 
 <br/>
@@ -336,7 +355,7 @@ flag-parse error.
 | Variable | Effect |
 |----------|--------|
 | `LUCID_HOME` | Override the Ledger location (default `~/.lucid/`). |
-| `UPDATE_CHANNEL` | Default release channel for `upgrade` (`stable` \| `beta` \| `edge`); `--channel` overrides it. |
+| `LUCID_NO_UPDATE_CHECK` | Silence the passive "a new version is available" notice (`1`/`true`); the shared `NO_UPDATE_CHECK` and `CI` also disable it. |
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `scheduler run` posts with. Injected at spawn — vaulted in `hush`, never committed. |
 | `LUCID_USER_CHANNEL_ID` · `LUCID_WITNESS_CHANNEL_ID` | Real channel IDs the logical `user` and `witness` sends resolve to. Injected, never committed. |
 | `LUCID_SCHEDULER_DB` · `LUCID_COMPANION_DB` · `LUCID_WITNESS_REPORT_DB` · `LUCID_WORKOUT_DB` | Override a disposable job-store path. All default **outside** `~/.lucid/` — machinery, never the record. |

@@ -18,7 +18,7 @@ Lucid** (the binary writes only `~/.lucid/`):
 
 `log` · `closeout` (+ `skip` / `backfill` / `today`) · `mode` · `status` ·
 `obs` (+ enabled kinds) · `day` · `anchor add` · `metrics` · `stats` · `export` / `packet` ·
-`validate` · `version` · `upgrade`
+`validate` · `version` · `update`
 
 That is the full nightly close-out + morning status loop — the core of a
 morning/evening routine. Full syntax: [`usage/commands.md`](usage/commands.md).
@@ -53,9 +53,9 @@ own, no human in the loop.
   credential-dumb; no real secret name lives in the repo). `"user"` routes to the
   primary Lucid channel; `"witness"` routes to a dedicated witness channel.
 - **Deploy:** runs under `hush supervise` as a launchd sibling of the harness
-  gateway (Stage 6), with the managed-upgrade drain window (never between the
-  evening bell and the morning close-out) and the post-upgrade tripwire
-  self-check unchanged.
+  gateway (Stage 6); the supervisor's drain window (never between the evening
+  bell and the morning close-out) and the morning tripwire self-check are
+  unchanged.
 - **Ceiling held:** the notifier sends **only** the pre-committed templates,
   received already-rendered from the Engine — it composes nothing, imports no
   model, and L2 stays content-free (streak / mode / storm only). These remain
