@@ -69,20 +69,32 @@ its output. Acknowledge *after* the binary persists, never before.
 | `/companion [morning\|night]` | compose one companion message on demand | `lucid companion fire --mode <morning\|night>` — dry-run by default; scheduled sends stay scheduler-owned |
 | `/witness` | compose the weekly witness report on demand | `lucid witness report` — dry-run by default; scheduled send scheduler-owned |
 
-### Excluded from the chat command map — reason
+### Non-chat CLI verbs
 
 Every other current `lucid` verb is **excluded from the chat command map** on
 purpose, each for a documented reason — the MVP translator surfaces only the
 conversational verbs; the rest are reached by their documented CLI forms:
 
-* **Deeper life-archive verbs** — `recall`, `memory`, `era`, `injury`,
-  `thread`, `workout`: driven by their documented CLI forms; not surfaced as
-  chat shortcuts in the MVP translator.
-* **Pure-infra verbs** — `init`, `upgrade`, `version`, `completion`, `serve`,
-  `bootstrap`, `validate`: setup / maintenance / protocol surfaces, not
-  conversational commands. (`serve` drives the interactive `/checkin` flow
-  above; `bootstrap` toggles historical-entry mode — both reached by their CLI
-  form, not a chat verb of their own.)
+| Verb | Reason it is not a chat command |
+|------|---------------------------------|
+| `lucid anchor` | Record days-since milestones (anchors); a consequential lifecycle verb that is echoed and confirmed rather than chat-mapped. |
+| `lucid recall` | Read-only: browse the archive by era, thread, or injury (never writes). |
+| `lucid memory` | Record a story from your past — backdated, linked, kept. |
+| `lucid era` | Record or amend a life chapter (era). |
+| `lucid injury` | Record or amend an injury in your body history. |
+| `lucid thread` | Record or amend a thread you're working on. |
+| `lucid workout` | Recommend, log, and review your training (config-gated). |
+| `lucid structure` | Structure a raw entry you did not just capture, or a window of them. |
+| `lucid self` | Read and record durable facts about yourself. |
+| `lucid backup` | Write the must-keep Ledger trees to a single `.tar.gz` archive; a data-safety operation rather than a conversation. |
+| `lucid restore` | Rebuild a Ledger from a backup archive; destructive-adjacent and deliberately CLI-only. |
+| `lucid init` | Scaffold the `~/.lucid/` Ledger tree. |
+| `lucid upgrade` | Upgrade lucid in place from a GitHub release. |
+| `lucid version` | Print lucid build metadata. |
+| `lucid completion` | Generate the autocompletion script for the specified shell. |
+| `lucid serve` | Drive the interactive `/checkin` flow over a stdin/JSON protocol. |
+| `lucid bootstrap` | Toggle historical-entry (bootstrap) mode. |
+| `lucid validate` | Validate the Ledger and boundary invariants (read-only). |
 
 The skill never invents a command, an agent, or a field.
 
