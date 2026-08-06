@@ -1,14 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -433,4 +438,103 @@ func TestSelf_CLI_RegisteredOnRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "Read and record durable facts about yourself")
 	assert.Regexp(t, `(?m)^\s+self\s`, out)
+}
+
+// TestSelfFactRow_RendersSinceAndNote covers the row formatter directly: the
+// leaf is padded to the column width and the optional origin and annotation are
+// appended only when present, so a bare fact renders without dangling markers.
+func TestSelfFactRow_RendersSinceAndNote(t *testing.T) {
+	cases := []struct {
+		name string
+		fact engine.SelfFact
+		want string
+	}{
+		{"bare", engine.SelfFact{Key: "body.handedness", Value: "left"}, "handedness  left"},
+		{"since", engine.SelfFact{Key: "body.handedness", Value: "left", Since: "1985"}, "handedness  left (since 1985)"},
+		{"note", engine.SelfFact{Key: "body.handedness", Value: "left", Note: "writes right"}, "handedness  left — writes right"},
+		{
+			"since and note",
+			engine.SelfFact{Key: "body.handedness", Value: "left", Since: "1985", Note: "writes right"},
+			"handedness  left (since 1985) — writes right",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, selfFactRow(tc.fact, len("handedness")))
+		})
+	}
+}
+
+// TestSelfKeySplit_DegradesOnMissingDot proves the namespace/leaf split returns
+// the whole key rather than failing when a hand-edited record carries a key with
+// no dot — a read path never panics on malformed state.
+func TestSelfKeySplit_DegradesOnMissingDot(t *testing.T) {
+	assert.Equal(t, "identity", selfKeyNamespace("identity.generation"))
+	assert.Equal(t, "generation", selfKeyLeaf("identity.generation"))
+	assert.Equal(t, "nodot", selfKeyNamespace("nodot"))
+	assert.Equal(t, "nodot", selfKeyLeaf("nodot"))
+}
+
+// TestSelfHistoryLines covers the append-log renderer: an empty selection names
+// the miss, a retirement carries the [retired] marker, and an active record does
+// not.
+func TestSelfHistoryLines(t *testing.T) {
+	assert.Equal(t, []string{"No records in the history for that selection."}, selfHistoryLines(nil))
+
+	lines := selfHistoryLines([]engine.SelfFact{
+		{RecordedAt: "2026-07-05T10:00:00Z", Key: "pref.editor", Value: "vim"},
+		{RecordedAt: "2026-07-06T10:00:00Z", Key: "pref.editor", Value: "vim", State: engine.SelfStateRetired},
+	})
+	require.Len(t, lines, 2)
+	assert.Equal(t, "2026-07-05T10:00:00Z  pref.editor  vim", lines[0])
+	assert.Contains(t, lines[1], "[retired]")
+}
+
+// TestSelfRejection_PassesThroughRealFailure proves a non-rejection error travels
+// unchanged (it is a real failure, not a deterministic refusal) while a
+// SelfRejectedError maps to the shared not-recorded sentinel with the reason on
+// stderr.
+func TestSelfRejection_PassesThroughRealFailure(t *testing.T) {
+	cmd, errBuf := selfRejectionCmd()
+	boom := errors.New("disk on fire")
+	assert.Equal(t, boom, selfRejection(cmd, boom), "a real failure is returned verbatim")
+	assert.Empty(t, errBuf.String())
+
+	cmd, errBuf = selfRejectionCmd()
+	rejected := &router.SelfRejectedError{Reason: "no active fact holds pref.editor"}
+	require.ErrorIs(t, selfRejection(cmd, rejected), errSelfNotRecorded)
+	assert.Contains(t, errBuf.String(), "no active fact holds pref.editor")
+
+	cmd, errBuf = selfRejectionCmd()
+	wrapped := fmt.Errorf("gate: %w", router.ErrSelfRejected)
+	require.ErrorIs(t, selfRejection(cmd, wrapped), errSelfNotRecorded)
+	assert.Contains(t, errBuf.String(), "self fact rejected")
+}
+
+// selfRejectionCmd returns a bare command whose stderr is captured, for the
+// deterministic-rejection routing tests.
+func selfRejectionCmd() (*cobra.Command, *bytes.Buffer) {
+	cmd := &cobra.Command{}
+	var errBuf bytes.Buffer
+	cmd.SetErr(&errBuf)
+	cmd.SetOut(&bytes.Buffer{})
+	return cmd, &errBuf
+}
+
+// TestSelfWriteVerbs_BootErrorSurfaces proves each write verb surfaces a boot
+// failure (an unscaffoldable home) rather than appending — the router never
+// comes up, so nothing is recorded. Mirrors the other *_BootError guards on the
+// spine.
+func TestSelfWriteVerbs_BootErrorSurfaces(t *testing.T) {
+	for _, args := range [][]string{
+		{"self", "set", "body.handedness", "left"},
+		{"self", "retire", "pref.editor"},
+		{"self", "move", "misc.handedness", "body.handedness"},
+	} {
+		t.Run(args[1], func(t *testing.T) {
+			unscaffoldableHome(t)
+			_, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+			require.Error(t, err)
+		})
+	}
 }

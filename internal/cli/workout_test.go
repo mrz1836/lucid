@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -440,6 +441,209 @@ func TestWorkout_Log_DayFlagStructuredCLI(t *testing.T) {
 	assert.Equal(t, workouts[0].LogicalDate, states[0].LogicalDate)
 	assert.Equal(t, workouts[0].OccurredAt, states[0].OccurredAt)
 	assert.Equal(t, workouts[0].OccurredAtPrecision, states[0].OccurredAtPrecision)
+}
+
+// --- render helpers ---------------------------------------------------------
+
+// TestRenderWorkoutDryRun_NamesDegrades proves the dry-run preview names the
+// deterministic-fallback and enrichment-degraded paths when they fired, and
+// names neither on a clean compose.
+func TestRenderWorkoutDryRun_NamesDegrades(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, renderWorkoutDryRun(&buf, router.WorkoutResult{
+		Fallback: true, EnrichmentDegraded: true, Text: "SESSION",
+	}))
+	out := buf.String()
+	assert.Contains(t, out, "dry-run — not delivered")
+	assert.Contains(t, out, "deterministic fallback")
+	assert.Contains(t, out, "enrichment degraded")
+	assert.Contains(t, out, "SESSION")
+
+	buf.Reset()
+	require.NoError(t, renderWorkoutDryRun(&buf, router.WorkoutResult{Text: "CLEAN"}))
+	assert.Contains(t, buf.String(), "CLEAN")
+	assert.NotContains(t, buf.String(), "fallback")
+}
+
+// TestRenderWorkoutFire_ReportsOutcome proves the delivery reporter maps each
+// outcome to its honest line: a skip names the reason, a delivery names the
+// message id, and a late or fallback delivery is annotated.
+func TestRenderWorkoutFire_ReportsOutcome(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome workout.Outcome
+		want    string
+	}{
+		{"skipped", workout.Outcome{Skipped: true, SkipReason: "already delivered"}, "workout slot skipped (already delivered)."},
+		{"delivered", workout.Outcome{Delivered: true, MessageID: "42"}, "workout delivered — message 42."},
+		{"late", workout.Outcome{Delivered: true, Late: true, MessageID: "42"}, "(late note prepended)"},
+		{"fallback", workout.Outcome{Delivered: true, Fallback: true, MessageID: "7"}, "(deterministic fallback)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, renderWorkoutFire(&buf, tc.outcome))
+			assert.Contains(t, buf.String(), tc.want)
+		})
+	}
+}
+
+// TestWorkoutFire_DeliverWithoutEnv_Errors proves the --deliver path fails
+// loudly when the Discord transport cannot be built from the environment.
+func TestWorkoutFire_DeliverWithoutEnv_Errors(t *testing.T) {
+	enableWorkoutSurface(t)
+	withScriptedProvider(t, provider.Exchange{Content: "note"})
+	t.Setenv("LUCID_HARNESS_TOKEN", "")
+	t.Setenv("LUCID_USER_CHANNEL_ID", "")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "fire", "--deliver")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lucid workout fire:")
+}
+
+// TestParsePartLevel covers the splitter's branches directly: an empty value is
+// dropped, a bare part is allowed only when a level is not required, and a
+// present level must be a 0-10 integer.
+func TestParsePartLevel(t *testing.T) {
+	cases := []struct {
+		raw          string
+		requireLevel bool
+		wantPart     string
+		wantLevel    int
+		wantHas      bool
+		wantErr      string
+	}{
+		{raw: "  ", requireLevel: false},
+		{raw: "knee", requireLevel: false, wantPart: "knee"},
+		{raw: "knee", requireLevel: true, wantErr: "needs a 0-10 level"},
+		{raw: ":5", requireLevel: true, wantErr: "missing a body part"},
+		{raw: "knee:abc", requireLevel: false, wantErr: "must be a number"},
+		{raw: "knee:12", requireLevel: false, wantErr: "must be 0-10"},
+		{raw: "knee:5", requireLevel: true, wantPart: "knee", wantLevel: 5, wantHas: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw+"/"+boolName(tc.requireLevel), func(t *testing.T) {
+			part, level, has, err := parsePartLevel(tc.raw, flagWSoreness, tc.requireLevel)
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantPart, part)
+			assert.Equal(t, tc.wantLevel, level)
+			assert.Equal(t, tc.wantHas, has)
+		})
+	}
+}
+
+// TestParseBodyStateFlags_MergesPerPart proves per-part soreness and pain fold
+// into one reading for the same part, an empty flag value is skipped, and a bare
+// pain part records its own reading at the flag level.
+func TestParseBodyStateFlags_MergesPerPart(t *testing.T) {
+	states, err := parseBodyStateFlags([]string{"knee:4", ""}, []string{"knee:7", "shoulder"})
+	require.NoError(t, err)
+	require.Len(t, states, 2, "knee merges soreness+pain; shoulder is its own reading")
+
+	// order preserves first appearance: knee (from soreness), then shoulder.
+	knee := states[0]
+	assert.Equal(t, "knee", knee.Part)
+	require.NotNil(t, knee.Soreness)
+	require.NotNil(t, knee.Pain)
+	assert.Equal(t, 4, *knee.Soreness)
+	assert.Equal(t, 7, *knee.Pain)
+
+	shoulder := states[1]
+	assert.Equal(t, "shoulder", shoulder.Part)
+	assert.Nil(t, shoulder.Soreness, "a bare pain flag records no soreness")
+	require.NotNil(t, shoulder.Pain)
+	assert.Equal(t, router.PainFlagLevel, *shoulder.Pain, "a bare part records at the flag level")
+}
+
+// boolName labels a subtest by its requireLevel flag.
+func boolName(b bool) string {
+	if b {
+		return "requireLevel"
+	}
+	return "bareOK"
+}
+
+// TestParseBodyStateFlags_PainErrorAndEmptySkip covers the pain loop's two
+// remaining branches: a malformed pain value surfaces the parse error, and an
+// empty value is skipped rather than recorded as a blank part.
+func TestParseBodyStateFlags_PainErrorAndEmptySkip(t *testing.T) {
+	_, err := parseBodyStateFlags(nil, []string{"knee:99"})
+	require.Error(t, err, "an out-of-range pain level is a usage error")
+	assert.Contains(t, err.Error(), "must be 0-10")
+
+	states, err := parseBodyStateFlags(nil, []string{""})
+	require.NoError(t, err)
+	assert.Empty(t, states, "an empty pain value is skipped, not a blank reading")
+}
+
+// TestWorkout_OnDemand_BootError proves the bare on-demand verb surfaces a boot
+// failure before it composes anything.
+func TestWorkout_OnDemand_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout")
+	require.Error(t, err)
+}
+
+// TestWorkout_OnDemand_ProviderBuildErrorSurfaces proves a provider that cannot
+// be built is a loud failure on the on-demand surface (the message is composed
+// through the model, so no backend is fatal here — unlike the scheduled slot's
+// deterministic fallback).
+func TestWorkout_OnDemand_ProviderBuildErrorSurfaces(t *testing.T) {
+	enableWorkoutSurface(t)
+	withFailingProvider(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider backend unavailable")
+}
+
+// TestWorkoutFire_BootError proves the fire verb surfaces a boot failure before
+// it composes or delivers.
+func TestWorkoutFire_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "fire")
+	require.Error(t, err)
+}
+
+// TestWorkoutFire_DryRun_ProviderBuildErrorSurfaces proves the dry-run compose
+// fails loudly when the provider cannot be built.
+func TestWorkoutFire_DryRun_ProviderBuildErrorSurfaces(t *testing.T) {
+	enableWorkoutSurface(t)
+	withFailingProvider(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "fire")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider backend unavailable")
+}
+
+// TestWorkoutLog_BootError proves the log verb surfaces a boot failure before it
+// parses or writes.
+func TestWorkoutLog_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log", "--type", "push")
+	require.Error(t, err)
+}
+
+// TestWorkoutLog_NegativeDurationRejected proves a negative --duration is a usage
+// error rather than a clamped or silently-dropped value.
+func TestWorkoutLog_NegativeDurationRejected(t *testing.T) {
+	enableWorkoutKinds(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log", "--type", "push", "--duration", "-5")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be zero or more")
+}
+
+// TestWorkoutLog_SpokenProviderBuildErrorSurfaces proves the spoken capture path
+// surfaces a provider-build failure (the extraction needs the model).
+func TestWorkoutLog_SpokenProviderBuildErrorSurfaces(t *testing.T) {
+	enableWorkoutKinds(t)
+	withFailingProvider(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log", "did pull today")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provider backend unavailable")
 }
 
 // TestWorkout_Log_DayComposesWithSpokenDrop: --day says *when*, not *what*, so

@@ -33,3 +33,20 @@ func TestEmit(t *testing.T) {
 		assert.Equal(t, "line one\nline two\n", buf.String())
 	})
 }
+
+// TestWriteJSON_IndentsWithTrailingNewline proves the shared JSON writer emits
+// two-space-indented output terminated by a newline.
+func TestWriteJSON_IndentsWithTrailingNewline(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, writeJSON(&buf, map[string]any{"n": 7}))
+	assert.Equal(t, "{\n  \"n\": 7\n}\n", buf.String())
+}
+
+// TestWriteJSON_EncodeErrorSurfaces proves an unmarshalable value (a channel has
+// no JSON representation) surfaces the wrapped encode error rather than writing
+// half a document.
+func TestWriteJSON_EncodeErrorSurfaces(t *testing.T) {
+	err := writeJSON(&bytes.Buffer{}, map[string]any{"bad": make(chan int)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "encode json")
+}

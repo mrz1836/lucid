@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/isoweek"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/router"
@@ -592,4 +593,156 @@ func TestReflectWeek_CappedStatesShortfall(t *testing.T) {
 func TestReflectWeek_UncappedWindowStatesNoShortfall(t *testing.T) {
 	out := renderWeekOut(t, windowResult(t, "2026-07-13", "2026-07-26", 14), false)
 	assert.NotContains(t, out, "un-reflected days")
+}
+
+// TestReflectWeek_RendersSectionsAndPattern proves the human render prints every
+// populated narrative section as bullets and appends the cited pattern under its
+// lens label — the full non-empty branch.
+func TestReflectWeek_RendersSectionsAndPattern(t *testing.T) {
+	res := windowResult(t, "2026-07-06", "2026-07-12", 7)
+	res.Wins = []string{"held the morning walk"}
+	res.Misses = []string{"skipped two lifts"}
+	res.BodyPain = []string{"left knee tender"}
+	res.HabitChange = []string{"earlier bedtime"}
+	res.NextWeek = []string{"protect the knee"}
+	res.AppliedLens = "act v1"
+	res.Pattern = &router.ReflectWeekPattern{
+		ProposalText:       "One possible read: rest is protective, not lazy.",
+		ShapeTag:           "rest-as-protection",
+		SupportingEntryIDs: []string{"raw_2026_07_08_09_00", "raw_2026_07_10_21_00"},
+	}
+	out := renderWeekOut(t, res, false)
+	assert.Contains(t, out, "Wins:")
+	assert.Contains(t, out, "• held the morning walk")
+	assert.Contains(t, out, "Next week:")
+	assert.Contains(t, out, "Pattern — rest-as-protection (lens: act v1):")
+	assert.Contains(t, out, "One possible read: rest is protective, not lazy.")
+	assert.Contains(t, out, "Cites: raw_2026_07_08_09_00, raw_2026_07_10_21_00")
+}
+
+// TestReflectWeekResponseKind maps each accepted response string to its router
+// kind and rejects an unknown value so an explicit apply never degrades to
+// `unanswered` on a typo.
+func TestReflectWeekResponseKind(t *testing.T) {
+	for _, kind := range []router.ResponseKind{
+		router.RespAccepted, router.RespNuanced, router.RespRejected, router.RespUnanswered,
+	} {
+		got, err := reflectWeekResponseKind("  " + string(kind) + "  ")
+		require.NoError(t, err)
+		assert.Equal(t, kind, got)
+	}
+	_, err := reflectWeekResponseKind("maybe")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown response kind")
+}
+
+// TestTrimWeekLabelYear drops the repeated ISO year within one year and keeps the
+// whole label across a year boundary, where the year is the only thing telling
+// the two weeks apart.
+func TestTrimWeekLabelYear(t *testing.T) {
+	assert.Equal(t, "W30", trimWeekLabelYear("2026-W29", "2026-W30"), "same year drops the repeated prefix")
+	assert.Equal(t, "2027-W01", trimWeekLabelYear("2026-W52", "2027-W01"), "a year boundary keeps the label whole")
+	assert.Equal(t, "2026-W30", trimWeekLabelYear("nodashstart", "2026-W30"), "an unsplittable start keeps the end whole")
+}
+
+// renderApplyOut renders one apply result through a bare command carrying the
+// --json flag, returning the printed text.
+func renderApplyOut(t *testing.T, res router.ValidateResult, asJSON bool) string {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool(jsonFlag, false, "")
+	if asJSON {
+		require.NoError(t, cmd.Flags().Set(jsonFlag, "true"))
+	}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	require.NoError(t, renderReflectWeekApply(cmd, res))
+	return out.String()
+}
+
+// TestRenderReflectWeekApply_HumanOutcomes proves each apply outcome renders its
+// honest one-line human confirmation.
+func TestRenderReflectWeekApply_HumanOutcomes(t *testing.T) {
+	assert.Contains(t, renderApplyOut(t, router.ValidateResult{Wrote: true, InsightID: "insight_1", RuleSet: true}, false), "Tracked insight insight_1.")
+	assert.Contains(t, renderApplyOut(t, router.ValidateResult{Wrote: true, InsightID: "insight_1", RuleSet: true}, false), "Rule attached.")
+	assert.Contains(t, renderApplyOut(t, router.ValidateResult{Rejected: true}, false), "not a fit")
+	assert.Contains(t, renderApplyOut(t, router.ValidateResult{Unanswered: true}, false), "Left it open")
+	assert.Contains(t, renderApplyOut(t, router.ValidateResult{Message: "blocked by safety"}, false), "blocked by safety")
+}
+
+// TestRenderReflectWeekApply_JSON proves the --json projection carries the stable
+// snake_case shape a harness branches on.
+func TestRenderReflectWeekApply_JSON(t *testing.T) {
+	out := renderApplyOut(t, router.ValidateResult{
+		Outcome: "persisted", InsightID: "insight_9", Wrote: true, RuleSet: true, ProposalPaused: true,
+	}, true)
+	var view reflectWeekApplyView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.Equal(t, "persisted", view.Outcome)
+	assert.Equal(t, "insight_9", view.InsightID)
+	assert.True(t, view.Wrote)
+	assert.True(t, view.RuleSet)
+	assert.True(t, view.ProposalPaused)
+}
+
+// TestReadReflectWeekApply covers the stdin decoder: malformed JSON and a
+// candidate missing its required fields are both explicit errors (apply is a
+// write with a required payload), while a well-formed envelope decodes.
+func TestReadReflectWeekApply(t *testing.T) {
+	_, err := readReflectWeekApply(strings.NewReader("{not json"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decode payload")
+
+	_, err = readReflectWeekApply(strings.NewReader(`{"candidate":{"proposal_text":"","shape_tag":""}}`))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs a candidate")
+
+	env, err := readReflectWeekApply(strings.NewReader(
+		`{"candidate":{"proposal_text":"a read","shape_tag":"tag"},"response":{"kind":"accepted"}}`,
+	))
+	require.NoError(t, err)
+	assert.Equal(t, "tag", env.Candidate.ShapeTag)
+}
+
+// TestResolveActiveLens_NilWhenNoFramework proves the lens resolver short-
+// circuits to the baseline voice when no framework is consented, so the embedded
+// registry is only loaded when a lens is actually in play.
+func TestResolveActiveLens_NilWhenNoFramework(t *testing.T) {
+	assert.Nil(t, resolveActiveLens(config.Config{}))
+}
+
+// TestReflectWeekClose_BootError proves the close verb surfaces a boot failure
+// before it stamps the reflected-through cursor.
+func TestReflectWeekClose_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, err := runReflectWeekClose(t)
+	require.Error(t, err)
+}
+
+// TestReflectWeekApply_ProviderBuildErrorSurfaces proves a well-formed apply
+// payload still fails loudly when the provider (needed to re-gate the candidate)
+// cannot be built.
+func TestReflectWeekApply_ProviderBuildErrorSurfaces(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, reflectNow())
+	citeID := seedWeekRaw(t, home, reflectNow().Add(-3*24*time.Hour), "over-prepared for the review call")
+	withFailingProvider(t)
+
+	_, err := runReflectWeekApply(t, applyPayload(t, citeID, "", "accepted", "Yes, that fits."))
+	require.Error(t, err)
+}
+
+// TestResolveActiveLens_LoadsConsentedLens proves a consented stack head
+// resolves to the shipped lens definition from the binary's embedded registry —
+// the full path from config through to a framed run.
+func TestResolveActiveLens_LoadsConsentedLens(t *testing.T) {
+	cfg := config.Default()
+	cfg.FrameworkStack = []string{"stoicism", "nvc"}
+	cfg.FrameworkConsents = map[string]string{
+		"stoicism": "2026-07-05T18:00:00-04:00",
+		"nvc":      "2026-07-05T18:02:00-04:00",
+	}
+	lens := resolveActiveLens(cfg)
+	require.NotNil(t, lens, "a consented stack head resolves to its lens")
+	assert.Equal(t, "stoicism", lens.ID)
 }

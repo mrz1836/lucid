@@ -65,6 +65,14 @@ func TestInit_Idempotent(t *testing.T) {
 	assert.Equal(t, before, after)
 }
 
+// TestInit_UnscaffoldableHome proves `init` surfaces a scaffold failure (a home
+// that cannot be created) rather than reporting a Ledger it never wrote.
+func TestInit_UnscaffoldableHome(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "init")
+	require.Error(t, err)
+}
+
 // TestInit_JSON checks the machine-readable contract.
 func TestInit_JSON(t *testing.T) {
 	isolatedHome(t)

@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 
+	"github.com/mrz1836/lucid/internal/companion"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/storage"
@@ -280,5 +281,87 @@ func TestCompanionFire_RejectsArgs(t *testing.T) {
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 	err := root.Execute()
+	require.Error(t, err)
+}
+
+// TestNoopNotifier_Send documents the send-free contract: the companion reads
+// the tripwire verdict through a scheduler it never asks to deliver, so the
+// notifier it is constructed with discards without error.
+func TestNoopNotifier_Send(t *testing.T) {
+	require.NoError(t, noopNotifier{}.Send(context.Background(), "channel", "body"))
+}
+
+// TestRenderCompanionDryRun_NamesEveryDegrade proves the dry-run preview names
+// each degraded path (fallback, enrichment, routine, miss-day) so a preview is
+// never mistaken for the model's warm output when a read fell back.
+func TestRenderCompanionDryRun_NamesEveryDegrade(t *testing.T) {
+	var buf bytes.Buffer
+	require.NoError(t, renderCompanionDryRun(&buf, companion.Result{
+		Mode:               companion.ModeMorning,
+		Fallback:           true,
+		EnrichmentDegraded: true,
+		RoutineDegraded:    true,
+		MissDay:            true,
+		Text:               "BODY",
+	}))
+	out := buf.String()
+	assert.Contains(t, out, "companion morning (dry-run — not delivered)")
+	assert.Contains(t, out, "deterministic fallback")
+	assert.Contains(t, out, "enrichment degraded")
+	assert.Contains(t, out, "routine unreadable")
+	assert.Contains(t, out, "miss-day")
+	assert.Contains(t, out, "BODY")
+
+	// A clean compose names none of the degrade lines.
+	buf.Reset()
+	require.NoError(t, renderCompanionDryRun(&buf, companion.Result{Mode: companion.ModeNight, Text: "WARM"}))
+	clean := buf.String()
+	assert.Contains(t, clean, "WARM")
+	assert.NotContains(t, clean, "fallback")
+	assert.NotContains(t, clean, "degraded")
+}
+
+// TestRenderCompanionFire_ReportsOutcome proves the delivery reporter maps each
+// outcome to its honest line: a skip names the reason, a delivery names the
+// message id, and a late or fallback delivery is annotated.
+func TestRenderCompanionFire_ReportsOutcome(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome companion.Outcome
+		want    string
+	}{
+		{"skipped", companion.Outcome{Mode: companion.ModeMorning, Skipped: true, SkipReason: "already delivered"}, "companion morning skipped (already delivered)."},
+		{"delivered", companion.Outcome{Mode: companion.ModeNight, Delivered: true, MessageID: "42"}, "companion night delivered — message 42."},
+		{"late", companion.Outcome{Mode: companion.ModeNight, Delivered: true, Late: true, MessageID: "42"}, "(late note prepended)"},
+		{"fallback", companion.Outcome{Mode: companion.ModeMorning, Delivered: true, Fallback: true, MessageID: "7"}, "(deterministic fallback)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			require.NoError(t, renderCompanionFire(&buf, tc.outcome))
+			assert.Contains(t, buf.String(), tc.want)
+		})
+	}
+}
+
+// TestCompanionFire_DeliverWithoutEnv_Errors proves the --deliver path fails
+// loudly when the Discord transport cannot be built from the environment, rather
+// than silently composing without sending.
+func TestCompanionFire_DeliverWithoutEnv_Errors(t *testing.T) {
+	seedCompanionHome(t)
+	withClock(t, time.Date(2026, 7, 6, 6, 0, 0, 0, time.UTC))
+	t.Setenv("LUCID_HARNESS_TOKEN", "")
+	t.Setenv("LUCID_USER_CHANNEL_ID", "")
+
+	_, _, err := runCompanion(t, "fire", "--mode", "morning", "--deliver")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "lucid companion fire:")
+}
+
+// TestBootCompanion_HomeErrorSurfaces proves the companion boot surfaces an
+// unscaffoldable home rather than composing against a half-open Ledger.
+func TestBootCompanion_HomeErrorSurfaces(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runCompanion(t, "fire", "--mode", "morning")
 	require.Error(t, err)
 }

@@ -5,9 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // TestValidateCLI_CleanRepo runs `lucid validate` from the checkout with no
@@ -114,4 +117,49 @@ func TestValidateCLI_NoRepoNoLedger(t *testing.T) {
 	assert.Contains(t, out, "validate: clean")
 	assert.Contains(t, errOut, "repo checks")
 	assert.Contains(t, errOut, "schema check")
+}
+
+// TestValidateCLI_SweepsEveryRecordFamily seeds one valid insight, reflection,
+// and person into an initialized Ledger, then runs validate: the schema sweep
+// reads each family (ReadInsightErr / ReadReflectionErr / ReadPersonErr) and,
+// because every record parses, the run stays clean. This is the read-back
+// coverage of the sweep the corrupt-record tests only exercise for processed
+// artifacts.
+func TestValidateCLI_SweepsEveryRecordFamily(t *testing.T) {
+	home := isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "init")
+	require.NoError(t, err)
+
+	a := storage.New(home)
+	at := time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC)
+	_, err = a.WriteInsight(storage.Insight{
+		CreatedAt: at,
+		Status:    storage.InsightStatusAccepted,
+		Provenance: storage.InsightProvenance{
+			RawEntryIDs:             []string{"raw_2026_07_06_09_00"},
+			ProcessedArtifactID:     "raw_2026_07_06_09_00",
+			ReflectionPromptVersion: "reflection-2026.05.0",
+			UserResponseKind:        storage.ResponseAccepted,
+			UserResponseText:        "Yes, that fits.",
+		},
+		Body: "A steadier week.",
+	})
+	require.NoError(t, err)
+	_, err = a.WriteReflection(storage.Reflection{
+		ID:           "reflection_2026_W28",
+		ISOWeek:      "2026-W28",
+		WindowStart:  at.AddDate(0, 0, -6),
+		WindowEnd:    at,
+		CreatedAt:    at,
+		AgentVersion: "reflection-2026.05.0",
+		Summary:      "A steadier week overall.",
+	})
+	require.NoError(t, err)
+	_, err = a.UpdatePerson(storage.PersonMention{DisplayName: "Sam", RawEntryID: "raw_2026_07_06_09_00", At: at})
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate")
+	require.NoError(t, err)
+	assert.Contains(t, out, "validate: clean")
+	assert.NotContains(t, out, "skipped: schema check", "the schema sweep ran over the seeded records")
 }

@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/router"
 )
 
 // seedRegistry runs a registry-write verb with --json and returns the resolved
@@ -151,4 +153,34 @@ func TestRecall_ReadOnly(t *testing.T) {
 	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "recall")
 	require.NoError(t, err)
 	assert.Equal(t, before, countHomeFiles(t, home, ""), "recall writes nothing")
+}
+
+// TestRecallDimension covers the flag→(dimension,key) mapping directly: the set
+// flag wins and its value is trimmed, and no flag is the bare index.
+func TestRecallDimension(t *testing.T) {
+	cases := []struct {
+		name             string
+		era, thread, inj string
+		wantDim, wantKey string
+	}{
+		{"era", " sobriety ", "", "", router.RecallEra, "sobriety"},
+		{"thread", "", " writing ", "", router.RecallThread, "writing"},
+		{"injury", "", "", " knee ", router.RecallInjury, "knee"},
+		{"none", "", "", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dim, key := recallDimension(tc.era, tc.thread, tc.inj)
+			assert.Equal(t, tc.wantDim, dim)
+			assert.Equal(t, tc.wantKey, key)
+		})
+	}
+}
+
+// TestRecall_BootError proves the read surface surfaces a boot failure rather
+// than answering over a half-open Ledger.
+func TestRecall_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall")
+	require.Error(t, err)
 }

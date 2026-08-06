@@ -299,3 +299,12 @@ func TestResolveCloseoutDay(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not read the day")
 }
+
+// TestCloseoutCLI_BootError proves closeout surfaces a boot failure (an
+// unscaffoldable home) before it would parse or write anything — mirrors the
+// other *_BootError guards on the spine.
+func TestCloseoutCLI_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "dfx", "3/wrist", "the chain ran")
+	require.Error(t, err)
+}

@@ -149,3 +149,27 @@ func TestBackupCmd_UnscaffoldableHome(t *testing.T) {
 	_, statErr := os.Stat(out)
 	assert.ErrorIs(t, statErr, fs.ErrNotExist, "partial archive removed on failure")
 }
+
+// TestPathInsideHome covers the containment guard directly: the home itself and
+// any descendant are inside (backup refuses to write into the tree it copies),
+// while a sibling and an unrelated tree are outside.
+func TestPathInsideHome(t *testing.T) {
+	home := t.TempDir()
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"home itself", home, true},
+		{"descendant file", filepath.Join(home, "sub", "b.tar.gz"), true},
+		{"sibling sharing a prefix", home + "-sibling", false},
+		{"unrelated tree", t.TempDir(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inside, err := pathInsideHome(home, tc.path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, inside)
+		})
+	}
+}

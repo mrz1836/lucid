@@ -332,6 +332,14 @@ func TestServe_EmptyStdinCleanExit(t *testing.T) {
 	assert.Empty(t, frames)
 }
 
+// TestServe_BootError proves serve surfaces a boot failure before it opens the
+// stdin protocol — an unscaffoldable home never reaches the session loop.
+func TestServe_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, err := runServe(t, "")
+	require.Error(t, err)
+}
+
 // cleanProposalScript is the six-exchange script for a clean (non-rewritten)
 // proposal: two follow-ups, done, bundle, extract, one hypothesis-framed
 // proposal that Safety passes unchanged.
