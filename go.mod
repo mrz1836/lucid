@@ -4,8 +4,8 @@ go 1.26
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/mrz1836/go-flywheel v0.20.1
-	github.com/mrz1836/go-foundation v0.4.1
+	github.com/mrz1836/go-flywheel v0.21.0
+	github.com/mrz1836/go-foundation v0.5.0
 	github.com/mrz1836/go-selfupdate v0.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
@@ -18,7 +18,7 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/glebarez/go-sqlite v1.22.0 // indirect
+	github.com/glebarez/go-sqlite v1.23.0 // indirect
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
