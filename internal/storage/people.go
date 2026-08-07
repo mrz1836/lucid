@@ -35,6 +35,13 @@ type PersonMention struct {
 	// At is when the mention occurred (the raw entry's occurred_at); it
 	// widens the first_seen_at / last_seen_at window.
 	At time.Time
+	// Aka is other written forms of the *same* person, emitted by Structuring
+	// only on explicit "X, aka Y" phrasing (never a guessed nickname). Each is
+	// folded into the record's aka[] and gets a resolving redirect tombstone
+	// when its slug is free or already this person's; a form owned by a
+	// different live person is left for `person reconcile` — capture never fails
+	// on it (data-model.md §"Merge & redirect").
+	Aka []string
 }
 
 // PersonResult reports what [Adapter.UpdatePerson] resolved for a mention:
@@ -202,20 +209,31 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	}
 
 	rec := mergePerson(existing, found, key, m)
+	// Fold any explicit akas ("X, aka Y" phrasing) into the record before the
+	// write, so the merged-away form matches this person immediately.
+	for _, form := range m.Aka {
+		if f := strings.TrimSpace(form); f != "" {
+			rec.Aka = addUnique(rec.Aka, f)
+		}
+	}
+	slices.Sort(rec.Aka)
 
-	path, err := a.personPath(key)
-	if err != nil {
+	if err = a.writePerson(rec); err != nil {
 		return PersonResult{}, err
 	}
-	if err = ensureDir(a.peopleDir(), "people"); err != nil {
-		return PersonResult{}, err
-	}
-	content, err := marshalJSON(rec.encode())
-	if err != nil {
-		return PersonResult{}, err
-	}
-	if err = os.WriteFile(path, content, filePerm); err != nil {
-		return PersonResult{}, fmt.Errorf("storage: write person %q: %w", key, err)
+
+	// Plant a resolving redirect tombstone for each explicit alias so a later
+	// bare mention of it folds into this record. A form already owned by a
+	// *different* live person is left for `person reconcile` — capture never
+	// fails on it (only a real I/O error propagates).
+	for _, form := range m.Aka {
+		f := strings.TrimSpace(form)
+		if f == "" || strings.EqualFold(f, rec.DisplayName) {
+			continue
+		}
+		if perr := a.plantAliasResolver(key, f, rec); perr != nil && !errors.Is(perr, ErrPersonAkaConflict) {
+			return PersonResult{}, perr
+		}
 	}
 
 	// first_mention is order-independent: this entry introduces the person

@@ -52,6 +52,34 @@ func TestExtract_HappyPath(t *testing.T) {
 	assert.Contains(t, p.Requests[0].Messages[0].Content, "Rough dinner")
 }
 
+// TestExtract_AkaOnExplicitPhrasing: a payload with an explicit alias yields the
+// primary as display_name and the other written forms on the person's Aka
+// (acceptance-criteria.md 4.7).
+func TestExtract_AkaOnExplicitPhrasing(t *testing.T) {
+	payload := `{
+	  "emotions": [],
+	  "themes":   [],
+	  "people":   [{"display_name": "Sam", "aka": ["Sammy"]}],
+	  "notes": null
+	}`
+	p := &provider.Fake{Script: []provider.Exchange{reply(payload)}}
+	res := structuring.Extract(context.Background(), input("Sam, aka Sammy, dropped by."), p)
+
+	require.Len(t, res.People, 1)
+	assert.Equal(t, "Sam", res.People[0].DisplayName)
+	assert.Equal(t, []string{"Sammy"}, res.People[0].Aka)
+	assert.False(t, res.Degraded)
+}
+
+// TestExtract_NoAkaWithoutPhrasing: a person with no alias carries no Aka — the
+// field stays empty, so nothing plants a tombstone downstream.
+func TestExtract_NoAkaWithoutPhrasing(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{reply(goodExtraction)}}
+	res := structuring.Extract(context.Background(), input("Rough dinner with M."), p)
+	require.Len(t, res.People, 1)
+	assert.Empty(t, res.People[0].Aka)
+}
+
 // TestExtract_EmptyBody is error-states.md §S-3: an empty body degrades to
 // notes "raw body empty" with no model call.
 func TestExtract_EmptyBody(t *testing.T) {

@@ -261,6 +261,21 @@ mention immediately after Structuring returns and **before**
 `null` for `person_key`. See §"How contracts compose" below for the
 exact router order.
 
+A `people[]` entry may additionally carry an optional `aka[]` — other
+written forms of the **same** person — but **only** when the entry states
+the alias explicitly ("Sam, aka Sammy", "Sam (nickname Sammy)").
+Structuring emits the primary as `display_name` and the alias(es) in
+`aka[]`; it never *guesses* a nickname (that would be the profile
+inference the Forbidden list bars). The router passes `aka[]` to
+`storage.update_person`, which folds each form into the canonical record
+and plants a resolving redirect tombstone so a later bare mention of the
+alias resolves to the same person ([`data-model.md`](data-model.md)
+§"Merge & redirect"). When the alias's slug is already owned by a
+*different* live person, the tombstone is skipped — never a hijack — and
+the tail is left to `person reconcile`; capture never fails on it. 100%
+nickname coverage is a non-goal: the explicit `person alias` / `person
+merge` verbs and the harness above Lucid cover the rest.
+
 `rejected_proposals` and `unanswered_proposals` are always returned as
 empty arrays on the first write; later appends come from the validation
 paths via the storage adapter (`storage.append_rejected_proposal`,
@@ -283,8 +298,10 @@ silence is not rejection. Both arrays feed the suppression window in
 * Cross-entry generalization ("this echoes last week's pattern …").
   Structuring is strictly per-entry. Cross-entry work is Reflection's.
 * Person profile inference (relationships, affect per person, dynamics).
-  People extraction is name-only; the People agent owns merging into
-  `~/.lucid/people/`.
+  People extraction is name-only — a `display_name` plus, **on explicit
+  "X, aka Y" phrasing only**, an `aka[]` of other written forms; an
+  inferred or guessed nickname is barred. The People routine owns merging
+  into `~/.lucid/people/`.
 * Diagnostic vocabulary in `notes` (no "anxious attachment",
   "avoidant", "trauma response", etc.). Notes are extractive, not
   interpretive.

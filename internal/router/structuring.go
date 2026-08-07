@@ -110,6 +110,7 @@ func (r *Router) resolvePeople(mentions []structuring.Person, rawID string, at t
 	for _, m := range mentions {
 		res, err := r.store.UpdatePerson(storage.PersonMention{
 			DisplayName: m.DisplayName,
+			Aka:         m.Aka,
 			RawEntryID:  rawID,
 			At:          at,
 		})

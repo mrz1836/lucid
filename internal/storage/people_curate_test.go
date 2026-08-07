@@ -228,6 +228,65 @@ func TestMergePersons_ByteStableAcrossReadsAfterMerge(t *testing.T) {
 	_ = data.Wordlist()
 }
 
+// TestUpdatePerson_FoldsExplicitAka proves a mention carrying an explicit aka
+// records the form and plants a resolving tombstone, so a later bare mention of
+// the alias folds into the same person (acceptance-criteria.md 4.7).
+func TestUpdatePerson_FoldsExplicitAka(t *testing.T) {
+	a := newPeopleAdapter(t)
+	res, err := a.UpdatePerson(PersonMention{
+		DisplayName: "Sam", Aka: []string{"Sammy"}, RawEntryID: "raw_2026_05_01_09_00", At: personAt(1),
+	})
+	require.NoError(t, err)
+	keySam := res.PersonKey
+
+	rec, _, err := a.ReadPerson(keySam)
+	require.NoError(t, err)
+	assert.Contains(t, rec.Aka, "Sammy")
+
+	// A later bare "Sammy" mention folds into Sam.
+	later, err := a.UpdatePerson(PersonMention{DisplayName: "Sammy", RawEntryID: "raw_2026_05_09_20_10", At: personAt(9)})
+	require.NoError(t, err)
+	assert.Equal(t, keySam, later.PersonKey)
+}
+
+// TestUpdatePerson_AkaNeverHijacks proves an explicit aka whose slug already
+// belongs to a *different* live person records the form (for matching) but plants
+// no tombstone, leaves the two people separate, and never fails capture
+// (acceptance-criteria.md 4.8).
+func TestUpdatePerson_AkaNeverHijacks(t *testing.T) {
+	a := newPeopleAdapter(t)
+	keyBob := seedPersonStore(t, a, "Bob", "raw_2026_05_02_09_00", personAt(2))
+
+	res, err := a.UpdatePerson(PersonMention{
+		DisplayName: "Alex", Aka: []string{"Bob"}, RawEntryID: "raw_2026_05_03_10_00", At: personAt(3),
+	})
+	require.NoError(t, err, "capture never fails on a hijacking aka")
+	keyAlex := res.PersonKey
+	require.NotEqual(t, keyAlex, keyBob)
+
+	alex, _, err := a.ReadPerson(keyAlex)
+	require.NoError(t, err)
+	assert.Contains(t, alex.Aka, "Bob", "the aka is recorded for matching")
+
+	// A bare "Bob" still resolves to the original Bob, not Alex — no hijack.
+	later, err := a.UpdatePerson(PersonMention{DisplayName: "Bob", RawEntryID: "raw_2026_05_09_20_10", At: personAt(9)})
+	require.NoError(t, err)
+	assert.Equal(t, keyBob, later.PersonKey)
+}
+
+// TestUpdatePerson_AkaEqualToDisplayIsNoop proves an aka that repeats the display
+// name adds nothing spurious and plants no self-tombstone.
+func TestUpdatePerson_AkaEqualToDisplayIsNoop(t *testing.T) {
+	a := newPeopleAdapter(t)
+	res, err := a.UpdatePerson(PersonMention{
+		DisplayName: "Sam", Aka: []string{"Sam", "  "}, RawEntryID: "raw_2026_05_01_09_00", At: personAt(1),
+	})
+	require.NoError(t, err)
+	rec, _, err := a.ReadPerson(res.PersonKey)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Sam"}, rec.Aka)
+}
+
 // readFileBytes reads the raw on-disk bytes of a person record.
 func readFileBytes(t *testing.T, a *Adapter, key string) []byte {
 	t.Helper()
