@@ -202,5 +202,17 @@ func (l ledgerAdapter) ReadReflectionErr(id string) error {
 // ReadPersonErr returns only the parse error of reading one person record.
 func (l ledgerAdapter) ReadPersonErr(key string) error { _, _, err := l.a.ReadPerson(key); return err }
 
+// PersonRedirect returns the redirect_to of one person record, backing the
+// redirect-graph check. An unreadable record resolves to the empty string
+// (the schema check reports the parse failure); the redirect check does not
+// double-report it.
+func (l ledgerAdapter) PersonRedirect(key string) (string, error) {
+	rec, found, err := l.a.ReadPerson(key)
+	if err != nil || !found {
+		return "", err
+	}
+	return rec.RedirectTo, nil
+}
+
 // LoadConfigErr returns only the parse error of loading lucid.json.
 func (l ledgerAdapter) LoadConfigErr() error { _, err := l.a.LoadConfig(); return err }

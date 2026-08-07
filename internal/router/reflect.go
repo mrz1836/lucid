@@ -404,6 +404,15 @@ func (r *Router) dominanceLine() (string, error) {
 	}
 	deny := toSet(offLimits)
 
+	// Canonicalize each mention's person_key before counting: a merged person's
+	// mentions are spread across their pre-merge slugs in the historical
+	// artifacts, and only folding onto the canonical key aggregates them (and
+	// renders the canonical display name).
+	canon, canonNames, err := r.personRedirectIndex()
+	if err != nil {
+		return "", fmt.Errorf("reflect: index people for dominance: %w", err)
+	}
+
 	counts := map[string]int{}
 	names := map[string]string{}
 	for _, id := range ids {
@@ -413,12 +422,13 @@ func (r *Router) dominanceLine() (string, error) {
 		}
 		seen := map[string]bool{}
 		for _, p := range art.People {
-			if deny[p.PersonKey] || seen[p.PersonKey] {
+			key := canonicalKey(canon, p.PersonKey)
+			if deny[key] || deny[p.PersonKey] || seen[key] {
 				continue
 			}
-			seen[p.PersonKey] = true
-			counts[p.PersonKey]++
-			names[p.PersonKey] = p.DisplayName
+			seen[key] = true
+			counts[key]++
+			names[key] = p.DisplayName
 		}
 	}
 
@@ -430,8 +440,12 @@ func (r *Router) dominanceLine() (string, error) {
 	if share <= r.cfg.PersonDominanceThreshold {
 		return "", nil
 	}
+	name := names[key]
+	if cn, ok := canonNames[key]; ok {
+		name = cn
+	}
 	pct := int(share*100 + 0.5)
-	return fmt.Sprintf("%s appears in %d%% of entries this window — worth a look, or expected?", names[key], pct), nil
+	return fmt.Sprintf("%s appears in %d%% of entries this window — worth a look, or expected?", name, pct), nil
 }
 
 // topPerson returns the person key with the highest entry count, breaking ties

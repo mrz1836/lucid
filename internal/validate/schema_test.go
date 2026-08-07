@@ -16,17 +16,19 @@ var errSentinel = errors.New("boom")
 // without touching disk. A listErr forces a listing failure; a configErr fails
 // the lucid.json check.
 type fakeLedger struct {
-	home         string
-	processed    []string
-	insights     []string
-	reflections  []string
-	people       []string
-	badProcessed map[string]bool
-	badInsight   map[string]bool
-	badReflect   map[string]bool
-	badPerson    map[string]bool
-	listErr      error
-	configErr    error
+	home          string
+	processed     []string
+	insights      []string
+	reflections   []string
+	people        []string
+	badProcessed  map[string]bool
+	badInsight    map[string]bool
+	badReflect    map[string]bool
+	badPerson     map[string]bool
+	redirects     map[string]string
+	listErr       error
+	peopleListErr error
+	configErr     error
 }
 
 func (f *fakeLedger) Home() string { return f.home }
@@ -34,12 +36,19 @@ func (f *fakeLedger) Home() string { return f.home }
 func (f *fakeLedger) ListProcessedIDs() ([]string, error)  { return f.processed, f.listErr }
 func (f *fakeLedger) ListInsightIDs() ([]string, error)    { return f.insights, nil }
 func (f *fakeLedger) ListReflectionIDs() ([]string, error) { return f.reflections, nil }
-func (f *fakeLedger) ListPeopleKeys() ([]string, error)    { return f.people, nil }
+func (f *fakeLedger) ListPeopleKeys() ([]string, error)    { return f.people, f.peopleListErr }
 
 func (f *fakeLedger) ReadProcessedErr(id string) error  { return errIf(f.badProcessed, id) }
 func (f *fakeLedger) ReadInsightErr(id string) error    { return errIf(f.badInsight, id) }
 func (f *fakeLedger) ReadReflectionErr(id string) error { return errIf(f.badReflect, id) }
 func (f *fakeLedger) ReadPersonErr(key string) error    { return errIf(f.badPerson, key) }
+
+func (f *fakeLedger) PersonRedirect(key string) (string, error) {
+	if f.badPerson[key] {
+		return "", errIf(f.badPerson, key)
+	}
+	return f.redirects[key], nil
+}
 
 func (f *fakeLedger) LoadConfigErr() error { return f.configErr }
 

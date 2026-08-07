@@ -70,9 +70,14 @@ func (r *Router) Person(req PersonRequest) (PersonResult, error) {
 	}
 }
 
-// matchPeople returns every people record whose display_name or an aka variant
-// equals the query (case-insensitive), sorted by person_key so the candidate
-// order — and any output built from it — is deterministic.
+// matchPeople returns every canonical people record whose display_name or an
+// aka variant equals the query (case-insensitive), sorted by person_key so the
+// candidate order — and any output built from it — is deterministic.
+//
+// Redirect tombstones are skipped: a merge unions the source's forms into the
+// canonical's aka[], so a merged-away form still matches the canonical and
+// yields exactly one match rather than a spurious §P-2. Resolution never scans
+// a tombstone (data-model.md §"Merge & redirect").
 func (r *Router) matchPeople(query string) ([]storage.PersonRecord, error) {
 	keys, err := r.store.ListPeopleKeys()
 	if err != nil {
@@ -84,7 +89,7 @@ func (r *Router) matchPeople(query string) ([]storage.PersonRecord, error) {
 		if err != nil {
 			return nil, fmt.Errorf("person: read %q: %w", key, err)
 		}
-		if found && recordMatchesName(rec, query) {
+		if found && !rec.IsTombstone() && recordMatchesName(rec, query) {
 			matches = append(matches, rec)
 		}
 	}
@@ -215,6 +220,47 @@ func (r *Router) insightsCiting(rec storage.PersonRecord) ([]string, error) {
 	return citing, nil
 }
 
+// personRedirectIndex reads the people tree once and returns, for every person
+// key, the canonical key it resolves to (canon), plus the current display name
+// of each canonical record (names). It is the join bridge for the two counting
+// paths — /person dominance and the /reflect gate panel — because historical
+// processed/*.json artifacts keep the pre-merge person_key, so a count that
+// keys on the artifact's key would split a merged person across their old and
+// new slugs. Canonicalizing first folds those counts back onto the one record.
+func (r *Router) personRedirectIndex() (canon, names map[string]string, err error) {
+	keys, err := r.store.ListPeopleKeys()
+	if err != nil {
+		return nil, nil, fmt.Errorf("person: list people: %w", err)
+	}
+	canon = make(map[string]string, len(keys))
+	names = make(map[string]string, len(keys))
+	for _, key := range keys {
+		rec, found, rerr := r.store.ReadPerson(key)
+		if rerr != nil {
+			return nil, nil, fmt.Errorf("person: read %q: %w", key, rerr)
+		}
+		if !found {
+			continue
+		}
+		if rec.IsTombstone() {
+			canon[key] = rec.RedirectTo
+			continue
+		}
+		canon[key] = key
+		names[key] = rec.DisplayName
+	}
+	return canon, names, nil
+}
+
+// canonicalKey maps a person_key through the redirect index, returning the key
+// unchanged when it names a canonical record (or one absent from the index).
+func canonicalKey(canon map[string]string, key string) string {
+	if c, ok := canon[key]; ok {
+		return c
+	}
+	return key
+}
+
 // personDominanceLine returns the one dominance line for this person, or "" when
 // their share of processed entries does not exceed person_dominance_threshold.
 // Share is the fraction of processed artifacts that mention them (deterministic,
@@ -229,6 +275,10 @@ func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 	if total == 0 {
 		return "", nil
 	}
+	canon, _, err := r.personRedirectIndex()
+	if err != nil {
+		return "", err
+	}
 	mentions := 0
 	for _, id := range ids {
 		art, err := r.store.ReadProcessed(id)
@@ -236,7 +286,7 @@ func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 			return "", fmt.Errorf("person: read processed %q: %w", id, err)
 		}
 		for _, p := range art.People {
-			if p.PersonKey == rec.PersonKey {
+			if canonicalKey(canon, p.PersonKey) == rec.PersonKey {
 				mentions++
 				break
 			}

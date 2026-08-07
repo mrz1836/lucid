@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -278,6 +279,240 @@ func TestUpdatePerson_WriteFailureSurfaces(t *testing.T) {
 	_, err := a.UpdatePerson(PersonMention{DisplayName: "M.", RawEntryID: "raw_x", At: personAt(5)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write person")
+}
+
+// writePersonTombstone writes a redirect tombstone at key pointing forward to
+// target — the on-disk shape a merge produces, hand-authored so the read/write
+// tests do not depend on the Phase 2 curation verbs.
+func writePersonTombstone(t *testing.T, a *Adapter, key, display, target string, at time.Time) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(a.peopleDir(), dirPerm))
+	rec := personRecordJSON{
+		PersonKey:   key,
+		DisplayName: display,
+		Aka:         []string{display},
+		FirstSeenAt: at.Format(time.RFC3339),
+		LastSeenAt:  at.Format(time.RFC3339),
+		EntryRefs:   []string{"raw_2026_05_01_09_00"},
+		RedirectTo:  target,
+	}
+	b, err := marshalJSON(rec)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(a.peopleDir(), key+".json"), b, filePerm))
+}
+
+// TestResolvePersonRedirect covers the three cases: an absent key and a
+// canonical record resolve to themselves; a tombstone resolves forward to its
+// target (single hop).
+func TestResolvePersonRedirect(t *testing.T) {
+	a := newPeopleAdapter(t)
+
+	// Absent → identity.
+	got, err := a.ResolvePersonRedirect("person_none")
+	require.NoError(t, err)
+	assert.Equal(t, "person_none", got)
+
+	// Canonical → identity.
+	keyAlex := seedPersonStore(t, a, "Alex", "raw_2026_05_05_19_42", personAt(5))
+	got, err = a.ResolvePersonRedirect(keyAlex)
+	require.NoError(t, err)
+	assert.Equal(t, keyAlex, got)
+
+	// Tombstone → target.
+	keyAndy, err := DerivePersonKey("Andy", data.Wordlist())
+	require.NoError(t, err)
+	require.NotEqual(t, keyAlex, keyAndy, "the fixture needs two distinct slugs")
+	writePersonTombstone(t, a, keyAndy, "Andy", keyAlex, personAt(4))
+	got, err = a.ResolvePersonRedirect(keyAndy)
+	require.NoError(t, err)
+	assert.Equal(t, keyAlex, got)
+}
+
+// TestUpdatePerson_FollowsRedirect proves a mention whose derived slug is a
+// tombstone folds into the canonical record it points to, rather than reviving
+// the tombstone or minting a new key.
+func TestUpdatePerson_FollowsRedirect(t *testing.T) {
+	a := newPeopleAdapter(t)
+	keyAlex := seedPersonStore(t, a, "Alex", "raw_2026_05_05_19_42", personAt(5))
+
+	// A merge has already turned Andy's slug into a tombstone forwarding to Alex.
+	keyAndy, err := DerivePersonKey("Andy", data.Wordlist())
+	require.NoError(t, err)
+	writePersonTombstone(t, a, keyAndy, "Andy", keyAlex, personAt(4))
+
+	// A later bare "Andy" mention lands on the canonical Alex record.
+	res, err := a.UpdatePerson(PersonMention{DisplayName: "Andy", RawEntryID: "raw_2026_05_10_08_00", At: personAt(10)})
+	require.NoError(t, err)
+	assert.Equal(t, keyAlex, res.PersonKey, "the mention folds into the canonical, not the tombstone")
+
+	rec, found, err := a.ReadPerson(keyAlex)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Contains(t, rec.EntryRefs, "raw_2026_05_10_08_00", "the canonical absorbs the new ref")
+	assert.Contains(t, rec.Aka, "Andy", "the folded form is recorded on the canonical")
+
+	// The tombstone is untouched — still a frozen forward pointer.
+	tomb, found, err := a.ReadPerson(keyAndy)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.True(t, tomb.IsTombstone())
+	assert.Equal(t, keyAlex, tomb.RedirectTo)
+	assert.NotContains(t, tomb.EntryRefs, "raw_2026_05_10_08_00", "resolution never writes the tombstone")
+}
+
+// TestUpdatePerson_SuffixBumpsPastTombstone proves a tombstone still witnesses
+// the slug it occupies: a differently-normalized name deriving to the same base
+// key bumps to the -2 suffix instead of colliding with (or resolving through)
+// the tombstone.
+func TestUpdatePerson_SuffixBumpsPastTombstone(t *testing.T) {
+	a := newPeopleAdapter(t)
+
+	// A canonical target for the tombstone to forward to.
+	keyTarget := seedPersonStore(t, a, "Sam", "raw_2026_05_02_09_00", personAt(2))
+
+	// A tombstone at person_p-hazel owned by the normalized name "other".
+	// "M." derives to person_p-hazel too, but is a different person.
+	writePersonTombstone(t, a, "person_p-hazel", "Other", keyTarget, personAt(1))
+
+	res, err := a.UpdatePerson(PersonMention{DisplayName: "M.", RawEntryID: "raw_2026_05_05_19_42", At: personAt(5)})
+	require.NoError(t, err)
+	assert.Equal(t, "person_p-hazel-2", res.PersonKey, "a distinct name bumps past the tombstone")
+	assert.True(t, res.FirstMention)
+
+	// The tombstone is untouched, and "M." got its own fresh record.
+	tomb, _, err := a.ReadPerson("person_p-hazel")
+	require.NoError(t, err)
+	assert.True(t, tomb.IsTombstone())
+	rec, found, err := a.ReadPerson("person_p-hazel-2")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "M.", rec.DisplayName)
+	assert.False(t, rec.IsTombstone())
+}
+
+// TestPersonRecord_TombstoneAndEnrichedRoundTrip proves the three new fields
+// survive an encode/decode cycle, and that the on-disk JSON carries redirect_to
+// / dob / relationship only when set (omitempty) while notes stays always
+// present — the byte-stability contract the fuzz test also guards.
+func TestPersonRecord_TombstoneAndEnrichedRoundTrip(t *testing.T) {
+	a := newPeopleAdapter(t)
+	require.NoError(t, os.MkdirAll(a.peopleDir(), dirPerm))
+
+	dob, rel := "1990-04-12", "colleague"
+	notes := "met at the co-op"
+	enriched := PersonRecord{
+		PersonKey: "person_a-alex", DisplayName: "Alexandra", Aka: []string{"Alex", "Alexandra"},
+		FirstSeenAt: personAt(5), LastSeenAt: personAt(9), EntryRefs: []string{"raw_2026_05_05_19_42"},
+		Dob: &dob, Relationship: &rel, Notes: &notes,
+	}
+	b, err := marshalJSON(enriched.encode())
+	require.NoError(t, err)
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.Equal(t, `"1990-04-12"`, string(m["dob"]))
+	assert.Equal(t, `"colleague"`, string(m["relationship"]))
+	_, hasRedirect := m["redirect_to"]
+	assert.False(t, hasRedirect, "a canonical record omits redirect_to")
+
+	// A plain canonical record omits all three optional identity fields but keeps
+	// notes: null.
+	plain := PersonRecord{
+		PersonKey: "person_a-plain", DisplayName: "Andy", Aka: []string{"Andy"},
+		FirstSeenAt: personAt(5), LastSeenAt: personAt(5), EntryRefs: []string{"raw_2026_05_05_19_42"},
+	}
+	pb, err := marshalJSON(plain.encode())
+	require.NoError(t, err)
+	var pm map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(pb, &pm))
+	for _, absent := range []string{"redirect_to", "dob", "relationship"} {
+		_, ok := pm[absent]
+		assert.Falsef(t, ok, "a plain record must omit %q", absent)
+	}
+	_, hasNotes := pm["notes"]
+	assert.True(t, hasNotes, "notes stays always-present")
+}
+
+// FuzzPersonRecordRoundTrip guards the omitempty fixed point: encode→decode→
+// encode is byte-stable for any field combination, and an unset optional field
+// (redirect_to / dob / relationship) never serializes, so a pre-feature record
+// rewrites byte-identically (S-22). A reviewer flipping any of the three to
+// always-present breaks this test.
+func FuzzPersonRecordRoundTrip(f *testing.F) {
+	f.Add("person_a-alex", "Alex", "raw_1", "", "", "", false)
+	f.Add("person_a-andy", "Andy", "raw_2", "person_a-alex", "", "", false)
+	f.Add("person_a-alex", "Alexandra", "raw_3", "", "1990-04-12", "colleague", true)
+	f.Add("dobson", "relationship", "redirect_to", "", "", "", true) // adversarial: values echo field names
+
+	f.Fuzz(func(t *testing.T, key, display, ref, redirect, dob, rel string, hasNotes bool) {
+		// Records on disk are always valid UTF-8 (the encoder produced them);
+		// invalid UTF-8 is normalized asymmetrically by encoding/json and is out
+		// of scope for the on-disk fixed point.
+		for _, s := range []string{key, display, ref, redirect, dob, rel} {
+			if !utf8.ValidString(s) {
+				t.Skip()
+			}
+		}
+
+		rec := PersonRecord{
+			PersonKey:   key,
+			DisplayName: display,
+			Aka:         []string{display},
+			FirstSeenAt: personAt(5),
+			LastSeenAt:  personAt(5),
+			EntryRefs:   []string{ref},
+			RedirectTo:  redirect,
+		}
+		if dob != "" {
+			rec.Dob = &dob
+		}
+		if rel != "" {
+			rec.Relationship = &rel
+		}
+		if hasNotes {
+			n := "note"
+			rec.Notes = &n
+		}
+
+		b1, err := marshalJSON(rec.encode())
+		require.NoError(t, err)
+
+		var j personRecordJSON
+		require.NoError(t, json.Unmarshal(b1, &j))
+		dec, ok, err := j.decode()
+		require.NoError(t, err)
+		require.True(t, ok)
+		b2, err := marshalJSON(dec.encode())
+		require.NoError(t, err)
+		assert.Equal(t, string(b1), string(b2), "encode→decode→encode must be a byte-stable fixed point")
+
+		// The omitempty contract, checked structurally (robust to fuzzed values
+		// that happen to echo a field name).
+		var m map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(b1, &m))
+		if redirect == "" {
+			_, present := m["redirect_to"]
+			assert.False(t, present, "an unset redirect_to must not serialize")
+		}
+		if dob == "" {
+			_, present := m["dob"]
+			assert.False(t, present, "an unset dob must not serialize")
+		}
+		if rel == "" {
+			_, present := m["relationship"]
+			assert.False(t, present, "an unset relationship must not serialize")
+		}
+		_, notesPresent := m["notes"]
+		assert.True(t, notesPresent, "notes stays always-present")
+	})
+}
+
+// seedPersonStore records one mention via update_person and returns the
+// resolved key — the storage-package analog of the router test's seedPerson.
+func seedPersonStore(t *testing.T, a *Adapter, display, rawID string, at time.Time) string {
+	t.Helper()
+	res, err := a.UpdatePerson(PersonMention{DisplayName: display, RawEntryID: rawID, At: at})
+	require.NoError(t, err)
+	return res.PersonKey
 }
 
 // TestPersonRecord_RoundTrips proves a record survives an encode/decode cycle,
