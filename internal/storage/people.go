@@ -225,6 +225,28 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	return PersonResult{PersonKey: key, FirstMention: firstMention}, nil
 }
 
+// writePerson marshals a person record and writes it to people/<key>.json,
+// creating the tree on demand. It is the single write primitive UpdatePerson
+// and the curation verbs (people_curate.go) share, so every people write goes
+// through one encode + one path guard.
+func (a *Adapter) writePerson(rec PersonRecord) error {
+	path, err := a.personPath(rec.PersonKey)
+	if err != nil {
+		return err
+	}
+	if err = ensureDir(a.peopleDir(), "people"); err != nil {
+		return err
+	}
+	content, err := marshalJSON(rec.encode())
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(path, content, filePerm); err != nil {
+		return fmt.Errorf("storage: write person %q: %w", rec.PersonKey, err)
+	}
+	return nil
+}
+
 // personKeyOwner reports the normalized name currently stored at a candidate
 // key, so [ResolvePersonKey] can tell a same-person reuse from a genuine
 // collision (data-model.md §"person_key derivation"). Every spelling on a

@@ -102,6 +102,36 @@ The cross-cutting principles below bind all three tables.
 | P-2 | `<name>` matches more than one person record | List the candidates by display name and first-seen date; render nothing else. | "That matches more than one person — which did you mean: <list>?" | None. | User re-runs with a disambiguated name. |
 | P-3 | The matched person is named in the off-limits registry | Render the view with a standing header note; inference-derived material is absent by construction (the person was redacted from every agent slice, so no insight or proposal references them). | "<name> is off-limits to inference — what follows is your raw record only: mentions and dates, nothing derived." | None. | (none — this is designed behavior, not a failure) |
 
+### Person (write verbs) — the curation verbs (deterministic, agent-free)
+
+The `/person` rows above cover a *read*. These cover the five **curation
+writes** — `person merge | alias | rename | set | off-limits` (scope.md §4;
+[`data-model.md`](data-model.md) §"Merge & redirect") — which repair a
+nickname/full-name split, record another written form, fix a display name, add
+the user-authored `dob`/`relationship`/`notes`, or toggle P-3 redaction. All
+are on the **strict tier**: the rejection is decided from the store *before*
+any write, the copy is fixed and model-free, the exit is non-zero, every row
+ends with the nothing-was-saved clause, and no record is deleted (a merge
+leaves a redirect tombstone). Subjects are resolved the way `/person` matches:
+an exact `person_key` wins, else a unique `display_name`/`aka[]` match — more
+than one live match is refused, never guessed. Tombstones are skipped in
+matching, so a merged-away form resolves to its one canonical record.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect |
+|---|---------|-----------------|----------------------|------------------|
+| P-4 | A subject (name or key) names **no live record** | Reject before any write; never guess. The remedy travels with the error. | `no one matches "andy" — check the name or run lucid person <name>; nothing was saved.` | None |
+| P-5 | A subject matches **more than one** live record | Reject — never guess which. Names the candidate keys so the retry is exact. | `"sam" matches more than one person — disambiguate with a person_key (person_s-… / person_s-…); nothing was saved.` | None |
+| P-6 | `person merge` whose source and target resolve to the **same** canonical record | Reject — there is nothing to merge (the store's `MergePersons` is a no-op for this too, so a retry is harmless). | `"alex" is already that person; nothing was saved.` | None |
+| P-7 | `person alias` whose new form already resolves to a **different** live record | Reject — an alias never hijacks another person's slug (merge them instead if they are the same). | `the form "ali" already belongs to another person — use lucid person merge if they are the same; nothing was saved.` | None |
+| P-8 | `person rename` onto a name that already **uniquely identifies a different** live record | Reject — a rename never creates a duplicate identity; steer to merge. Two people who *coincidentally* share a name from capture stay as they are (the intentional §P-2 state); only the explicit rename that would add a collision is refused. | `"alex" already identifies another person — use lucid person merge if they are the same; nothing was saved.` | None |
+| P-9 | Blank or malformed input — an empty subject/value, or a `person set --dob` that is not a civil `YYYY-MM-DD` | Reject before any write. | `a person name is required; nothing was saved.` / `could not read the date of birth "04/12/1990" (want YYYY-MM-DD); nothing was saved.` | None |
+
+`person off-limits` and `person set` cannot raise P-6/P-7/P-8 (they do not
+merge, alias, or rename); every verb can raise P-4, P-5, and P-9. `off-limits`
+is idempotent (adding a person already off-limits, or `--restore` on one who is
+not, is a no-op ack, not a rejection), matching how the registry already
+behaves.
+
 
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |

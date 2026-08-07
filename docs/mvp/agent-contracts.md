@@ -901,6 +901,17 @@ before implementation begins.
   storage adapter.
 * **Forbidden (now).** No relationship inference, no profile prompts,
   no LLM calls.
+* **User-driven curation (now).** The `person merge | alias | rename |
+  set | off-limits` verbs let the user (and the harness above Lucid)
+  reconcile the people records — collapse a nickname/full-name split,
+  record another written form, fix a display name, add the
+  user-authored `dob`/`relationship`/`notes`, or toggle P-3 redaction.
+  Every one is **deterministic, user-invoked, and model-free**, decided
+  from the store before any write, and bound by the same forbidden list
+  above: the durable fields are recorded *because the user typed them*,
+  never inferred. Resolution is tombstone-backed (data-model.md §"Merge
+  & redirect"); `person reconcile` is a read-only detector that only
+  *suggests* merges and changes nothing.
 * **Deferred surface.** A future People agent may infer aliases,
   detect first/last seen, and (much later) maintain a relational map.
   Each addition requires its own contract here before it ships.
