@@ -132,6 +132,13 @@ is idempotent (adding a person already off-limits, or `--restore` on one who is
 not, is a no-op ack, not a rejection), matching how the registry already
 behaves.
 
+`person reconcile` is a **read**, not a write, so none of P-4..P-9 applies: it
+takes no subject, never fails on the state of the data, and — like `/person` —
+exits `0` whether it finds candidates or not (an honest empty list is a
+legitimate outcome, not an error). It is deterministic, no-LLM, off-limits-safe,
+and byte-stable across runs (S-22); only a genuine read/boot fault surfaces as a
+non-zero exit.
+
 
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |

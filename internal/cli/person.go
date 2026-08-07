@@ -101,5 +101,6 @@ func newPersonCmd() *cobra.Command {
 	cmd.AddCommand(newPersonRenameCmd())
 	cmd.AddCommand(newPersonSetCmd())
 	cmd.AddCommand(newPersonOffLimitsCmd())
+	cmd.AddCommand(newPersonReconcileCmd())
 	return cmd
 }

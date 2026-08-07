@@ -1269,6 +1269,7 @@ lucid person alias <subject> <form> [--json]
 lucid person rename <subject> <new-name...> [--json]
 lucid person set <subject> [--dob <YYYY-MM-DD>] [--relationship <text>] [--note <text>] [--json]
 lucid person off-limits <subject> [--restore] [--json]
+lucid person reconcile [--json]
 ```
 
 `lucid person <name>` is a deterministic person join
@@ -1374,11 +1375,33 @@ Each write verb prints a fixed reason, exits `1`, and writes nothing:
 - **`rename` onto a name that already identifies another person** (§P-8).
 - **Blank input, or a `set --dob` that is not `YYYY-MM-DD`** (§P-9).
 
+#### `person reconcile`
+
+List likely-duplicate people and a suggested merge for each — the detector that
+catches the split `merge`/`alias` fix by hand. It is a pure **read**: no model,
+no writes, byte-stable across runs (S-22), and off-limits people are excluded.
+Two deterministic signals surface a pair: a **shared written form** (a normalized
+`display_name`/`aka[]` in common) or **name proximity** (a bounded edit distance
+of ≤2 between forms of length ≥4, or a short diminutive prefix like `sam`⊂
+`sammy`). Co-occurrence in the same entry is deliberately *not* a signal — people
+seen together are usually different people. Each unordered pair is listed once,
+with a suggested merge direction (the record with fewer mentions folds into the
+one with more; ties break by later first-seen, then key) and the exact
+`lucid person merge` command to run. It changes nothing — you decide. `--json`
+emits `{candidates: [{source_key, source_display_name, target_key,
+target_display_name, reason, suggested_merge}]}` (an empty array, never null,
+when the store is clean).
+
+```sh
+lucid person reconcile
+lucid person reconcile --json
+```
+
 #### A subcommand shadows a literal name
 
-`merge`, `alias`, `rename`, `set`, and `off-limits` are subcommands, so
-`lucid person merge …` always runs the merge verb — a person you literally
-mentioned as "merge" cannot be looked up by `lucid person merge`. This mirrors
+`merge`, `alias`, `rename`, `set`, `off-limits`, and `reconcile` are
+subcommands, so `lucid person merge …` always runs the merge verb — a person you
+literally mentioned as "merge" cannot be looked up by `lucid person merge`. This mirrors
 every other verb group in the CLI and is the accepted trade for a clean curate
 surface; the names collide only with a handful of English words no one records a
 person under.

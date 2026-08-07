@@ -125,6 +125,47 @@ func TestPersonCLI_Set_BadDob_ExitErr(t *testing.T) {
 	assert.Contains(t, errOut, "date of birth")
 }
 
+// TestPersonCLI_Reconcile_JSON seeds a duplicate pair and checks the --json
+// candidate shape (including the suggested merge command) and prose exit 0.
+func TestPersonCLI_Reconcile_JSON(t *testing.T) {
+	home := isolatedHome(t)
+	writePersonRecord(t, home, "person_s-sam", "Sam", []string{"Sam"}, []string{"raw_1"}, personSeed())
+	writePersonRecord(t, home, "person_s-sammy", "Sammy", []string{"Sammy"}, []string{"raw_2"}, personSeed())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "reconcile", "--json")
+	require.NoError(t, err)
+	assert.Equal(t, ExitOK, exitCodeForError(err))
+
+	var view personReconcileView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	require.Len(t, view.Candidates, 1)
+	assert.Equal(t, "person_s-sam", view.Candidates[0].TargetKey)
+	assert.Equal(t, "person_s-sammy", view.Candidates[0].SourceKey)
+	assert.Equal(t, "lucid person merge person_s-sammy person_s-sam", view.Candidates[0].SuggestedMerge)
+}
+
+// TestPersonCLI_Reconcile_EmptyHonest: a clean store returns the honest empty
+// prose and exit 0, with an empty (never null) candidates array under --json.
+func TestPersonCLI_Reconcile_EmptyHonest(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "reconcile")
+	require.NoError(t, err)
+	assert.Contains(t, out, "No likely-duplicate people")
+
+	jsonOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "reconcile", "--json")
+	require.NoError(t, err)
+	assert.Contains(t, jsonOut, `"candidates": []`)
+}
+
+// TestPersonCLI_Reconcile_NoArgs: reconcile takes no positional args.
+func TestPersonCLI_Reconcile_NoArgs(t *testing.T) {
+	isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "reconcile", "extra")
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+}
+
 // TestPersonCLI_ReadContractIntact re-confirms the read leaf is unchanged now
 // that write children hang beneath it: a bare `person` still exits usage, and a
 // name lookup still works.

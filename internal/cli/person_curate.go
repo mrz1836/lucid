@@ -232,6 +232,74 @@ value clears it. A dob that is not a civil date is rejected.`,
 	return cmd
 }
 
+// reconcileCandidateView is one row of the reconcile --json output: the pair,
+// why they were flagged, and the exact merge to run.
+type reconcileCandidateView struct {
+	SourceKey      string `json:"source_key"`
+	SourceName     string `json:"source_display_name"`
+	TargetKey      string `json:"target_key"`
+	TargetName     string `json:"target_display_name"`
+	Reason         string `json:"reason"`
+	SuggestedMerge string `json:"suggested_merge"`
+}
+
+// personReconcileView is the machine-readable projection of a reconcile scan.
+// Candidates is always a (possibly empty) array, never null.
+type personReconcileView struct {
+	Candidates []reconcileCandidateView `json:"candidates"`
+}
+
+// projectReconcile builds the --json view from a router result.
+func projectReconcile(res router.PersonReconcileResult) personReconcileView {
+	cands := make([]reconcileCandidateView, 0, len(res.Candidates))
+	for _, c := range res.Candidates {
+		cands = append(cands, reconcileCandidateView{
+			SourceKey:      c.SourceKey,
+			SourceName:     c.SourceName,
+			TargetKey:      c.TargetKey,
+			TargetName:     c.TargetName,
+			Reason:         c.Reason,
+			SuggestedMerge: fmt.Sprintf("lucid person merge %s %s", c.SourceKey, c.TargetKey),
+		})
+	}
+	return personReconcileView{Candidates: cands}
+}
+
+// newPersonReconcileCmd builds the `reconcile` child: a read-only detector that
+// lists likely-duplicate people and a suggested merge for each. It changes
+// nothing and always exits 0 (an empty result is honest, not an error).
+func newPersonReconcileCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reconcile",
+		Short: "List likely-duplicate people and a suggested merge for each (read-only)",
+		Long: `reconcile scans the people records for likely duplicates — a nickname and a
+full name split into two records, a transcription variant — and lists each pair
+with a suggested merge direction and the exact command to run. It is a pure read:
+no model, no writes, byte-stable across runs, and off-limits people are excluded.
+Two signals flag a pair: a shared written form (a normalized display_name/aka in
+common) or name proximity (a bounded edit distance, or a short diminutive prefix
+like sam ⊂ sammy). It changes nothing — you decide whether to merge.`,
+		Args: cobra.NoArgs,
+		Example: `  lucid person reconcile
+  lucid person reconcile --json`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.PersonReconcile()
+			if err != nil {
+				return err
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				return writeJSON(cmd.OutOrStdout(), projectReconcile(res))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Text)
+			return nil
+		},
+	}
+}
+
 // newPersonOffLimitsCmd builds the `off-limits` child: toggle P-3 redaction. It
 // is the CLI writer for the off-limits registry, which previously had no verb.
 func newPersonOffLimitsCmd() *cobra.Command {
