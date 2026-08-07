@@ -101,6 +101,37 @@ func TestStructure_FirstMention(t *testing.T) {
 	require.NoError(t, statErr)
 }
 
+// TestStructure_FoldsExplicitAka drives the full compose with a mention carrying
+// an explicit aka: the People routine records the form and plants a resolving
+// tombstone, so a later bare mention of the alias resolves to the same person
+// (acceptance-criteria.md 4.7).
+func TestStructure_FoldsExplicitAka(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	id, _ := writeRawAt(t, a, home, "Sam, aka Sammy, dropped by.", fixedNow())
+	payload := `{
+	  "emotions": [],
+	  "themes":   [],
+	  "people":   [{"display_name": "Sam", "aka": ["Sammy"]}],
+	  "notes": "no themes"
+	}`
+	p := &provider.Fake{Script: []provider.Exchange{extractEx(payload)}}
+
+	res, err := r.Structure(context.Background(), structReq(id, p))
+	require.NoError(t, err)
+	require.True(t, res.Wrote)
+	require.Len(t, res.People, 1)
+	keySam := res.People[0].PersonKey
+
+	rec, _, err := a.ReadPerson(keySam)
+	require.NoError(t, err)
+	assert.Contains(t, rec.Aka, "Sammy", "the explicit aka is folded onto the canonical record")
+
+	// A later bare "Sammy" mention folds into Sam.
+	later, err := a.UpdatePerson(storage.PersonMention{DisplayName: "Sammy", RawEntryID: "raw_2026_05_09_20_10", At: fixedNow()})
+	require.NoError(t, err)
+	assert.Equal(t, keySam, later.PersonKey)
+}
+
 // TestStructure_SecondMention is acceptance case 4.2: a second entry
 // mentioning the same person (different spelling) is first_mention false and
 // merges aka on the people record.

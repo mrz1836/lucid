@@ -1264,9 +1264,16 @@ lucid profile default --json
 
 ```
 lucid person <name> [--json]
+lucid person merge <source> <target> [--json]
+lucid person alias <subject> <form> [--json]
+lucid person rename <subject> <new-name...> [--json]
+lucid person set <subject> [--dob <YYYY-MM-DD>] [--relationship <text>] [--note <text>] [--json]
+lucid person off-limits <subject> [--restore] [--json]
+lucid person reconcile [--json]
 ```
 
-Deterministic person join ([`../mvp/data-model.md`](../mvp/data-model.md);
+`lucid person <name>` is a deterministic person join
+([`../mvp/data-model.md`](../mvp/data-model.md);
 [`../mvp/scope.md`](../mvp/scope.md) §4) over the people record, its mention counts,
 the accepted insights citing entries that mention them, and a dominance line. Pure
 **read** — it never calls a model and never writes, and the output is byte-stable
@@ -1281,6 +1288,131 @@ text}`.
 ```sh
 lucid person "Sam Rivera"
 lucid person Alex --json
+```
+
+People records are **capture-first**: they appear as you mention people, and a
+`person_key` is an unsalted slug of the normalized display name — so a nickname
+("Sammy") and a full name ("Sam Rivera") of the same person can land as two
+disconnected records. The write verbs below are the **curate** surface that
+reconciles them, modeled as **append-and-redirect** (§"Merge & redirect"):
+nothing is ever deleted, and `lucid person <any form>` ends up resolving to one
+canonical record with correct aggregate counts. Every write verb is
+deterministic and model-free, decides its rejection from the store before any
+write, and prints an inventory-only ack (no evaluative language). All accept
+`--json`, which emits a projected view of the record, never the raw storage
+struct.
+
+#### Resolving a subject
+
+Every write verb takes a **subject** — a `person_key` or a name. An exact key
+wins; otherwise the name is matched against `display_name`/`aka[]` exactly as
+`lucid person <name>` does, with redirect tombstones skipped. No live match is
+rejected (§P-4); more than one live match is rejected and the candidate keys are
+named (§P-5) — the verb never guesses which person you meant.
+
+#### `person merge`
+
+Fold <source> into <target> — the repair for a nickname/full-name split. The
+target absorbs the source's `aka[]`, its `display_name`, and its `entry_refs[]`;
+the seen window widens to cover both; any off-limits mark carries across. The
+source record is **rewritten as a redirect tombstone** pointing at the target —
+so a later bare mention of the merged-away form resolves forward to the one
+canonical record, and `lucid person <that form>` returns a single match rather
+than the pre-merge §P-2. Nothing is deleted. Merging is idempotent, and every
+tombstone that already pointed at the source is flattened onto the target, so
+the chain stays a single hop. Merging a person into themselves is rejected
+(§P-6).
+
+#### `person alias`
+
+Record another written form on a person without waiting for it to be captured.
+The form is added to the subject's `aka[]`, and a redirect tombstone is planted
+at the form's derived slug **when that slug is free or already this person's**,
+so a future bare mention of the form resolves here. If the form already resolves
+to a *different* live record, the verb refuses (§P-7) rather than hijack the
+other person's slug — merge them instead if they are the same. Idempotent: an
+alias already recorded is a no-op ack.
+
+#### `person rename`
+
+Change a person's `display_name`; the old form folds into `aka[]`. The
+`person_key` **does not change** — it is a stable id and a mutable address, the
+same model as [`anchor rename`](#anchor) and [`self move`](#self). Trailing words
+join into the new name. Renaming onto a name that already uniquely identifies a
+*different* live record is rejected (§P-8): a rename never creates a duplicate
+identity — use `merge` if they are the same person. (Two people who
+*coincidentally* share a name from capture are the intentional §P-2 state and are
+left untouched.)
+
+#### `person set`
+
+Record the **user-authored durable fields** on a person: `--dob` (a civil
+`YYYY-MM-DD`), `--relationship` (a free-text label like `colleague`), and
+`--note` (free text). These never touch identity — no key, no `aka[]`, no
+merge — and they are the one carve-out to the people record's extractive-only
+boundary: they exist only because you typed them, and no agent ever infers them.
+A `--dob` that is not a civil date is rejected (§P-9). Setting a field again
+overwrites it; passing no flag leaves that field unchanged.
+
+#### `person off-limits`
+
+Mark a person off-limits to inference (`--restore` clears it) — the CLI writer
+for the P-3 redaction registry, which previously had no verb. While off-limits,
+`lucid person <name>` renders the raw record only (mentions and dates, nothing
+derived) and the person is redacted from every agent slice. Nothing is deleted.
+Idempotent: marking someone already off-limits, or restoring someone who is not,
+is a no-op ack, not an error.
+
+#### Errors
+
+Each write verb prints a fixed reason, exits `1`, and writes nothing:
+
+- **A subject no live record holds** (§P-4) — the error names the remedy.
+- **A subject matching more than one live record** (§P-5) — the error names the
+  candidate keys so the retry is exact; the verb never guesses.
+- **`merge` of a person into themselves** (§P-6).
+- **`alias` onto a form that already belongs to another person** (§P-7).
+- **`rename` onto a name that already identifies another person** (§P-8).
+- **Blank input, or a `set --dob` that is not `YYYY-MM-DD`** (§P-9).
+
+#### `person reconcile`
+
+List likely-duplicate people and a suggested merge for each — the detector that
+catches the split `merge`/`alias` fix by hand. It is a pure **read**: no model,
+no writes, byte-stable across runs (S-22), and off-limits people are excluded.
+Two deterministic signals surface a pair: a **shared written form** (a normalized
+`display_name`/`aka[]` in common) or **name proximity** (a bounded edit distance
+of ≤2 between forms of length ≥4, or a short diminutive prefix like `sam`⊂
+`sammy`). Co-occurrence in the same entry is deliberately *not* a signal — people
+seen together are usually different people. Each unordered pair is listed once,
+with a suggested merge direction (the record with fewer mentions folds into the
+one with more; ties break by later first-seen, then key) and the exact
+`lucid person merge` command to run. It changes nothing — you decide. `--json`
+emits `{candidates: [{source_key, source_display_name, target_key,
+target_display_name, reason, suggested_merge}]}` (an empty array, never null,
+when the store is clean).
+
+```sh
+lucid person reconcile
+lucid person reconcile --json
+```
+
+#### A subcommand shadows a literal name
+
+`merge`, `alias`, `rename`, `set`, `off-limits`, and `reconcile` are
+subcommands, so `lucid person merge …` always runs the merge verb — a person you
+literally mentioned as "merge" cannot be looked up by `lucid person merge`. This mirrors
+every other verb group in the CLI and is the accepted trade for a clean curate
+surface; the names collide only with a handful of English words no one records a
+person under.
+
+```sh
+lucid person merge person_s-quiet person_s-river   # fold the nickname into the full name
+lucid person alias person_s-river Sammy            # a future "Sammy" resolves here
+lucid person rename person_s-river "Sam Rivera"    # key stable, old form kept in aka[]
+lucid person set person_s-river --relationship colleague --dob 1990-04-12
+lucid person off-limits person_s-river             # then --restore
+lucid person Sammy                                 # resolves to the one canonical record
 ```
 
 ### self

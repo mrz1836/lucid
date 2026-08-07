@@ -169,6 +169,8 @@ length > 4 or length 1; ack copy matches the fixed strings in
 | 4.4 | Raw entry with empty body | Empty arrays + `notes: "raw body empty"`; no people record changes. |
 | 4.5 | LLM returns malformed JSON twice | Empty arrays + `notes: "structuring failed (parse)"`. |
 | 4.6 | LLM emits "anxious attachment" in `notes` | Validation rejects; retry; if persistent, downgrade to 4.5 path. |
+| 4.7 | A raw entry with explicit alias phrasing ("Sam, aka Sammy") | The `people[]` entry carries `aka: ["Sammy"]`; `storage.update_person` folds "Sammy" into Sam's record and plants a resolving redirect tombstone at its slug, so a later bare "Sammy" mention resolves to Sam ([`data-model.md`](data-model.md) §"Merge & redirect"). |
+| 4.8 | Alias phrasing where the alias's slug is already owned by a *different* live person | The `aka` is recorded on the record (for matching/readability) but **no tombstone is planted** — no hijack. The two stay separate for `person reconcile`; capture never fails. |
 
 ### Verification commands
 

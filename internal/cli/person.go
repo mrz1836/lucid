@@ -74,9 +74,9 @@ func personViewFrom(res router.PersonResult) personView {
 // the command exits 0 for every one of them. Only a genuine boot/read failure
 // (a real I/O error) surfaces as a non-zero exit.
 func newPersonCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "person <name>",
-		Short: "Look up a person you've mentioned",
+		Short: "Look up a person you've mentioned, or curate the people records",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
@@ -94,4 +94,13 @@ func newPersonCmd() *cobra.Command {
 			return nil
 		},
 	}
+	// The read stays the parent's own RunE (so `lucid person <name>` and the
+	// bare-arg exit-2 contract are unchanged); the curation verbs hang beneath.
+	cmd.AddCommand(newPersonMergeCmd())
+	cmd.AddCommand(newPersonAliasCmd())
+	cmd.AddCommand(newPersonRenameCmd())
+	cmd.AddCommand(newPersonSetCmd())
+	cmd.AddCommand(newPersonOffLimitsCmd())
+	cmd.AddCommand(newPersonReconcileCmd())
+	return cmd
 }

@@ -261,6 +261,21 @@ mention immediately after Structuring returns and **before**
 `null` for `person_key`. See §"How contracts compose" below for the
 exact router order.
 
+A `people[]` entry may additionally carry an optional `aka[]` — other
+written forms of the **same** person — but **only** when the entry states
+the alias explicitly ("Sam, aka Sammy", "Sam (nickname Sammy)").
+Structuring emits the primary as `display_name` and the alias(es) in
+`aka[]`; it never *guesses* a nickname (that would be the profile
+inference the Forbidden list bars). The router passes `aka[]` to
+`storage.update_person`, which folds each form into the canonical record
+and plants a resolving redirect tombstone so a later bare mention of the
+alias resolves to the same person ([`data-model.md`](data-model.md)
+§"Merge & redirect"). When the alias's slug is already owned by a
+*different* live person, the tombstone is skipped — never a hijack — and
+the tail is left to `person reconcile`; capture never fails on it. 100%
+nickname coverage is a non-goal: the explicit `person alias` / `person
+merge` verbs and the harness above Lucid cover the rest.
+
 `rejected_proposals` and `unanswered_proposals` are always returned as
 empty arrays on the first write; later appends come from the validation
 paths via the storage adapter (`storage.append_rejected_proposal`,
@@ -283,8 +298,10 @@ silence is not rejection. Both arrays feed the suppression window in
 * Cross-entry generalization ("this echoes last week's pattern …").
   Structuring is strictly per-entry. Cross-entry work is Reflection's.
 * Person profile inference (relationships, affect per person, dynamics).
-  People extraction is name-only; the People agent owns merging into
-  `~/.lucid/people/`.
+  People extraction is name-only — a `display_name` plus, **on explicit
+  "X, aka Y" phrasing only**, an `aka[]` of other written forms; an
+  inferred or guessed nickname is barred. The People routine owns merging
+  into `~/.lucid/people/`.
 * Diagnostic vocabulary in `notes` (no "anxious attachment",
   "avoidant", "trauma response", etc.). Notes are extractive, not
   interpretive.
@@ -901,6 +918,17 @@ before implementation begins.
   storage adapter.
 * **Forbidden (now).** No relationship inference, no profile prompts,
   no LLM calls.
+* **User-driven curation (now).** The `person merge | alias | rename |
+  set | off-limits` verbs let the user (and the harness above Lucid)
+  reconcile the people records — collapse a nickname/full-name split,
+  record another written form, fix a display name, add the
+  user-authored `dob`/`relationship`/`notes`, or toggle P-3 redaction.
+  Every one is **deterministic, user-invoked, and model-free**, decided
+  from the store before any write, and bound by the same forbidden list
+  above: the durable fields are recorded *because the user typed them*,
+  never inferred. Resolution is tombstone-backed (data-model.md §"Merge
+  & redirect"); `person reconcile` is a read-only detector that only
+  *suggests* merges and changes nothing.
 * **Deferred surface.** A future People agent may infer aliases,
   detect first/last seen, and (much later) maintain a relational map.
   Each addition requires its own contract here before it ships.

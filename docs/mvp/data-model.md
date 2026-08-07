@@ -678,10 +678,17 @@ small so it can be regenerated from the proposal text alone.
 
 **Format:** JSON. One file per person key.
 
-**Mutability:** Mutable, but only via `storage.update_person`. The
-adapter merges new mentions into the existing record.
+**Mutability:** Mutable. Every write goes through `internal/storage`;
+`~/.lucid/people/` is never hand-edited. The deterministic People routine
+(`storage.update_person`) folds each new mention into a record, and is no
+longer the *only* writer: the curation verbs — `person merge`, `person
+alias`, `person rename`, `person set`, and `person off-limits` — also write
+here. All of them are deterministic and model-free; none infers anything
+(see the user-authored carve-out below).
 
 ### Schema
+
+A **canonical** record (`redirect_to` absent):
 
 ```json
 {
@@ -700,20 +707,87 @@ adapter merges new mentions into the existing record.
 }
 ```
 
+The three optional identity fields (`redirect_to`, `dob`, `relationship`)
+are omitted when unset, so a record written before this feature — or a plain
+mention-only record like the one above — is byte-identical on rewrite. A
+record enriched with the user-authored fields carries them explicitly:
+
+```json
+{
+  "person_key": "person_a-alex",
+  "display_name": "Alexandra",
+  "aka": ["Alex", "Alexandra", "Ali"],
+  "first_seen_at": "2026-04-12T19:01:55-04:00",
+  "last_seen_at": "2026-05-05T19:42:11-04:00",
+  "entry_refs": ["raw_2026_04_12_19_01"],
+  "dob": "1990-04-12",
+  "relationship": "colleague",
+  "notes": "met at the co-op"
+}
+```
+
+A **redirect tombstone** is the same family with `redirect_to` set and every
+other field frozen:
+
+```json
+{
+  "person_key": "person_a-andy",
+  "display_name": "Andy",
+  "aka": ["Andy"],
+  "first_seen_at": "2026-04-01T08:00:00-04:00",
+  "last_seen_at": "2026-04-10T08:00:00-04:00",
+  "entry_refs": ["raw_2026_04_01_08_00"],
+  "redirect_to": "person_a-alex",
+  "notes": null
+}
+```
+
 ### Field semantics
 
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `person_key` | yes | Stable, low-signal slug. The filename matches. |
-| `display_name` | yes | Whatever the user actually wrote (or the latest version). |
-| `aka[]` | yes | Other forms the same person has been written as. |
+| `display_name` | yes | Whatever the user actually wrote (or the latest version). On a tombstone it is frozen and still serves as the collision-oracle witness for its slug. |
+| `aka[]` | yes | Other forms the same person has been written as, including every form absorbed by a merge or alias. Used for `/person` name matching and human readability — **never** for resolution, which goes through tombstones. |
 | `first_seen_at` / `last_seen_at` | yes | Lifecycle window. |
 | `entry_refs[]` | yes | Raw entry ids in which this person was mentioned. |
-| `notes` | no | Free-text, optional, off by default. The MVP does not prompt for or store relational profiles — that is a follow-on per [`product-principles.md`](product-principles.md) §1. |
+| `redirect_to` | no | Present only on a **redirect tombstone**: the `person_key` of the canonical record this key resolves to. Omitted on a canonical record. Single-hop by invariant — a tombstone never points at another tombstone. |
+| `dob` | no | User-authored civil date of birth (`YYYY-MM-DD`), set with `person set --dob`. Never inferred. Omitted when unset. |
+| `relationship` | no | User-authored relationship label ("colleague", "sister"), set with `person set --relationship`. Never inferred. Omitted when unset. |
+| `notes` | no | Free-text, optional, off by default; set with `person set --note`. |
 
-The MVP does **not** record relationships, dynamics, or affect per
-person. People records are extractive only; they exist so future
-relational features have somewhere to grow into.
+`dob`, `relationship`, and `notes` are the **user-authored durable fields** —
+the one deliberate carve-out to the extractive-only boundary. They exist only
+because a person typed them at an explicit `person set`; no agent ever infers
+or writes them, so the no-inference invariant (agent-contracts.md §People)
+stays intact. The MVP still records no *inferred* relationships, dynamics, or
+affect per person; these are user statements, not derivations.
+
+### Merge & redirect
+
+A `person_key` is an *unsalted* hash of the normalized display name, so the
+People routine mints a **separate** key for two spellings of one person that
+normalize differently (e.g. "Andy" and "Alex"). The curation verbs repair such
+a split without ever deleting a record — an append-and-redirect identity model
+mirroring `anchor`/`self` (stable id, mutable address):
+
+- **Merge** (`person merge <source> <target>`) folds the source into the
+  target: the target's `aka[]` and `entry_refs[]` absorb the source's (and the
+  source's `display_name`), the seen window widens, and the **source record is
+  rewritten as a redirect tombstone** (`redirect_to: <target>`). Nothing is
+  hard-deleted.
+- **Resolution is through tombstones, never through `aka[]`.** A later bare
+  mention of a merged-away form derives to the tombstone's slug, and
+  `update_person` follows `redirect_to` to fold it into the canonical. `aka[]`
+  is not scanned for resolution — an aka normalizes differently from the
+  record's `display_name`, so scanning it would break the collision oracle.
+- **Single hop, no cycles.** A merge flattens every tombstone already pointing
+  at the source onto the target, so a chain is never created; a self-redirect
+  and a cycle are structurally impossible. `lucid validate` enforces this (a
+  new redirect check: missing target, chain, self, cycle).
+
+People records remain **one mutable file per key**; the tombstone is a shape of
+that same family, not a new record type.
 
 ## Sessions and channel memory — `~/.lucid/sessions/`
 

@@ -43,13 +43,16 @@ type Item struct {
 	Rationale string
 }
 
-// Person is one extracted mention — the display name exactly as written.
+// Person is one extracted mention — the display name exactly as written, plus
+// an optional Aka of other written forms emitted **only** on explicit "X, aka
+// Y" phrasing (never a guessed nickname; agent-contracts.md §Structuring).
 // Structuring emits no person_key (it cannot see people/) and does not decide
 // first_mention; the deterministic People routine in the storage adapter
 // resolves both after this agent returns (agent-contracts.md §"How contracts
 // compose").
 type Person struct {
 	DisplayName string
+	Aka         []string
 }
 
 // Input is the single raw entry the router authorizes for one extraction
@@ -89,7 +92,8 @@ type itemPayload struct {
 }
 
 type personPayload struct {
-	DisplayName string `json:"display_name"`
+	DisplayName string   `json:"display_name"`
+	Aka         []string `json:"aka"`
 }
 
 // Extract runs Structuring over one raw entry and returns the extractive
@@ -225,11 +229,14 @@ func extractSystem(strict bool) string {
 	b.WriteString("You are Lucid's Structuring agent. Read ONE journal entry and extract only ")
 	b.WriteString("what is explicitly present: emotions and themes (each a short name with a ")
 	b.WriteString("one-line rationale grounded in the text) and the people named (display name ")
-	b.WriteString("exactly as written). Do not generalize across entries, infer relationships, ")
-	b.WriteString("or use any diagnostic or clinical vocabulary. If nothing useful is present, ")
-	b.WriteString("return empty arrays and a short factual note explaining why. Reply ONLY with ")
-	b.WriteString(`JSON: {"emotions":[{"name":"","rationale":""}],"themes":[{"name":"","rationale":""}],`)
-	b.WriteString(`"people":[{"display_name":""}],"notes":null}.`)
+	b.WriteString("exactly as written). If — and only if — the entry states an alias explicitly ")
+	b.WriteString(`("Sam, aka Sammy", "Sam (nickname Sammy)"), put the primary in display_name and `)
+	b.WriteString("the other written form(s) in that person's aka array; never guess a nickname, ")
+	b.WriteString("and leave aka empty otherwise. Do not generalize across entries, infer ")
+	b.WriteString("relationships, or use any diagnostic or clinical vocabulary. If nothing useful ")
+	b.WriteString("is present, return empty arrays and a short factual note explaining why. Reply ")
+	b.WriteString(`ONLY with JSON: {"emotions":[{"name":"","rationale":""}],"themes":[{"name":"","rationale":""}],`)
+	b.WriteString(`"people":[{"display_name":"","aka":[]}],"notes":null}.`)
 	if strict {
 		b.WriteString(" Your previous reply was not valid or contained interpretation. Reply with ")
 		b.WriteString("the JSON object and nothing else; keep every rationale extractive.")

@@ -302,6 +302,7 @@ flag-parse error.
 | `recall` | `--era` `--injury` `--thread` | Browse the archive by era, thread, or injury (never writes). |
 | `excavate` | — | Select the next memory cluster to excavate (never writes). |
 | `person <name>` | — | Look up a person you've mentioned. |
+| `person reconcile` | — | List likely-duplicate people with a suggested merge — read-only, no-LLM, changes nothing. |
 
 <br/>
 
@@ -316,6 +317,9 @@ flag-parse error.
 | `self [<key-or-prefix>]` | `--history` | Read the durable self-profile — atemporal facts under `identity.` `body.` `constraint.` `pref.` `misc.` |
 | `self set <key> <value…>` | `--note` `--since` | Record one durable fact. Append-only: a correction is just another `set`. |
 | `self move <key> <new-key>`<br>`self retire <key> [reason…]` | — | Re-categorize a fact, or retire one that stopped being true. History carries forward; nothing is ever deleted. |
+| `person merge <source> <target>`<br>`person alias <subject> <form>`<br>`person rename <subject> <new-name…>` | — | Reconcile the people records: fold a duplicate onto a canonical record (append-only redirect, never a delete), record another written form, or change a display name (the `person_key` is stable). |
+| `person set <subject>` | `--dob` `--relationship` `--note` | Record the user-authored durable fields on a person — never inferred. |
+| `person off-limits <subject>` | `--restore` | Mark a person off-limits to inference (the P-3 redaction); `--restore` clears it. |
 | `anchor add <label> <date> [note…]` | — | Record a days-since milestone. A future date is accepted — an anchor may be a date you count *toward*. |
 | `anchor rename <label> <new-label>`<br>`anchor sunset <label> [reason…]` | — | Rename a milestone's display label (the day count carries forward), or retire it from the counting surfaces (the record is kept). |
 | `structure [raw_id]` | `--since` `--until` `--force` | Run the Structuring pass over raw entries a check-in did not capture — one id, or an inclusive date window. |

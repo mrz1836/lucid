@@ -35,6 +35,13 @@ type PersonMention struct {
 	// At is when the mention occurred (the raw entry's occurred_at); it
 	// widens the first_seen_at / last_seen_at window.
 	At time.Time
+	// Aka is other written forms of the *same* person, emitted by Structuring
+	// only on explicit "X, aka Y" phrasing (never a guessed nickname). Each is
+	// folded into the record's aka[] and gets a resolving redirect tombstone
+	// when its slug is free or already this person's; a form owned by a
+	// different live person is left for `person reconcile` — capture never fails
+	// on it (data-model.md §"Merge & redirect").
+	Aka []string
 }
 
 // PersonResult reports what [Adapter.UpdatePerson] resolved for a mention:
@@ -54,29 +61,44 @@ type PersonResult struct {
 }
 
 // PersonRecord is a decoded people/<key>.json record (data-model.md
-// §"People references"). It is extractive only — no relationships, no
-// affect, no dynamics — a place future relational features can grow into.
+// §"People references"). A canonical record (RedirectTo == "") is extractive
+// plus the three user-authored durable fields (Dob, Relationship, Notes); a
+// redirect tombstone (RedirectTo != "") freezes every other field and points
+// its slug forward at a canonical key (data-model.md §"Merge & redirect").
 type PersonRecord struct {
-	PersonKey   string
-	DisplayName string
-	Aka         []string
-	FirstSeenAt time.Time
-	LastSeenAt  time.Time
-	EntryRefs   []string
-	Notes       *string
+	PersonKey    string
+	DisplayName  string
+	Aka          []string
+	FirstSeenAt  time.Time
+	LastSeenAt   time.Time
+	EntryRefs    []string
+	RedirectTo   string
+	Dob          *string
+	Relationship *string
+	Notes        *string
 }
+
+// IsTombstone reports whether this record is a redirect tombstone — a merged-
+// away or aliased slug that resolves forward to a canonical key. Resolution
+// runs through tombstones, never through aka[]; matchPeople skips them.
+func (r PersonRecord) IsTombstone() bool { return r.RedirectTo != "" }
 
 // personRecordJSON is the on-disk JSON shape; field order matches
 // data-model.md §"People references" so a written record reads like the
-// documented schema.
+// documented schema. The three identity fields are omitempty so a record
+// written before this feature — or a plain mention-only record — round-trips
+// byte-identically (S-22); notes stays always-present as it always has.
 type personRecordJSON struct {
-	PersonKey   string   `json:"person_key"`
-	DisplayName string   `json:"display_name"`
-	Aka         []string `json:"aka"`
-	FirstSeenAt string   `json:"first_seen_at"`
-	LastSeenAt  string   `json:"last_seen_at"`
-	EntryRefs   []string `json:"entry_refs"`
-	Notes       *string  `json:"notes"`
+	PersonKey    string   `json:"person_key"`
+	DisplayName  string   `json:"display_name"`
+	Aka          []string `json:"aka"`
+	FirstSeenAt  string   `json:"first_seen_at"`
+	LastSeenAt   string   `json:"last_seen_at"`
+	EntryRefs    []string `json:"entry_refs"`
+	RedirectTo   string   `json:"redirect_to,omitempty"`
+	Dob          *string  `json:"dob,omitempty"`
+	Relationship *string  `json:"relationship,omitempty"`
+	Notes        *string  `json:"notes"`
 }
 
 // peopleDir returns ~/.lucid/people/.
@@ -101,6 +123,24 @@ func (a *Adapter) ReadPerson(key string) (PersonRecord, bool, error) {
 		return PersonRecord{}, false, err
 	}
 	return rec.decode()
+}
+
+// ResolvePersonRedirect follows a redirect tombstone to the canonical key it
+// points at. The follow is single-hop: a merge flattens every chain, so a
+// tombstone never points at another tombstone (data-model.md §"Merge &
+// redirect"; `lucid validate` flags a chain that slips through). A canonical
+// record — or a key with no record at all — resolves to itself, so callers can
+// canonicalize any person_key unconditionally, including the pre-merge keys
+// historical processed/*.json artifacts still carry.
+func (a *Adapter) ResolvePersonRedirect(key string) (string, error) {
+	rec, found, err := a.ReadPerson(key)
+	if err != nil {
+		return "", err
+	}
+	if !found || rec.RedirectTo == "" {
+		return key, nil
+	}
+	return rec.RedirectTo, nil
 }
 
 // ListPeopleKeys returns the person_key of every record on disk, sorted so the
@@ -152,26 +192,48 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 		return PersonResult{}, fmt.Errorf("storage: update_person: resolve key: %w", err)
 	}
 
+	// Follow a redirect: a mention whose derived slug is a merged-away or
+	// aliased tombstone folds into the canonical record it points to, so a
+	// later bare mention of an absorbed form lands on the one canonical record
+	// (data-model.md §"Merge & redirect"). Resolution goes through the tombstone
+	// only — aka[] is never scanned, which is what keeps the collision oracle
+	// sound.
+	key, err = a.ResolvePersonRedirect(key)
+	if err != nil {
+		return PersonResult{}, err
+	}
+
 	existing, found, err := a.ReadPerson(key)
 	if err != nil {
 		return PersonResult{}, err
 	}
 
 	rec := mergePerson(existing, found, key, m)
+	// Fold any explicit akas ("X, aka Y" phrasing) into the record before the
+	// write, so the merged-away form matches this person immediately.
+	for _, form := range m.Aka {
+		if f := strings.TrimSpace(form); f != "" {
+			rec.Aka = addUnique(rec.Aka, f)
+		}
+	}
+	slices.Sort(rec.Aka)
 
-	path, err := a.personPath(key)
-	if err != nil {
+	if err = a.writePerson(rec); err != nil {
 		return PersonResult{}, err
 	}
-	if err = ensureDir(a.peopleDir(), "people"); err != nil {
-		return PersonResult{}, err
-	}
-	content, err := marshalJSON(rec.encode())
-	if err != nil {
-		return PersonResult{}, err
-	}
-	if err = os.WriteFile(path, content, filePerm); err != nil {
-		return PersonResult{}, fmt.Errorf("storage: write person %q: %w", key, err)
+
+	// Plant a resolving redirect tombstone for each explicit alias so a later
+	// bare mention of it folds into this record. A form already owned by a
+	// *different* live person is left for `person reconcile` — capture never
+	// fails on it (only a real I/O error propagates).
+	for _, form := range m.Aka {
+		f := strings.TrimSpace(form)
+		if f == "" || strings.EqualFold(f, rec.DisplayName) {
+			continue
+		}
+		if perr := a.plantAliasResolver(key, f, rec); perr != nil && !errors.Is(perr, ErrPersonAkaConflict) {
+			return PersonResult{}, perr
+		}
 	}
 
 	// first_mention is order-independent: this entry introduces the person
@@ -179,6 +241,28 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	// kept sorted, so the earliest is the first element.
 	firstMention := len(rec.EntryRefs) > 0 && rec.EntryRefs[0] == m.RawEntryID
 	return PersonResult{PersonKey: key, FirstMention: firstMention}, nil
+}
+
+// writePerson marshals a person record and writes it to people/<key>.json,
+// creating the tree on demand. It is the single write primitive UpdatePerson
+// and the curation verbs (people_curate.go) share, so every people write goes
+// through one encode + one path guard.
+func (a *Adapter) writePerson(rec PersonRecord) error {
+	path, err := a.personPath(rec.PersonKey)
+	if err != nil {
+		return err
+	}
+	if err = ensureDir(a.peopleDir(), "people"); err != nil {
+		return err
+	}
+	content, err := marshalJSON(rec.encode())
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(path, content, filePerm); err != nil {
+		return fmt.Errorf("storage: write person %q: %w", rec.PersonKey, err)
+	}
+	return nil
 }
 
 // personKeyOwner reports the normalized name currently stored at a candidate
@@ -246,13 +330,16 @@ func addUnique(xs []string, v string) []string {
 // §"Time zone rule").
 func (r PersonRecord) encode() personRecordJSON {
 	return personRecordJSON{
-		PersonKey:   r.PersonKey,
-		DisplayName: r.DisplayName,
-		Aka:         orEmpty(r.Aka),
-		FirstSeenAt: r.FirstSeenAt.Format(time.RFC3339),
-		LastSeenAt:  r.LastSeenAt.Format(time.RFC3339),
-		EntryRefs:   orEmpty(r.EntryRefs),
-		Notes:       r.Notes,
+		PersonKey:    r.PersonKey,
+		DisplayName:  r.DisplayName,
+		Aka:          orEmpty(r.Aka),
+		FirstSeenAt:  r.FirstSeenAt.Format(time.RFC3339),
+		LastSeenAt:   r.LastSeenAt.Format(time.RFC3339),
+		EntryRefs:    orEmpty(r.EntryRefs),
+		RedirectTo:   r.RedirectTo,
+		Dob:          r.Dob,
+		Relationship: r.Relationship,
+		Notes:        r.Notes,
 	}
 }
 
@@ -268,13 +355,16 @@ func (j personRecordJSON) decode() (PersonRecord, bool, error) {
 		return PersonRecord{}, false, fmt.Errorf("storage: person last_seen_at: %w", err)
 	}
 	return PersonRecord{
-		PersonKey:   j.PersonKey,
-		DisplayName: j.DisplayName,
-		Aka:         j.Aka,
-		FirstSeenAt: first,
-		LastSeenAt:  last,
-		EntryRefs:   j.EntryRefs,
-		Notes:       j.Notes,
+		PersonKey:    j.PersonKey,
+		DisplayName:  j.DisplayName,
+		Aka:          j.Aka,
+		FirstSeenAt:  first,
+		LastSeenAt:   last,
+		EntryRefs:    j.EntryRefs,
+		RedirectTo:   j.RedirectTo,
+		Dob:          j.Dob,
+		Relationship: j.Relationship,
+		Notes:        j.Notes,
 	}, true, nil
 }
 

@@ -211,3 +211,82 @@ func writePersonFile(t *testing.T, home, key, display string, aka []string, seen
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, key+".json"), []byte(content), 0o600))
 }
+
+// writeTombstone writes a redirect tombstone at key forwarding to target — the
+// on-disk shape a merge leaves behind, hand-authored so the read-path tests do
+// not depend on the Phase 2 curation verbs.
+func writeTombstone(t *testing.T, home, key, display, target string, seen time.Time) {
+	t.Helper()
+	dir := filepath.Join(home, "people")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	ts := seen.Format(time.RFC3339)
+	content := `{
+  "person_key": "` + key + `",
+  "display_name": "` + display + `",
+  "aka": ["` + display + `"],
+  "first_seen_at": "` + ts + `",
+  "last_seen_at": "` + ts + `",
+  "entry_refs": ["raw_2026_05_05_19_42"],
+  "redirect_to": "` + target + `",
+  "notes": null
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, key+".json"), []byte(content), 0o600))
+}
+
+// TestPerson_MergedFormResolvesToOneCanonical proves the tombstone-skip in
+// matchPeople: after a merge, the merged-away form lives on the canonical's
+// aka[] and its old slug is a tombstone — so querying that form yields exactly
+// one match (the canonical), never a spurious §P-2. Byte-stable across runs.
+func TestPerson_MergedFormResolvesToOneCanonical(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	keyAlex := seedPerson(t, a, "Alex", "raw_2026_05_05_19_42", personSeedTime())
+	keyAndy := seedPerson(t, a, "Andy", "raw_2026_05_06_08_10", personSeedTime().Add(24*time.Hour))
+	require.NotEqual(t, keyAlex, keyAndy)
+
+	// Simulate a merge of Andy → Alex: the canonical absorbs the form, and Andy's
+	// slug becomes a redirect tombstone.
+	writePersonFile(t, home, keyAlex, "Alex", []string{"Alex", "Andy"}, personSeedTime())
+	writeTombstone(t, home, keyAndy, "Andy", keyAlex, personSeedTime().Add(24*time.Hour))
+
+	res, err := r.Person(PersonRequest{Name: "Andy"})
+	require.NoError(t, err)
+	assert.True(t, res.Matched, "the merged-away form resolves to the canonical")
+	assert.False(t, res.MultipleMatches, "the tombstone is skipped — no spurious P-2")
+	assert.Equal(t, keyAlex, res.PersonKey)
+
+	// Querying the canonical's own name also yields the one record.
+	byName, err := r.Person(PersonRequest{Name: "Alex"})
+	require.NoError(t, err)
+	assert.True(t, byName.Matched)
+	assert.Equal(t, keyAlex, byName.PersonKey)
+
+	// Byte-stable across repeated runs on the merged store (S-22).
+	again, err := r.Person(PersonRequest{Name: "Andy"})
+	require.NoError(t, err)
+	assert.Equal(t, res.Text, again.Text)
+}
+
+// TestPerson_DominanceCountsPreMergeKeys proves the dominance join canonicalizes
+// the person_key: historical artifacts keep the pre-merge key, and only folding
+// them onto the canonical pushes the share over threshold. Without
+// canonicalization the canonical would count 1/2 (below 0.5) — with it, 2/2.
+func TestPerson_DominanceCountsPreMergeKeys(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	keyAlex := seedPerson(t, a, "Alex", "raw_2026_05_05_19_42", personSeedTime())
+	keyAndy := seedPerson(t, a, "Andy", "raw_2026_05_06_08_10", personSeedTime().Add(24*time.Hour))
+
+	// Two artifacts, each keyed to a different pre-merge slug.
+	seedArtifactMentioning(t, a, "raw_2026_05_05_19_42", "Alex", keyAlex, personSeedTime())
+	seedArtifactMentioning(t, a, "raw_2026_05_06_08_10", "Andy", keyAndy, personSeedTime())
+
+	// Merge Andy → Alex.
+	writePersonFile(t, home, keyAlex, "Alexandra", []string{"Alex", "Alexandra", "Andy"}, personSeedTime())
+	writeTombstone(t, home, keyAndy, "Andy", keyAlex, personSeedTime().Add(24*time.Hour))
+
+	res, err := r.Person(PersonRequest{Name: "Alexandra"})
+	require.NoError(t, err)
+	require.True(t, res.Matched)
+	assert.Contains(t, res.Text, "appears in 100% of entries", "both pre-merge artifacts fold onto the canonical")
+	assert.Contains(t, res.Text, "worth a look, or expected?")
+}

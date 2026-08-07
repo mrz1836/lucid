@@ -40,11 +40,12 @@ const (
 // Check names — stable strings a script (or a test) can branch on. They are
 // the `check` field of every finding and the entries of [Report.Ran].
 const (
-	CheckPublicBoundary = "public-boundary"
-	CheckDiagnostic     = "diagnostic-language"
-	CheckSanctuary      = "sanctuary"
-	CheckSchema         = "schema"
-	CheckLinks          = "links"
+	CheckPublicBoundary  = "public-boundary"
+	CheckDiagnostic      = "diagnostic-language"
+	CheckSanctuary       = "sanctuary"
+	CheckSchema          = "schema"
+	CheckLinks           = "links"
+	CheckPeopleRedirects = "people-redirects"
 )
 
 // Finding is one issue the sweep surfaced. Path is repo-relative (grep checks)
@@ -119,6 +120,11 @@ type LedgerSource interface {
 	ReadReflectionErr(id string) error
 	ListPeopleKeys() ([]string, error)
 	ReadPersonErr(key string) error
+	// PersonRedirect returns the redirect_to of a person record — the empty
+	// string for a canonical record or one that cannot be read (the schema
+	// check reports an unreadable record; the redirect check does not
+	// double-report it). It backs [CheckPeopleRedirects].
+	PersonRedirect(key string) (string, error)
 	LoadConfigErr() error
 }
 
@@ -162,6 +168,13 @@ func Run(opts Options) (Report, error) {
 		}
 		rep.Ran = append(rep.Ran, CheckSchema)
 		rep.Findings = append(rep.Findings, found...)
+
+		redirects, err := CheckPeopleRedirectGraph(opts.Ledger)
+		if err != nil {
+			return Report{}, err
+		}
+		rep.Ran = append(rep.Ran, CheckPeopleRedirects)
+		rep.Findings = append(rep.Findings, redirects...)
 	}
 
 	sortFindings(rep.Findings)
