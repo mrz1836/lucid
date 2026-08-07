@@ -184,14 +184,22 @@ everything under a user-owned Ledger at `~/.lucid/`.
 ### Install the binary
 
 Install the latest prebuilt release into `~/.local/bin` — a user‑writable directory, so
-no `sudo`, and `lucid update` can self‑update in place afterward:
+no `sudo`, and `lucid update` can self‑update in place afterward.
+
+No `curl … | sudo bash` here — we don't ask you to pipe a mystery script into your shell
+and hope for the best. Every line below is in the open, and the download is checked against
+the release's published SHA‑256 checksums before anything lands on your `PATH`:
 
 ```bash
-# Install the latest lucid release into ~/.local/bin
-VER=$(curl -fsSL https://api.github.com/repos/mrz1836/lucid/releases/latest | grep '"tag_name"' | cut -d'"' -f4 | tr -d v)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-mkdir -p ~/.local/bin
-curl -fsSL "https://github.com/mrz1836/lucid/releases/download/v${VER}/lucid_${VER}_${OS}_${ARCH}.tar.gz" | tar -xzf - -C ~/.local/bin lucid
+# Install the latest lucid release into ~/.local/bin, verified against checksums.txt
+VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/mrz1836/lucid/releases/latest | sed 's#.*/v##')
+OS=$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+F="lucid_${VER}_${OS}_${ARCH}.tar.gz"; U="https://github.com/mrz1836/lucid/releases/download/v${VER}"
+mkdir -p ~/.local/bin && cd "$(mktemp -d)" && curl -fsSLO "$U/$F" \
+  && WANT=$(curl -fsSL "$U/lucid_${VER}_checksums.txt" | awk -v f="$F" '$2==f{print $1}') \
+  && GOT=$( { command -v sha256sum >/dev/null && sha256sum "$F" || shasum -a 256 "$F"; } | awk '{print $1}') \
+  && [ -n "$WANT" ] && [ "$WANT" = "$GOT" ] \
+  && tar -xzf "$F" -C ~/.local/bin lucid
 lucid version
 ```
 
