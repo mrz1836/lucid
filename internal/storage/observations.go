@@ -281,6 +281,20 @@ func (a *Adapter) ReadObservationsKind(kind observations.Kind) ([]observations.E
 	return observations.SortEventsByID(out), nil
 }
 
+// ReadObservationByID reads a single observation event by its id, deriving the
+// logical day the id encodes ([observations.EventDate]) and scanning that day's
+// file. A missing observation — an unparseable id, an absent day file, or a day
+// that holds no such id — is (zero, false, nil), never an error, so a caller can
+// treat absence as a clean "not found". It is the public wrapper over the
+// per-id read the range-index join already uses ([Adapter.readObsEventByID]).
+func (a *Adapter) ReadObservationByID(id string) (observations.Event, bool, error) {
+	date, ok := observations.EventDate(id)
+	if !ok {
+		return observations.Event{}, false, nil
+	}
+	return a.readObsEventByID(date, id)
+}
+
 // ResolveRegistryKey returns the salted, collision-suffixed key for a referent
 // name under the instance's key_salt (observations-module.md §"Registry
 // keys"). The owner check reads the registry dir so a second name that hashes

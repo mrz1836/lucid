@@ -86,6 +86,30 @@ func TestEventID_AndParseSeq(t *testing.T) {
 	}
 }
 
+// TestEventDate_IsTheInverseOfEventID: EventDate recovers the dashed logical
+// date EventID encoded, and rejects anything that is not a well-formed obs id —
+// a missing prefix, a missing sequence field, or an impossible date.
+func TestEventDate_IsTheInverseOfEventID(t *testing.T) {
+	for _, date := range []string{"2026-07-02", "2014-09-01", "2026-12-31"} {
+		got, ok := EventDate(EventID(date, 3))
+		require.Truef(t, ok, "expected %q to round-trip", date)
+		assert.Equal(t, date, got)
+	}
+	// A wider sequence still yields the same date.
+	got, ok := EventDate("obs_2026_07_02_1000")
+	require.True(t, ok)
+	assert.Equal(t, "2026-07-02", got)
+
+	for _, bad := range []string{
+		"", "raw_2026_07_02_19_42", "obs_", "obs_2026_07_02", // no seq field
+		"obs_2026_13_40_001", // impossible date
+		"obs_x_y_z_1", "not-an-id",
+	} {
+		_, ok := EventDate(bad)
+		assert.Falsef(t, ok, "expected %q to be an invalid obs id", bad)
+	}
+}
+
 // TestMarshalLine_Deterministic guarantees the single-line, byte-stable
 // rendering the append discipline and /day byte-stability depend on.
 func TestMarshalLine_Deterministic(t *testing.T) {

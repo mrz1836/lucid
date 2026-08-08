@@ -212,6 +212,30 @@ func ParseSeq(id string) (seq int, ok bool) {
 	return n, true
 }
 
+// EventDate extracts the YYYY-MM-DD logical date an observation id encodes —
+// the read-side inverse of [EventID] (obs_<logical_date>_<seq>, the date in
+// underscores). It reports ok=false for anything that is not a well-formed obs
+// id: a missing obs_ prefix, a date component that is not three underscore-
+// joined fields forming a real civil date, or no sequence field after them. The
+// date is returned in dashed form so it feeds the day-file readers directly.
+func EventDate(id string) (date string, ok bool) {
+	rest, cut := strings.CutPrefix(id, "obs_")
+	if !cut {
+		return "", false
+	}
+	// obs_YYYY_MM_DD_seq → the first three fields are the date, and a fourth
+	// field must exist so a bare obs_YYYY_MM_DD (no seq) is not a valid id.
+	parts := strings.SplitN(rest, "_", 4)
+	if len(parts) < 4 {
+		return "", false
+	}
+	d := parts[0] + "-" + parts[1] + "-" + parts[2]
+	if _, err := time.Parse(dateLayout, d); err != nil {
+		return "", false
+	}
+	return d, true
+}
+
 // DateOf truncates t to local civil midnight — the anchor for a logical day.
 func DateOf(t time.Time) time.Time {
 	y, m, d := t.Date()
