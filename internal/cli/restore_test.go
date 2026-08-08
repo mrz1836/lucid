@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // backupTo runs `lucid backup --out <path>` and returns the archive path so the
@@ -34,6 +36,57 @@ func TestRestoreCmd_RoundTrip(t *testing.T) {
 	b, rerr := os.ReadFile(filepath.Join(home, "raw", "raw_2026_07_29_09_00.md"))
 	require.NoError(t, rerr)
 	assert.Equal(t, "# entry\nhello\n", string(b))
+}
+
+// TestRestoreCmd_RoundTripCarriesMediaAndLinks is SC-14's actual promise, proven
+// end-to-end through the shipped verbs and the shipped deploy.BackupManifest():
+// a capture's binary and the append-only link that points at it both survive a
+// backup and restore into a fresh home, so a restored Ledger yields coherent
+// links whose binaries still exist. Seeding via `attach --to` and archiving via
+// the real `backup` command means a manifest that ever stopped covering media/
+// or links/ would fail here, not pass vacuously.
+func TestRestoreCmd_RoundTripCarriesMediaAndLinks(t *testing.T) {
+	src := isolatedHome(t)
+	body := []byte("\xff\xd8\xff synthetic image bytes")
+	path := writeTempFile(t, "trailhead.jpg", body)
+
+	// Capture the media and link it to a subject in one flow.
+	stdout, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"attach", path, "--to", "day:2020-01-01", "--json")
+	require.NoError(t, err)
+	var att attachJSON
+	require.NoError(t, json.Unmarshal([]byte(stdout), &att))
+	require.Len(t, att.Linked, 1, "the attach linked one subject")
+	mediaID := filepath.Base(att.StoredPath)
+
+	// The link and its binary both live in the source home before the backup.
+	srcLinks, err := storage.New(src).LinksForMedia(mediaID)
+	require.NoError(t, err)
+	require.Len(t, srcLinks, 1)
+
+	out := filepath.Join(t.TempDir(), "b.tar.gz")
+	backupTo(t, out)
+
+	// Restore into a fresh home — nothing carries over except the archive.
+	dst := filepath.Join(t.TempDir(), ".lucid")
+	t.Setenv("LUCID_HOME", dst)
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "restore", "--in", out)
+	require.NoError(t, err)
+
+	// The binary survives, byte-for-byte, reachable by its media id.
+	rec, found, err := storage.New(dst).ReadMediaByID(mediaID)
+	require.NoError(t, err)
+	require.True(t, found, "the media sidecar restored")
+	got, err := os.ReadFile(rec.StoredPath)
+	require.NoError(t, err)
+	assert.Equal(t, body, got, "the restored binary is byte-identical")
+
+	// The folded link survives and still points at the same subject.
+	restored, err := storage.New(dst).LinksForMedia(mediaID)
+	require.NoError(t, err)
+	require.Len(t, restored, 1, "the folded link restored")
+	assert.Equal(t, "day", restored[0].Subject.Kind)
+	assert.Equal(t, "2020-01-01", restored[0].Subject.Key)
 }
 
 // TestRestoreCmd_PositionalPath: the archive may be passed positionally.

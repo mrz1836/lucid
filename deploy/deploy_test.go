@@ -256,12 +256,12 @@ func TestRender_ExecuteError(t *testing.T) {
 // one exclusion (engine/status.json).
 func TestBackupManifest_IsTheADR0002Set(t *testing.T) {
 	m := BackupManifest()
-	require.Len(t, m, 5)
+	require.Len(t, m, 7)
 	paths := make([]string, len(m))
 	for i, e := range m {
 		paths[i] = e.Path
 	}
-	assert.Equal(t, []string{"raw", "observations", "registries", "engine", "projections/exports.log"}, paths)
+	assert.Equal(t, []string{"raw", "media", "observations", "registries", "links", "engine", "projections/exports.log"}, paths)
 
 	// engine/ is the only entry with an exclusion, and it is status.json.
 	for _, e := range m {

@@ -37,10 +37,17 @@ func newBackupCmd() *cobra.Command {
 		Use:   "backup [--out <file>]",
 		Short: "Write the must-keep Ledger trees to a single .tar.gz archive",
 		Long: `backup writes the must-keep Ledger set — the ADR-0002 backup manifest
-that exists nowhere else: raw/, observations/, registries/, engine/ (minus its
-derived status.json), and projections/exports.log — to one gzip-compressed tar
-archive. Rebuildable trees and the reconstructable indexes (processed/, insights/,
-reflections/, engine/status.json, people/, sessions/, lucid.json) are omitted.
+that exists nowhere else: raw/, media/, observations/, registries/, links/,
+engine/ (minus its derived status.json), and projections/exports.log — to one
+gzip-compressed tar archive. Rebuildable trees and the reconstructable indexes
+(processed/, insights/, reflections/, engine/status.json, people/, sessions/,
+lucid.json) are omitted. Everything primary is included — there is no opt-out flag.
+
+Covering media/ and links/ means a restore yields a coherent Ledger: the
+association ledger and the binaries its links point at survive together. It also
+has an honest cost — media/ holds already-compressed formats (photos, scanned
+PDFs), so the gzip stream shrinks them very little and archives are materially
+larger than a metadata-only backup.
 
 It reads ~/.lucid/ and writes one archive; it makes no network call and never
 mutates the Ledger. The destination must be outside ~/.lucid/ (a backup is never
