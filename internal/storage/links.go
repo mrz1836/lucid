@@ -407,3 +407,40 @@ func sortLinkViews(views []LinkView) {
 		)
 	})
 }
+
+// LinkedMedia pairs one stored media record with the live link that points at
+// it, so a subject surface gets the caption, the stored path, and when/why it
+// was linked in one value — no second lookup, and no chance of rendering a link
+// whose media it never read. It is the shape the router's SubjectMedia seam
+// returns.
+type LinkedMedia struct {
+	// Media is the sidecar record of the linked attachment, with StoredPath set.
+	Media MediaRecord
+	// Link is the live association that names why this media is here.
+	Link LinkView
+}
+
+// LinkedMediaForSubject folds one subject's live links and pairs each with its
+// media record, preserving [Adapter.LinksForSubject]'s byte-stable order. A link
+// whose media sidecar has since disappeared — a hand-deleted binary — is skipped
+// and counted (the returned skipped count), never an error: the same tolerance
+// [Adapter.readObsFile] applies to a malformed line, so a dangling link degrades
+// one row of a surface rather than breaking it. It is a pure read.
+func (a *Adapter) LinkedMediaForSubject(kind, key string) (out []LinkedMedia, skipped int, err error) {
+	views, err := a.LinksForSubject(kind, key)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, v := range views {
+		rec, found, rerr := a.ReadMediaByID(v.MediaID)
+		if rerr != nil {
+			return nil, 0, rerr
+		}
+		if !found {
+			skipped++ // the media binary is gone; skip this link, do not fail the read
+			continue
+		}
+		out = append(out, LinkedMedia{Media: rec, Link: v})
+	}
+	return out, skipped, nil
+}
