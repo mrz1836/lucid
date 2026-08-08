@@ -66,15 +66,29 @@ type StormEvent struct {
 	Through string `json:"through,omitempty"`
 }
 
+// StormVersion is the storm.json schema version this binary stamps on every
+// append. Like AnchorVersion it is a signal, not a gate: reads are never
+// version-checked, so a file written before episodes existed reads exactly
+// as it always did, and an older binary reading a version 1 file ignores the
+// episodes[] and version fields entirely.
+const StormVersion = 1
+
 // StormHistory is the parsed storm.json (engine-module.md §storm.json). The
 // derived status reads it to decide whether a storm stands and, if so,
 // through what date; the day records carry the per-day storm stamp used for
 // budget and breach math.
 type StormHistory struct {
+	Version      int           `json:"version,omitempty"`
 	Clauses      []string      `json:"clauses"`
 	Windows      []StormWindow `json:"windows"`
 	DurationDays int           `json:"duration_days"`
 	History      []StormEvent  `json:"history"`
+	// Episodes indexes the runs in History by id. It is a sibling of the
+	// history, never part of it: StormStanding decides from History's last
+	// element (as do pendingDeclaredAt, standingThrough, and stormStart), so
+	// an appended history record would move the derived status. Every existing
+	// consumer ignores this field, so adding it changes no derived value.
+	Episodes []StormEpisode `json:"episodes,omitempty"`
 }
 
 // StormStanding reports whether a storm stands as of asOf and, if so, the
