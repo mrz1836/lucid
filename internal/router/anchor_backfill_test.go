@@ -46,7 +46,7 @@ func TestBackfillAnchorIDs_IsIdempotent(t *testing.T) {
 	require.Len(t, first.Planned, 2, "both pre-id anchors are adopted")
 	for _, rec := range first.Planned {
 		require.NotEmpty(t, rec.ID, "every adoption carries a minted id")
-		assert.True(t, len(rec.Adopts) > 0, "every adoption names the legacy identity it takes over")
+		assert.NotEmpty(t, rec.Adopts, "every adoption names the legacy identity it takes over")
 	}
 	assert.Len(t, engine.LatestAnchors(readAnchorLog(t, a)), 2, "no anchor forks")
 

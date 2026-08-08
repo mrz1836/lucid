@@ -46,7 +46,7 @@ func PlanAnchorAdoptions(log AnchorLog, now time.Time) []Anchor {
 	working := AnchorLog{Version: log.Version, History: slices.Clone(log.History)}
 	adoptedAt := now.Format(time.RFC3339)
 
-	var planned []Anchor
+	planned := make([]Anchor, 0, len(pending))
 	for _, w := range pending {
 		rec := Anchor{
 			ID:         NextAnchorID(working, now),

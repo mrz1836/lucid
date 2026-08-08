@@ -40,10 +40,14 @@ func sortedKeys(m map[string]any) []string {
 	return slices.Sorted(maps.Keys(m))
 }
 
+// legacyAnchorDate is the fixed backdated civil date every seeded pre-id anchor
+// carries; the tests vary the label and note, never the date.
+const legacyAnchorDate = "2026-02-01"
+
 // seedLegacyAnchor appends a record in the pre-id shape — no id, no state —
 // directly through storage, so a test can exercise the read-time synthetic
 // identity on data this binary never wrote.
-func seedLegacyAnchor(t *testing.T, home, label, date, note string) {
+func seedLegacyAnchor(t *testing.T, home, label, note string) {
 	t.Helper()
 	st := storage.New(home)
 	_, err := st.Scaffold()
@@ -51,7 +55,7 @@ func seedLegacyAnchor(t *testing.T, home, label, date, note string) {
 	require.NoError(t, st.ScaffoldEngine())
 	require.NoError(t, st.AppendAnchor(engine.Anchor{
 		Label:      label,
-		Date:       date,
+		Date:       legacyAnchorDate,
 		Note:       note,
 		RecordedAt: afternoon().Format(time.RFC3339),
 	}))
@@ -116,7 +120,7 @@ func TestAnchorAdd_CLI_JSONWithNote(t *testing.T) {
 func TestAnchorAdd_CLI_JSON_LegacyID(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-30", "2026-02-01", "")
+	seedLegacyAnchor(t, home, "gate-30", "")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "add", "gate-30", "2026-02-02", "--json")
 	require.NoError(t, err)
@@ -474,7 +478,7 @@ func TestAnchorRename_CLI_JSON(t *testing.T) {
 func TestAnchorRename_CLI_AdoptsLegacyAnchor(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-30", "2026-02-01", "first gate")
+	seedLegacyAnchor(t, home, "gate-30", "first gate")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "rename", "gate-30", "gate-thirty")
 	require.NoError(t, err)
@@ -610,7 +614,7 @@ func TestAnchorRename_CLI_BootError(t *testing.T) {
 func TestAnchorBackfillIDs_CLI_DryRunWritesNothing(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-a", "2026-02-01", "")
+	seedLegacyAnchor(t, home, "gate-a", "")
 
 	before, err := os.ReadFile(filepath.Join(home, "engine", "anchors.json"))
 	require.NoError(t, err)
@@ -633,7 +637,7 @@ func TestAnchorBackfillIDs_CLI_DryRunWritesNothing(t *testing.T) {
 func TestAnchorBackfillIDs_CLI_JSON(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-a", "2026-02-01", "first gate")
+	seedLegacyAnchor(t, home, "gate-a", "first gate")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids", "--json")
 	require.NoError(t, err)
@@ -662,7 +666,7 @@ func TestAnchorBackfillIDs_CLI_JSON(t *testing.T) {
 func TestAnchorBackfillIDs_CLI_SecondRunReportsNothing(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-a", "2026-02-01", "")
+	seedLegacyAnchor(t, home, "gate-a", "")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids")
 	require.NoError(t, err)
@@ -701,7 +705,7 @@ func TestAnchorBackfillIDs_CLI_BootError(t *testing.T) {
 func TestAnchorSunset_CLI_ReadErrorIsNotARejection(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-30", "2026-02-01", "")
+	seedLegacyAnchor(t, home, "gate-30", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "engine", "anchors.json"), []byte("not json"), 0o600))
 
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "sunset", "gate-30")

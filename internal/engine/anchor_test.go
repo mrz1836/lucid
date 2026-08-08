@@ -229,7 +229,7 @@ func TestLatestAnchors_LastAdoptionWins(t *testing.T) {
 	}}
 	got := LatestAnchors(log)
 
-	var ids []string
+	ids := make([]string, 0, len(got))
 	for _, a := range got {
 		assert.NotEqual(t, "legacy:gate-a", AnchorIdentity(a), "the legacy identity never survives the fold")
 		ids = append(ids, AnchorIdentity(a))
