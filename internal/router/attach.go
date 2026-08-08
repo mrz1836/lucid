@@ -36,6 +36,11 @@ type AttachRequest struct {
 	Source    string
 	Harness   string
 	ChannelID string
+	// Subjects are the repeatable --to <kind>:<key> tokens the capture links
+	// to at the moment it lands, so a photo can name what it is about without a
+	// second command. Empty leaves the attachment linked to nothing but its
+	// logical day, exactly as before this flag existed.
+	Subjects []string
 }
 
 // AttachResult reports what an attach wrote and the acknowledgement to show
@@ -49,6 +54,10 @@ type AttachResult struct {
 	RawID      string
 	Caption    string
 	Ack        string
+	// Linked is one entry per subject the capture was linked to, in --to order
+	// (empty when no --to was given). Each is a real append — a fresh capture
+	// has no live links to no-op against.
+	Linked []LinkApplied
 }
 
 // Attach executes the `lucid attach` command: it copies req.Path into the
@@ -90,6 +99,15 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 		return AttachResult{}, err
 	}
 	day := when.LogicalDate
+
+	// Validate every --to subject before the media copy lands: a malformed or
+	// unresolvable subject must leave nothing on disk (error-states.md §St-1),
+	// the same up-front rule source/harness/day already follow. The links
+	// themselves are appended after the media exists, because each event
+	// references the stored media id.
+	if _, err = r.resolveSubjects(req.Subjects); err != nil {
+		return AttachResult{}, fmt.Errorf("invalid --to subject; nothing was saved: %w", err)
+	}
 
 	// The sidecar links to the raw entry emitted alongside it; the raw id is
 	// derived from now (minute precision), so it is known before the media is
@@ -139,13 +157,34 @@ func (r *Router) Attach(req AttachRequest) (AttachResult, error) {
 		return AttachResult{}, fmt.Errorf("could not write the session record for %s: %w", res.RawID, err)
 	}
 
+	// The media exists now, so the links can reference it. Delegate to the same
+	// Router.Link path the verbs use, so the link semantics live in exactly one
+	// place. The subjects were already validated above, so this append fails
+	// only on I/O — the same class of after-media failure the raw/session writes
+	// already tolerate.
+	var linked []LinkApplied
+	if len(req.Subjects) > 0 {
+		linkRes, lerr := r.Link(LinkRequest{
+			Media:    rec.ID,
+			Subjects: req.Subjects,
+			Op:       storage.LinkOpLink,
+			Now:      now,
+			Source:   source,
+		})
+		if lerr != nil {
+			return AttachResult{}, fmt.Errorf("stored the media but could not link it: %w", lerr)
+		}
+		linked = linkRes.Applied
+	}
+
 	return AttachResult{
 		StoredPath: rec.StoredPath,
 		SHA256:     rec.SHA256,
 		Day:        day,
 		RawID:      res.RawID,
 		Caption:    req.Caption,
-		Ack:        attachAck(relPath, day, rec.SHA256, res.RawID),
+		Ack:        attachAck(relPath, day, rec.SHA256, res.RawID, linked),
+		Linked:     linked,
 	}, nil
 }
 
@@ -239,10 +278,19 @@ func attachBody(relPath, caption string) string {
 
 // attachAck builds the user-facing acknowledgement, emitted only after the
 // writes land (provenance over magic): it names the stored path, a short
-// sha256, the logical day, and the linked raw id.
-func attachAck(relPath, day, sha, rawID string) string {
-	return fmt.Sprintf("Attached %s for %s (sha256 %s) — logged as `%s`.",
+// sha256, the logical day, and the linked raw id — and, when the capture named
+// subjects with --to, what it was linked to.
+func attachAck(relPath, day, sha, rawID string, linked []LinkApplied) string {
+	ack := fmt.Sprintf("Attached %s for %s (sha256 %s) — logged as `%s`.",
 		relPath, day, shortSHA(sha), rawID)
+	if len(linked) == 0 {
+		return ack
+	}
+	refs := make([]string, len(linked))
+	for i, a := range linked {
+		refs[i] = a.Kind + ":" + a.Key
+	}
+	return ack + " Linked to " + strings.Join(refs, ", ") + "."
 }
 
 // shortSHA returns a legible prefix of a sha256 hex digest for the ack.
