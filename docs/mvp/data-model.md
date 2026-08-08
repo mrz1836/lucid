@@ -533,7 +533,7 @@ is added, corrected, or removed.
 
 ### Layout
 
-A **single** append-only log — no sharding:
+A **single** append-only log at `links/links.jsonl` — no sharding:
 
 ```
 ~/.lucid/links/
