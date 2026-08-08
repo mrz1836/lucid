@@ -440,3 +440,109 @@ func anchorRenameAck(from string, a engine.Anchor) string {
 func anchorAdoptedRenameAck(from string, a engine.Anchor) string {
 	return anchorRenameAck(from, a) + " The old name is retired and appears in anchors_sunset."
 }
+
+// BackfillAnchorIDsRequest is one `lucid anchor backfill-ids` intent: give every
+// anchor recorded before ids existed a written, durable id by appending an
+// adoption record for each. Now stamps every adoption's AdoptedAt; DryRun plans
+// the records without writing them.
+type BackfillAnchorIDsRequest struct {
+	Now    time.Time
+	DryRun bool
+}
+
+// BackfillAnchorIDsResult reports the adoption records the backfill planned,
+// whether they were written, and the inventory-only ack. Planned is in append
+// order and is empty when every anchor already carries an id; Written is false
+// on that no-op and on a dry run.
+type BackfillAnchorIDsResult struct {
+	Planned []engine.Anchor
+	Written bool
+	Ack     string
+}
+
+// BackfillAnchorIDs executes `lucid anchor backfill-ids` (engine-module.md
+// §anchors.json): give every pre-id anchor a written id by *appending* an
+// adoption record for each, never by rewriting a stored one. [engine.PlanAnchorAdoptions]
+// mints the records — a fresh id, the legacy:<label> identity it takes over,
+// and the adopted record's label/date/note/state/recorded_at copied verbatim —
+// and [engine.LatestAnchors]' remap pre-pass then folds each pre-id record onto
+// its minted id, so the projected surface is unchanged except for the published
+// id (legacy:<label> → the minted id).
+//
+// The plan is written through a single [Adapter.AppendAnchors] call, the same
+// one-read-one-write seam renameAdoption uses: either every adoption lands or
+// none does. It is deliberately not a loop of AppendAnchor — a half-applied
+// backfill would leave some anchors folded onto minted ids and others not, and
+// a re-run would then plan against a half-migrated fold. Because the planner is
+// idempotent, a re-run of a fully-backfilled log plans nothing and writes
+// nothing, so this command is safe to run more than once. It is explicit and
+// never automatic (no write happens on any path but this verb): a silent write
+// to primary testimony is exactly what this store does not do.
+func (r *Router) BackfillAnchorIDs(req BackfillAnchorIDsRequest) (BackfillAnchorIDsResult, error) {
+	now := whenOr(req.Now)
+
+	// Scaffold before reading: a never-scaffolded tree has no anchors.json.
+	if err := r.prepareEngine(); err != nil {
+		return BackfillAnchorIDsResult{}, err
+	}
+	log, err := r.store.ReadAnchors()
+	if err != nil {
+		return BackfillAnchorIDsResult{}, err
+	}
+
+	planned := engine.PlanAnchorAdoptions(log, now)
+	if len(planned) == 0 {
+		return BackfillAnchorIDsResult{Ack: anchorBackfillNothingAck()}, nil
+	}
+	if req.DryRun {
+		return BackfillAnchorIDsResult{Planned: planned, Ack: anchorBackfillDryRunAck(planned)}, nil
+	}
+
+	if err := r.store.AppendAnchors(planned...); err != nil {
+		return BackfillAnchorIDsResult{}, fmt.Errorf("could not back-fill anchor ids; nothing was saved: %w", err)
+	}
+	return BackfillAnchorIDsResult{Planned: planned, Written: true, Ack: anchorBackfillWrittenAck(planned)}, nil
+}
+
+// adoptedLabels lists the labels the plan adopts, in append order, so an ack can
+// name exactly which anchors it touched.
+func adoptedLabels(planned []engine.Anchor) []string {
+	out := make([]string, len(planned))
+	for i, a := range planned {
+		out[i] = a.Label
+	}
+	return out
+}
+
+// anchorCountPhrase renders "1 anchor" / "N anchors" so an ack reads naturally.
+func anchorCountPhrase(n int) string {
+	if n == 1 {
+		return "1 anchor"
+	}
+	return fmt.Sprintf("%d anchors", n)
+}
+
+// anchorBackfillNothingAck reports a no-op backfill: every anchor already
+// carries a written id, so nothing was appended.
+func anchorBackfillNothingAck() string {
+	return "Every anchor already carries an id; nothing was appended."
+}
+
+// anchorBackfillWrittenAck names how many anchors were adopted and which, so the
+// one-time write is auditable from the ack alone, and states plainly that no
+// stored record was rewritten.
+func anchorBackfillWrittenAck(planned []engine.Anchor) string {
+	return fmt.Sprintf(
+		"Backfilled %s: %s. Adoption records were appended; no record was rewritten.",
+		anchorCountPhrase(len(planned)), strings.Join(adoptedLabels(planned), ", "),
+	)
+}
+
+// anchorBackfillDryRunAck names what a real run would append and says explicitly
+// that nothing was written, so a dry run is never mistaken for the real one.
+func anchorBackfillDryRunAck(planned []engine.Anchor) string {
+	return fmt.Sprintf(
+		"Would backfill %s: %s. Dry run — nothing was written.",
+		anchorCountPhrase(len(planned)), strings.Join(adoptedLabels(planned), ", "),
+	)
+}

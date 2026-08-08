@@ -142,16 +142,16 @@ func TestNewRootCmd_FreshEachCall(t *testing.T) {
 	assert.NotNil(t, b.PersistentFlags().Lookup(jsonFlag))
 }
 
-// TestAnchorCmd_HasThreeSubcommands guards the anchor command tree: a dropped
+// TestAnchorCmd_HasFourSubcommands guards the anchor command tree: a dropped
 // registration would ship a missing verb silently, since the group itself still
 // renders. Mirrors TestSpine_AllVerbsRegistered one level down.
-func TestAnchorCmd_HasThreeSubcommands(t *testing.T) {
+func TestAnchorCmd_HasFourSubcommands(t *testing.T) {
 	got := map[string]bool{}
 	for _, c := range newAnchorCmd().Commands() {
 		got[c.Name()] = true
 	}
-	for _, want := range []string{"add", "sunset", "rename"} {
+	for _, want := range []string{"add", "sunset", "rename", "backfill-ids"} {
 		assert.Truef(t, got[want], "anchor group missing %q", want)
 	}
-	assert.Len(t, got, 3, "anchor exposes exactly add, sunset, and rename")
+	assert.Len(t, got, 4, "anchor exposes exactly add, sunset, rename, and backfill-ids")
 }
