@@ -40,10 +40,14 @@ func sortedKeys(m map[string]any) []string {
 	return slices.Sorted(maps.Keys(m))
 }
 
+// legacyAnchorDate is the fixed backdated civil date every seeded pre-id anchor
+// carries; the tests vary the label and note, never the date.
+const legacyAnchorDate = "2026-02-01"
+
 // seedLegacyAnchor appends a record in the pre-id shape — no id, no state —
 // directly through storage, so a test can exercise the read-time synthetic
 // identity on data this binary never wrote.
-func seedLegacyAnchor(t *testing.T, home, label, date, note string) {
+func seedLegacyAnchor(t *testing.T, home, label, note string) {
 	t.Helper()
 	st := storage.New(home)
 	_, err := st.Scaffold()
@@ -51,7 +55,7 @@ func seedLegacyAnchor(t *testing.T, home, label, date, note string) {
 	require.NoError(t, st.ScaffoldEngine())
 	require.NoError(t, st.AppendAnchor(engine.Anchor{
 		Label:      label,
-		Date:       date,
+		Date:       legacyAnchorDate,
 		Note:       note,
 		RecordedAt: afternoon().Format(time.RFC3339),
 	}))
@@ -116,7 +120,7 @@ func TestAnchorAdd_CLI_JSONWithNote(t *testing.T) {
 func TestAnchorAdd_CLI_JSON_LegacyID(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-30", "2026-02-01", "")
+	seedLegacyAnchor(t, home, "gate-30", "")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "add", "gate-30", "2026-02-02", "--json")
 	require.NoError(t, err)
@@ -474,7 +478,7 @@ func TestAnchorRename_CLI_JSON(t *testing.T) {
 func TestAnchorRename_CLI_AdoptsLegacyAnchor(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-30", "2026-02-01", "first gate")
+	seedLegacyAnchor(t, home, "gate-30", "first gate")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "rename", "gate-30", "gate-thirty")
 	require.NoError(t, err)
@@ -605,6 +609,95 @@ func TestAnchorRename_CLI_BootError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestAnchorBackfillIDs_CLI_DryRunWritesNothing: a dry run prints what it would
+// append, exits 0, and leaves anchors.json byte-identical.
+func TestAnchorBackfillIDs_CLI_DryRunWritesNothing(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedLegacyAnchor(t, home, "gate-a", "")
+
+	before, err := os.ReadFile(filepath.Join(home, "engine", "anchors.json"))
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids", "--dry-run")
+	require.NoError(t, err)
+	assert.Contains(t, out, "gate-a")
+	assert.Contains(t, out, "nothing was written")
+
+	after, err := os.ReadFile(filepath.Join(home, "engine", "anchors.json"))
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a dry run must not write")
+
+	assert.Len(t, readAnchorLog(t, home).History, 1, "the store still holds only the pre-id record")
+}
+
+// TestAnchorBackfillIDs_CLI_JSON is the shape guard on `anchor backfill-ids
+// --json`: the planned adoptions are projected (so the minted id is published,
+// not an empty one) and `written` reports the real write happened.
+func TestAnchorBackfillIDs_CLI_JSON(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedLegacyAnchor(t, home, "gate-a", "first gate")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids", "--json")
+	require.NoError(t, err)
+
+	var got struct {
+		Planned []map[string]any `json:"planned"`
+		Written bool             `json:"written"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.True(t, got.Written)
+	require.Len(t, got.Planned, 1)
+	assert.Equal(t, []string{"date", "id", "label", "note", "recorded_at"}, sortedKeys(got.Planned[0]))
+	assert.Equal(t, "gate-a", got.Planned[0]["label"])
+	assert.Equal(t, "anchor_2026_07_05_a", got.Planned[0]["id"], "a fresh per-day slot id is minted")
+
+	// The adoption landed on disk and metrics now publishes the minted id.
+	log := readAnchorLog(t, home)
+	require.Len(t, log.History, 2, "adoption appends one record and rewrites none")
+	assert.Empty(t, log.History[0].ID, "the pre-id record is left untouched")
+	assert.Equal(t, "anchor_2026_07_05_a", log.History[1].ID)
+	assert.Equal(t, "legacy:gate-a", log.History[1].Adopts)
+}
+
+// TestAnchorBackfillIDs_CLI_SecondRunReportsNothing: the backfill is idempotent,
+// so a second run appends nothing and says so.
+func TestAnchorBackfillIDs_CLI_SecondRunReportsNothing(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedLegacyAnchor(t, home, "gate-a", "")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Backfilled 1 anchor: gate-a")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Every anchor already carries an id")
+
+	assert.Len(t, readAnchorLog(t, home).History, 2, "a re-run must not append")
+}
+
+// TestAnchorBackfillIDs_CLI_EmptyStoreSaysNothingToDo: a store with no anchors
+// exits 0 with the no-op ack rather than an error.
+func TestAnchorBackfillIDs_CLI_EmptyStoreSaysNothingToDo(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Every anchor already carries an id")
+}
+
+// TestAnchorBackfillIDs_CLI_BootError: a Ledger that cannot be scaffolded
+// surfaces the boot error rather than a false success.
+func TestAnchorBackfillIDs_CLI_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "backfill-ids")
+	require.Error(t, err)
+}
+
 // TestAnchorSunset_CLI_ReadErrorIsNotARejection: an unreadable store is a real
 // failure, not a deterministic refusal. It must surface as itself rather than
 // being flattened into the "nothing was recorded" exit, or a caller would read
@@ -612,7 +705,7 @@ func TestAnchorRename_CLI_BootError(t *testing.T) {
 func TestAnchorSunset_CLI_ReadErrorIsNotARejection(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
-	seedLegacyAnchor(t, home, "gate-30", "2026-02-01", "")
+	seedLegacyAnchor(t, home, "gate-30", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "engine", "anchors.json"), []byte("not json"), 0o600))
 
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "sunset", "gate-30")

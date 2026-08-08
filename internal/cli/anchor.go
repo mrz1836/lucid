@@ -54,7 +54,91 @@ wins.`,
 	parent.AddCommand(newAnchorAddCmd())
 	parent.AddCommand(newAnchorSunsetCmd())
 	parent.AddCommand(newAnchorRenameCmd())
+	parent.AddCommand(newAnchorBackfillIDsCmd())
 	return parent
+}
+
+// anchorBackfillFlagDryRun prints exactly what the backfill would append without
+// writing anything, so an operator can preview the one-time write first.
+const anchorBackfillFlagDryRun = "dry-run"
+
+// newAnchorBackfillIDsCmd builds the `backfill-ids` child: give every anchor
+// recorded before ids existed a written, durable id by appending an adoption
+// record for each. It is append-only — no stored record is rewritten — and
+// explicit, never automatic. Human-first prose ack by default; the planned
+// records plus whether they were written as JSON under --json for scripts
+// (ADR-0007). --dry-run prints exactly what would be appended and writes
+// nothing.
+func newAnchorBackfillIDsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backfill-ids",
+		Short: "Give every pre-id anchor a written id by appending adoption records",
+		Long: `backfill-ids gives every anchor recorded before ids existed a written,
+durable id. It is append-only: no stored record is ever rewritten. For each
+pre-id anchor it appends one adoption record carrying a freshly minted id and
+the legacy:<label> identity it takes over; the fold then reads the pre-id
+record and its adoption as one anchor, so labels, dates, notes, states, and the
+retirement date all stay exactly as they were — only the published id changes,
+from legacy:<label> to the minted id.
+
+This command is explicit and never automatic: a silent write to primary
+testimony on upgrade is exactly what lucid does not do. It is safe to re-run —
+a log whose anchors all carry ids appends nothing. Add --dry-run to print what
+would be appended without writing anything.
+
+After a real run, ` + "`lucid metrics --json`" + ` publishes the minted id in place of
+legacy:<label> for the adopted anchors. That synthetic address was read-time
+only and never durable, so the change is the intended outcome, not a regression.`,
+		Args: cobra.NoArgs,
+		Example: `  # Preview the one-time backfill without writing.
+  lucid anchor backfill-ids --dry-run
+
+  # Append the adoption records.
+  lucid anchor backfill-ids
+
+  # Machine-readable output for a harness.
+  lucid anchor backfill-ids --json`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			dryRun, _ := cmd.Flags().GetBool(anchorBackfillFlagDryRun)
+			res, err := r.BackfillAnchorIDs(router.BackfillAnchorIDsRequest{
+				Now:    clockNow(),
+				DryRun: dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				return writeJSON(cmd.OutOrStdout(), anchorBackfillJSON(res))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+	cmd.Flags().Bool(anchorBackfillFlagDryRun, false, "Print exactly what would be appended without writing anything")
+	return cmd
+}
+
+// anchorBackfillView is the `anchor backfill-ids --json` surface: the adoption
+// records that would be (or were) appended, each projected through the same
+// [engine.AnchorRecord] every anchor surface uses so the minted id is published
+// rather than an empty one, plus whether the write happened. Planned is a
+// non-nil empty slice on a no-op, so the shape is stable ({"planned":[],...}).
+type anchorBackfillView struct {
+	Planned []engine.AnchorRecord `json:"planned"`
+	Written bool                  `json:"written"`
+}
+
+// anchorBackfillJSON projects a backfill result into its machine surface.
+func anchorBackfillJSON(res router.BackfillAnchorIDsResult) anchorBackfillView {
+	planned := make([]engine.AnchorRecord, len(res.Planned))
+	for i, a := range res.Planned {
+		planned[i] = engine.ProjectAnchor(a)
+	}
+	return anchorBackfillView{Planned: planned, Written: res.Written}
 }
 
 // newAnchorAddCmd builds the `add` child: record one labeled milestone with an

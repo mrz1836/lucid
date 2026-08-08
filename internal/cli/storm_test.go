@@ -183,3 +183,129 @@ func TestStormCLI_UnreadableDayJSON(t *testing.T) {
 	require.ErrorIs(t, err, errStormRejected)
 	assert.Contains(t, out, "\"rejected\": true")
 }
+
+// seedStormHistory writes storm.json with the given history events and no
+// episodes index — the shape a storm.json written before episodes existed has —
+// so the backfill command has runs to index. Every label is synthetic.
+func seedStormHistory(t *testing.T, home string, events ...engine.StormEvent) {
+	t.Helper()
+	dir := filepath.Join(home, "engine")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	h := engine.StormHistory{
+		Clauses:      []string{},
+		Windows:      []engine.StormWindow{},
+		DurationDays: engine.StormDurationDefault,
+		History:      events,
+	}
+	b, err := json.MarshalIndent(h, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "storm.json"), b, 0o600))
+}
+
+// stormFileBytes reads the raw storm.json bytes so a CLI test can assert a dry
+// run wrote nothing.
+func stormFileBytes(t *testing.T, home string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(home, "engine", "storm.json"))
+	require.NoError(t, err)
+	return b
+}
+
+// TestStormCmd_PositionalFormsStillDispatch is the A2 regression guard: with the
+// `backfill-episodes` subcommand registered, every positional `storm` form still
+// reaches StormCommand rather than being read as an unknown subcommand, and a
+// bare `storm` still fails the MinimumNArgs(1) usage check.
+func TestStormCmd_PositionalFormsStillDispatch(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedStormClauses(t, home, "clause-a")
+
+	// A registered clause label reaches the declare path.
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "clause-a")
+	require.NoError(t, err)
+	assert.Contains(t, out, "storm declared (clause-a)")
+
+	// `unwritten` reaches the declare path (always declarable).
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "storm", "unwritten")
+	require.NoError(t, err)
+	assert.Contains(t, out, "storm declared (unwritten)")
+
+	// `end` reaches the end path — nothing stands, so it is the fixed rejection,
+	// not a cobra "unknown command for storm".
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "end")
+	require.ErrorIs(t, err, errStormRejected)
+	assert.Contains(t, errOut, "No standing storm to end")
+
+	// A bare `storm` is still the MinimumNArgs(1) usage error (exit 2).
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "storm")
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+}
+
+// TestStormCLI_BackfillEpisodes_DryRunWritesNothing: a dry run prints what it
+// would append, exits 0, and leaves storm.json byte-identical.
+func TestStormCLI_BackfillEpisodes_DryRunWritesNothing(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedStormHistory(t, home,
+		engine.StormEvent{At: "2026-07-01T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+	)
+
+	before := stormFileBytes(t, home)
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "backfill-episodes", "--dry-run")
+	require.NoError(t, err)
+	assert.Contains(t, out, "storm_2026_07_01_a")
+	assert.Contains(t, out, "nothing was written")
+	assert.Equal(t, before, stormFileBytes(t, home), "a dry run must not write")
+}
+
+// TestStormCLI_BackfillEpisodes_JSON is the shape guard on `storm
+// backfill-episodes --json`: the planned episodes are published with their
+// minted ids and `written` reports the real write happened.
+func TestStormCLI_BackfillEpisodes_JSON(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedStormHistory(t, home,
+		engine.StormEvent{At: "2026-07-01T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+	)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "backfill-episodes", "--json")
+	require.NoError(t, err)
+
+	var got struct {
+		Planned []map[string]any `json:"planned"`
+		Written bool             `json:"written"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	assert.True(t, got.Written)
+	require.Len(t, got.Planned, 1)
+	assert.Equal(t, "storm_2026_07_01_a", got.Planned[0]["id"])
+	assert.Equal(t, "2026-07-01T08:00:00Z", got.Planned[0]["opener_at"])
+}
+
+// TestStormCLI_BackfillEpisodes_SecondRunReportsNothing: the backfill is
+// idempotent, so a second run appends nothing and says so.
+func TestStormCLI_BackfillEpisodes_SecondRunReportsNothing(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	seedStormHistory(t, home,
+		engine.StormEvent{At: "2026-07-01T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+	)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "backfill-episodes")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Indexed 1 storm episode")
+	assert.Contains(t, out, "storm_2026_07_01_a")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "storm", "backfill-episodes")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Every storm run already carries an episode id")
+}
+
+// TestStormCLI_BackfillEpisodes_BootError: a Ledger that cannot be scaffolded
+// surfaces the boot error rather than a false success.
+func TestStormCLI_BackfillEpisodes_BootError(t *testing.T) {
+	unscaffoldableHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "storm", "backfill-episodes")
+	require.Error(t, err)
+}

@@ -178,7 +178,7 @@ lucid log "the summer I moved north" --day 2014
 ### attach
 
 ```
-lucid attach <path> [--caption <text>] [--day <date>]
+lucid attach <path> [--caption <text>] [--day <date>] [--to <kind>:<key>]...
 ```
 
 Attach a file to the Ledger: copy **any binary** — a photo, a scanned PDF, a
@@ -196,11 +196,12 @@ media, so the attachment is discoverable by the day view and the Mirror.
 |------|--------|
 | `--caption <text>` | Optional description, stored verbatim and used to derive the filename slug. Absent on the frictionless "drop it" path. |
 | `--day <date>` | Attribute the media to a prior logical day, on the strict tier and the shared grammar — see [Backdating with --day](#backdating-with---day). `@yesterday` steps back from the current logical day, so before 04:00 it resolves to the day *before* the one a bare capture files under. A day in the future is rejected and nothing is saved. Defaults to the current logical day. |
+| `--to <kind>:<key>` | **Repeatable.** Link the attachment to a subject at capture time, appending the initial link(s) to the [link ledger](#link) in the same flow — so one capture can name several subjects it is about (`--to person:person_a-river --to day:2026-07-10`). The grammar and the linkable kinds are the same as [`link`](#link). Every `--to` is **validated before the media is written**, so a malformed or unresolvable subject writes **no media, no raw entry, and no link**. |
 
 Provenance over magic: the ack lands only *after* the write, naming the stored
-path, the sha256, the logical day, and the linked raw id. `--json` emits
-`{stored_path, sha256, day, raw_id, caption}`. Scaffolds the media store on first
-use.
+path, the sha256, the logical day, the linked raw id, and any subjects linked.
+`--json` emits `{stored_path, sha256, day, raw_id, caption, linked}`. Scaffolds
+the media store (and, when `--to` is given, the link ledger) on first use.
 
 ```sh
 lucid attach ~/Pictures/IMG_4823.jpg --caption "handwritten session notes, page 1"
@@ -208,8 +209,107 @@ lucid attach ./scan.pdf --caption "clinic intake form"
 lucid attach ~/Pictures/whiteboard.png --day @yesterday
 lucid attach ./scan-2.pdf --day "2026-07-01 19:30"
 lucid attach ./box-of-negatives.jpg --day 2014-09
+lucid attach ~/Pictures/trailhead.jpg --to person:person_a-river --to day:2026-07-10
 lucid attach ./artifact.bin --json
 ```
+
+### link
+
+```
+lucid link <media> --to <kind>:<key> [--to <kind>:<key>]... [--json]
+```
+
+Associate a media attachment with **anything it is about** — a person, an injury,
+a specific day, a thread, an anchor — by appending a `link` event to the
+append-only link ledger ([`../mvp/data-model.md`](../mvp/data-model.md) §"Link
+ledger"), `~/.lucid/links/links.jsonl`. Linking is **additive and retroactive**:
+any existing media may be linked to any existing subject at any time, with no
+recency constraint, and one media may carry many subjects. The media binary and
+its sidecar are **never** modified — all of the mutability lives in the log.
+Deterministic, agent-free, no model in the path.
+
+| Argument / flag | Effect |
+|-----------------|--------|
+| `<media>` | The attachment to link — its sidecar `id` (`2026-07-10-handwritten-notes.jpg`), or a stored path, which is reduced to its basename. An unknown media is a clean error; nothing is written. |
+| `--to <kind>:<key>` | **Required, repeatable.** The subject to link, as `<kind>:<key>`. Parsed by splitting on the **first colon only** — a key may itself contain colons, a `kind` may not (`kind` matches `^[a-z][a-z0-9_]*$`). Pass it more than once to link several subjects in one turn; if **any** subject is unresolvable the whole turn is refused and nothing is written. |
+
+**Re-linking is a no-op, not an error.** `link` of a pair that is already live
+prints "already linked", exits `0`, and appends nothing — the verb exists so
+associations can grow over years, so "already there" is an acknowledgement, not a
+failure. `--json` emits `{media_id, applied: [{kind, key, event_id, no_op}]}`;
+the prose ack names each subject linked.
+
+```sh
+lucid link 2026-07-10-handwritten-notes.jpg --to person:person_a-river
+lucid link 2026-07-10-handwritten-notes.jpg --to injury:injury_a-cedar --to day:2026-07-10
+lucid link ~/.lucid/media/2026/07/2026-07-10-handwritten-notes.jpg --to thread:thread_b-pine --json
+```
+
+### unlink
+
+```
+lucid unlink <media> --to <kind>:<key> [--to <kind>:<key>]... [--json]
+```
+
+Remove a current association by appending an `unlink` event. Nothing is
+destroyed — the unlink is an append, and the pair simply folds to *not live*; a
+later `link` of the same pair makes it live again, and the full history stays in
+the log. Same `<media>` and `--to` grammar as [`link`](#link).
+
+**Unlinking a pair that is not live is a no-op**, not an error: it prints a plain
+ack, exits `0`, and appends nothing. `--json` shape and the whole-turn refusal on
+an unresolvable subject match `link`.
+
+```sh
+lucid unlink 2026-07-10-handwritten-notes.jpg --to person:person_a-river
+```
+
+### annotate
+
+```
+lucid annotate <media> --to <kind>:<key> --note <text> [--json]
+```
+
+Attach a free-text **annotation** to a media↔subject association by appending an
+`annotate` event. Annotate is its **own op**: it never implies `link`, folds
+**independently of link/unlink liveness**, and may be applied to a pair that is
+not currently linked (the note is recorded either way). `--note` is required and
+is rejected on `link` / `unlink`, which have no note. Same `<media>` and `--to`
+grammar as [`link`](#link).
+
+```sh
+lucid annotate 2026-07-10-handwritten-notes.jpg --to person:person_a-river --note "page 1 of the session notes"
+```
+
+#### Linkable kinds
+
+`--to` accepts twelve subject kinds at launch. The kind space is **open** — a new
+kind (e.g. `pet`) becomes linkable by registering one resolver, with no change to
+the ledger — but these twelve resolve today, each through its own native key:
+
+| Kind | Key form | Example |
+|------|----------|---------|
+| `person` | `person_<slug>` | `person:person_a-river` |
+| `injury` | registry key | `injury:injury_a-cedar` |
+| `thread` | registry key | `thread:thread_b-pine` |
+| `era` | registry key | `era:era_d-swell` |
+| `place` | registry key | `place:place_c-stone` |
+| `raw` | `raw_YYYY_MM_DD_HH_MM` | `raw:raw_2026_07_10_21_14` |
+| `day` | `YYYY-MM-DD` (not future) | `day:2026-07-10` |
+| `observation` | `obs_YYYY_MM_DD_<seq>` | `observation:obs_2026_07_10_003` |
+| `anchor` | `anchor_YYYY_MM_DD_<slot>` | `anchor:anchor_2026_02_01_a` |
+| `self` | `self_YYYY_MM_DD_<slot>` | `self:self_2026_08_05_a` |
+| `storm` | `storm_YYYY_MM_DD_<slot>` (episode) | `storm:storm_2026_07_14_a` |
+| `memory` | `obs_YYYY_MM_DD_<seq>` (a `memory` observation) | `memory:obs_2026_07_10_005` |
+
+An unknown kind, or a key that names no existing subject, is refused with a
+message that **names the problem** — never a silent write. A kind whose record
+has no **written** id yet — a pre-id `anchor`, or a `storm` run with no minted
+episode — is refused with the remedy command **named**
+([`anchor backfill-ids`](#anchor), [`storm backfill-episodes`](#storm)); a
+synthetic `legacy:<label>` identity is never a valid link key. `memory` resolves
+as an alias over a `memory`-kind observation and refuses an observation whose kind
+is something else.
 
 ### closeout
 
@@ -344,6 +444,7 @@ can never disagree.
 lucid anchor add <label> <date> [note...]
 lucid anchor sunset <label> [reason...]
 lucid anchor rename <label> <new-label>
+lucid anchor backfill-ids [--dry-run] [--json]
 ```
 
 A **milestone anchor** is a recorded date the Engine counts a running "days
@@ -420,6 +521,35 @@ write: a retired stub under the old name appears in `anchors_sunset[]` carrying
 a freshly minted id. That stub is documented behavior, not a caveat — it is how
 the ledger stays honest about a name that is no longer in use, and it is what
 every rename of a pre-id anchor will do.
+
+#### `anchor backfill-ids`
+
+Give every anchor **recorded before ids existed** a real, written
+`anchor_YYYY_MM_DD_<slot>` id — so `anchor:<id>` linking, and any future
+reference, has a durable target instead of the read-time `legacy:<label>`
+identity. It works by **appending, never rewriting**: one *adoption record* per
+legacy anchor, copying that anchor's label, date, note, state, and `recorded_at`
+verbatim and adding the minted id (see
+[`../mvp/engine-module.md`](../mvp/engine-module.md) §`anchors.json`). No stored
+record is edited or removed.
+
+This is an **explicit maintenance command, never automatic** — a silent write to
+primary testimony on upgrade is exactly what Lucid does not do. It is safe to
+re-run: once every legacy anchor is adopted it appends nothing.
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Print exactly what would be appended and write **nothing**. |
+
+`--json` emits `{planned: [<anchor>...], written}`. **One visible consequence,
+called out here rather than discovered later:** after the backfill,
+`lucid metrics --json` publishes the **minted** id for an adopted anchor instead
+of `legacy:<label>` (that synthetic id was read-time-only and never durable).
+
+```sh
+lucid anchor backfill-ids --dry-run
+lucid anchor backfill-ids
+```
 
 #### Errors
 
@@ -664,12 +794,19 @@ lucid backup [--out <file>] [--json]
 Write the **must-keep** Ledger set to a single gzip-compressed tar archive: the
 primary data that exists nowhere else and must survive forever (ADR-0002; the
 same set `scripts/backup.sh` and `deploy.BackupManifest` encode) — `raw/`,
-`observations/`, `registries/`, `engine/` (minus its derived `status.json`), and
-`projections/exports.log`. Rebuildable trees (`processed/`, `insights/`,
-`reflections/`, `engine/status.json`, the rest of `projections/`) and the
-reconstructable indexes (`people/`, `sessions/`, `lucid.json`) are deliberately
-omitted. It reads `~/.lucid/` and writes one archive; it makes no network call
-and never mutates the Ledger.
+`media/`, `observations/`, `registries/`, `links/`, `engine/` (minus its derived
+`status.json`), and `projections/exports.log`. Rebuildable trees (`processed/`,
+`insights/`, `reflections/`, `engine/status.json`, the rest of `projections/`)
+and the reconstructable indexes (`people/`, `sessions/`, `lucid.json`) are
+deliberately omitted. It reads `~/.lucid/` and writes one archive; it makes no
+network call and never mutates the Ledger. **Everything primary is included —
+there is no opt-out flag.**
+
+**A note on size.** `media/` holds the user's attached binaries, and the archive
+is gzip: photos, scanned PDFs, and the like are **already-compressed formats**,
+so gzip shrinks them very little. Covering `media/` therefore makes archives
+**materially larger** than a metadata-only backup — the honest cost of a backup
+that actually restores to a coherent Ledger (links whose binaries still exist).
 
 | Flag | Effect |
 |------|--------|
@@ -697,7 +834,9 @@ wherever you name it (outside `~/.lucid/`); every entry is written back under
 allowlist, so a crafted archive can never plant a file outside the record trees.
 Restore is an **overlay**: it writes and overwrites the archive's files and never
 deletes anything already present (a full replace is out of scope). The archive
-path may be passed with `--in` or positionally.
+path may be passed with `--in` or positionally. Because the backup set now covers
+`media/` and `links/`, a restore yields a **coherent** Ledger — the association
+ledger and the binaries its links point at survive together.
 
 | Flag | Effect |
 |------|--------|
@@ -1210,6 +1349,7 @@ lucid scheduler uninstall                  # bootout + remove the plist (macOS)
 
 ```
 lucid storm <clause-label|unwritten|end> [--day <date>] [--json]
+lucid storm backfill-episodes [--dry-run] [--json]
 ```
 
 Declare or end a **storm** — the pre-committed incapacity state
@@ -1238,6 +1378,33 @@ lucid storm unwritten
 lucid storm end
 lucid storm unwritten --day @yesterday
 lucid storm wrist-flare --json
+```
+
+#### `storm backfill-episodes`
+
+Mint a stable **episode** id for each storm run that predates the episode index —
+so `storm:<id>` linking has a durable target. An episode is one run of the storm
+history (a `declared` / `entered` opener through its terminal event, or a
+still-open trailing run); its identity lives in a new `episodes[]` index in
+`storm.json`, **never** as a new `history[]` event, so `status.json` is provably
+unchanged (see [`../mvp/engine-module.md`](../mvp/engine-module.md)
+§`storm.json`). Like [`anchor backfill-ids`](#anchor) it **appends only**, is
+**idempotent**, and is **never automatic**.
+
+| Flag | Effect |
+|------|--------|
+| `--dry-run` | Print the episode ids that would be minted and write **nothing**. |
+
+`--json` emits `{planned: [<episode>...], written}`.
+
+Because a clause label is an opaque token, a Charter clause could in principle be
+named `backfill-episodes` — the subcommand **shadows** that literal label. Cite
+such a clause by any other registered label; the reserved word is the maintenance
+verb.
+
+```sh
+lucid storm backfill-episodes --dry-run
+lucid storm backfill-episodes
 ```
 
 ### profile

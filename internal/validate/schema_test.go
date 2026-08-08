@@ -21,13 +21,16 @@ type fakeLedger struct {
 	insights      []string
 	reflections   []string
 	people        []string
+	links         []string
 	badProcessed  map[string]bool
 	badInsight    map[string]bool
 	badReflect    map[string]bool
 	badPerson     map[string]bool
+	badLink       map[string]bool
 	redirects     map[string]string
 	listErr       error
 	peopleListErr error
+	linkListErr   error
 	configErr     error
 }
 
@@ -37,11 +40,13 @@ func (f *fakeLedger) ListProcessedIDs() ([]string, error)  { return f.processed,
 func (f *fakeLedger) ListInsightIDs() ([]string, error)    { return f.insights, nil }
 func (f *fakeLedger) ListReflectionIDs() ([]string, error) { return f.reflections, nil }
 func (f *fakeLedger) ListPeopleKeys() ([]string, error)    { return f.people, f.peopleListErr }
+func (f *fakeLedger) ListLinkEventIDs() ([]string, error)  { return f.links, f.linkListErr }
 
 func (f *fakeLedger) ReadProcessedErr(id string) error  { return errIf(f.badProcessed, id) }
 func (f *fakeLedger) ReadInsightErr(id string) error    { return errIf(f.badInsight, id) }
 func (f *fakeLedger) ReadReflectionErr(id string) error { return errIf(f.badReflect, id) }
 func (f *fakeLedger) ReadPersonErr(key string) error    { return errIf(f.badPerson, key) }
+func (f *fakeLedger) ReadLinkEventErr(id string) error  { return errIf(f.badLink, id) }
 
 func (f *fakeLedger) PersonRedirect(key string) (string, error) {
 	if f.badPerson[key] {
@@ -102,6 +107,22 @@ func TestCheckLedgerSchema_BadRecords(t *testing.T) {
 	assert.True(t, paths["processed/p_bad"])
 	assert.True(t, paths["insights/i_bad"])
 	assert.True(t, paths["people/person_bad"])
+}
+
+// TestCheckLedgerSchema_BadLink: a malformed link-ledger line is one finding
+// pathed under links/, addressed by the locator the listing reported, while a
+// well-formed log adds none.
+func TestCheckLedgerSchema_BadLink(t *testing.T) {
+	found, err := CheckLedgerSchema(&fakeLedger{
+		links:   []string{"link_1", "line-2", "link_3"},
+		badLink: map[string]bool{"line-2": true},
+	})
+	require.NoError(t, err)
+	require.Len(t, found, 1)
+	assert.Equal(t, CheckSchema, found[0].Check)
+	assert.Equal(t, SeverityError, found[0].Severity)
+	assert.Equal(t, "links/line-2", found[0].Path)
+	assert.Equal(t, "links", found[0].Rule)
 }
 
 // TestCheckLedgerSchema_ListError: an unreadable listing is a hard error, not

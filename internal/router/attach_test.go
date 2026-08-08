@@ -107,6 +107,90 @@ func TestAttach_StoresMediaAndLinksRawEntry(t *testing.T) {
 	assert.Equal(t, 0, countFiles(t, home, "insights"))
 }
 
+// TestAttach_LinksSubjectsAtCapture: a capture with --to subjects writes the
+// media and appends a link per subject in the same flow (AC-10), and the fold
+// sees each one.
+func TestAttach_LinksSubjectsAtCapture(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	path := writeTempFile(t, "trailhead.jpg", []byte("trailhead photo"))
+
+	res, err := r.Attach(AttachRequest{
+		Path:     path,
+		Now:      fixedNow(),
+		Subjects: []string{"day:2020-01-01", "day:2020-02-02"},
+	})
+	require.NoError(t, err)
+	require.Len(t, res.Linked, 2, "one link applied per --to subject")
+	for _, ap := range res.Linked {
+		assert.False(t, ap.NoOp, "a fresh capture links, never no-ops")
+		assert.NotEmpty(t, ap.EventID)
+	}
+	assert.Contains(t, res.Ack, "Linked to day:2020-01-01, day:2020-02-02.")
+
+	// The media exists and the fold sees both links.
+	recs := mustListMedia(t, a)
+	require.Len(t, recs, 1)
+	views, err := a.LinksForMedia(recs[0].ID)
+	require.NoError(t, err)
+	assert.Len(t, views, 2)
+}
+
+// TestAttach_SingleSubject: one --to links one subject.
+func TestAttach_SingleSubject(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	path := writeTempFile(t, "one.jpg", []byte("one"))
+
+	res, err := r.Attach(AttachRequest{Path: path, Now: fixedNow(), Subjects: []string{"day:2020-01-01"}})
+	require.NoError(t, err)
+	require.Len(t, res.Linked, 1)
+
+	recs := mustListMedia(t, a)
+	require.Len(t, recs, 1)
+	views, err := a.LinksForMedia(recs[0].ID)
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	assert.Equal(t, "day", views[0].Subject.Kind)
+	assert.Equal(t, "2020-01-01", views[0].Subject.Key)
+}
+
+// TestAttach_BareIsUnchanged: an attach with no --to behaves exactly as before —
+// the media lands and nothing is linked.
+func TestAttach_BareIsUnchanged(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	path := writeTempFile(t, "bare.jpg", []byte("bare"))
+
+	res, err := r.Attach(AttachRequest{Path: path, Now: fixedNow()})
+	require.NoError(t, err)
+	assert.Empty(t, res.Linked)
+	assert.NotContains(t, res.Ack, "Linked to")
+
+	recs := mustListMedia(t, a)
+	require.Len(t, recs, 1)
+	views, err := a.LinksForMedia(recs[0].ID)
+	require.NoError(t, err)
+	assert.Empty(t, views, "a bare attach links nothing")
+}
+
+// TestAttach_MalformedSubjectWritesNothing: a malformed or unresolvable --to is
+// refused before the media copy lands, so nothing is on disk (error-states.md
+// §St-1) — including no link.
+func TestAttach_MalformedSubjectWritesNothing(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	path := writeTempFile(t, "x.jpg", []byte("x"))
+
+	// Malformed kind.
+	_, err := r.Attach(AttachRequest{Path: path, Now: fixedNow(), Subjects: []string{"Bad:x"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assertNothingWritten(t, a, home)
+
+	// Well-formed but unresolvable (a future day).
+	_, err = r.Attach(AttachRequest{Path: path, Now: fixedNow(), Subjects: []string{"day:2999-01-01"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing was saved")
+	assertNothingWritten(t, a, home)
+}
+
 // TestAttach_NonImageBinaryStoredOpaquely proves any binary is stored
 // content-agnostically (Q4=B): a PDF-ish blob round-trips with its original
 // extension preserved and no type gate.
@@ -430,12 +514,18 @@ func TestAttachHelpers(t *testing.T) {
 	assert.Equal(t, "Media attachment media/x.jpg — a note", attachBody("media/x.jpg", "a note"))
 	assert.Equal(t, "raw_2026_07_05_18_41", predictRawID(fixedNow()))
 
-	ack := attachAck("media/x.jpg", "2026-07-05", "0123456789abcdef0123", "raw_1")
+	ack := attachAck("media/x.jpg", "2026-07-05", "0123456789abcdef0123", "raw_1", nil)
 	assert.Contains(t, ack, "media/x.jpg")
 	assert.Contains(t, ack, "2026-07-05")
 	assert.Contains(t, ack, "0123456789ab…")
 	assert.Contains(t, ack, "raw_1")
+	assert.NotContains(t, ack, "Linked to", "no --to means no link clause")
 	assert.Equal(t, "abc", shortSHA("abc"))
+
+	// With linked subjects, the ack names each one.
+	linkedAck := attachAck("media/x.jpg", "2026-07-05", "0123456789abcdef0123", "raw_1",
+		[]LinkApplied{{Kind: "day", Key: "2020-01-01"}, {Kind: "person", Key: "person_abc"}})
+	assert.Contains(t, linkedAck, "Linked to day:2020-01-01, person:person_abc.")
 }
 
 // TestResolveCaptureWhen_SharedGrammar covers the forms the capture verbs

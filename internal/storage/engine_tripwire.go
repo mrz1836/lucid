@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/mrz1836/lucid/internal/engine"
 )
@@ -49,6 +50,17 @@ func (a *Adapter) AppendStormEvent(ev engine.StormEvent) error {
 
 // AppendStormEvents appends events to storm.json's history in order — the form
 // a single tripwire run's storm bookkeeping (lapse/expire/enter) persists.
+//
+// Every append also mints an episode id for any run this write opens and stamps
+// the storm.json schema version. Identity lives in the sibling episodes[] index,
+// never in history[] (engine.PlanStormEpisodes is idempotent and derives runs
+// from the folded history), so this leaves the derived status.json untouched:
+// StormStanding reads history's last element and ignores episodes[] entirely.
+// Because the planner matches runs already indexed, the first append after an
+// upgrade also self-heals — it mints ids for any runs that predate the index,
+// and every later append then adds nothing new. That is why this and the
+// explicit backfill command coexist: this keeps the index current as storms
+// happen, the command completes it without requiring a new event to occur.
 func (a *Adapter) AppendStormEvents(events ...engine.StormEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -58,6 +70,8 @@ func (a *Adapter) AppendStormEvents(events ...engine.StormEvent) error {
 		return err
 	}
 	h.History = append(h.History, events...)
+	h.Version = engine.StormVersion
+	h.Episodes = append(h.Episodes, engine.PlanStormEpisodes(h, mintDayFor(events[len(events)-1]))...)
 	content, err := marshalJSON(h)
 	if err != nil {
 		return err
@@ -66,6 +80,48 @@ func (a *Adapter) AppendStormEvents(events ...engine.StormEvent) error {
 		return fmt.Errorf("storage: write storm.json: %w", err)
 	}
 	return nil
+}
+
+// WriteStormEpisodes appends episode records to storm.json's episodes[] index
+// and stamps the schema version, touching history[] not at all. It is the
+// storage seam the `storm backfill-episodes` command writes through, so identity
+// is added to primary testimony the same append-only way a storm event is: no
+// history record is edited, reordered, or removed, and the derived status.json
+// is unchanged because StormStanding never reads episodes[]. Passing no episodes
+// is a no-op — nothing is read, nothing is written.
+func (a *Adapter) WriteStormEpisodes(episodes ...engine.StormEpisode) error {
+	if len(episodes) == 0 {
+		return nil
+	}
+	h, err := a.ReadStormState()
+	if err != nil {
+		return err
+	}
+	h.Version = engine.StormVersion
+	h.Episodes = append(h.Episodes, episodes...)
+	content, err := marshalJSON(h)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(a.stormPath(), content, filePerm); err != nil {
+		return fmt.Errorf("storage: write storm.json: %w", err)
+	}
+	return nil
+}
+
+// mintDayFor resolves the reference instant a same-write episode mint uses, from
+// the just-appended event's RFC3339 `at`. It matters only at the margins:
+// PlanStormEpisodes dates each event-opened run by that run's own opener_at, so
+// this fixes the bare-window cutoff (a window is an episode once its start is on
+// or before this instant) and the ultimate fallback. An unparseable `at` yields
+// the zero instant, which mints no not-yet-open bare window rather than
+// fabricating an id — the run's own opener still dates every event-opened
+// episode correctly.
+func mintDayFor(ev engine.StormEvent) time.Time {
+	if at, err := time.Parse(time.RFC3339, ev.At); err == nil {
+		return at
+	}
+	return time.Time{}
 }
 
 // TripwireState is engine/tripwire.json: the scheduler's small durable memory

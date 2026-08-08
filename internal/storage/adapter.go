@@ -48,6 +48,12 @@ type Adapter struct {
 	// audited network op. It is nil in production (a default https getter is
 	// used) and injected by tests so no real socket ever opens.
 	enrichFetch EnrichmentFetcher
+	// subjects is the per-adapter link-subject resolver table, lazily seeded
+	// from defaultSubjectResolvers on first use (see linksubject.go). It lives on
+	// the adapter rather than a package global so a registered kind never leaks
+	// between instances or tests, and so the open taxonomy costs one resolver
+	// per kind — not a mutable global the linter (gochecknoglobals) would reject.
+	subjects map[string]SubjectResolver
 }
 
 // New returns an adapter rooted at an explicit home directory. Tests

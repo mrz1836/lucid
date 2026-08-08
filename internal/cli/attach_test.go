@@ -130,6 +130,53 @@ func TestAttach_CLI_JSON(t *testing.T) {
 	require.NoError(t, statErr)
 }
 
+// TestAttach_CLI_LinksSubjects: `attach --to` links the capture to its subjects
+// in one flow and reports them in --json (AC-10). --to is repeatable.
+func TestAttach_CLI_LinksSubjects(t *testing.T) {
+	isolatedHome(t)
+	path := writeTempFile(t, "photo.jpg", []byte("\xff\xd8\xff bytes"))
+
+	out, _, err := runRoot(
+		t, BuildInfo{Version: "dev"},
+		"attach", path, "--to", "day:2020-01-01", "--to", "day:2020-02-02", "--json",
+	)
+	require.NoError(t, err)
+
+	var res attachJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &res))
+	require.Len(t, res.Linked, 2, "one link per --to subject")
+	assert.Equal(t, "day", res.Linked[0].Kind)
+	assert.False(t, res.Linked[0].NoOp)
+	assert.NotEmpty(t, res.Linked[0].EventID)
+}
+
+// TestAttach_CLI_BareOmitsLinked: an attach with no --to omits the linked field
+// entirely, so the bare --json shape is unchanged.
+func TestAttach_CLI_BareOmitsLinked(t *testing.T) {
+	isolatedHome(t)
+	path := writeTempFile(t, "bare.bin", []byte("bytes"))
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "attach", path, "--json")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "linked", "a bare attach omits the linked field")
+
+	var res attachJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &res))
+	assert.Empty(t, res.Linked)
+}
+
+// TestAttach_CLI_MalformedSubjectExitsNonZero: an unresolvable --to is refused
+// with nothing written.
+func TestAttach_CLI_MalformedSubjectExitsNonZero(t *testing.T) {
+	home := isolatedHome(t)
+	path := writeTempFile(t, "x.jpg", []byte("x"))
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "attach", path, "--to", "bogus:x")
+	require.Error(t, err)
+	assert.Contains(t, errOut, "nothing was saved")
+	assert.Equal(t, 0, mediaFileCount(t, home), "a refused subject stores no media")
+}
+
 // TestAttach_CLI_RequiresExactlyOnePath confirms ExactArgs(1): a bare `attach`
 // and a two-arg `attach` are usage errors (exit 2), not runtime failures.
 func TestAttach_CLI_RequiresExactlyOnePath(t *testing.T) {

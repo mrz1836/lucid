@@ -5,12 +5,14 @@
 # WHAT THIS BACKS UP
 #   The backup set is the primary data that exists nowhere else and must
 #   survive forever (docs/adr/0002-storage.md; docs/mvp/local-runtime.md
-#   §Rebuildability): raw entries, the observation event log, the registries,
-#   the engine tree MINUS its derived status.json, and the append-only export
-#   log. Everything else under ~/.lucid/ is rebuildable — processed/,
-#   insights/, reflections/, engine/status.json, and the rest of projections/ —
-#   and is deliberately NOT copied, along with the people/ and sessions/
-#   indexes and lucid.json (all reconstructable, not testimony).
+#   §Rebuildability): raw entries, the media binaries and their sidecars, the
+#   observation event log, the registries, the append-only link ledger, the
+#   engine tree MINUS its derived status.json, and the append-only export log.
+#   media/ and links/ are covered so a restore yields a coherent Ledger — links
+#   whose binaries still exist. Everything else under ~/.lucid/ is rebuildable —
+#   processed/, insights/, reflections/, engine/status.json, and the rest of
+#   projections/ — and is deliberately NOT copied, along with the people/ and
+#   sessions/ indexes and lucid.json (all reconstructable, not testimony).
 #
 #   This inclusion set is the single source of truth shared with the Go deploy
 #   package (deploy.BackupManifest); `--print-manifest` emits it and a test
@@ -57,8 +59,10 @@ done
 # to deploy.BackupManifest() (a Go test asserts the equality).
 print_manifest() {
   printf 'dir\traw\n'
+  printf 'dir\tmedia\n'
   printf 'dir\tobservations\n'
   printf 'dir\tregistries\n'
+  printf 'dir\tlinks\n'
   printf 'dir\tengine\texclude=engine/status.json\n'
   printf 'file\tprojections/exports.log\n'
 }
@@ -123,8 +127,10 @@ prune() {
 [ "$DRY_RUN" -eq 1 ] || mkdir -p "$DEST"
 
 backup_dir raw
+backup_dir media
 backup_dir observations
 backup_dir registries
+backup_dir links
 backup_dir engine
 prune engine/status.json
 backup_file projections/exports.log

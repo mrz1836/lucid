@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -8,6 +9,20 @@ import (
 
 	"github.com/mrz1836/lucid/internal/router"
 )
+
+// attachLinkedViews projects the links an attach applied into the shared
+// per-subject JSON shape, so `attach --json` and the link verbs report a link
+// the same way.
+func attachLinkedViews(applied []router.LinkApplied) []linkAppliedView {
+	if len(applied) == 0 {
+		return nil
+	}
+	out := make([]linkAppliedView, len(applied))
+	for i, a := range applied {
+		out[i] = linkAppliedView{Kind: a.Kind, Key: a.Key, EventID: a.EventID, NoOp: a.NoOp}
+	}
+	return out
+}
 
 // flagCaption is the attach-only flag name: the optional verbatim
 // description stored with the media. The logical-day selector (flagDay) and
@@ -28,6 +43,9 @@ type attachJSON struct {
 	Day        string `json:"day"`
 	RawID      string `json:"raw_id"`
 	Caption    string `json:"caption,omitempty"`
+	// Linked names the subjects the capture linked at attach time, one per
+	// --to; omitted when no --to was given so a bare attach's shape is unchanged.
+	Linked []linkAppliedView `json:"linked,omitempty"`
 }
 
 // newAttachCmd wires `lucid attach <path> [--caption …] [--day @yesterday]`:
@@ -53,6 +71,7 @@ func newAttachCmd() *cobra.Command {
 
 			caption, _ := cmd.Flags().GetString(flagCaption)
 			day, _ := cmd.Flags().GetString(flagDay)
+			subjects, _ := cmd.Flags().GetStringArray(flagTo)
 
 			res, err := r.Attach(router.AttachRequest{
 				Path:      args[0],
@@ -62,9 +81,18 @@ func newAttachCmd() *cobra.Command {
 				Source:    flagOrEnv(cmd, flagSource, envSource, sourceCLI),
 				Harness:   flagOrEnv(cmd, flagHarness, envHarness, sourceCLI),
 				ChannelID: flagOrEnv(cmd, flagChannel, envChannel, sourceCLI),
+				Subjects:  subjects,
 			})
 			if err != nil {
-				return emitRefusedDay(cmd, err)
+				// A refused --day prints through emitRefusedDay; any other
+				// refusal (an invalid --to subject, a bad source) is a plain
+				// error that must still reach the user, since the root silences
+				// returned errors.
+				var refusedDay *router.DayRejectedError
+				if errors.As(err, &refusedDay) {
+					return emitRefusedDay(cmd, err)
+				}
+				return emitErr(cmd, err)
 			}
 
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
@@ -74,6 +102,7 @@ func newAttachCmd() *cobra.Command {
 					Day:        res.Day,
 					RawID:      res.RawID,
 					Caption:    res.Caption,
+					Linked:     attachLinkedViews(res.Linked),
 				})
 			}
 
@@ -92,5 +121,9 @@ func newAttachCmd() *cobra.Command {
 	f.String(flagSource, "", "Harness source token recorded on the attachment (overrides "+envSource+")")
 	f.String(flagHarness, "", "Surface that hosted the capture (overrides "+envHarness+")")
 	f.String(flagChannel, "", "Channel the capture came in through (overrides "+envChannel+")")
+	// Repeatable --to links the attachment to its subjects at capture time, as
+	// <kind>:<key>. StringArray (not StringSlice) so a key with a comma is one
+	// token; a malformed or unresolvable subject leaves nothing on disk.
+	f.StringArray(flagTo, nil, "Subject to link this attachment to, as <kind>:<key> (repeatable)")
 	return cmd
 }

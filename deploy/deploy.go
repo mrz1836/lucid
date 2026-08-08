@@ -297,18 +297,29 @@ type BackupEntry struct {
 
 // BackupManifest is the canonical ADR-0002 backup set (also stated in
 // local-runtime.md §Rebuildability): the trees that must survive forever
-// because they are primary data existing nowhere else — raw entries, the
-// observation event log, the registries, the engine tree minus its derived
-// status, and the append-only export log. Everything else in ~/.lucid/ is
-// rebuildable (see [RebuildableTrees]) and is deliberately omitted.
+// because they are primary data existing nowhere else — raw entries, the media
+// binaries and their sidecars, the observation event log, the registries, the
+// append-only link ledger, the engine tree minus its derived status, and the
+// append-only export log. Everything else in ~/.lucid/ is rebuildable (see
+// [RebuildableTrees]) and is deliberately omitted.
+//
+// media/ and links/ are primary for different reasons and both belong here:
+// media/ holds the user's immutable attached binaries, which exist nowhere else
+// and cannot be regenerated — data-model.md §"Durability" already documents a
+// backup of ~/.lucid/ as covering media in full, so listing it here closes a
+// real doc↔manifest divergence rather than setting new policy — and links/ is
+// the append-only association ledger, which is not rebuildable from anything.
+// Covering both means a restored Ledger yields links whose binaries still exist.
 //
 // It is the single source of truth the backup script must match:
 // scripts/backup.sh encodes the same set and a test cross-checks the two.
 func BackupManifest() []BackupEntry {
 	return []BackupEntry{
 		{Path: "raw", IsDir: true},
+		{Path: "media", IsDir: true},
 		{Path: "observations", IsDir: true},
 		{Path: "registries", IsDir: true},
+		{Path: "links", IsDir: true},
 		{Path: "engine", IsDir: true, Exclude: []string{"engine/status.json"}},
 		{Path: "projections/exports.log", IsDir: false},
 	}

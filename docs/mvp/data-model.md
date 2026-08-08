@@ -12,9 +12,9 @@ The two design rules that drive everything below:
 
 1. **Primary data is permanent.** The trees the user absolutely must
    never lose are `raw/`, `media/`, `observations/`,
-   `registries/`, and `engine/` (minus the derived `status.json`):
-   each holds testimony, an attached artifact, or configuration that
-   exists nowhere else.
+   `registries/`, `links/`, and `engine/` (minus the derived
+   `status.json`): each holds testimony, an attached artifact, an
+   association, or configuration that exists nowhere else.
    `processed/`, `insights/`, `reflections/`, `engine/status.json`,
    and `projections/` are rebuildable.
 2. **Processed is rebuildable.** If the agents improve,
@@ -58,6 +58,7 @@ These rules trace directly to
 │   └── status.json
 ├── observations/           # frozen-envelope events — owned by observations-module.md
 ├── registries/             # injuries, threads, places, eras — same key derivation as people/
+├── links/                  # append-only media↔subject association ledger (links.jsonl)
 └── projections/            # rebuildable views/exports — deletable wholesale
 ```
 
@@ -509,7 +510,134 @@ state-folder backup, never committed** to git: the Ledger is the record and its
 backup is the durability story, so no code repo ever swells with photos. This is
 the same "primary data is permanent" rule the trees above follow — `media/` is
 primary, immutable, and belongs to the user, so a backup of `~/.lucid/` covers it
-in full.
+in full — and it is an explicit entry in the backup manifest
+(`deploy.BackupManifest`, [`local-runtime.md`](local-runtime.md)
+§Rebuildability), so the claim and the manifest agree.
+
+## Link ledger — `~/.lucid/links/`
+
+**Format:** newline-delimited JSON (JSONL). One event per line.
+
+**Mutability:** **Append-only.** Every `link`, `unlink`, and `annotate` is a new
+line; no line is ever rewritten or removed. The *current* associations are a
+**fold** of the log, not a stored state — an unlink is an appended event, not a
+deletion, so the full history of what pointed at what, and when, survives
+forever. History is the feature.
+
+The link ledger is the one place an association between a media attachment and
+whatever it is *about* is recorded. It is deliberately a **separate** tree: the
+media binary and its sidecar (§"Media attachments") stay immutable, and all of
+the mutability lives here in the append-only log. Nothing about a media record —
+its `sha256`, its `raw_entry_id`, its logical-day join — is touched when a link
+is added, corrected, or removed.
+
+### Layout
+
+A **single** append-only log at `links/links.jsonl` — no sharding:
+
+```
+~/.lucid/links/
+└── links.jsonl
+```
+
+One file, because every read this feature serves is **subject-oriented** ("what
+media is about this person / injury / day?") or **media-oriented** ("what is
+this photo linked to?"), never day-oriented — so a single file is a single pass
+for both folds. Just as importantly, `subject.kind` and `subject.key` are stored
+as **opaque values, never as path components**: making a kind a directory name
+would force sanitization, case-folding, and traversal defense, and would break
+the promise that a new kind is linkable without touching the ledger (see
+"Resolver model" below).
+
+### Schema
+
+**Format:** JSON, one object per line.
+
+```json
+{"schema":"link.v1","id":"link_1","media_id":"2026-07-10-handwritten-notes.jpg","subject":{"kind":"person","key":"person_a-river"},"op":"link","at":"2026-07-12T09:14:07-04:00","source":"cli"}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `schema` | yes | Record schema tag, `link.v1`. |
+| `id` | yes | `link_<n>` — a monotonic per-file sequence, where `n` is the **maximum sequence already parsed from the file, plus one** (never a line count, so a malformed or truncated line never perturbs id assignment). |
+| `media_id` | yes | The media sidecar `id` (§"Media attachments") — the stored filename `YYYY-MM-DD-<slug>.<ext>`, globally unique, which alone locates the binary. |
+| `subject.kind` | yes | The kind of subject this media is about (`person`, `injury`, …). Stored **opaquely**; see the launch set below. |
+| `subject.key` | yes | The subject's own native key, in that kind's grammar (a `person_` slug, a registry key, a `raw_…` / `obs_…` / `anchor_…` / `self_…` / `storm_…` id, or a `YYYY-MM-DD` day). Stored opaquely. |
+| `op` | yes | `link`, `unlink`, or `annotate`. |
+| `at` | yes | When the event was recorded — RFC3339 with the host's local offset, the same time rule every dated Lucid record follows. |
+| `source` | yes | Provenance token (the capture surface — `cli`, or a harness token), normalized on write exactly as on the raw entry and media sidecar. |
+| `note` | on `annotate` | Free-text annotation carried on the event. Present only on an `annotate` op. |
+
+### The fold — current links are a read, not a state
+
+Current associations are computed by folding the log, **last-write-wins per
+`(media_id, kind, key)`**, ordered by `at` then by append order (so a
+hand-edited or clock-skewed `at` degrades to insertion order rather than
+reordering history):
+
+* `link` → the pair is **live**.
+* `unlink` → the pair is **not live**. Nothing is destroyed; the unlink is an
+  appended event, and a later `link` of the same pair makes it live again.
+* `annotate` → **liveness is unchanged**; the note is recorded. An annotation
+  folds independently of link/unlink state and may be applied to a pair that is
+  not currently linked.
+
+Both directions read from the same fold: subject → media ("the media currently
+about this subject") and media → subject ("the subjects this media is currently
+about").
+
+### Additive, retroactive, many-to-many
+
+Linking has **no recency constraint**: any existing media may be linked to any
+existing subject at any time — a years-old photo can be linked to a subject
+today. The backfilled event carries its own `at` / `source` and never mutates
+the media's `captured_at` or `logical_day`. One media may link to many subjects
+and one subject may carry many media, and links may be added incrementally
+forever; re-linking an already-live pair is an idempotent no-op, never an error
+that blocks growth.
+
+### Resolver model — the kind space is open
+
+The ledger stores `kind` and `key` **opaquely and needs no schema change to add
+a kind**. Whether a `kind:key` names an existing subject is decided by a
+**per-kind resolver**, registered on the storage adapter; a new kind becomes
+linkable the moment its resolver is registered, and the ledger writer never
+learns the kind's name. The launch set is twelve kinds, each resolved through
+its own native key helper:
+
+| Kind | Key form | Resolves against |
+|------|----------|------------------|
+| `person` | `person_<slug>` | the people record (§"People references") |
+| `injury` | registry key | the `registries/` injury record |
+| `thread` | registry key | the `registries/` thread record |
+| `era` | registry key | the `registries/` era record |
+| `place` | registry key | the `registries/` place record |
+| `raw` | `raw_YYYY_MM_DD_HH_MM` | the raw entry (§"Raw entries") |
+| `day` | `YYYY-MM-DD` | a well-formed logical day, not in the future |
+| `observation` | `obs_YYYY_MM_DD_<seq>` | the observation event |
+| `anchor` | `anchor_YYYY_MM_DD_<slot>` | a written anchor id |
+| `self` | `self_YYYY_MM_DD_<slot>` | a self-fact id |
+| `storm` | `storm_YYYY_MM_DD_<slot>` | a storm **episode** id |
+| `memory` | `obs_YYYY_MM_DD_<seq>` | an observation whose kind is `memory` (alias) |
+
+The `anchor`, `self`, and `storm` id grammars are specified in
+[`engine-module.md`](engine-module.md); a `storm` key is an **episode** id, and
+both `anchor` and `storm` keys must be a **written** id — a synthetic
+read-time-only identity (e.g. `legacy:<label>`) is never a valid link key.
+`memory` is **not its own record family** — it is a resolver **alias** over a
+`memory`-kind observation event, and refuses an observation id whose event kind
+is not `memory`. `pet` (a future kind) becomes linkable the moment its resolver
+is registered, with no change to this ledger. An unknown kind, or a key that
+names no existing subject, is a **clear refusal that names the problem** — never
+a silent write.
+
+### Backup — primary testimony
+
+`links/` is primary data that exists nowhere else and is **not** rebuildable
+from anything, so it joins the backup set (`deploy.BackupManifest`,
+[`local-runtime.md`](local-runtime.md) §Rebuildability). A restored Ledger
+therefore yields links whose media binaries still exist.
 
 ## Processed artifacts — `~/.lucid/processed/`
 

@@ -171,6 +171,72 @@ func TestLatestAnchors_MixedLegacyAndMinted(t *testing.T) {
 	}
 }
 
+// TestLatestAnchors_AdoptionFoldsAsOneAnchor is the remap pre-pass in one
+// case: a pre-id record and the adoption record that takes over its
+// legacy:<label> identity fold as a single anchor carrying the minted id, not
+// two anchors sharing a display name.
+func TestLatestAnchors_AdoptionFoldsAsOneAnchor(t *testing.T) {
+	log := AnchorLog{Version: AnchorVersion, History: []Anchor{
+		{Label: "gate-a", Date: "2026-01-01", RecordedAt: "2026-01-01T10:00:00Z"},
+		{
+			ID: "anchor_2026_08_08_a", Label: "gate-a", Date: "2026-01-01",
+			RecordedAt: "2026-01-01T10:00:00Z",
+			Adopts:     "legacy:gate-a", AdoptedAt: "2026-08-08T09:00:00Z",
+		},
+	}}
+	got := LatestAnchors(log)
+	require.Len(t, got, 1, "the adoption record folds with the legacy record it adopts")
+	assert.Equal(t, "anchor_2026_08_08_a", AnchorIdentity(got[0]), "the folded winner carries the minted id")
+	assert.Equal(t, "gate-a", got[0].Label)
+	assert.Equal(t, "2026-01-01", got[0].Date)
+}
+
+// TestLatestAnchors_NoAdoptionFoldsUnchanged proves the remap pre-pass is a
+// no-op when no record carries adopts: a mix of legacy and minted records
+// folds exactly as it did before adoption existed.
+func TestLatestAnchors_NoAdoptionFoldsUnchanged(t *testing.T) {
+	log := AnchorLog{Version: AnchorVersion, History: []Anchor{
+		{Label: "gate-a", Date: "2026-01-01", RecordedAt: "2026-01-01T10:00:00Z"},
+		{Label: "gate-a", Date: "2026-02-01", RecordedAt: "2026-02-01T10:00:00Z"},
+		{ID: "anchor_2026_08_04_a", Label: "sobriety", Date: "2026-06-01", RecordedAt: "2026-08-04T10:00:00Z"},
+	}}
+	got := LatestAnchors(log)
+	require.Len(t, got, 2)
+	assert.Equal(t, "gate-a", got[0].Label)
+	assert.Equal(t, "2026-02-01", got[0].Date, "the later legacy correction still wins")
+	assert.Empty(t, got[0].ID, "folding never stamps an id onto a legacy record")
+	assert.Equal(t, "sobriety", got[1].Label)
+}
+
+// TestLatestAnchors_LastAdoptionWins covers the defensive tiebreak: if a legacy
+// identity somehow carries more than one adoption (a double-mint the backfill's
+// idempotency is meant to prevent), the last adoption in append order wins the
+// remap, so the pre-id record folds onto the last minted id and the legacy
+// identity never survives the fold.
+func TestLatestAnchors_LastAdoptionWins(t *testing.T) {
+	log := AnchorLog{Version: AnchorVersion, History: []Anchor{
+		{Label: "gate-a", Date: "2026-01-01", RecordedAt: "2026-01-01T10:00:00Z"},
+		{
+			ID: "anchor_2026_08_08_a", Label: "gate-a", Date: "2026-01-01",
+			RecordedAt: "2026-01-01T10:00:00Z",
+			Adopts:     "legacy:gate-a", AdoptedAt: "2026-08-08T09:00:00Z",
+		},
+		{
+			ID: "anchor_2026_08_08_b", Label: "gate-a", Date: "2026-01-01",
+			RecordedAt: "2026-01-01T10:00:00Z",
+			Adopts:     "legacy:gate-a", AdoptedAt: "2026-08-08T10:00:00Z",
+		},
+	}}
+	got := LatestAnchors(log)
+
+	ids := make([]string, 0, len(got))
+	for _, a := range got {
+		assert.NotEqual(t, "legacy:gate-a", AnchorIdentity(a), "the legacy identity never survives the fold")
+		ids = append(ids, AnchorIdentity(a))
+	}
+	assert.Contains(t, ids, "anchor_2026_08_08_b", "the pre-id record folds onto the last adoption's id")
+}
+
 // TestNextAnchorID_SlotsPerDay covers the minting grammar: per-day slots that
 // advance, restart on a new day, and are never reissued once used — including
 // by an anchor that has since been sunset, which is why the allocator scans

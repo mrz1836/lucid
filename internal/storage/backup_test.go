@@ -23,8 +23,10 @@ import (
 func backupManifest() []BackupEntry {
 	return []BackupEntry{
 		{Path: "raw", IsDir: true},
+		{Path: "media", IsDir: true},
 		{Path: "observations", IsDir: true},
 		{Path: "registries", IsDir: true},
+		{Path: "links", IsDir: true},
 		{Path: "engine", IsDir: true, Exclude: []string{"engine/status.json"}},
 		{Path: "projections/exports.log", IsDir: false},
 	}
@@ -32,7 +34,7 @@ func backupManifest() []BackupEntry {
 
 // manifestRoots is the deduped top-level set the restore allowlist checks.
 func manifestRoots() []string {
-	return []string{"raw", "observations", "registries", "engine", "projections"}
+	return []string{"raw", "media", "observations", "registries", "links", "engine", "projections"}
 }
 
 // writeHomeFile writes content at a home-relative slash path, creating parents.

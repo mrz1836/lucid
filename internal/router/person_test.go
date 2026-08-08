@@ -290,3 +290,63 @@ func TestPerson_DominanceCountsPreMergeKeys(t *testing.T) {
 	assert.Contains(t, res.Text, "appears in 100% of entries", "both pre-merge artifacts fold onto the canonical")
 	assert.Contains(t, res.Text, "worth a look, or expected?")
 }
+
+// linkMediaToPerson seeds one synthetic media and links it to the person key
+// through the real Link verb, returning the stored media id.
+func linkMediaToPerson(t *testing.T, r *Router, a *storage.Adapter, personKey string) string {
+	t.Helper()
+	mediaID := seedLinkMedia(t, a)
+	_, err := r.Link(LinkRequest{
+		Media: mediaID, Subjects: []string{"person:" + personKey},
+		Op: storage.LinkOpLink, Now: fixedNow(), Source: "cli",
+	})
+	require.NoError(t, err)
+	return mediaID
+}
+
+// TestPerson_LinkedMedia_Surfaced is SC-9 for /person: media associated by an
+// explicit link surface in the single-match view, labeled "linked" so they read
+// distinctly from a same-day coincidence join.
+func TestPerson_LinkedMedia_Surfaced(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	key := seedPerson(t, a, "M.", "raw_2026_05_05_19_42", personSeedTime())
+	mediaID := linkMediaToPerson(t, r, a, key)
+
+	res, err := r.Person(PersonRequest{Name: "M."})
+	require.NoError(t, err)
+	require.True(t, res.Matched)
+	assert.False(t, res.OffLimits)
+	assert.Contains(t, res.Text, "Media linked to them: "+mediaID)
+
+	again, err := r.Person(PersonRequest{Name: "M."})
+	require.NoError(t, err)
+	assert.Equal(t, res.Text, again.Text, "the linked-media line is byte-stable across runs")
+}
+
+// TestPerson_NoLinks_NoMediaLine proves a person with no linked media renders no
+// media line at all — so every existing person fixture is unchanged (A4/S-22).
+func TestPerson_NoLinks_NoMediaLine(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	seedPerson(t, a, "M.", "raw_2026_05_05_19_42", personSeedTime())
+
+	res, err := r.Person(PersonRequest{Name: "M."})
+	require.NoError(t, err)
+	require.True(t, res.Matched)
+	assert.NotContains(t, res.Text, "Media linked to them", "no links → no media line")
+}
+
+// TestPerson_OffLimits_NoLinkedMediaLine guards the sanctuary boundary: an
+// off-limits person with linked media still renders the raw record only, with no
+// derived media line — the redaction returns before the link seam is reached.
+func TestPerson_OffLimits_NoLinkedMediaLine(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	key := seedPerson(t, a, "M.", "raw_2026_05_05_19_42", personSeedTime())
+	linkMediaToPerson(t, r, a, key)
+	require.NoError(t, a.WriteOffLimitsPersonKeys([]string{key}))
+
+	res, err := r.Person(PersonRequest{Name: "M."})
+	require.NoError(t, err)
+	require.True(t, res.Matched)
+	assert.True(t, res.OffLimits)
+	assert.NotContains(t, res.Text, "Media linked to them", "an off-limits person surfaces nothing derived")
+}

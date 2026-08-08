@@ -12,10 +12,14 @@ import (
 // every append, so the number in a file is always true of that file. It is a
 // signal, not a gate: reads are never version-checked, so a version 1 file
 // (written before anchors carried an id or a state) still reads exactly as it
-// always did. The honest consequence of that choice runs the other way — an
-// older binary reading a version 2 file ignores the state field, and would
-// keep counting an anchor this binary has sunset.
-const AnchorVersion = 2
+// always did, and a version 2 file (written before the adoption fields
+// existed) still reads exactly as it always did too. The honest consequence of
+// that choice runs the other way — an older binary reading a version 2 file
+// ignores the state field and would keep counting an anchor this binary has
+// sunset, and an older binary reading a version 3 file ignores the adopts field
+// and would fold a backfilled anchor as two identities (the pre-id record and
+// the record that adopted it) rather than one.
+const AnchorVersion = 3
 
 // AnchorStateSunset marks a record that retires its anchor: the milestone
 // stops counting on the metrics and witness surfaces but stays in the
@@ -43,6 +47,14 @@ type Anchor struct {
 	Note       string `json:"note,omitempty"`
 	RecordedAt string `json:"recorded_at"`
 	State      string `json:"state,omitempty"`
+	// Adopts holds the identity this record takes over — the synthetic
+	// legacy:<label> a pre-id anchor folds under. It is written only by the
+	// id backfill and is what LatestAnchors' remap pre-pass reads.
+	Adopts string `json:"adopts,omitempty"`
+	// AdoptedAt is the real backfill time. RecordedAt is a verbatim copy of
+	// the adopted record's, so the retirement date SunsetDate renders stays
+	// true; the append time lives here instead.
+	AdoptedAt string `json:"adopted_at,omitempty"`
 }
 
 // IsSunset reports whether this record retires its anchor.
@@ -65,6 +77,20 @@ func AnchorIdentity(a Anchor) string {
 		return a.ID
 	}
 	return LegacyAnchorIDPrefix + a.Label
+}
+
+// foldedAnchorIdentity is AnchorIdentity with the adoption remap applied: a
+// record whose synthetic legacy:<label> identity has been taken over by an
+// adoption record folds under that record's minted id instead, so the pre-id
+// record and the record that adopted it land as one anchor rather than two.
+// A nil or empty remap makes this exactly AnchorIdentity, so a store with no
+// adoption records folds precisely as it always did.
+func foldedAnchorIdentity(a Anchor, remap map[string]string) string {
+	id := AnchorIdentity(a)
+	if minted, ok := remap[id]; ok {
+		return minted
+	}
+	return id
 }
 
 // AnchorLog is anchors.json: the schema version plus the append-only history
@@ -182,9 +208,19 @@ func ValidateAnchor(label, date string) error {
 // display name have a total, stable order rather than one that depends on map
 // iteration. An empty log yields an empty slice.
 func LatestAnchors(log AnchorLog) []Anchor {
+	// Records carrying adopts take over a legacy identity, so a pre-id record
+	// and the record that adopted it fold as one anchor rather than two.
+	// Last adoption wins if an identity somehow carries more than one.
+	remap := map[string]string{}
+	for _, a := range log.History {
+		if a.Adopts != "" && a.ID != "" {
+			remap[a.Adopts] = a.ID
+		}
+	}
+
 	latest := make(map[string]Anchor, len(log.History))
 	for _, a := range log.History {
-		latest[AnchorIdentity(a)] = a // last write per identity wins (append order)
+		latest[foldedAnchorIdentity(a, remap)] = a // last write per identity wins (append order)
 	}
 	out := make([]Anchor, 0, len(latest))
 	for _, a := range latest {
@@ -194,7 +230,10 @@ func LatestAnchors(log AnchorLog) []Anchor {
 		if c := cmp.Compare(a.Label, b.Label); c != 0 {
 			return c
 		}
-		return cmp.Compare(AnchorIdentity(a), AnchorIdentity(b))
+		// The tiebreak must see the same identity the fold used, or two records
+		// sharing a display name would get an order that depends on which
+		// record won the fold rather than a stable one.
+		return cmp.Compare(foldedAnchorIdentity(a, remap), foldedAnchorIdentity(b, remap))
 	})
 	return out
 }

@@ -131,6 +131,7 @@ the cloud, not in any backup the user has not deliberately set up.
 ```
 ~/.lucid/
 ├── raw/                         # immutable raw entries (Markdown)
+├── media/                       # immutable binary attachments + JSON sidecars
 ├── processed/                   # JSON extraction artifacts
 ├── insights/                    # validated insights (Markdown)
 ├── people/                      # lightweight people references (JSON)
@@ -139,6 +140,7 @@ the cloud, not in any backup the user has not deliberately set up.
 ├── engine/                      # chain config + profiles, day records, witness, storm, status
 ├── observations/                # frozen-envelope events (JSONL) + config
 ├── registries/                  # injuries, threads, places, eras
+├── links/                       # append-only media↔subject association ledger (JSONL)
 ├── projections/                 # rebuildable views/exports
 └── lucid.json                   # tiny config (paths, agent versions)
 ```
@@ -155,10 +157,10 @@ Two reasons this lives outside the repo:
    `engine/status.json`, and `projections/` (minus
    `projections/exports.log`, the append-only export record) can be
    rebuilt if the agents or scripts improve. The trees that must
-   survive forever — the backup set — are `raw/`, `observations/`,
-   `registries/`, `engine/` (minus `status.json`), and
-   `projections/exports.log`: they are primary data that exists
-   nowhere else. `lucid backup` writes exactly that set to a single
+   survive forever — the backup set — are `raw/`, `media/`,
+   `observations/`, `registries/`, `links/`, `engine/` (minus
+   `status.json`), and `projections/exports.log`: they are primary data
+   that exists nowhere else. `lucid backup` writes exactly that set to a single
    `.tar.gz`, and `lucid restore` rebuilds it — the native realization of
    the ADR-0002 set (also encoded in `scripts/backup.sh` and
    `deploy.BackupManifest`), so backing up no longer means copying trees

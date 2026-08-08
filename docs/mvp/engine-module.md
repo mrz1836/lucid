@@ -432,6 +432,7 @@ stake review (engine §4).
 
 ```json
 {
+  "version": 1,
   "clauses": ["clause-1", "clause-2"],
   "windows": [
     {"label": "window-1", "start": "2026-11-02", "end": "2026-11-09"}
@@ -441,6 +442,9 @@ stake review (engine §4).
     {"at": "2026-07-14T07:05:00-04:00", "event": "declared", "label": "clause-1"},
     {"at": "2026-07-14T09:40:00-04:00", "event": "confirmed", "by": "J.",
      "text": "confirmed — that's real. stake stayed.", "through": "2026-07-28"}
+  ],
+  "episodes": [
+    {"id": "storm_2026_07_14_a", "opener_at": "2026-07-14T07:05:00-04:00"}
   ]
 }
 ```
@@ -458,6 +462,42 @@ history state is `confirmed`/`entered`/`renewed` and today ≤ its
 `through` date. Entry applies from the declaration forward, never
 backward (engine §4); a pending declaration lapses if unconfirmed
 within the confirmation window (72 hours).
+
+**Episodes — an addressable name for a storm run, added without touching
+history.** A storm is otherwise only ever a *derived* state; an **episode** makes
+one run addressable. An episode is the run from a `declared`/`entered` opener
+through its terminal event (`ended`/`expired`/`lapsed`), or the still-open
+trailing run at the end of the log; a standing bare ambush window that stands
+with no `entered` history event of its own is its own episode. `confirmed` and
+`renewed` continue a run — they never open one, so a confirmation without a
+declaration is not an episode. Episode identity lives in a **new top-level
+`episodes[]` index** — `{id, opener_at}` for a run opened by an event, or
+`{id, window_label, window_start}` for a bare window — and the id grammar is
+`storm_YYYY_MM_DD_<slot>`, dated by the opener's `at` and slotted with
+`SlotLabel`: the same per-day slot grammar anchors, insights, and self facts
+share.
+
+**Why identity is a sibling index and not a history event.** `StormStanding`
+decides purely from `history[len-1]`, and `pendingDeclaredAt`, `standingThrough`,
+and `stormStart` all read the last element too — so appending *anything* to
+`history[]`, even an id-only adoption event, would move the derived
+`status.json`. `episodes[]` is therefore a sibling array that every existing
+consumer ignores; adding it changes no derived value. Membership stays derived
+from the run rule above, so no existing history event changes and `history[]`
+gains nothing. **No stored entry is edited or removed.**
+
+**Minting.** An episode id is minted forward the moment an episode opens (in the
+same write as its opener), and `lucid storm backfill-episodes` backfills ids for
+existing runs on demand — idempotent, with a `--dry-run` that writes nothing and,
+like the anchor backfill, never automatic. `StormStanding` and every derived
+`status.json` value are provably **unchanged** by the addition (asserted over a
+multi-episode fixture, still-open trailing run included). A future ambush window
+is not yet an episode; it becomes one when its start arrives.
+
+**`version: 1` is a signal, not a gate**, on the same terms as `anchors.json`:
+stamped on every append, never validated on read, so a `storm.json` written
+before `episodes[]`/`version` existed reads exactly as it always did — an older
+binary ignores both new fields.
 
 ### `profile.json`
 
@@ -482,7 +522,7 @@ Retro.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "history": [
     {"label": "sobriety", "date": "2026-01-15", "note": "",
      "recorded_at": "2026-01-15T08:04:00-05:00"},
@@ -491,7 +531,10 @@ Retro.
      "recorded_at": "2026-02-01T21:12:00-05:00"},
     {"id": "anchor_2026_02_01_a", "label": "gate-30", "date": "2026-02-01",
      "note": "mistyped label", "recorded_at": "2026-08-04T09:30:00-04:00",
-     "state": "sunset"}
+     "state": "sunset"},
+    {"id": "anchor_2026_08_07_a", "label": "sobriety", "date": "2026-01-15",
+     "note": "", "recorded_at": "2026-01-15T08:04:00-05:00",
+     "adopts": "legacy:sobriety", "adopted_at": "2026-08-07T10:15:00-04:00"}
   ]
 }
 ```
@@ -524,6 +567,48 @@ first use, or a label whose only holder was sunset). `date` is a civil
 whole logical days from the folded anchor date, **anchor day = 0**, at the
 chain's rollover boundary; it is **surfaced by `metrics`, never stored** here.
 
+**Adoption — a legacy anchor acquires a written id by appending, never by
+rewriting.** A pre-id anchor folds under a read-time `legacy:<label>` identity
+that is never written (above), which is not a durable target: a link, or any
+future reference, keyed on it would dangle. `lucid anchor backfill-ids` fixes
+that **without touching a single stored byte** — it *appends* one **adoption
+record** per legacy identity, carrying a freshly minted `anchor_YYYY_MM_DD_<slot>`
+`id`, an `adopts: "legacy:<label>"` field naming the identity it takes over, and
+an `adopted_at` timestamp (the real backfill time). Every other field —
+`label`, `date`, `note`, `state`, and **`recorded_at` especially** — is copied
+**verbatim** from the folded winner of the identity it adopts. `recorded_at` must
+be verbatim because `LatestSunsetFor` / `SunsetDate` read it: an adoption stamped
+with today's `recorded_at` would silently restate when a milestone was retired,
+so the real append time lives in `adopted_at` instead. (In the example above, the
+last record adopts `legacy:sobriety`: it copies `sobriety`'s `date` and
+`recorded_at` verbatim and carries the minted id `anchor_2026_08_07_a`.)
+
+**The remap is a pre-pass inside the fold, and `AnchorIdentity` is unchanged.**
+`LatestAnchors` first scans `history[]` for records carrying `adopts`, building a
+`legacy:<label> → minted id` map (last adoption wins if an identity somehow
+carries two), then folds with that remap applied — so a pre-id record and the
+adoption record that took it over fold as **one** anchor rather than forking into
+two. `AnchorIdentity` stays a pure per-record function and its `legacy:` branch
+stays **forever**: pre-id records stay on disk by design, so nothing about them
+is ever rewritten. Everything downstream (`FindActiveAnchor`, `LatestSunsetFor`,
+`AnchorLabels`, `ProjectAnchor`, metrics) reads the folded set and needs no
+change.
+
+**`lucid anchor backfill-ids` is explicit, idempotent, and never automatic.** It
+appends the adoption records on demand — with a `--dry-run` that prints exactly
+what it would append and writes nothing — because a silent write to primary
+testimony on upgrade is precisely what Lucid's no-silent-writes posture forbids.
+Re-running it appends nothing (every legacy identity is already adopted), and the
+mint threads the growing log so same-day mints never collide. Until it is run,
+`anchor:<…>` resolution for a pre-id record is refused with this command named as
+the remedy. **No stored entry is edited or removed by any of this.**
+
+**Visible surface change (documented, not slipped in).** After the backfill,
+`ProjectAnchor` and `lucid metrics --json` publish the **minted** id for an
+adopted anchor instead of `legacy:<label>`. That synthetic id was read-time-only
+and never durable, so the change is safe — but it is a real output change and is
+called out here rather than discovered later.
+
 **`state`** discriminates a retirement, exactly as `event` does in `storm.json`:
 absent ⇒ active; `"sunset"` ⇒ retired. `anchor sunset <label> [reason]` appends a
 full mirror of the anchor plus `state: "sunset"`, carrying the superseded
@@ -536,10 +621,13 @@ legacy anchor it writes a **pair** in one write — an id-less sunset stub retir
 `legacy:<old-label>`, plus a new id-bearing record carrying the original date and
 note forward.
 
-**`version: 2` is a signal, not a gate.** It is stamped on every append, so the
-number in a file is always true of that file, but nothing validates it on read —
-a `version: 1` file still reads. The honest consequence of having no gate: an
-older binary reading a v2 file ignores `state` and would keep counting a sunset
+**`version: 3` is a signal, not a gate.** It is stamped on every append (bumped
+from 2 when the adoption fields shipped), so the number in a file is always true
+of that file, but nothing validates it on read — a `version: 1` or `version: 2`
+file still reads exactly as it always did. The honest consequence of having no
+gate: an older binary reading a v3 file ignores `adopts` / `adopted_at` and would
+fold a backfilled anchor as **two** identities (the legacy record and its
+adoption), just as it already ignores `state` and would keep counting a sunset
 anchor on its metrics surface.
 
 No capacity, journal, or Mirror data ever rides this file — it holds ids, labels

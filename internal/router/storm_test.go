@@ -1,6 +1,7 @@
 package router
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -293,4 +294,127 @@ func TestStorm_UsageBeforeDayResolution(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.Rejected)
 	assert.Equal(t, stormUsageMsg, res.Ack)
+}
+
+// seedStormNoEpisodes writes storm.json with the given history and no episodes
+// index — the shape a storm.json written before episodes existed has, so the
+// backfill has runs to index. It writes bytes directly, bypassing
+// AppendStormEvents (which now mints episodes forward), and every label is
+// synthetic.
+func seedStormNoEpisodes(t *testing.T, home string, events ...engine.StormEvent) {
+	t.Helper()
+	dir := filepath.Join(home, "engine")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	h := engine.StormHistory{
+		Clauses:      []string{},
+		Windows:      []engine.StormWindow{},
+		DurationDays: engine.StormDurationDefault,
+		History:      events,
+	}
+	b, err := json.MarshalIndent(h, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "storm.json"), b, 0o600))
+}
+
+// stormFileBytes reads the raw storm.json bytes so a test can assert the file is
+// byte-identical across a run.
+func stormFileBytes(t *testing.T, home string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(home, "engine", "storm.json"))
+	require.NoError(t, err)
+	return b
+}
+
+// TestBackfillStormEpisodes_IsIdempotent: the first run indexes every existing
+// run, and a second run appends nothing — storm.json is byte-identical across
+// it, and no history event is ever added.
+func TestBackfillStormEpisodes_IsIdempotent(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	seedStormNoEpisodes(t, home,
+		engine.StormEvent{At: "2026-01-05T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+		engine.StormEvent{At: "2026-01-20T06:00:00Z", Event: engine.StormExpired},
+		engine.StormEvent{At: "2026-07-01T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+		engine.StormEvent{At: "2026-07-01T10:00:00Z", Event: engine.StormConfirmed, Through: "2026-07-15"},
+	)
+
+	first, err := r.BackfillStormEpisodes(BackfillStormEpisodesRequest{Now: atUTC(2026, 9, 5, 0, 0)})
+	require.NoError(t, err)
+	assert.True(t, first.Written, "the first run indexes the runs")
+	require.Len(t, first.Planned, 2, "two runs are indexed")
+	assert.Equal(t, "storm_2026_01_05_a", first.Planned[0].ID)
+	assert.Equal(t, "storm_2026_07_01_a", first.Planned[1].ID)
+
+	h, err := a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, h.Episodes, 2, "the episodes index carries both runs")
+	assert.Len(t, h.History, 4, "no history event was added")
+	assert.Equal(t, engine.StormVersion, h.Version)
+
+	beforeSecond := stormFileBytes(t, home)
+	second, err := r.BackfillStormEpisodes(BackfillStormEpisodesRequest{Now: atUTC(2026, 9, 5, 0, 0)})
+	require.NoError(t, err)
+	assert.False(t, second.Written, "a re-run writes nothing")
+	assert.Empty(t, second.Planned, "every run already carries an id")
+	assert.Equal(t, stormBackfillNothingAck(), second.Ack)
+	assert.Equal(t, beforeSecond, stormFileBytes(t, home), "a re-run must not touch storm.json")
+}
+
+// TestBackfillStormEpisodes_DryRunWritesNothing: a dry run plans the episodes but
+// leaves storm.json byte-identical, and the plan is non-empty so the byte
+// assertion is meaningful.
+func TestBackfillStormEpisodes_DryRunWritesNothing(t *testing.T) {
+	r, _, home := newBootedRouter(t)
+	seedStormNoEpisodes(t, home,
+		engine.StormEvent{At: "2026-07-01T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+	)
+
+	before := stormFileBytes(t, home)
+
+	res, err := r.BackfillStormEpisodes(BackfillStormEpisodesRequest{Now: atUTC(2026, 9, 5, 0, 0), DryRun: true})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Planned, "the dry run must plan something for the no-write assertion to mean anything")
+	assert.False(t, res.Written, "a dry run never writes")
+	assert.Contains(t, res.Ack, "nothing was written")
+
+	assert.Equal(t, before, stormFileBytes(t, home), "a dry run must not touch storm.json")
+}
+
+// TestBackfillStormEpisodes_EmptyHistory: a storm.json with no runs plans nothing
+// and returns the no-op ack, not a failure.
+func TestBackfillStormEpisodes_EmptyHistory(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+
+	res, err := r.BackfillStormEpisodes(BackfillStormEpisodesRequest{Now: atUTC(2026, 9, 5, 0, 0)})
+	require.NoError(t, err)
+	assert.False(t, res.Written)
+	assert.Empty(t, res.Planned)
+	assert.Equal(t, stormBackfillNothingAck(), res.Ack)
+}
+
+// TestBackfillStormEpisodes_StatusUnchanged is the SC-13 promise at the command
+// level: indexing existing runs changes no field of the derived status.json. A
+// completed day inside the standing window anchors the reference date so the
+// storm actually stands, making the equality non-vacuous.
+func TestBackfillStormEpisodes_StatusUnchanged(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	require.NoError(t, a.ScaffoldEngine()) // chain.json/profile.json for the rebuild
+	require.NoError(t, a.WriteEngineDay(engine.DayRecord{
+		DayID: "day_2026_07_10", LogicalDate: "2026-07-10", Completed: true, Mode: engine.ModeGreen,
+	}))
+	seedStormNoEpisodes(t, home,
+		engine.StormEvent{At: "2026-07-01T08:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+		engine.StormEvent{At: "2026-07-01T10:00:00Z", Event: engine.StormConfirmed, Through: "2026-07-15"},
+	)
+
+	before, err := a.RebuildEngineStatus(nil)
+	require.NoError(t, err)
+	require.Equal(t, engine.StormStandingState, before.StormState, "the storm stands at the reference date")
+
+	res, err := r.BackfillStormEpisodes(BackfillStormEpisodesRequest{Now: atUTC(2026, 9, 5, 0, 0)})
+	require.NoError(t, err)
+	require.True(t, res.Written)
+
+	after, err := a.RebuildEngineStatus(nil)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "the episodes index changes no derived status field")
 }

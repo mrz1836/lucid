@@ -157,7 +157,36 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 	if dominance != "" {
 		b.WriteString(dominance + "\n")
 	}
+	linked, err := r.personLinkedMediaLine(rec)
+	if err != nil {
+		return PersonResult{}, err
+	}
+	if linked != "" {
+		b.WriteString(linked + "\n")
+	}
 	return PersonResult{Query: query, Matched: true, PersonKey: rec.PersonKey, Text: strings.TrimRight(b.String(), "\n")}, nil
+}
+
+// personLinkedMediaLine renders the "Media linked to them" line: the media
+// associated with this person by an explicit link (SC-9), listed by stored id in
+// the read seam's byte-stable order. The wording says "linked" so it reads
+// distinctly from a same-day coincidence join, and the line renders only when at
+// least one link exists — so a person with no linked media renders
+// byte-identically to before (S-22). The off-limits view returns before this is
+// ever reached, so a redacted person never surfaces derived media.
+func (r *Router) personLinkedMediaLine(rec storage.PersonRecord) (string, error) {
+	media, err := r.SubjectMedia("person", rec.PersonKey)
+	if err != nil {
+		return "", fmt.Errorf("person: linked media for %q: %w", rec.PersonKey, err)
+	}
+	if len(media) == 0 {
+		return "", nil
+	}
+	ids := make([]string, len(media))
+	for i, m := range media {
+		ids[i] = m.Media.ID
+	}
+	return "Media linked to them: " + strings.Join(ids, ", "), nil
 }
 
 // renderOffLimits builds the §P-3 raw-record-only view: the standing header,
