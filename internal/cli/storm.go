@@ -7,8 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/router"
 )
+
+// stormBackfillFlagDryRun prints exactly what the backfill would append without
+// writing anything, so an operator can preview the one-time write first.
+const stormBackfillFlagDryRun = "dry-run"
 
 // errStormRejected is returned when `lucid storm` declined the command — an
 // unknown clause label, a second renewal (a season, not a storm), or `end` with
@@ -92,5 +97,86 @@ func newStormCmd() *cobra.Command {
 		"Date the storm event itself, e.g. @yesterday or YYYY-MM-DD "+
 			"(an event before the last recorded one is rejected)",
 	)
+	cmd.AddCommand(newStormBackfillEpisodesCmd())
 	return cmd
+}
+
+// stormBackfillView is the `storm backfill-episodes --json` surface: the episode
+// records that would be (or were) appended, plus whether the write happened.
+// Planned is a non-nil empty slice on a no-op, so the shape is stable
+// ({"planned":[],...}).
+type stormBackfillView struct {
+	Planned []engine.StormEpisode `json:"planned"`
+	Written bool                  `json:"written"`
+}
+
+// newStormBackfillEpisodesCmd builds the `backfill-episodes` child: give every
+// storm run recorded before the episodes index existed a written id by appending
+// to the sibling episodes[] index. It is append-only — no history event is
+// touched — and explicit, never automatic. Human-first prose ack by default; the
+// planned records plus whether they were written as JSON under --json for
+// scripts (ADR-0007). --dry-run prints exactly what would be appended and writes
+// nothing.
+//
+// Registering this subcommand does not change how the positional `lucid storm
+// <clause-label|unwritten|end>` forms dispatch: the parent's explicit
+// MinimumNArgs(1) keeps cobra from reading a clause label as an unknown
+// subcommand. A clause literally named "backfill-episodes" is the one label this
+// child shadows.
+func newStormBackfillEpisodesCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backfill-episodes",
+		Short: "Give every existing storm run a written episode id",
+		Long: `backfill-episodes gives every storm run recorded before the episodes index
+existed a written id. It is append-only: identity is added to a sibling
+episodes[] index and no history event is ever edited, reordered, or removed, so
+the derived status.json is unchanged — a storm's standing is read from history,
+not from this index.
+
+This command is explicit and never automatic. A normal ` + "`lucid storm`" + ` command
+already mints an episode id when a run opens, so this command's job is only to
+complete the index for runs that predate it. It is safe to re-run — a history
+whose runs are all already indexed appends nothing. Add --dry-run to print what
+would be appended without writing anything.`,
+		Args: cobra.NoArgs,
+		Example: `  # Preview the one-time backfill without writing.
+  lucid storm backfill-episodes --dry-run
+
+  # Append the episode records.
+  lucid storm backfill-episodes
+
+  # Machine-readable output for a harness.
+  lucid storm backfill-episodes --json`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			dryRun, _ := cmd.Flags().GetBool(stormBackfillFlagDryRun)
+			res, err := r.BackfillStormEpisodes(router.BackfillStormEpisodesRequest{
+				Now:    clockNow(),
+				DryRun: dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				return writeJSON(cmd.OutOrStdout(), stormBackfillJSON(res))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+	cmd.Flags().Bool(stormBackfillFlagDryRun, false, "Print exactly what would be appended without writing anything")
+	return cmd
+}
+
+// stormBackfillJSON projects a backfill result into its machine surface, with a
+// non-nil Planned so the JSON shape is stable on a no-op.
+func stormBackfillJSON(res router.BackfillStormEpisodesResult) stormBackfillView {
+	planned := res.Planned
+	if planned == nil {
+		planned = []engine.StormEpisode{}
+	}
+	return stormBackfillView{Planned: planned, Written: res.Written}
 }

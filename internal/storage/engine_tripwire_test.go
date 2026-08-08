@@ -62,6 +62,109 @@ func TestAppendStormEvents(t *testing.T) {
 	assert.Len(t, h.History, 3)
 }
 
+// TestAppendStormEvents_MintsEpisodeWhenRunOpens: every append mints an id for a
+// run it opens and stamps the version, while confirmed/renewed continue a run
+// and mint nothing, and a fresh declaration after an end opens a second episode.
+func TestAppendStormEvents_MintsEpisodeWhenRunOpens(t *testing.T) {
+	a := newEngineAdapter(t)
+
+	// A declaration opens a run — exactly one episode, keyed on the opener.
+	require.NoError(t, a.AppendStormEvent(engine.StormEvent{At: "2026-07-14T07:05:00Z", Event: engine.StormDeclared, Label: "clause-a"}))
+	h, err := a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, h.Episodes, 1)
+	assert.Equal(t, "storm_2026_07_14_a", h.Episodes[0].ID)
+	assert.Equal(t, "2026-07-14T07:05:00Z", h.Episodes[0].OpenerAt)
+	assert.Equal(t, engine.StormVersion, h.Version)
+
+	// Confirmed then renewed continue the open run — no new episode.
+	require.NoError(t, a.AppendStormEvents(
+		engine.StormEvent{At: "2026-07-14T09:40:00Z", Event: engine.StormConfirmed, Through: "2026-07-28"},
+		engine.StormEvent{At: "2026-07-27T08:00:00Z", Event: engine.StormRenewed, Through: "2026-08-11"},
+	))
+	h, err = a.ReadStormState()
+	require.NoError(t, err)
+	assert.Len(t, h.Episodes, 1, "confirmed/renewed continue the run and mint nothing")
+
+	// An end closes the run, then a fresh declaration opens a second episode.
+	require.NoError(t, a.AppendStormEvents(
+		engine.StormEvent{At: "2026-08-12T06:00:00Z", Event: engine.StormExpired},
+		engine.StormEvent{At: "2026-09-01T07:00:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+	))
+	h, err = a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, h.Episodes, 2, "a fresh declaration after a terminal event opens a second episode")
+	assert.Equal(t, "storm_2026_09_01_a", h.Episodes[1].ID)
+	assert.Equal(t, "2026-09-01T07:00:00Z", h.Episodes[1].OpenerAt)
+	assert.Len(t, h.History, 5, "identity lives in episodes[]; history carries only the events")
+}
+
+// TestAppendStormEvents_StatusUnchangedByEpisodes proves the minted episodes[]
+// index perturbs no derived status field: the status built from the real
+// (episodes-carrying) storm.json is byte-identical to the one built from the
+// same history with episodes[] and version stripped.
+func TestAppendStormEvents_StatusUnchangedByEpisodes(t *testing.T) {
+	a := newEngineAdapter(t)
+	// A completed day inside the standing window anchors the reference date, so
+	// the storm actually stands and the equality is non-vacuous.
+	require.NoError(t, a.WriteEngineDay(completedRecord("2026-07-20", 3)))
+	require.NoError(t, a.AppendStormEvents(
+		engine.StormEvent{At: "2026-07-14T07:05:00Z", Event: engine.StormDeclared, Label: "clause-a"},
+		engine.StormEvent{At: "2026-07-14T09:40:00Z", Event: engine.StormConfirmed, Through: "2026-07-28"},
+	))
+
+	h, err := a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, h.Episodes, 1, "the opened run is indexed")
+	assert.Equal(t, engine.StormVersion, h.Version)
+	require.Len(t, h.History, 2, "history carries only the two events")
+
+	withEp, err := a.RebuildEngineStatus(time.UTC)
+	require.NoError(t, err)
+	require.Equal(t, engine.StormStandingState, withEp.StormState, "the storm stands at the reference date")
+
+	// Rewrite the identical history with episodes[] and version stripped, then
+	// rebuild: byte-identical status means the index changed nothing derived.
+	stripped := h
+	stripped.Episodes = nil
+	stripped.Version = 0
+	content, err := marshalJSON(stripped)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(a.stormPath(), content, filePerm))
+
+	withoutEp, err := a.RebuildEngineStatus(time.UTC)
+	require.NoError(t, err)
+	assert.Equal(t, withoutEp, withEp, "the episodes index changes no derived status field")
+}
+
+// TestWriteStormEpisodes_AppendsAndLeavesHistory: WriteStormEpisodes appends to
+// episodes[] and stamps the version without touching history[], and a no-op call
+// leaves the file untouched.
+func TestWriteStormEpisodes_AppendsAndLeavesHistory(t *testing.T) {
+	a := newEngineAdapter(t)
+	require.NoError(t, a.AppendStormEvent(engine.StormEvent{At: "2026-07-14T07:05:00Z", Event: engine.StormDeclared, Label: "clause-a"}))
+
+	before, err := a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, before.Episodes, 1, "the append already minted one episode forward")
+
+	require.NoError(t, a.WriteStormEpisodes(engine.StormEpisode{ID: "storm_2099_01_01_a", OpenerAt: "2099-01-01T00:00:00Z"}))
+	after, err := a.ReadStormState()
+	require.NoError(t, err)
+	require.Len(t, after.Episodes, 2, "the record was appended to episodes[]")
+	assert.Equal(t, "storm_2099_01_01_a", after.Episodes[1].ID)
+	assert.Equal(t, before.History, after.History, "history[] is never touched")
+	assert.Equal(t, engine.StormVersion, after.Version)
+
+	// A no-op call reads and writes nothing.
+	beforeBytes, err := os.ReadFile(a.stormPath())
+	require.NoError(t, err)
+	require.NoError(t, a.WriteStormEpisodes())
+	afterBytes, err := os.ReadFile(a.stormPath())
+	require.NoError(t, err)
+	assert.Equal(t, beforeBytes, afterBytes, "a no-op append leaves storm.json untouched")
+}
+
 // TestTripwireState_MissingIsZero: a never-run Ledger reads the zero state, and
 // a written state round-trips.
 func TestTripwireState_MissingIsZero(t *testing.T) {

@@ -503,7 +503,7 @@ func TestAppendAnchor_StampsVersionOnEveryAppend(t *testing.T) {
 
 	log, err := a.ReadAnchors()
 	require.NoError(t, err)
-	assert.Equal(t, 2, log.Version, "the version in a file is always true of that file")
+	assert.Equal(t, engine.AnchorVersion, log.Version, "the version in a file is always true of that file")
 	require.Len(t, log.History, 2)
 
 	afterHistory := rawAnchorHistory(t, a.anchorsPath())

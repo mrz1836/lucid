@@ -199,3 +199,103 @@ func (r *Router) persistStorm(ev engine.StormEvent, loc *time.Location) error {
 	_, err := r.store.RebuildEngineStatus(loc)
 	return err
 }
+
+// BackfillStormEpisodesRequest is one `lucid storm backfill-episodes` intent:
+// give every storm run recorded before the episodes index existed a written id.
+// Now fixes the bare-window cutoff and the ultimate mint fallback; DryRun plans
+// the records without writing them.
+type BackfillStormEpisodesRequest struct {
+	Now    time.Time
+	DryRun bool
+}
+
+// BackfillStormEpisodesResult reports the episode records the backfill planned,
+// whether they were written, and the inventory-only ack. Planned is in append
+// order and is empty when every run already carries an id; Written is false on
+// that no-op and on a dry run.
+type BackfillStormEpisodesResult struct {
+	Planned []engine.StormEpisode
+	Written bool
+	Ack     string
+}
+
+// BackfillStormEpisodes executes `lucid storm backfill-episodes`
+// (engine-module.md §storm.json): give every existing storm run a written
+// episode id by *appending* to the sibling episodes[] index, never by touching
+// history[]. [engine.PlanStormEpisodes] derives the runs from the folded history
+// and mints one id per un-indexed run; the write goes through
+// [Adapter.WriteStormEpisodes], which stamps the version and leaves every
+// history event exactly where it is — so the derived status.json is unchanged
+// (StormStanding never reads episodes[]).
+//
+// It is idempotent: the planner matches runs already indexed, so a re-run of a
+// fully-indexed history plans nothing and writes nothing, and this command is
+// safe to run more than once. It is explicit and never automatic — a silent
+// write to primary testimony is exactly what this store does not do — though a
+// normal storm append also mints forward, so this command's job is only to
+// complete the index for runs that predate it.
+func (r *Router) BackfillStormEpisodes(req BackfillStormEpisodesRequest) (BackfillStormEpisodesResult, error) {
+	now := whenOr(req.Now)
+
+	// Scaffold before reading: a never-scaffolded tree has no storm.json.
+	if err := r.prepareEngine(); err != nil {
+		return BackfillStormEpisodesResult{}, err
+	}
+	h, err := r.store.ReadStormState()
+	if err != nil {
+		return BackfillStormEpisodesResult{}, err
+	}
+
+	planned := engine.PlanStormEpisodes(h, now)
+	if len(planned) == 0 {
+		return BackfillStormEpisodesResult{Ack: stormBackfillNothingAck()}, nil
+	}
+	if req.DryRun {
+		return BackfillStormEpisodesResult{Planned: planned, Ack: stormBackfillDryRunAck(planned)}, nil
+	}
+
+	if err := r.store.WriteStormEpisodes(planned...); err != nil {
+		return BackfillStormEpisodesResult{}, fmt.Errorf("could not back-fill storm episodes; nothing was saved: %w", err)
+	}
+	return BackfillStormEpisodesResult{Planned: planned, Written: true, Ack: stormBackfillWrittenAck(planned)}, nil
+}
+
+// stormBackfillNothingAck is the no-op ack: every run already carries an id.
+func stormBackfillNothingAck() string {
+	return "Every storm run already carries an episode id; nothing was appended."
+}
+
+// stormBackfillWrittenAck names the runs indexed and reasserts the append-only
+// invariant — no history event was touched.
+func stormBackfillWrittenAck(planned []engine.StormEpisode) string {
+	return fmt.Sprintf(
+		"Indexed %s: %s. Episode records were appended; no history event was touched.",
+		stormEpisodeCountPhrase(len(planned)), strings.Join(episodeIDs(planned), ", "),
+	)
+}
+
+// stormBackfillDryRunAck names the runs a real run would index and says plainly
+// that nothing was written.
+func stormBackfillDryRunAck(planned []engine.StormEpisode) string {
+	return fmt.Sprintf(
+		"Would index %s: %s. Dry run — nothing was written.",
+		stormEpisodeCountPhrase(len(planned)), strings.Join(episodeIDs(planned), ", "),
+	)
+}
+
+// stormEpisodeCountPhrase renders "1 storm episode" / "N storm episodes".
+func stormEpisodeCountPhrase(n int) string {
+	if n == 1 {
+		return "1 storm episode"
+	}
+	return fmt.Sprintf("%d storm episodes", n)
+}
+
+// episodeIDs collects the minted ids in append order for the ack.
+func episodeIDs(planned []engine.StormEpisode) []string {
+	ids := make([]string, len(planned))
+	for i, ep := range planned {
+		ids[i] = ep.ID
+	}
+	return ids
+}
