@@ -247,3 +247,54 @@ func TestExportClinicianPacket_AllAndOverride(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "2026-06-01", override.WindowStart)
 }
+
+// seedMediaLink writes one synthetic media and appends a live link from it to a
+// subject, returning the stored media id — the storage-layer equivalent of
+// `lucid attach` followed by `lucid link`.
+func seedMediaLink(t *testing.T, a *Adapter, filename, day, kind, key string) string {
+	t.Helper()
+	rec, err := a.WriteMedia(MediaAttachment{
+		Bytes: []byte("synthetic bytes for " + filename), OriginalFilename: filename,
+		CapturedAt: time.Date(2026, time.June, 1, 9, 0, 0, 0, time.UTC),
+		LogicalDay: day, Source: "cli", RawEntryID: "raw_2026_06_01_09_00",
+	})
+	require.NoError(t, err)
+	_, err = a.AppendLinkEvent(LinkEvent{
+		MediaID: rec.ID, Subject: LinkSubject{Kind: kind, Key: key},
+		Op: LinkOpLink, At: "2026-06-01T09:00:00Z", Source: "cli",
+	})
+	require.NoError(t, err)
+	return rec.ID
+}
+
+// TestInjuryContext_LinkedMedia proves the injury projection carries media
+// associated by an explicit link (SC-9), in byte-stable id order, while an
+// injury with no links carries an empty slice. It is the second consumer of the
+// generic read seam — proof the seam is generic rather than person-shaped.
+func TestInjuryContext_LinkedMedia(t *testing.T) {
+	a := newObsStore(t)
+	seedInjury(t, a, "injury_a-cedar", "left knee", observations.StatusActive, nil)
+	seedInjury(t, a, "injury_c-oak", "right shoulder", observations.StatusManaged, nil)
+
+	// Two media linked to the knee, seeded out of id order to prove the sort.
+	bID := seedMediaLink(t, a, "b.jpg", "2026-06-01", observations.RegistryInjury, "injury_a-cedar")
+	aID := seedMediaLink(t, a, "a.jpg", "2026-06-01", observations.RegistryInjury, "injury_a-cedar")
+
+	ctx, err := a.InjuryContext()
+	require.NoError(t, err)
+	require.Len(t, ctx, 2)
+
+	// The knee carries both media, in byte-stable id order.
+	knee := ctx[0]
+	require.Equal(t, "injury_a-cedar", knee.Key)
+	require.Len(t, knee.LinkedMedia, 2)
+	assert.Equal(t, aID, knee.LinkedMedia[0].Media.ID)
+	assert.Equal(t, bID, knee.LinkedMedia[1].Media.ID)
+	assert.Equal(t, "injury", knee.LinkedMedia[0].Link.Subject.Kind)
+	assert.NotEmpty(t, knee.LinkedMedia[0].Media.StoredPath, "the paired record carries the stored path")
+
+	// The shoulder has no links → an empty slice, never an error.
+	shoulder := ctx[1]
+	require.Equal(t, "injury_c-oak", shoulder.Key)
+	assert.Empty(t, shoulder.LinkedMedia)
+}

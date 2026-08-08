@@ -236,6 +236,13 @@ type InjuryContext struct {
 	CurrentLimitations string
 	Timeline           string
 	Severity           string
+	// LinkedMedia is the media associated with this injury by an explicit link
+	// (SC-9), folded from the link ledger in byte-stable order. It is additive:
+	// every other field and the active/managed filter are untouched, so the
+	// clinician packet's activeInjuryLines and this projection still render from
+	// the one shared helper and cannot diverge. A dangling link (its media binary
+	// gone) is skipped; an injury with no links carries an empty slice.
+	LinkedMedia []LinkedMedia
 }
 
 // activeManagedInjuries reads the injury registry and keeps only the
@@ -286,6 +293,10 @@ func (a *Adapter) InjuryContext() ([]InjuryContext, error) {
 	}
 	out := make([]InjuryContext, 0, len(recs))
 	for _, r := range recs {
+		linked, _, lerr := a.LinkedMediaForSubject(observations.RegistryInjury, r.Key)
+		if lerr != nil {
+			return nil, lerr
+		}
 		out = append(out, InjuryContext{
 			Key:                r.Key,
 			DisplayName:        r.DisplayName,
@@ -294,6 +305,7 @@ func (a *Adapter) InjuryContext() ([]InjuryContext, error) {
 			CurrentLimitations: injuryField(r.Fields, "current_limitations"),
 			Timeline:           injuryField(r.Fields, "timeline"),
 			Severity:           injuryField(r.Fields, "severity"),
+			LinkedMedia:        linked,
 		})
 	}
 	return out, nil
