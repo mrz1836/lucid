@@ -120,6 +120,13 @@ type LedgerSource interface {
 	ReadReflectionErr(id string) error
 	ListPeopleKeys() ([]string, error)
 	ReadPersonErr(key string) error
+	// ListLinkEventIDs enumerates the link-ledger event locators in append
+	// order (the parsed id, or a positional line-<n> for a malformed line), and
+	// ReadLinkEventErr re-parses the one line a locator names and returns only
+	// its error. Together they let the schema sweep walk the single
+	// links/links.jsonl log the way it walks the per-file record families.
+	ListLinkEventIDs() ([]string, error)
+	ReadLinkEventErr(id string) error
 	// PersonRedirect returns the redirect_to of a person record — the empty
 	// string for a canonical record or one that cannot be read (the schema
 	// check reports an unreadable record; the redirect check does not

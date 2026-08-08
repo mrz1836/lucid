@@ -225,6 +225,42 @@ func (a *Adapter) ReadMediaForDay(date string) ([]MediaRecord, error) {
 	return out, nil
 }
 
+// ReadMediaByID returns the sidecar record for one stored media id, locating it
+// by the id's own YYYY-MM-DD prefix (the shard is media/YYYY/MM/, derivable from
+// the id — data-model.md §"Naming conventions"), with StoredPath filled. A
+// missing sidecar — or an id whose prefix names no valid day — is
+// (zero, false, nil), never an error: the caller (the link verbs) decides
+// whether absence is a refusal. A sidecar that exists but fails to parse is a
+// real error.
+func (a *Adapter) ReadMediaByID(id string) (MediaRecord, bool, error) {
+	day, ok := mediaDayPrefix(id)
+	if !ok {
+		return MediaRecord{}, false, nil
+	}
+	shard, err := a.mediaShardDir(day)
+	if err != nil {
+		return MediaRecord{}, false, nil //nolint:nilerr // a bad day prefix names no stored media, not a read failure
+	}
+	sidecar := filepath.Join(shard, id+mediaSidecarExt)
+	rec, found, err := readJSONOptional[MediaRecord](sidecar, fmt.Sprintf("media sidecar %q", id))
+	if err != nil || !found {
+		return MediaRecord{}, found, err
+	}
+	rec.StoredPath = filepath.Join(shard, id)
+	return rec, true, nil
+}
+
+// mediaDayPrefix extracts the YYYY-MM-DD day a stored media id carries as its
+// prefix. The date is always exactly ten characters, ahead of the slug, so the
+// slug's own hyphens never confuse it.
+func mediaDayPrefix(id string) (string, bool) {
+	const dayLen = len("2006-01-02")
+	if len(id) < dayLen {
+		return "", false
+	}
+	return id[:dayLen], true
+}
+
 // ListMedia returns every attachment record in the store, sorted by stored id —
 // a whole-tree retrieval primitive. It walks the media/ tree and decodes each
 // valid sidecar; a missing store yields no records and no error.

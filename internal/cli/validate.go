@@ -202,6 +202,12 @@ func (l ledgerAdapter) ReadReflectionErr(id string) error {
 // ReadPersonErr returns only the parse error of reading one person record.
 func (l ledgerAdapter) ReadPersonErr(key string) error { _, _, err := l.a.ReadPerson(key); return err }
 
+// ListLinkEventIDs enumerates the link-ledger event locators.
+func (l ledgerAdapter) ListLinkEventIDs() ([]string, error) { return l.a.ListLinkEventIDs() }
+
+// ReadLinkEventErr returns only the parse/validation error of one link event.
+func (l ledgerAdapter) ReadLinkEventErr(id string) error { return l.a.ReadLinkEventErr(id) }
+
 // PersonRedirect returns the redirect_to of one person record, backing the
 // redirect-graph check. An unreadable record resolves to the empty string
 // (the schema check reports the parse failure); the redirect check does not
