@@ -282,7 +282,7 @@ flag-parse error.
 |---------|-------|--------------|
 | `log [text]` | `--day` `--source` `--channel` `--thread` `--agent` `--model` `--harness` | Capture one immutable raw entry — no structure imposed at capture time. |
 | `obs [kind] [value…]` | *same as `log`* | One-line health/context micro-log — pain, mood, sleep, place. Inventory, never obligation. |
-| `attach <path>` | `--caption` `--day` `--source` `--channel` `--harness` | Attach a photo or file to a logical day. |
+| `attach <path>` | `--caption` `--day` `--source` `--channel` `--harness` `--to` | Attach a photo or file to a logical day — optionally linking it to what it's about at capture time (`--to <kind>:<key>`, repeatable). |
 | `mode <green\|yellow\|red>` | `--day` | Declare today's capacity mode; the floor drops with it (rejected after the bell). |
 | `closeout [today\|skip\|backfill] [compact form…]` | `--day` | The two-minute nightly close-out — record the day's committed practice. Idempotent per logical day. |
 
@@ -322,6 +322,7 @@ flag-parse error.
 | `person off-limits <subject>` | `--restore` | Mark a person off-limits to inference (the P-3 redaction); `--restore` clears it. |
 | `anchor add <label> <date> [note…]` | — | Record a days-since milestone. A future date is accepted — an anchor may be a date you count *toward*. |
 | `anchor rename <label> <new-label>`<br>`anchor sunset <label> [reason…]` | — | Rename a milestone's display label (the day count carries forward), or retire it from the counting surfaces (the record is kept). |
+| `link <media>`<br>`unlink <media>`<br>`annotate <media>` | `--to` `--note` | Point a stored attachment at anything it's about — a person, injury, day, anchor, thread — through the append-only link ledger (`--to <kind>:<key>`, repeatable). `unlink` retires an association; `annotate` adds a note to one. Correctable and retroactive; the media binary is never touched and nothing is destroyed. |
 | `structure [raw_id]` | `--since` `--until` `--force` | Run the Structuring pass over raw entries a check-in did not capture — one id, or an inclusive date window. |
 | `bootstrap [done]` | — | Toggle historical-entry mode to backfill the past without disturbing today. |
 
@@ -511,8 +512,10 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 > - **Status:** pre-1.0; expect bugs, edge cases, and breaking changes to
 >   commands and the `~/.lucid/` layout.
 > - **Your data is yours.** `lucid backup` writes the must-keep set (`raw/`,
->   `observations/`, `registries/`, `engine/` minus `status.json`, and
->   `projections/exports.log`) to a single archive; `lucid restore` rebuilds it.
+>   `media/`, `observations/`, `registries/`, `links/`, `engine/` minus
+>   `status.json`, and `projections/exports.log`) to a single archive; `lucid
+>   restore` rebuilds it — the association ledger and the binaries its links
+>   point at survive together.
 >   There is still no cloud copy — the backup goes where you tell it.
 > - **Not medical advice.** Lucid is not a therapist or clinician; health
 >   projections are data for you and your care team, never a diagnosis.

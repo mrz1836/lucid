@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.12.0"
+min_lucid_version: "0.17.0"
 ---
 
 # Lucid
@@ -46,7 +46,7 @@ its output. Acknowledge *after* the binary persists, never before.
 | Message | Router intent | How the skill drives it |
 |---------|---------------|-------------------------|
 | `/log <text>` | capture | `lucid log <text> [--day <date>]` |
-| media/file attachment | media capture | `lucid attach <path> [--caption <text>] [--day <date>]` |
+| media/file attachment | media capture | `lucid attach <path> [--caption <text>] [--day <date>] [--to <kind>:<key>]...` |
 | `/checkin` | guided Intake → structure → ≤1 proposal | router check-in (thread-driven, provider-backed) |
 | `/closeout …` | Engine close-out | `lucid closeout …` — **verbatim passthrough** |
 | `/closeout skip` | honest miss | `lucid closeout skip` — **verbatim passthrough** |
@@ -83,13 +83,16 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid era` | Record or amend a life chapter (era). |
 | `lucid injury` | Record or amend an injury in your body history. |
 | `lucid thread` | Record or amend a thread you're working on. |
+| `lucid link` | Point a stored media attachment at a subject it is about — a person, injury, day, anchor, or thread — through the append-only link ledger; a retroactive curation verb reached by its CLI form. |
+| `lucid unlink` | Retire a media↔subject association by appending an unlink event — nothing is destroyed, the pair just stops being live. |
+| `lucid annotate` | Attach a free-text note to a media↔subject association without changing whether it is linked. |
 | `lucid workout` | Recommend, log, and review your training (config-gated). |
 | `lucid structure` | Structure a raw entry you did not just capture, or a window of them. |
 | `lucid self` | Read and record durable facts about yourself. |
 | `lucid backup` | Write the must-keep Ledger trees to a single `.tar.gz` archive; a data-safety operation rather than a conversation. |
 | `lucid restore` | Rebuild a Ledger from a backup archive; destructive-adjacent and deliberately CLI-only. |
 | `lucid init` | Scaffold the `~/.lucid/` Ledger tree. |
-| `lucid upgrade` | Upgrade lucid in place from a GitHub release. |
+| `lucid update` | Self-update lucid in place from a GitHub release (alias: `upgrade`). |
 | `lucid version` | Print lucid build metadata. |
 | `lucid completion` | Generate the autocompletion script for the specified shell. |
 | `lucid serve` | Drive the interactive `/checkin` flow over a stdin/JSON protocol. |
@@ -107,8 +110,8 @@ per-verb precision tiers are specified once in the command reference —
 never re-decided here. In brief:
 
 * **Which verbs carry it.** `log`, `obs`, `attach`, `mode`, `storm`, `memory`,
-  and `closeout` (where `--day` is an alias onto `closeout backfill`). `obs` also
-  accepts an inline `@yesterday` token in its value stream.
+  `workout log`, and `closeout` (where `--day` is an alias onto `closeout
+  backfill`). `obs` also accepts an inline `@yesterday` token in its value stream.
 * **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
   04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
   literally), a partial `2014` or `2014-09` (snaps to the period's first day),
@@ -200,6 +203,15 @@ then run `lucid attach <path>` with an optional caption. Do not store user media
 under the agent workspace as the final archive. The canonical media store is
 `~/.lucid/media/`, and `lucid attach` emits the stored path, sha256, logical day,
 linked raw id, and caption. Relay those fields back to the user.
+
+When the user names what the file is *about* — a person, injury, day, anchor, or
+thread — pass one repeatable `--to <kind>:<key>` per subject and `attach` links it
+in the same flow (`attach --json` then also reports the `linked` subjects). Every
+`--to` is validated **before** the media is written, so a malformed or
+unresolvable subject saves no media, no raw entry, and no link. Those associations
+are corrected afterward from the CLI, never conversationally: `lucid link` points
+an existing media at more subjects, `lucid unlink` retires a pair, and `lucid
+annotate` notes one — all append-only, and the stored binary is never touched.
 
 ## Verbatim passthrough on Engine verbs
 

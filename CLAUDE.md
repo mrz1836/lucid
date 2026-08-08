@@ -40,7 +40,7 @@ floor — if a doc and a passing test disagree, stop and surface it rather than
 
 | …do this | Read first | Touch |
 |----------|------------|-------|
-| add/change a CLI verb | [`agent-contracts.md`](docs/mvp/agent-contracts.md), [ADR-0007](docs/adr/0007-cli-conventions.md) | `internal/cli` + `internal/router` |
+| add/change a CLI verb | [`agent-contracts.md`](docs/mvp/agent-contracts.md), [ADR-0007](docs/adr/0007-cli-conventions.md) | `internal/cli` + `internal/router` — then sync the three surface docs (see *CLI surface stays in sync* below) |
 | change what leaves the machine (a send) | [`engine-module.md`](docs/mvp/engine-module.md) | `internal/scheduler` + `internal/engine/templates` — and confirm it's a pre-committed template |
 | change `~/.lucid/` layout or a record | [`data-model.md`](docs/mvp/data-model.md) | `internal/storage` **only** |
 | add/adjust enrichment or any network call | [`observations.md`](docs/observations.md) §5, [ADR-0006](docs/adr/0006-model-access.md) | `internal/storage/fetch_enrichment.go` + `internal/observations` |
@@ -52,6 +52,16 @@ floor — if a doc and a passing test disagree, stop and surface it rather than
 ## Invariants — never violate (most are enforced by tests)
 
 - **Docs-first.** A behavior change is a doc diff before a code diff.
+- **CLI surface stays in sync.** Any Go change that adds, removes, or renames a
+  verb, subcommand, flag, or `LUCID_*` env var updates all three user-facing
+  surfaces in the **same** change: the canonical reference
+  [`docs/usage/commands.md`](docs/usage/commands.md), the harness command map
+  [`skills/lucid/SKILL.md`](skills/lucid/SKILL.md) (its command map, non-chat
+  verb table, and `min_lucid_version`), and the root
+  [`README.md`](README.md) (its Command reference + Environment tables). A verb
+  that exists in code but not in all three is a docs-first violation. (The CI
+  env doc [`.github/env/README.md`](.github/env/README.md) is **not** part of
+  this set — it is upstream-synced `.github/**` and holds no CLI surface.)
 - **`personal/` is private.** Gitignored; never in any commit, example,
   fixture, or shared context. Do not read it unless the user explicitly
   directs you to.
