@@ -47,7 +47,7 @@ func TestSecretGuard_SourceHasNoExternalLifecyclePath(t *testing.T) {
 
 func TestSecretGuard_CatalogSurfaceIsValueFree(t *testing.T) {
 	routerType := reflect.TypeOf((*router.Router)(nil))
-	methods := make([]string, 0, 3)
+	methods := make([]string, 0, 4)
 	for i := range routerType.NumMethod() {
 		method := routerType.Method(i)
 		if strings.HasPrefix(method.Name, "Secret") {
@@ -55,7 +55,7 @@ func TestSecretGuard_CatalogSurfaceIsValueFree(t *testing.T) {
 			assertValueFreeType(t, method.Type, map[reflect.Type]bool{})
 		}
 	}
-	assert.ElementsMatch(t, []string{"SecretAdd", "SecretList", "SecretRemove"}, methods)
+	assert.ElementsMatch(t, []string{"SecretAdd", "SecretList", "SecretNote", "SecretRemove"}, methods)
 
 	assertValueFreeType(t, reflect.TypeOf(storage.SecretRefEvent{}), map[reflect.Type]bool{})
 	assertValueFreeType(t, reflect.TypeOf(storage.SecretRef{}), map[reflect.Type]bool{})

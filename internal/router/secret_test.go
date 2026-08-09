@@ -73,6 +73,75 @@ func TestSecretAddRefusesDuplicateWithoutAppending(t *testing.T) {
 	assert.Len(t, events, 1)
 }
 
+func TestSecretNoteUpdatesNoteKeepingCreatedAt(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	created := fixedNow()
+
+	_, err := r.SecretAdd(SecretAddRequest{Name: "FIXTURE_SECRET", Note: "first", Now: created, Source: "cli"})
+	require.NoError(t, err)
+
+	res, err := r.SecretNote("FIXTURE_SECRET", "second", created.Add(time.Hour), "cli")
+	require.NoError(t, err)
+	assert.Equal(t, storage.SecretRefOpNote, res.Event.Op)
+	assert.Equal(t, "Updated the note on FIXTURE_SECRET.", res.Ack)
+
+	refs, err := r.SecretList()
+	require.NoError(t, err)
+	require.Equal(t, []storage.SecretRef{{
+		Name:      "FIXTURE_SECRET",
+		Note:      "second",
+		CreatedAt: created.Format(time.RFC3339),
+	}}, refs)
+
+	// The amend is a new append; nothing was rewritten or removed.
+	events, skipped, err := a.ReadSecretRefEvents()
+	require.NoError(t, err)
+	assert.Zero(t, skipped)
+	assert.Len(t, events, 2)
+}
+
+func TestSecretNoteClearsNote(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+	_, err := r.SecretAdd(SecretAddRequest{Name: "FIXTURE_SECRET", Note: "first", Now: fixedNow(), Source: "cli"})
+	require.NoError(t, err)
+
+	res, err := r.SecretNote("FIXTURE_SECRET", "", fixedNow().Add(time.Minute), "cli")
+	require.NoError(t, err)
+	assert.Equal(t, "Cleared the note on FIXTURE_SECRET.", res.Ack)
+
+	refs, err := r.SecretList()
+	require.NoError(t, err)
+	require.Len(t, refs, 1)
+	assert.Empty(t, refs[0].Note)
+}
+
+func TestSecretNoteRefusesMissingWithoutAppending(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	_, err := r.SecretNote("FIXTURE_SECRET", "x", fixedNow(), "cli")
+	require.EqualError(t, err, `reference "FIXTURE_SECRET" is not registered; nothing was changed`)
+
+	events, skipped, err := a.ReadSecretRefEvents()
+	require.NoError(t, err)
+	assert.Zero(t, skipped)
+	assert.Empty(t, events)
+}
+
+func TestSecretNoteRefusesInvalidInput(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+	_, err := r.SecretAdd(SecretAddRequest{Name: "FIXTURE_SECRET", Now: fixedNow(), Source: "cli"})
+	require.NoError(t, err)
+
+	_, err = r.SecretNote("lower", "x", fixedNow(), "cli")
+	require.EqualError(t, err, "could not update the note; nothing was saved: storage: secret reference name must match ^[A-Z_][A-Z0-9_]*$ (1-64 characters)")
+
+	_, err = r.SecretNote("FIXTURE_SECRET", strings.Repeat("x", 257), fixedNow(), "cli")
+	require.EqualError(t, err, "could not update the note; nothing was saved: storage: secret reference note must be at most 256 characters")
+
+	_, err = r.SecretNote("FIXTURE_SECRET", "x", fixedNow(), "bad token!")
+	require.ErrorContains(t, err, "invalid source; nothing was saved")
+}
+
 func TestSecretRemoveRefusesMissingWithoutAppending(t *testing.T) {
 	r, a, _ := newBootedRouter(t)
 

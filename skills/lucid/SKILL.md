@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.18.0"
+min_lucid_version: "0.19.0"
 ---
 
 # Lucid
@@ -92,6 +92,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid self` | Read and record durable facts about yourself. |
 | `lucid backup` | Write the must-keep Ledger trees to a single `.tar.gz` archive; a data-safety operation rather than a conversation. |
 | `lucid restore` | Rebuild a Ledger from a backup archive; destructive-adjacent and deliberately CLI-only. |
+| `lucid secret` | Maintain a names-only catalog of hush secret handles (`add`/`list`/`note`/`remove`) — a handle and an optional note, never a value; `note` amends a live handle's note in place (or removes it with `--clear`), keeping its creation time, and the catalog has no reveal, fetch, or storage path. An operational/config verb reached by its CLI form. |
 | `lucid init` | Scaffold the `~/.lucid/` Ledger tree. |
 | `lucid update` | Self-update lucid in place from a GitHub release (alias: `upgrade`). |
 | `lucid version` | Print lucid build metadata. |

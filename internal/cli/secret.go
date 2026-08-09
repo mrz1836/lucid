@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -29,6 +31,7 @@ creation time. Catalog history is append-only, so remove records a tombstone.`,
 	}
 	parent.AddCommand(newSecretAddCmd())
 	parent.AddCommand(newSecretListCmd())
+	parent.AddCommand(newSecretNoteCmd())
 	parent.AddCommand(newSecretRemoveCmd())
 	return parent
 }
@@ -95,6 +98,51 @@ func newSecretListCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// flagClear removes a reference's note instead of setting new text. Requiring
+// an explicit --clear means a forgotten note argument can never silently blank
+// a note.
+const flagClear = "clear"
+
+// newSecretNoteCmd amends the note on one live reference without re-registering
+// it, so the original creation time is preserved. The new note is positional
+// text; --clear removes the note instead. Exactly one of the two must be given,
+// so a bare `secret note <name>` is refused rather than blanking the note.
+func newSecretNoteCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "note <name> (<text...> | --clear)",
+		Short: "Update or clear the note on a reference name",
+		Args: cobra.MatchAll(cobra.MinimumNArgs(1), func(cmd *cobra.Command, args []string) error {
+			clearNote, _ := cmd.Flags().GetBool(flagClear)
+			switch hasText := len(args) > 1; {
+			case clearNote && hasText:
+				return errors.New("cannot combine note text with --clear")
+			case !clearNote && !hasText:
+				return errors.New("provide the new note text, or pass --clear to remove the note")
+			}
+			return nil
+		}),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := secretRouter(cmd)
+			if err != nil {
+				return err
+			}
+			clearNote, _ := cmd.Flags().GetBool(flagClear)
+			note := ""
+			if !clearNote {
+				note = strings.Join(args[1:], " ")
+			}
+			res, err := r.SecretNote(args[0], note, clockNow(), sourceCLI)
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+	cmd.Flags().Bool(flagClear, false, "Remove the note from the reference (the reference stays registered)")
+	return cmd
 }
 
 // newSecretRemoveCmd appends a tombstone for one live reference name.

@@ -356,6 +356,7 @@ flag-parse error.
 | `export [series \| packet clinician [@date\|all]]` | — | Export a CSV series or a clinician packet — zero journal content by default. |
 | `backup` | `--out` | Write the must-keep Ledger trees to a single `.tar.gz`. Never writes into `~/.lucid/`, never clobbers an existing file. |
 | `restore [<file>]` | `--in` `--force` | Overlay a backup archive back into the Ledger; refuses an occupied home without `--force`. |
+| `secret <add\|list\|note\|remove>` | `--note` `--clear` | Maintain a names-only catalog of hush secret handles — a handle and an optional note, never a value. `note` updates a live handle's note (or removes it with `--clear`), keeping its creation time; `remove` tombstones it. History stays append-only. No reveal, no fetch, no storage. |
 | `validate` | — | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
 | `serve` | — | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
 | `version` | — | Print build metadata: version, commit, build date. |
@@ -513,10 +514,10 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 > - **Status:** pre-1.0; expect bugs, edge cases, and breaking changes to
 >   commands and the `~/.lucid/` layout.
 > - **Your data is yours.** `lucid backup` writes the must-keep set (`raw/`,
->   `media/`, `observations/`, `registries/`, `links/`, `engine/` minus
->   `status.json`, and `projections/exports.log`) to a single archive; `lucid
->   restore` rebuilds it — the association ledger and the binaries its links
->   point at survive together.
+>   `media/`, `observations/`, `registries/`, `links/`, `secrets/`, `engine/`
+>   minus `status.json`, and `projections/exports.log`) to a single archive;
+>   `lucid restore` rebuilds it — the association ledger and the binaries its
+>   links point at survive together.
 >   There is still no cloud copy — the backup goes where you tell it.
 > - **Not medical advice.** Lucid is not a therapist or clinician; health
 >   projections are data for you and your care team, never a diagnosis.

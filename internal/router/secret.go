@@ -116,6 +116,56 @@ func (r *Router) SecretRemove(name string, now time.Time, sourceRaw string) (Sec
 	}, nil
 }
 
+// SecretNoteResult reports the note event that was appended and the
+// acknowledgement to show the user.
+type SecretNoteResult struct {
+	Event storage.SecretRefEvent
+	Ack   string
+}
+
+// SecretNote amends the note on a live catalog name without re-registering it,
+// so the original creation time is preserved. An empty note clears it. A name
+// that is not live is refused rather than silently created.
+func (r *Router) SecretNote(name, note string, now time.Time, sourceRaw string) (SecretNoteResult, error) {
+	if err := storage.ValidateSecretRefName(name); err != nil {
+		return SecretNoteResult{}, fmt.Errorf("could not update the note; nothing was saved: %w", err)
+	}
+	if err := storage.ValidateSecretRefNote(note); err != nil {
+		return SecretNoteResult{}, fmt.Errorf("could not update the note; nothing was saved: %w", err)
+	}
+	source, err := resolveSource(sourceRaw)
+	if err != nil {
+		return SecretNoteResult{}, fmt.Errorf("invalid source; nothing was saved: %w", err)
+	}
+	if prepareErr := r.prepareSecrets(); prepareErr != nil {
+		return SecretNoteResult{}, prepareErr
+	}
+
+	refs, err := r.store.ListSecretRefs()
+	if err != nil {
+		return SecretNoteResult{}, err
+	}
+	if !secretRefIsLive(refs, name) {
+		return SecretNoteResult{}, fmt.Errorf("reference %q is not registered; nothing was changed", name)
+	}
+
+	event, err := r.store.AppendSecretRefEvent(storage.SecretRefEvent{
+		Name:   name,
+		Op:     storage.SecretRefOpNote,
+		Note:   note,
+		At:     whenOr(now).Format(time.RFC3339),
+		Source: source,
+	})
+	if err != nil {
+		return SecretNoteResult{}, fmt.Errorf("could not update the note; nothing was saved: %w", err)
+	}
+	ack := fmt.Sprintf("Updated the note on %s.", event.Name)
+	if note == "" {
+		ack = fmt.Sprintf("Cleared the note on %s.", event.Name)
+	}
+	return SecretNoteResult{Event: event, Ack: ack}, nil
+}
+
 func (r *Router) prepareSecrets() error {
 	if err := r.store.ScaffoldSecrets(); err != nil {
 		return fmt.Errorf("could not prepare the reference catalog: %w", err)

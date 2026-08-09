@@ -443,21 +443,30 @@ can never disagree.
 ```
 lucid secret add <NAME> [--note <text>]
 lucid secret list [--json]
+lucid secret note <NAME> <text…>
+lucid secret note <NAME> --clear
 lucid secret remove <NAME>
 ```
 
 Maintain a high-level catalog of hush handles. `add` registers a reference name
-and optional note; `list` returns the live names, notes, and creation times; and
+and optional note; `list` returns the live names, notes, and creation times;
+`note` updates the note on a live reference — or removes it with `--clear` —
+without re-registering it, so its original creation time is preserved; and
 `remove` appends a tombstone that drops a reference from the live view without
 deleting its history.
 
-Names must match `^[A-Z_][A-Z0-9_]*$` and contain at most 64 characters. Adding
-an already-registered name is an error. A removed name may be registered again.
+Names must match `^[A-Z_][A-Z0-9_]*$` and contain at most 64 characters; a note
+is at most 256 characters. Adding an already-registered name is an error — amend
+its note with `note`. A removed name may be registered again. `note` requires
+either the new text or `--clear`, so a note is never blanked by a forgotten
+argument.
 
 ```sh
 lucid secret add FIXTURE_SECRET --note "synthetic reference"
 lucid secret list
 lucid secret list --json
+lucid secret note FIXTURE_SECRET "rotated 2026-08"
+lucid secret note FIXTURE_SECRET --clear
 lucid secret remove FIXTURE_SECRET
 ```
 
@@ -821,8 +830,9 @@ lucid backup [--out <file>] [--json]
 Write the **must-keep** Ledger set to a single gzip-compressed tar archive: the
 primary data that exists nowhere else and must survive forever (ADR-0002; the
 same set `scripts/backup.sh` and `deploy.BackupManifest` encode) — `raw/`,
-`media/`, `observations/`, `registries/`, `links/`, `engine/` (minus its derived
-`status.json`), and `projections/exports.log`. Rebuildable trees (`processed/`,
+`media/`, `observations/`, `registries/`, `links/`, `secrets/`, `engine/` (minus
+its derived `status.json`), and `projections/exports.log`. Rebuildable trees
+(`processed/`,
 `insights/`, `reflections/`, `engine/status.json`, the rest of `projections/`)
 and the reconstructable indexes (`people/`, `sessions/`, `lucid.json`) are
 deliberately omitted. It reads `~/.lucid/` and writes one archive; it makes no

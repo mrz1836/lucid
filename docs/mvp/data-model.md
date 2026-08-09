@@ -651,8 +651,8 @@ therefore yields links whose media binaries still exist.
 **Format:** newline-delimited JSON (JSONL). One event per line in the single
 `secrets/secrets.jsonl` log.
 
-**Mutability:** **Append-only.** Registering a name or removing it appends an
-event; no existing line is rewritten or deleted. The current catalog is a
+**Mutability:** **Append-only.** Registering a name, amending its note, or
+removing it appends an event; no existing line is rewritten or deleted. The current catalog is a
 **fold** of the log containing live entries only. A `remove` event is a
 tombstone, and a later `register` event for the same name makes it live again
 without erasing its history.
@@ -673,7 +673,7 @@ lifecycle; Lucid builds no path to store or reveal it.
 | `schema` | yes | Record schema tag, `secretref.v1`. |
 | `id` | yes | `secretref_<n>` — a monotonic per-file sequence. |
 | `name` | yes | A hush-compatible handle matching `^[A-Z_][A-Z0-9_]*$`, at most 64 characters. It is the only reference key; the catalog does not model vault scope separately. |
-| `op` | yes | `register` or `remove`. A remove is a tombstone, never an in-place deletion. |
+| `op` | yes | `register`, `note`, or `remove`. A `note` amends the note on a live name while keeping its creation time; a remove is a tombstone, never an in-place deletion. |
 | `note` | no | Optional free text, stored verbatim, at most 256 characters. |
 | `at` | yes | When the event was recorded — RFC3339 with the host's local offset. |
 | `source` | yes | Provenance token for the capture surface, normalized on write. |
@@ -681,10 +681,17 @@ lifecycle; Lucid builds no path to store or reveal it.
 ### The fold — current references are a read
 
 The folded read shape is `{name, note?, created_at}`. `register` makes the name
-live and supplies its note and creation time; `remove` makes it absent from the
-live view while preserving both events. Listing the catalog returns only live
-records, sorted by name. Registering an already-live name is refused;
-registering it again after a tombstone is allowed and creates a new live record.
+live and supplies its note and creation time; a `note` event replaces the note
+on a live name without touching its `created_at` (an empty note clears it, and a
+`note` for a name that is not live is ignored); `remove` makes it absent from the
+live view while preserving every event. Listing the catalog returns only live
+records, sorted by name. Registering an already-live name is refused (amend its
+note with `note`, not another `register`); registering it again after a
+tombstone is allowed and creates a new live record.
+
+The catalog is primary testimony that exists nowhere else, so it joins the
+backup set (`deploy.BackupManifest`, [`local-runtime.md`](local-runtime.md)
+§Rebuildability); a restored Ledger carries the live handles and their notes.
 
 ## Processed artifacts — `~/.lucid/processed/`
 

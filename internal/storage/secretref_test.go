@@ -117,6 +117,56 @@ func TestFoldSecretRefsKeepsFirstRegistrationInLiveGeneration(t *testing.T) {
 	}, folded["FIXTURE_SECRET"])
 }
 
+func TestFoldSecretRefsNoteAmendsKeepingCreatedAt(t *testing.T) {
+	base := fixedTime()
+	events := []SecretRefEvent{
+		syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpRegister, base),
+		syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpNote, base.Add(time.Hour)),
+	}
+	events[0].Note = "first"
+	events[1].Note = "second"
+	folded := foldSecretRefs(events)
+	assert.Equal(t, SecretRef{
+		Name:      "FIXTURE_SECRET",
+		Note:      "second",
+		CreatedAt: base.Format(time.RFC3339),
+	}, folded["FIXTURE_SECRET"])
+}
+
+func TestFoldSecretRefsNoteOnAbsentNameIsIgnored(t *testing.T) {
+	base := fixedTime()
+	// A note after a tombstone (no live registration) leaves nothing live.
+	events := []SecretRefEvent{
+		syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpRegister, base),
+		syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpRemove, base.Add(time.Minute)),
+		syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpNote, base.Add(2*time.Minute)),
+	}
+	assert.Empty(t, foldSecretRefs(events))
+}
+
+func TestSecretRefNoteOpThroughAdapterKeepsCreatedAt(t *testing.T) {
+	a := New(t.TempDir())
+	base := fixedTime()
+
+	reg := syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpRegister, base)
+	reg.Note = "first"
+	_, err := a.AppendSecretRefEvent(reg)
+	require.NoError(t, err)
+
+	amend := syntheticSecretRefEvent("FIXTURE_SECRET", SecretRefOpNote, base.Add(time.Hour))
+	amend.Note = "second"
+	_, err = a.AppendSecretRefEvent(amend)
+	require.NoError(t, err)
+
+	refs, err := a.ListSecretRefs()
+	require.NoError(t, err)
+	require.Equal(t, []SecretRef{{
+		Name:      "FIXTURE_SECRET",
+		Note:      "second",
+		CreatedAt: base.Format(time.RFC3339),
+	}}, refs)
+}
+
 func TestSecretRefIDsAreNeverReusedAndMalformedLinesAreTolerated(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvHome, home)

@@ -30,6 +30,9 @@ type SecretRefOp string
 const (
 	// SecretRefOpRegister makes a catalog reference live.
 	SecretRefOpRegister SecretRefOp = "register"
+	// SecretRefOpNote amends the note on a live reference without
+	// re-registering it, so the original creation time is preserved.
+	SecretRefOpNote SecretRefOp = "note"
 	// SecretRefOpRemove tombstones a catalog reference.
 	SecretRefOpRemove SecretRefOp = "remove"
 )
@@ -179,9 +182,9 @@ func (ev SecretRefEvent) validate() error {
 		return err
 	}
 	switch ev.Op {
-	case SecretRefOpRegister, SecretRefOpRemove:
+	case SecretRefOpRegister, SecretRefOpNote, SecretRefOpRemove:
 	default:
-		return fmt.Errorf("storage: secret reference op %q is not one of register|remove", ev.Op)
+		return fmt.Errorf("storage: secret reference op %q is not one of register|note|remove", ev.Op)
 	}
 	if err := ValidateSecretRefNote(ev.Note); err != nil {
 		return err
@@ -208,7 +211,9 @@ func parseSecretRefSeq(id string) (int, bool) {
 }
 
 // foldSecretRefs reduces events in append order to the live catalog. Each
-// register starts a new live generation; remove leaves only its history.
+// register starts a new live generation; a note amends the live entry's note
+// without disturbing its creation time; remove leaves only its history. A note
+// for a name that is not currently live is ignored.
 func foldSecretRefs(events []SecretRefEvent) map[string]SecretRef {
 	live := make(map[string]SecretRef)
 	for _, ev := range events {
@@ -220,6 +225,11 @@ func foldSecretRefs(events []SecretRefEvent) map[string]SecretRef {
 			}
 			ref.Note = ev.Note
 			live[ev.Name] = ref
+		case SecretRefOpNote:
+			if ref, exists := live[ev.Name]; exists {
+				ref.Note = ev.Note
+				live[ev.Name] = ref
+			}
 		case SecretRefOpRemove:
 			delete(live, ev.Name)
 		}
