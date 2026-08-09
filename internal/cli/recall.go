@@ -12,16 +12,17 @@ import (
 
 // Recall dimension flag names (mvp/life-archive.md §7). They are mutually
 // exclusive — a browse names exactly one dimension, and no flag is the bare
-// index over all three.
+// index over all four.
 const (
 	recallFlagEra    = "era"
 	recallFlagThread = "thread"
 	recallFlagInjury = "injury"
+	recallFlagPet    = "pet"
 )
 
 // recallEmpty is the calm copy printed when the archive holds nothing to browse
-// yet — no era, thread, or injury recorded.
-const recallEmpty = "Nothing archived yet — record an injury, era, or story first, then come back."
+// yet — no era, thread, injury, or pet recorded.
+const recallEmpty = "Nothing archived yet — record an injury, era, pet, or story first, then come back."
 
 // recallFieldView is one convention Field of a browsed referent in the --json
 // projection.
@@ -30,7 +31,7 @@ type recallFieldView struct {
 	Value string `json:"value"`
 }
 
-// recallReferentView is the --json projection of the browsed era/thread/injury:
+// recallReferentView is the --json projection of the browsed era/thread/injury/pet:
 // its identity, status, convention fields, and source context.
 type recallReferentView struct {
 	Kind               string            `json:"kind"`
@@ -68,9 +69,9 @@ type recallView struct {
 }
 
 // newRecallCmd wires `lucid recall`: the read-only recall/browse surface
-// (mvp/life-archive.md §7). With `--era`/`--thread`/`--injury <key>` (mutually
+// (mvp/life-archive.md §7). With `--era`/`--thread`/`--injury`/`--pet <key>` (mutually
 // exclusive) it browses that referent and the stories filed under it; with no
-// flag it prints the archive index over every era, thread, and injury. Every
+// flag it prints the archive index over every era, thread, injury, and pet. Every
 // surfaced item carries its source context (the raw/observation ids behind it +
 // its provenance), so nothing is uncited. It is strictly read-only — nothing
 // under ~/.lucid/ changes — and agent-free (no model runs), mirroring the
@@ -78,13 +79,13 @@ type recallView struct {
 // projection-only reads back the weekly reflection surface, so the archive is
 // consumable from either verb without a second data path.
 func newRecallCmd() *cobra.Command {
-	var era, thread, injury string
+	var era, thread, injury, pet string
 	cmd := &cobra.Command{
 		Use:   "recall",
-		Short: "Read-only: browse the archive by era, thread, or injury (never writes)",
+		Short: "Read-only: browse the archive by era, thread, injury, or pet (never writes)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dim, key := recallDimension(era, thread, injury)
+			dim, key := recallDimension(era, thread, injury, pet)
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
@@ -99,14 +100,15 @@ func newRecallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&era, recallFlagEra, "", "Browse the stories filed under an era, by its key")
 	cmd.Flags().StringVar(&thread, recallFlagThread, "", "Browse a thread, by its key")
 	cmd.Flags().StringVar(&injury, recallFlagInjury, "", "Browse an injury's record, by its key")
-	cmd.MarkFlagsMutuallyExclusive(recallFlagEra, recallFlagThread, recallFlagInjury)
+	cmd.Flags().StringVar(&pet, recallFlagPet, "", "Browse a pet's record, by its key")
+	cmd.MarkFlagsMutuallyExclusive(recallFlagEra, recallFlagThread, recallFlagInjury, recallFlagPet)
 	return cmd
 }
 
 // recallDimension maps the mutually-exclusive dimension flags to a (dimension,
 // key) pair — the first set flag wins (cobra guarantees at most one is set), and
 // no flag is the bare index (empty dimension).
-func recallDimension(era, thread, injury string) (dim, key string) {
+func recallDimension(era, thread, injury, pet string) (dim, key string) {
 	switch {
 	case strings.TrimSpace(era) != "":
 		return router.RecallEra, strings.TrimSpace(era)
@@ -114,6 +116,8 @@ func recallDimension(era, thread, injury string) (dim, key string) {
 		return router.RecallThread, strings.TrimSpace(thread)
 	case strings.TrimSpace(injury) != "":
 		return router.RecallInjury, strings.TrimSpace(injury)
+	case strings.TrimSpace(pet) != "":
+		return router.RecallPet, strings.TrimSpace(pet)
 	default:
 		return "", ""
 	}
@@ -149,7 +153,7 @@ func renderRecall(cmd *cobra.Command, res router.RecallResult) error {
 	return nil
 }
 
-// renderRecallReferent prints the browsed era/thread/injury: a heading, its
+// renderRecallReferent prints the browsed era/thread/injury/pet: a heading, its
 // present convention fields as bullets, and its source-context citation.
 func renderRecallReferent(out io.Writer, ref *router.RecallReferent) {
 	_, _ = fmt.Fprintf(out, "%s — %s (%s)\n", ref.DisplayName, ref.Kind, ref.Status)

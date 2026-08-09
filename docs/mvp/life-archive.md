@@ -254,17 +254,17 @@ projections, not state).
 
 ## 7. The recall / browse contract
 
-A read-only browse over the archive **by era / thread / injury**, each
+A read-only browse over the archive **by era / thread / injury / pet**, each
 surfaced item carrying its **source context**:
-`RecallRequest{dimension: "era" | "thread" | "injury" | "", key}` →
+`RecallRequest{dimension: "era" | "thread" | "injury" | "pet" | "", key}` →
 items that each carry `SupportingEntryIDs` (the raw/observation ids
 behind them) and `source` provenance. A bare request (no dimension)
-returns an index of eras, threads, and injuries. Like §6 it reads only
-through router projection seams and writes nothing, and it degrades to
-an honest empty result on a thin or missing store. **No surfaced item is
-uncited** — the source-context ids are the browse's contract, so the
-same projection-only reads are consumable by the weekly reflection
-surface without a second data path.
+returns an index of eras, threads, injuries, and pets. Like §6 it reads
+only through router projection seams and writes nothing, and it
+degrades to an honest empty result on a thin or missing store. **No
+surfaced item is uncited** — the source-context ids are the browse's
+contract, so the same projection-only reads are consumable by the
+weekly reflection surface without a second data path.
 
 ## 8. Data-contract decision — no net-new observation kind in v1
 
@@ -317,7 +317,39 @@ code:
 The bias is explicit: reach for a documented `Fields`/payload key first,
 a new registry `Fields` key second, and a net-new kind only when a real
 need survives all four tests with its justification written down. v1
-needs none.
+needs no new observation kind.
+
+### Pet registry kind
+
+The escape-hatch tests above govern a net-new **observation** kind. A
+pet is instead a net-new **registry** kind: a lighter extension already
+anticipated by the open resolver model in
+[`data-model.md`](data-model.md) §"Resolver model — the kind space is
+open." It does not change the frozen observation envelope.
+
+A pet cannot be represented honestly as an `injury.Fields`,
+`thread.Fields`, or `era.Fields` key. It is a distinct named referent
+with its own identity, `aka[]`, status lifecycle, and linkable media —
+not an attribute of an existing referent. The first escape-hatch test
+therefore fails: no documented field on an existing registry can carry
+that identity. A dedicated registry kind is warranted.
+
+The `pet` registry uses only these conventional `Fields` keys:
+
+| `Fields` key | Type | Meaning | Synthetic example |
+|--------------|------|---------|-------------------|
+| `species` | string (free-form) | The companion's species, in the owner's words. | `"dog"` |
+| `note` | string (verbatim) | Optional owner-authored context. | `"prefers the blue blanket"` |
+
+Alternate names use the first-class `aka[]` column, not a `Fields`
+key. There are deliberately no adopted-on, health, or reminder fields:
+observations are inventory, never obligation (Sanctuary). The free-form
+map does not enforce this convention; the written contract does.
+
+Pet status is kind-specific: `active`, `rehomed`, or `passed`. Injury
+and thread retain `active`, `managed`, or `resolved`. A kind-aware
+`validRegistryStatus` enforces the distinction; this is the template
+for future kinds whose lifecycles require their own humane vocabulary.
 
 ## 9. Boundaries (inherited, restated)
 

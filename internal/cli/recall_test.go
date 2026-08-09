@@ -39,6 +39,7 @@ func TestRecall_Registered(t *testing.T) {
 	assert.Contains(t, out, "--era")
 	assert.Contains(t, out, "--thread")
 	assert.Contains(t, out, "--injury")
+	assert.Contains(t, out, "--pet")
 }
 
 // TestRecall_EmptyIndex prints the calm fallback when nothing is archived yet.
@@ -50,21 +51,47 @@ func TestRecall_EmptyIndex(t *testing.T) {
 	assert.Contains(t, out, "Nothing archived")
 }
 
-// TestRecall_IndexListsReferents seeds an era and an injury and proves the bare
-// index lists both, Discord-friendly (no markdown table).
+// TestRecall_IndexListsReferents seeds an era, an injury, and a pet and proves
+// the bare index lists all three, Discord-friendly (no markdown table).
 func TestRecall_IndexListsReferents(t *testing.T) {
 	isolatedHome(t)
 
 	seedRegistry(t, "era", "wild summer", "--start", "2010-06-01")
 	seedRegistry(t, "injury", "left knee")
+	seedRegistry(t, "pet", "Fixture Pet", "--species", "dog")
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall")
 	require.NoError(t, err)
 	assert.Contains(t, out, "Archive index")
 	assert.Contains(t, out, "wild summer")
 	assert.Contains(t, out, "left knee")
+	assert.Contains(t, out, "Fixture Pet")
 	assert.Contains(t, out, "Cites:", "every index entry is cited")
 	assert.NotContains(t, out, "|", "no markdown table in Discord output")
+}
+
+// TestRecall_ByPetJSON seeds a pet and proves --pet resolves its first-class
+// fields through the stable read-only JSON projection.
+func TestRecall_ByPetJSON(t *testing.T) {
+	isolatedHome(t)
+
+	petKey := seedRegistry(t, "pet", "Fixture Pet", "--species", "dog", "--note", "synthetic companion")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--pet", petKey, "--json")
+	require.NoError(t, err)
+
+	var view recallView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.True(t, view.Found)
+	assert.Equal(t, router.RecallPet, view.Dimension)
+	require.NotNil(t, view.Referent)
+	assert.Equal(t, "Fixture Pet", view.Referent.DisplayName)
+	assert.Equal(t, "active", view.Referent.Status)
+	assert.Equal(t, []recallFieldView{
+		{Label: "Species", Value: "dog"},
+		{Label: "Note", Value: "synthetic companion"},
+	}, view.Referent.Fields)
+	assert.Empty(t, view.Items)
 }
 
 // TestRecall_ByEraJSON seeds an era + a linked story and proves the --era browse
@@ -159,18 +186,19 @@ func TestRecall_ReadOnly(t *testing.T) {
 // flag wins and its value is trimmed, and no flag is the bare index.
 func TestRecallDimension(t *testing.T) {
 	cases := []struct {
-		name             string
-		era, thread, inj string
-		wantDim, wantKey string
+		name                  string
+		era, thread, inj, pet string
+		wantDim, wantKey      string
 	}{
-		{"era", " sobriety ", "", "", router.RecallEra, "sobriety"},
-		{"thread", "", " writing ", "", router.RecallThread, "writing"},
-		{"injury", "", "", " knee ", router.RecallInjury, "knee"},
-		{"none", "", "", "", "", ""},
+		{"era", " sobriety ", "", "", "", router.RecallEra, "sobriety"},
+		{"thread", "", " writing ", "", "", router.RecallThread, "writing"},
+		{"injury", "", "", " knee ", "", router.RecallInjury, "knee"},
+		{"pet", "", "", "", " fixture-pet ", router.RecallPet, "fixture-pet"},
+		{"none", "", "", "", "", "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dim, key := recallDimension(tc.era, tc.thread, tc.inj)
+			dim, key := recallDimension(tc.era, tc.thread, tc.inj, tc.pet)
 			assert.Equal(t, tc.wantDim, dim)
 			assert.Equal(t, tc.wantKey, key)
 		})

@@ -33,9 +33,11 @@ const (
 	keySaltBytes        = 16
 )
 
-// registryDirNames returns the four registry subtrees created at scaffold
+// registryDirNames returns the five registry subtrees created at scaffold
 // (observations.md §8).
-func registryDirNames() []string { return []string{"injuries", "threads", "places", "eras"} }
+func registryDirNames() []string {
+	return []string{"injuries", "threads", "places", "eras", "pets"}
+}
 
 // DayView is the `/day` join across trees (observations.md §7): the folded
 // engine day record, the observation events for the logical day (plus range

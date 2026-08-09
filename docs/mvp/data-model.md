@@ -57,7 +57,7 @@ These rules trace directly to
 │   ├── days/2026/07/day_2026_07_02.json
 │   └── status.json
 ├── observations/           # frozen-envelope events — owned by observations-module.md
-├── registries/             # injuries, threads, places, eras — same key derivation as people/
+├── registries/             # injuries, threads, places, eras, pets — same key derivation as people/
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
 └── projections/            # rebuildable views/exports — deletable wholesale
 ```
@@ -94,14 +94,19 @@ reach a declared mode.
 was storage-only in the original slice — only the sticky-location verb
 auto-created a `place`. The life-archive module
 ([`life-archive.md`](life-archive.md)) adds the user-facing verbs
-`lucid injury`, `lucid era`, and `lucid thread`, each merging through the
-existing append-only `update_registry` op (no rewrite; every patch
-appends a `status_history` entry). Their `Fields` follow documented
-conventions on the **frozen** free-form `Fields map[string]any`: the
-injury keys (`onset`, `timeline`, `body_area`, `cause`, `severity`,
-`lasting_effects`, `current_limitations`, `treatments`, `uncertainty`),
-the era range (`start`/`end`), and the thread `intent`/`domains` (with
-**no** progress/percent/streak field — the obliquity guard). Story
+`lucid injury`, `lucid era`, `lucid thread`, and `lucid pet`, each
+merging through the existing append-only `update_registry` op (no
+rewrite; every patch appends a `status_history` entry). Their `Fields`
+follow documented conventions on the **frozen** free-form
+`Fields map[string]any`: the injury keys (`onset`, `timeline`,
+`body_area`, `cause`, `severity`, `lasting_effects`,
+`current_limitations`, `treatments`, `uncertainty`), the era range
+(`start`/`end`), the thread `intent`/`domains` (with **no**
+progress/percent/streak field — the obliquity guard), and the pet
+`species`/`note`. Pet status is kind-specific — `active`, `rehomed`, or
+`passed` — while injury and thread retain `active`, `managed`, or
+`resolved`; [`life-archive.md`](life-archive.md) §8 records the field
+and status contract. Story
 `memory` events add three payload keys (`tone`, `why_it_matters`,
 `follow_up`, beside the existing `text`/`certainty`) and a fixed `refs`
 shape (`era`/`place`/`person`, plus `entry` for an attached photo's raw

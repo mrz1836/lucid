@@ -16,14 +16,18 @@ const (
 	RegistryThread = "thread"
 	RegistryPlace  = "place"
 	RegistryEra    = "era"
+	RegistryPet    = "pet"
 )
 
-// Registry status values (observations.md §8: active → managed → resolved,
-// recorded in an append-only status_history, never overwritten).
+// Registry status values are recorded in an append-only status_history, never
+// overwritten. Injury and thread use active → managed → resolved; pet uses
+// active → rehomed or passed.
 const (
 	StatusActive   = "active"
 	StatusManaged  = "managed"
 	StatusResolved = "resolved"
+	StatusRehomed  = "rehomed"
+	StatusPassed   = "passed"
 )
 
 // RegistryDir maps a registry kind to its directory name under registries/.
@@ -37,6 +41,8 @@ func RegistryDir(kind string) (string, bool) {
 		return "places", true
 	case RegistryEra:
 		return "eras", true
+	case RegistryPet:
+		return "pets", true
 	default:
 		return "", false
 	}

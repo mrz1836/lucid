@@ -68,6 +68,18 @@ type ThreadWriteRequest struct {
 	Now     time.Time
 }
 
+// PetWriteRequest carries one `lucid pet` create/amend turn
+// (life-archive.md §8): a named companion with optional species, lifecycle
+// status, and a note kept verbatim. Pet status uses the kind-specific
+// active/rehomed/passed vocabulary. A zero Now defaults to the wall clock.
+type PetWriteRequest struct {
+	Name    string
+	Species string
+	Status  string
+	Note    string
+	Now     time.Time
+}
+
 // RegistryWriteResult reports what a registry-write verb persisted and the
 // inventory ack to show. Created is true when this call first minted the record
 // (its status_history has exactly one entry); Fields is the merged result after
@@ -94,9 +106,10 @@ func (r *Router) WriteInjury(req InjuryWriteRequest) (RegistryWriteResult, error
 	if name == "" {
 		return RegistryWriteResult{}, fmt.Errorf("injury needs a name; nothing was saved")
 	}
-	if !validRegistryStatus(req.Status) {
+	if !validRegistryStatus(observations.RegistryInjury, req.Status) {
 		return RegistryWriteResult{}, fmt.Errorf(
-			"unknown injury status %q (want active, managed, or resolved); nothing was saved", req.Status,
+			"unknown injury status %q (want %s); nothing was saved",
+			req.Status, humanList(registryStatusVocab(observations.RegistryInjury)),
 		)
 	}
 
@@ -173,9 +186,10 @@ func (r *Router) WriteThread(req ThreadWriteRequest) (RegistryWriteResult, error
 	if name == "" {
 		return RegistryWriteResult{}, fmt.Errorf("thread needs a name; nothing was saved")
 	}
-	if !validRegistryStatus(req.Status) {
+	if !validRegistryStatus(observations.RegistryThread, req.Status) {
 		return RegistryWriteResult{}, fmt.Errorf(
-			"unknown thread status %q (want active, managed, or resolved); nothing was saved", req.Status,
+			"unknown thread status %q (want %s); nothing was saved",
+			req.Status, humanList(registryStatusVocab(observations.RegistryThread)),
 		)
 	}
 
@@ -190,7 +204,31 @@ func (r *Router) WriteThread(req ThreadWriteRequest) (RegistryWriteResult, error
 	return r.writeRegistry(observations.RegistryThread, name, req.Status, fields, now)
 }
 
-// writeRegistry is the shared create/amend core the three registry-write verbs
+// WritePet creates or amends a pet registry record (life-archive.md §8). It
+// records lifecycle transitions on the shared append-only status history and
+// stores only the documented species and note Fields. It is deterministic and
+// agent-free; a malformed status is rejected before any write.
+func (r *Router) WritePet(req PetWriteRequest) (RegistryWriteResult, error) {
+	now := whenOr(req.Now)
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return RegistryWriteResult{}, fmt.Errorf("pet needs a name; nothing was saved")
+	}
+	if !validRegistryStatus(observations.RegistryPet, req.Status) {
+		return RegistryWriteResult{}, fmt.Errorf(
+			"unknown pet status %q (want %s); nothing was saved",
+			req.Status, humanList(registryStatusVocab(observations.RegistryPet)),
+		)
+	}
+
+	fields := map[string]any{}
+	putField(fields, "species", req.Species)
+	putField(fields, "note", req.Note)
+
+	return r.writeRegistry(observations.RegistryPet, name, req.Status, fields, now)
+}
+
+// writeRegistry is the shared create/amend core the registry-write verbs
 // route through: scaffold the trees, resolve the salted collision-suffixed key,
 // and merge the patch through the append-only UpdateRegistry path. Created is
 // derived from the resulting status_history (exactly one entry ⇒ first mention),
@@ -288,14 +326,41 @@ func resolveRegistryDate(arg string, now time.Time) (value, precision string, er
 	return observations.DateString(res.OccurredAt), observations.PrecisionApproximate, nil
 }
 
-// validRegistryStatus reports whether s is empty (no transition) or one of the
-// three documented statuses (observations.md §8: active → managed → resolved).
-func validRegistryStatus(s string) bool {
-	switch s {
-	case "", observations.StatusActive, observations.StatusManaged, observations.StatusResolved:
+// registryStatusVocab returns the documented status vocabulary for a registry
+// kind. Pets have a companion-specific lifecycle; injury and thread retain the
+// original registry vocabulary.
+func registryStatusVocab(kind string) []string {
+	if kind == observations.RegistryPet {
+		return []string{observations.StatusActive, observations.StatusRehomed, observations.StatusPassed}
+	}
+	return []string{observations.StatusActive, observations.StatusManaged, observations.StatusResolved}
+}
+
+// validRegistryStatus reports whether s is empty (no transition) or belongs to
+// the documented vocabulary for kind.
+func validRegistryStatus(kind, s string) bool {
+	if s == "" {
 		return true
+	}
+	for _, allowed := range registryStatusVocab(kind) {
+		if s == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// humanList formats a non-empty vocabulary for validation copy.
+func humanList(values []string) string {
+	switch len(values) {
+	case 0:
+		return ""
+	case 1:
+		return values[0]
+	case 2:
+		return values[0] + " or " + values[1]
 	default:
-		return false
+		return strings.Join(values[:len(values)-1], ", ") + ", or " + values[len(values)-1]
 	}
 }
 
