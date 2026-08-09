@@ -38,7 +38,8 @@ func newBackupCmd() *cobra.Command {
 		Short: "Write the must-keep Ledger trees to a single .tar.gz archive",
 		Long: `backup writes the must-keep Ledger set — the ADR-0002 backup manifest
 that exists nowhere else: raw/, media/, observations/, registries/, links/,
-engine/ (minus its derived status.json), and projections/exports.log — to one
+secrets/, engine/ (minus its derived status.json), and
+projections/exports.log — to one
 gzip-compressed tar archive. Rebuildable trees and the reconstructable indexes
 (processed/, insights/, reflections/, engine/status.json, people/, sessions/,
 lucid.json) are omitted. Everything primary is included — there is no opt-out flag.

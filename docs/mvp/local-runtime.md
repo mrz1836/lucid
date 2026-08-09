@@ -158,7 +158,7 @@ Two reasons this lives outside the repo:
    `projections/exports.log`, the append-only export record) can be
    rebuilt if the agents or scripts improve. The trees that must
    survive forever — the backup set — are `raw/`, `media/`,
-   `observations/`, `registries/`, `links/`, `engine/` (minus
+   `observations/`, `registries/`, `links/`, `secrets/`, `engine/` (minus
    `status.json`), and `projections/exports.log`: they are primary data
    that exists nowhere else. `lucid backup` writes exactly that set to a single
    `.tar.gz`, and `lucid restore` rebuilds it — the native realization of

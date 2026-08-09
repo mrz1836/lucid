@@ -299,8 +299,9 @@ type BackupEntry struct {
 // local-runtime.md §Rebuildability): the trees that must survive forever
 // because they are primary data existing nowhere else — raw entries, the media
 // binaries and their sidecars, the observation event log, the registries, the
-// append-only link ledger, the engine tree minus its derived status, and the
-// append-only export log. Everything else in ~/.lucid/ is rebuildable (see
+// append-only link ledger, the names-only secret-reference catalog, the engine
+// tree minus its derived status, and the append-only export log. Everything
+// else in ~/.lucid/ is rebuildable (see
 // [RebuildableTrees]) and is deliberately omitted.
 //
 // media/ and links/ are primary for different reasons and both belong here:
@@ -320,6 +321,7 @@ func BackupManifest() []BackupEntry {
 		{Path: "observations", IsDir: true},
 		{Path: "registries", IsDir: true},
 		{Path: "links", IsDir: true},
+		{Path: "secrets", IsDir: true},
 		{Path: "engine", IsDir: true, Exclude: []string{"engine/status.json"}},
 		{Path: "projections/exports.log", IsDir: false},
 	}

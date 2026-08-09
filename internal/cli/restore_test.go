@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,6 +88,42 @@ func TestRestoreCmd_RoundTripCarriesMediaAndLinks(t *testing.T) {
 	require.Len(t, restored, 1, "the folded link restored")
 	assert.Equal(t, "day", restored[0].Subject.Kind)
 	assert.Equal(t, "2020-01-01", restored[0].Subject.Key)
+}
+
+// TestRestoreCmd_RoundTripCarriesSecretCatalog proves the names-only secret
+// reference catalog is primary data that survives a backup and restore into a
+// fresh home — a manifest that ever stopped covering secrets/ would fail here,
+// not pass vacuously. The catalog carries handles, notes, and creation times
+// only; there is no secret material to lose, so what must survive is exactly the
+// live folded reference.
+func TestRestoreCmd_RoundTripCarriesSecretCatalog(t *testing.T) {
+	isolatedHome(t)
+	now := time.Date(2026, time.August, 9, 15, 30, 0, 0, time.UTC)
+	withClock(t, now)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"secret", "add", "FIXTURE_SECRET", "--note", "synthetic reference")
+	require.NoError(t, err)
+
+	out := filepath.Join(t.TempDir(), "b.tar.gz")
+	backupTo(t, out)
+
+	// Restore into a fresh home — nothing carries over except the archive.
+	dst := filepath.Join(t.TempDir(), ".lucid")
+	t.Setenv("LUCID_HOME", dst)
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "restore", "--in", out)
+	require.NoError(t, err)
+
+	// The live catalog survives: handle, note, and creation time intact.
+	stdout, _, err := runRoot(t, BuildInfo{Version: "dev"}, "secret", "list", "--json")
+	require.NoError(t, err)
+	var refs []storage.SecretRef
+	require.NoError(t, json.Unmarshal([]byte(stdout), &refs))
+	require.Equal(t, []storage.SecretRef{{
+		Name:      "FIXTURE_SECRET",
+		Note:      "synthetic reference",
+		CreatedAt: now.Format(time.RFC3339),
+	}}, refs)
 }
 
 // TestRestoreCmd_PositionalPath: the archive may be passed positionally.

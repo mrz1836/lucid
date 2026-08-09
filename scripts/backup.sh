@@ -7,7 +7,8 @@
 #   survive forever (docs/adr/0002-storage.md; docs/mvp/local-runtime.md
 #   §Rebuildability): raw entries, the media binaries and their sidecars, the
 #   observation event log, the registries, the append-only link ledger, the
-#   engine tree MINUS its derived status.json, and the append-only export log.
+#   names-only secret-reference catalog, the engine tree MINUS its derived
+#   status.json, and the append-only export log.
 #   media/ and links/ are covered so a restore yields a coherent Ledger — links
 #   whose binaries still exist. Everything else under ~/.lucid/ is rebuildable —
 #   processed/, insights/, reflections/, engine/status.json, and the rest of
@@ -63,6 +64,7 @@ print_manifest() {
   printf 'dir\tobservations\n'
   printf 'dir\tregistries\n'
   printf 'dir\tlinks\n'
+  printf 'dir\tsecrets\n'
   printf 'dir\tengine\texclude=engine/status.json\n'
   printf 'file\tprojections/exports.log\n'
 }
@@ -131,6 +133,7 @@ backup_dir media
 backup_dir observations
 backup_dir registries
 backup_dir links
+backup_dir secrets
 backup_dir engine
 prune engine/status.json
 backup_file projections/exports.log
