@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // errSentinel is a shared sentinel for the error-propagation tests.

@@ -39,8 +39,8 @@ func (r *Router) SecretAdd(req SecretAddRequest) (SecretAddResult, error) {
 	if err != nil {
 		return SecretAddResult{}, fmt.Errorf("invalid source; nothing was saved: %w", err)
 	}
-	if err := r.prepareSecrets(); err != nil {
-		return SecretAddResult{}, err
+	if prepareErr := r.prepareSecrets(); prepareErr != nil {
+		return SecretAddResult{}, prepareErr
 	}
 
 	refs, err := r.store.ListSecretRefs()
@@ -89,8 +89,8 @@ func (r *Router) SecretRemove(name string, now time.Time, sourceRaw string) (Sec
 	if err != nil {
 		return SecretRemoveResult{}, fmt.Errorf("invalid source; nothing was saved: %w", err)
 	}
-	if err := r.prepareSecrets(); err != nil {
-		return SecretRemoveResult{}, err
+	if prepareErr := r.prepareSecrets(); prepareErr != nil {
+		return SecretRemoveResult{}, prepareErr
 	}
 
 	refs, err := r.store.ListSecretRefs()

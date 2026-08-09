@@ -36,7 +36,7 @@ func TestSecretGuard_SourceHasNoExternalLifecyclePath(t *testing.T) {
 		`"os/exec"`,
 	}
 	for _, path := range paths {
-		raw, err := os.ReadFile(path) //nolint:gosec // fixed repository source paths
+		raw, err := os.ReadFile(path)
 		require.NoError(t, err)
 		text := strings.ToLower(string(raw))
 		for _, term := range forbidden {
@@ -92,7 +92,10 @@ func assertValueFreeType(t *testing.T, typ reflect.Type, seen map[reflect.Type]b
 	}
 	seen[typ] = true
 	switch typ.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Array:
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Chan:
+		assertValueFreeType(t, typ.Elem(), seen)
+	case reflect.Map:
+		assertValueFreeType(t, typ.Key(), seen)
 		assertValueFreeType(t, typ.Elem(), seen)
 	case reflect.Func:
 		// Method values include their receiver as input zero. The receiver is
@@ -109,7 +112,13 @@ func assertValueFreeType(t *testing.T, typ reflect.Type, seen map[reflect.Type]b
 			assertValueFreeIdentifier(t, typ.String(), field.Name)
 			assertValueFreeType(t, field.Type, seen)
 		}
-	case reflect.Interface, reflect.String:
+	case reflect.Invalid,
+		reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128,
+		reflect.Interface, reflect.String, reflect.UnsafePointer:
 		return
 	}
 }
