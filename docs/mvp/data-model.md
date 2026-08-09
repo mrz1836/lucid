@@ -12,7 +12,7 @@ The two design rules that drive everything below:
 
 1. **Primary data is permanent.** The trees the user absolutely must
    never lose are `raw/`, `media/`, `observations/`,
-   `registries/`, `links/`, and `engine/` (minus the derived
+   `registries/`, `links/`, `secrets/`, and `engine/` (minus the derived
    `status.json`): each holds testimony, an attached artifact, an
    association, or configuration that exists nowhere else.
    `processed/`, `insights/`, `reflections/`, `engine/status.json`,
@@ -59,6 +59,7 @@ These rules trace directly to
 ├── observations/           # frozen-envelope events — owned by observations-module.md
 ├── registries/             # injuries, threads, places, eras, pets — same key derivation as people/
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
+├── secrets/                # append-only names-only reference catalog (secrets.jsonl)
 └── projections/            # rebuildable views/exports — deletable wholesale
 ```
 
@@ -643,6 +644,46 @@ a silent write.
 from anything, so it joins the backup set (`deploy.BackupManifest`,
 [`local-runtime.md`](local-runtime.md) §Rebuildability). A restored Ledger
 therefore yields links whose media binaries still exist.
+
+## Secret reference catalog — `~/.lucid/secrets/`
+
+**Format:** newline-delimited JSON (JSONL). One event per line in the single
+`secrets/secrets.jsonl` log.
+
+**Mutability:** **Append-only.** Registering a name or removing it appends an
+event; no existing line is rewritten or deleted. The current catalog is a
+**fold** of the log containing live entries only. A `remove` event is a
+tombstone, and a later `register` event for the same name makes it live again
+without erasing its history.
+
+This family is a reference catalog, not a secret store. It records names and an
+optional note only. No event or folded record has a value, ciphertext, token,
+or other secret-material field, ever. Hush owns all secret material and its
+lifecycle; Lucid builds no path to store or reveal it.
+
+### Schema
+
+```json
+{"schema":"secretref.v1","id":"secretref_1","name":"FIXTURE_SECRET","op":"register","note":"synthetic reference","at":"2026-08-09T14:45:00-04:00","source":"cli"}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `schema` | yes | Record schema tag, `secretref.v1`. |
+| `id` | yes | `secretref_<n>` — a monotonic per-file sequence. |
+| `name` | yes | A hush-compatible handle matching `^[A-Z_][A-Z0-9_]*$`, at most 64 characters. It is the only reference key; the catalog does not model vault scope separately. |
+| `op` | yes | `register` or `remove`. A remove is a tombstone, never an in-place deletion. |
+| `note` | no | Optional free text, stored verbatim, at most 256 characters. |
+| `at` | yes | When the event was recorded — RFC3339 with the host's local offset. |
+| `source` | yes | Provenance token for the capture surface, normalized on write. |
+
+### The fold — current references are a read
+
+The folded read shape is `{name, note?, created_at}`. `register` makes the name
+live and supplies its note and creation time; `remove` makes it absent from the
+live view while preserving both events. Listing the catalog returns only live
+records, sorted by name. Registering an already-live name is refused;
+registering it again after a tombstone is allowed and creates a new live record.
 
 ## Processed artifacts — `~/.lucid/processed/`
 
