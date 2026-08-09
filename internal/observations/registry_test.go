@@ -10,7 +10,7 @@ import (
 	"github.com/mrz1836/lucid/data"
 )
 
-var registryKeyRE = regexp.MustCompile(`^(injury|thread|place|era)_[a-z]-[a-z]+(-\d+)?$`)
+var registryKeyRE = regexp.MustCompile(`^(injury|thread|place|era|pet)_[a-z]-[a-z]+(-\d+)?$`)
 
 func wordlist(t *testing.T) []string {
 	t.Helper()
@@ -36,6 +36,11 @@ func TestDeriveRegistryKey_SaltedStableFormat(t *testing.T) {
 	place, err := DeriveRegistryKey(RegistryPlace, "Lisbon", "salt-a", wl)
 	require.NoError(t, err)
 	assert.Contains(t, place, "place_")
+
+	pet, err := DeriveRegistryKey(RegistryPet, "Fixture Pet", "salt-a", wl)
+	require.NoError(t, err)
+	assert.Regexp(t, registryKeyRE, pet)
+	assert.Contains(t, pet, "pet_")
 
 	// Salt is incorporated: at least one of several salts must differ.
 	keys := map[string]bool{}
@@ -164,6 +169,9 @@ func TestRegistryDir_AndNormalized(t *testing.T) {
 	dir, ok := RegistryDir(RegistryInjury)
 	assert.True(t, ok)
 	assert.Equal(t, "injuries", dir)
+	dir, ok = RegistryDir(RegistryPet)
+	assert.True(t, ok)
+	assert.Equal(t, "pets", dir)
 	_, ok = RegistryDir("nope")
 	assert.False(t, ok)
 

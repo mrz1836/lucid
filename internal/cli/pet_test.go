@@ -17,6 +17,38 @@ func runPet(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	return runRoot(t, BuildInfo{Version: "dev"}, append([]string{"pet"}, args...)...)
 }
 
+func TestPet_CLICreateThenAmend(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runPet(t, "Fixture Pet", "--species", "dog", "--note", "synthetic companion")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Recorded")
+	assert.Contains(t, out, "pet")
+
+	out, _, err = runPet(t, "Fixture Pet", "--status", "rehomed", "--json")
+	require.NoError(t, err)
+	var view registryWriteView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.Equal(t, "pet", view.Kind)
+	assert.False(t, view.Created, "the second write amends the same record")
+	assert.Equal(t, "rehomed", view.Status)
+	assert.Equal(t, "dog", view.Fields["species"], "the create's field survives the amend")
+	assert.Equal(t, "synthetic companion", view.Fields["note"])
+}
+
+func TestPet_CLIRejectsNonPetStatus(t *testing.T) {
+	home := isolatedHome(t)
+
+	_, _, err := runPet(t, "Fixture Pet", "--status", "managed")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "want active, rehomed, or passed")
+	assert.Contains(t, err.Error(), "nothing was saved")
+
+	pets, readErr := storage.New(home).ReadRegistryKind(observations.RegistryPet)
+	require.NoError(t, readErr)
+	assert.Empty(t, pets)
+}
+
 func TestPetMigrate_CLIHidden(t *testing.T) {
 	cmd := newPetCmd()
 	child, _, err := cmd.Find([]string{"migrate-self"})
