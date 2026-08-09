@@ -172,14 +172,96 @@ func TestResolveRegistryDate(t *testing.T) {
 	})
 }
 
-// TestValidRegistryStatus covers the status allowlist.
+// TestValidRegistryStatus covers the kind-aware status vocabularies and pins
+// injury/thread behavior while pets use their own lifecycle terms.
 func TestValidRegistryStatus(t *testing.T) {
-	for _, ok := range []string{"", observations.StatusActive, observations.StatusManaged, observations.StatusResolved} {
-		assert.True(t, validRegistryStatus(ok), "%q should be valid", ok)
+	for _, tc := range []struct {
+		kind    string
+		valid   []string
+		invalid []string
+	}{
+		{
+			kind:    observations.RegistryInjury,
+			valid:   []string{"", observations.StatusActive, observations.StatusManaged, observations.StatusResolved},
+			invalid: []string{observations.StatusRehomed, observations.StatusPassed, "flaring"},
+		},
+		{
+			kind:    observations.RegistryThread,
+			valid:   []string{"", observations.StatusActive, observations.StatusManaged, observations.StatusResolved},
+			invalid: []string{observations.StatusRehomed, observations.StatusPassed, "paused"},
+		},
+		{
+			kind:    observations.RegistryPet,
+			valid:   []string{"", observations.StatusActive, observations.StatusRehomed, observations.StatusPassed},
+			invalid: []string{observations.StatusManaged, observations.StatusResolved, "ACTIVE"},
+		},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			for _, status := range tc.valid {
+				assert.True(t, validRegistryStatus(tc.kind, status), "%q should be valid", status)
+			}
+			for _, status := range tc.invalid {
+				assert.False(t, validRegistryStatus(tc.kind, status), "%q should be rejected", status)
+			}
+		})
 	}
-	for _, bad := range []string{"flaring", "done", "ACTIVE", "open"} {
-		assert.False(t, validRegistryStatus(bad), "%q should be rejected", bad)
-	}
+}
+
+// TestWritePet_CreateThenAmend proves pet Fields round-trip through the shared
+// registry core and an amend appends status history rather than rewriting it.
+func TestWritePet_CreateThenAmend(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	created, err := r.WritePet(PetWriteRequest{
+		Name:    "Fixture Pet",
+		Species: " dog ",
+		Note:    "likes the window",
+		Now:     fixedNow(),
+	})
+	require.NoError(t, err)
+	assert.True(t, created.Created)
+	assert.Equal(t, observations.RegistryPet, created.Kind)
+	assert.Equal(t, observations.StatusActive, created.Status)
+	assert.Equal(t, "dog", created.Fields["species"])
+	assert.Equal(t, "likes the window", created.Fields["note"])
+	assert.Len(t, created.Fields, 2, "pet stores only the documented Fields")
+
+	amended, err := r.WritePet(PetWriteRequest{
+		Name:   "Fixture Pet",
+		Status: observations.StatusRehomed,
+		Note:   "settled into a new home",
+		Now:    fixedNow().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	assert.False(t, amended.Created)
+	assert.Equal(t, created.Key, amended.Key)
+	assert.Equal(t, observations.StatusRehomed, amended.Status)
+	assert.Equal(t, "dog", amended.Fields["species"], "prior Fields survive an amend")
+
+	rec, found, err := a.ReadRegistry(observations.RegistryPet, amended.Key)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, rec.StatusHistory, 2, "amend appends a new history entry")
+	assert.Equal(t, observations.StatusActive, rec.StatusHistory[0].Status)
+	assert.Equal(t, observations.StatusRehomed, rec.StatusHistory[1].Status)
+}
+
+// TestWritePet_RejectsInvalidInput proves validation happens before persistence.
+func TestWritePet_RejectsInvalidInput(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	_, err := r.WritePet(PetWriteRequest{Name: " ", Now: fixedNow()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "needs a name")
+
+	_, err = r.WritePet(PetWriteRequest{Name: "Fixture Pet", Status: observations.StatusManaged, Now: fixedNow()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "want active, rehomed, or passed")
+	assert.Contains(t, err.Error(), "nothing was saved")
+
+	recs, err := a.ReadRegistryKind(observations.RegistryPet)
+	require.NoError(t, err)
+	assert.Empty(t, recs)
 }
 
 // TestWriteEra_RejectsEmptyName rejects a blank era name before any write.

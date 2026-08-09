@@ -10,13 +10,14 @@ import (
 )
 
 // Registry-write flag names shared across the life-archive write verbs
-// (lucid injury / era / thread). Each maps to a documented convention Fields
+// (lucid injury / era / thread / pet). Each maps to a documented convention Fields
 // key (mvp/life-archive.md §2–§4); every one is optional so a bare
 // `lucid injury "left knee"` is a valid first mention. flagStatus and flagNote
 // are shared by more than one verb, declared once here.
 const (
 	flagStatus             = "status"
 	flagNote               = "note"
+	flagSpecies            = "species"
 	flagOnset              = "onset"
 	flagTimeline           = "timeline"
 	flagBodyArea           = "body-area"
@@ -61,8 +62,7 @@ func registryWriteViewOf(res router.RegistryWriteResult) registryWriteView {
 }
 
 // renderRegistryWrite prints a registry-write result: the --json view, or the
-// inventory ack prose. The shared tail of `lucid injury`, `lucid era`, and
-// `lucid thread`.
+// inventory ack prose. The shared tail of the registry-write commands.
 func renderRegistryWrite(cmd *cobra.Command, res router.RegistryWriteResult) error {
 	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
 		return writeJSON(cmd.OutOrStdout(), registryWriteViewOf(res))
