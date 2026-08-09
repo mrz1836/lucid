@@ -2042,6 +2042,26 @@ lucid thread "learning to sail" --intent "get comfortable single-handing" --doma
 lucid thread "the memoir" --intent "write the messy years down" --status active --json
 ```
 
+### pet
+
+```
+lucid pet <name> [--species <text>] [--status active|rehomed|passed] [--note <text>] [--json]
+```
+
+Record or amend a companion in the `pet` registry
+([`life-archive.md`](life-archive.md);
+[`../mvp/life-archive.md`](../mvp/life-archive.md) §8). `--species` is
+free-form, and status uses the pet-specific `active`, `rehomed`, or
+`passed` vocabulary. The command uses the same append-only merge and
+`{kind, key, display_name, status, created, fields}` `--json` shape as
+the other registry verbs. Re-mentioning a companion under another name
+accrues that name in the first-class `aka[]` column rather than a field.
+
+```sh
+lucid pet "Fixture Pet" --species dog --status active
+lucid pet "Fixture Pet" --note "prefers the blue blanket" --json
+```
+
 ### memory
 
 ```
@@ -2104,11 +2124,12 @@ lucid excavate --json
 ### recall
 
 ```
-lucid recall [--era <key> | --thread <key> | --injury <key>] [--json]
+lucid recall [--era <key> | --thread <key> | --injury <key> | --pet <key>] [--json]
 ```
 
-**Read-only.** Browse the archive by era, thread, or injury (mutually-exclusive
-dimension flags); with no flag, print the archive index over all three
+**Read-only.** Browse the archive by era, thread, injury, or pet
+(mutually-exclusive dimension flags); with no flag, print the archive index
+over all four
 ([`life-archive.md`](life-archive.md); [`../mvp/life-archive.md`](../mvp/life-archive.md) §7).
 Every surfaced item carries its **source context** — the supporting
 raw/observation ids and its provenance — so nothing is uncited (a story cites its
@@ -2123,6 +2144,7 @@ item (no tables).
 lucid recall
 lucid recall --era wild-summer
 lucid recall --injury left-knee --json
+lucid recall --pet pet_a-cedar --json
 ```
 
 ### structure
