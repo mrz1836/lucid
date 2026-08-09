@@ -438,6 +438,33 @@ read-only `stats` command reports **Ledger volume** — how much has been record
 field; both read the same rollover / logical-day basis, so their day boundaries
 can never disagree.
 
+### secret
+
+```
+lucid secret add <NAME> [--note <text>]
+lucid secret list [--json]
+lucid secret remove <NAME>
+```
+
+Maintain a high-level catalog of hush handles. `add` registers a reference name
+and optional note; `list` returns the live names, notes, and creation times; and
+`remove` appends a tombstone that drops a reference from the live view without
+deleting its history.
+
+Names must match `^[A-Z_][A-Z0-9_]*$` and contain at most 64 characters. Adding
+an already-registered name is an error. A removed name may be registered again.
+
+```sh
+lucid secret add FIXTURE_SECRET --note "synthetic reference"
+lucid secret list
+lucid secret list --json
+lucid secret remove FIXTURE_SECRET
+```
+
+**This is a catalog of names only — no reveal, no fetch, no storage.** Revealing
+(`hush request`) and storing (`hush secret add`) secret material happen only
+when the owner runs hush directly in a terminal; Lucid is never in that loop.
+
 ### anchor
 
 ```
