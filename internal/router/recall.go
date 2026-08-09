@@ -9,10 +9,11 @@ import (
 )
 
 // recall.go is the read-only recall/browse seam for the life-archive module
-// (mvp/life-archive.md §7). It browses the archive by era / thread / injury,
+// (mvp/life-archive.md §7). It browses the archive by era / thread / injury /
+// pet,
 // each surfaced item carrying its source context — the raw/observation ids
 // behind it and its provenance — so no surfaced item is uncited. A bare request
-// (no dimension) returns an index of every era, thread, and injury. Like the
+// (no dimension) returns an index of every era, thread, injury, and pet. Like the
 // excavation-selection seam it reads the registries and the memory events
 // **only** through the storage adapter's projection seams (ReadRegistry /
 // ReadRegistryKind / ReadObservationsKind) — never the raw
@@ -24,17 +25,18 @@ import (
 // data path onto the archive.
 
 // Recall dimensions (mvp/life-archive.md §7). The empty dimension is the bare
-// index over all three.
+// index over all four.
 const (
 	RecallEra    = "era"
 	RecallThread = "thread"
 	RecallInjury = "injury"
+	RecallPet    = "pet"
 )
 
 // Source provenance for a surfaced item: a registry-sourced referent (an era /
-// thread / injury record — primary, owner-held data) vs. an excavated story (a
-// memory event, source: excavation). Both are legible in the citation so a
-// consumer can tell testimony from a chapter heading.
+// thread / injury / pet record — primary, owner-held data) vs. an excavated
+// story (a memory event, source: excavation). Both are legible in the citation
+// so a consumer can tell testimony from a chapter heading.
 const (
 	recallSourceRegistry = "registry"
 )
@@ -48,13 +50,15 @@ var recallFieldOrder = map[string][]string{ //nolint:gochecknoglobals // the fix
 	RecallInjury: {"onset", "timeline", "body_area", "cause", "severity", "lasting_effects", "current_limitations", "treatments", "uncertainty", "note"},
 	RecallEra:    {"start", "end", "note"},
 	RecallThread: {"intent", "domains", "note"},
+	RecallPet:    {"species", "note"},
 }
 
 // RecallRequest is the read-only browse selector (mvp/life-archive.md §7):
-// Dimension is "era" | "thread" | "injury" | "" (the bare index), Key names the
-// referent to browse within a dimension. Now is carried for signature stability
-// and a possible future as-of filter; browsing the archive is time-independent
-// today (like the injury-context projection), so it is currently unread.
+// Dimension is "era" | "thread" | "injury" | "pet" | "" (the bare index), Key
+// names the referent to browse within a dimension. Now is carried for signature
+// stability and a possible future as-of filter; browsing the archive is
+// time-independent today (like the injury-context projection), so it is
+// currently unread.
 type RecallRequest struct {
 	Dimension string
 	Key       string
@@ -69,8 +73,9 @@ type RecallField struct {
 	Value string
 }
 
-// RecallReferent is the era / thread / injury being browsed (mvp/life-archive.md
-// §7): its identity, status, and the convention Fields it carries. It is
+// RecallReferent is the era / thread / injury / pet being browsed
+// (mvp/life-archive.md §7): its identity, status, and the convention Fields it
+// carries. It is
 // primary, owner-held registry data, so its Source is "registry" and its
 // SupportingEntryIDs are the story ids filed under it (empty when none) — the
 // referent is cited by those stories or, failing that, by its own key.
@@ -100,8 +105,9 @@ type RecallItem struct {
 
 // RecallResult is the read-only browse result (mvp/life-archive.md §7). For a
 // keyed dimension it carries the Referent and the Items (stories) filed under
-// it; for the bare index it carries only the Items (one per era/thread/injury,
-// Referent nil). Found is false for a keyed browse whose referent does not
+// it; for the bare index it carries only the Items (one per
+// era/thread/injury/pet, Referent nil). Found is false for a keyed browse whose
+// referent does not
 // resolve, or an empty index — an honest empty result, no model spent over it.
 type RecallResult struct {
 	Dimension string
@@ -112,7 +118,7 @@ type RecallResult struct {
 }
 
 // Recall browses the archive by dimension (mvp/life-archive.md §7). With no
-// dimension it returns the index of every era, thread, and injury; with a
+// dimension it returns the index of every era, thread, injury, and pet; with a
 // dimension + key it resolves that referent and the memory stories filed under
 // it (refs.<dimension> == key), each item carrying its source-context ids and
 // provenance. It reads only through the storage projection seams and writes
@@ -128,7 +134,7 @@ func (r *Router) Recall(req RecallRequest) (RecallResult, error) {
 	}
 	kind, ok := recallKind(dim)
 	if !ok {
-		return RecallResult{}, fmt.Errorf("recall: unknown dimension %q (want era, thread, or injury)", dim)
+		return RecallResult{}, fmt.Errorf("recall: unknown dimension %q (want era, thread, injury, or pet)", dim)
 	}
 	key := strings.TrimSpace(req.Key)
 	if key == "" {
@@ -151,14 +157,14 @@ func (r *Router) Recall(req RecallRequest) (RecallResult, error) {
 	return RecallResult{Dimension: dim, Key: key, Found: true, Referent: &ref, Items: stories}, nil
 }
 
-// recallIndex reads every era, thread, and injury registry through the
+// recallIndex reads every era, thread, injury, and pet registry through the
 // projection seam and returns one index item per record, grouped by dimension
-// in era→thread→injury order (each kind already key-sorted by
+// in era→thread→injury→pet order (each kind already key-sorted by
 // ReadRegistryKind), so the render is deterministic. An empty store yields an
 // empty, honest index.
 func (r *Router) recallIndex() (RecallResult, error) {
 	var items []RecallItem
-	for _, dim := range []string{RecallEra, RecallThread, RecallInjury} {
+	for _, dim := range []string{RecallEra, RecallThread, RecallInjury, RecallPet} {
 		kind, _ := recallKind(dim)
 		recs, err := r.store.ReadRegistryKind(kind)
 		if err != nil {
@@ -173,9 +179,9 @@ func (r *Router) recallIndex() (RecallResult, error) {
 
 // recallStories returns the memory stories filed under a referent — the memory
 // events whose refs.<dimension> resolves to the key. Only an era link is
-// written by v1's story-capture path (resolveMemoryRefs); thread and injury
-// links are read the same way so the browse is forward-compatible with a future
-// body-state linker, degrading to an honest empty list until then. Order
+// written by v1's story-capture path (resolveMemoryRefs); thread, injury, and pet
+// links are read the same way so the browse is forward-compatible with future
+// linkers, degrading to an honest empty list until then. Order
 // follows ReadObservationsKind's id sort, so it is byte-stable.
 func (r *Router) recallStories(dim, key string) ([]RecallItem, error) {
 	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
@@ -212,9 +218,10 @@ func storyItem(ev observations.Event) RecallItem {
 }
 
 // indexItem projects one registry record into a bare-index entry: its display
-// name and a short dimension-appropriate detail (an era's date range, a
-// thread's or injury's status), sourced "registry". It carries no supporting
-// ids — an index entry is cited by its own key + source in the render.
+// name and a short dimension-appropriate detail (an era's date range, or a
+// thread's, injury's, or pet's status), sourced "registry". It carries no
+// supporting ids — an index entry is cited by its own key + source in the
+// render.
 func indexItem(dim string, rec observations.Registry) RecallItem {
 	return RecallItem{
 		Kind:   dim,
@@ -254,7 +261,7 @@ func referentFields(dim string, fields map[string]any) []RecallField {
 }
 
 // indexDetail renders the short detail line for a bare-index entry: an era's
-// date range, or the status for a thread/injury.
+// date range, or the status for a thread/injury/pet.
 func indexDetail(dim string, rec observations.Registry) string {
 	if dim == RecallEra {
 		return eraRange(rec.Fields)
@@ -325,6 +332,8 @@ func recallKind(dim string) (string, bool) {
 		return observations.RegistryThread, true
 	case RecallInjury:
 		return observations.RegistryInjury, true
+	case RecallPet:
+		return observations.RegistryPet, true
 	default:
 		return "", false
 	}

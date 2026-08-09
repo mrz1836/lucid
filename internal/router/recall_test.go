@@ -124,7 +124,7 @@ func TestRecall_ByThreadHonestEmpty(t *testing.T) {
 }
 
 // TestRecall_IndexListsEveryReferent proves the bare index returns one entry per
-// era, thread, and injury, each sourced "registry" (AC-10).
+// era, thread, injury, and pet, each sourced "registry" (AC-10).
 func TestRecall_IndexListsEveryReferent(t *testing.T) {
 	r, _, _ := bootedMemoryRouter(t)
 
@@ -133,6 +133,8 @@ func TestRecall_IndexListsEveryReferent(t *testing.T) {
 	_, err = r.WriteThread(ThreadWriteRequest{Name: "learning piano", Intent: "play", Now: fixedNow()})
 	require.NoError(t, err)
 	_, err = r.WriteInjury(InjuryWriteRequest{Name: "left knee", Now: fixedNow()})
+	require.NoError(t, err)
+	_, err = r.WritePet(PetWriteRequest{Name: "Fixture Pet", Species: "dog", Now: fixedNow()})
 	require.NoError(t, err)
 
 	res, err := r.Recall(RecallRequest{})
@@ -148,8 +150,11 @@ func TestRecall_IndexListsEveryReferent(t *testing.T) {
 	require.Contains(t, byKind, RecallEra)
 	require.Contains(t, byKind, RecallThread)
 	require.Contains(t, byKind, RecallInjury)
+	require.Contains(t, byKind, RecallPet)
 	assert.Equal(t, "wild summer", byKind[RecallEra].Title)
 	assert.Contains(t, byKind[RecallEra].Detail, "2010-06-01", "an era index entry shows its range")
+	assert.Equal(t, "Fixture Pet", byKind[RecallPet].Title)
+	assert.Equal(t, observations.StatusActive, byKind[RecallPet].Detail)
 }
 
 // TestRecall_EmptyStoreHonestIndex proves an empty store returns an empty,
