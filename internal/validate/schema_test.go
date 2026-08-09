@@ -2,8 +2,12 @@ package validate
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,15 +26,19 @@ type fakeLedger struct {
 	reflections   []string
 	people        []string
 	links         []string
+	secrets       []string
 	badProcessed  map[string]bool
 	badInsight    map[string]bool
 	badReflect    map[string]bool
 	badPerson     map[string]bool
 	badLink       map[string]bool
+	badSecret     map[string]bool
+	secretStore   *storage.Adapter
 	redirects     map[string]string
 	listErr       error
 	peopleListErr error
 	linkListErr   error
+	secretListErr error
 	configErr     error
 }
 
@@ -41,12 +49,24 @@ func (f *fakeLedger) ListInsightIDs() ([]string, error)    { return f.insights, 
 func (f *fakeLedger) ListReflectionIDs() ([]string, error) { return f.reflections, nil }
 func (f *fakeLedger) ListPeopleKeys() ([]string, error)    { return f.people, f.peopleListErr }
 func (f *fakeLedger) ListLinkEventIDs() ([]string, error)  { return f.links, f.linkListErr }
+func (f *fakeLedger) ListSecretRefIDs() ([]string, error) {
+	if f.secretStore != nil {
+		return f.secretStore.ListSecretRefIDs()
+	}
+	return f.secrets, f.secretListErr
+}
 
 func (f *fakeLedger) ReadProcessedErr(id string) error  { return errIf(f.badProcessed, id) }
 func (f *fakeLedger) ReadInsightErr(id string) error    { return errIf(f.badInsight, id) }
 func (f *fakeLedger) ReadReflectionErr(id string) error { return errIf(f.badReflect, id) }
 func (f *fakeLedger) ReadPersonErr(key string) error    { return errIf(f.badPerson, key) }
 func (f *fakeLedger) ReadLinkEventErr(id string) error  { return errIf(f.badLink, id) }
+func (f *fakeLedger) ReadSecretRefErr(id string) error {
+	if f.secretStore != nil {
+		return f.secretStore.ReadSecretRefErr(id)
+	}
+	return errIf(f.badSecret, id)
+}
 
 func (f *fakeLedger) PersonRedirect(key string) (string, error) {
 	if f.badPerson[key] {
@@ -123,6 +143,43 @@ func TestCheckLedgerSchema_BadLink(t *testing.T) {
 	assert.Equal(t, SeverityError, found[0].Severity)
 	assert.Equal(t, "links/line-2", found[0].Path)
 	assert.Equal(t, "links", found[0].Rule)
+}
+
+// TestCheckLedgerSchema_SecretReferenceFixtures drives the schema sweep over
+// real temporary catalog logs: a valid names-only event is clean, while a
+// malformed line becomes one error finding under secrets/.
+func TestCheckLedgerSchema_SecretReferenceFixtures(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		home := t.TempDir()
+		store := storage.New(home)
+		_, err := store.AppendSecretRefEvent(storage.SecretRefEvent{
+			Name:   "FIXTURE_SECRET",
+			Op:     storage.SecretRefOpRegister,
+			At:     time.Date(2026, time.August, 9, 15, 30, 0, 0, time.FixedZone("EDT", -4*60*60)).Format(time.RFC3339),
+			Source: "test",
+		})
+		require.NoError(t, err)
+
+		found, err := CheckLedgerSchema(&fakeLedger{secretStore: store})
+		require.NoError(t, err)
+		assert.Empty(t, found)
+	})
+
+	t.Run("malformed", func(t *testing.T) {
+		home := t.TempDir()
+		store := storage.New(home)
+		secretsDir := filepath.Join(home, "secrets")
+		require.NoError(t, os.MkdirAll(secretsDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(secretsDir, "secrets.jsonl"), []byte("{malformed\n"), 0o600))
+
+		found, err := CheckLedgerSchema(&fakeLedger{secretStore: store})
+		require.NoError(t, err)
+		require.Len(t, found, 1)
+		assert.Equal(t, CheckSchema, found[0].Check)
+		assert.Equal(t, SeverityError, found[0].Severity)
+		assert.Equal(t, "secrets/line-1", found[0].Path)
+		assert.Equal(t, "secrets", found[0].Rule)
+	})
 }
 
 // TestCheckLedgerSchema_ListError: an unreadable listing is a hard error, not

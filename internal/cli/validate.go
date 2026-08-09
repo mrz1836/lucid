@@ -208,6 +208,12 @@ func (l ledgerAdapter) ListLinkEventIDs() ([]string, error) { return l.a.ListLin
 // ReadLinkEventErr returns only the parse/validation error of one link event.
 func (l ledgerAdapter) ReadLinkEventErr(id string) error { return l.a.ReadLinkEventErr(id) }
 
+// ListSecretRefIDs enumerates the secret-reference event locators.
+func (l ledgerAdapter) ListSecretRefIDs() ([]string, error) { return l.a.ListSecretRefIDs() }
+
+// ReadSecretRefErr returns only the parse/validation error of one secret-reference event.
+func (l ledgerAdapter) ReadSecretRefErr(id string) error { return l.a.ReadSecretRefErr(id) }
+
 // PersonRedirect returns the redirect_to of one person record, backing the
 // redirect-graph check. An unreadable record resolves to the empty string
 // (the schema check reports the parse failure); the redirect check does not
