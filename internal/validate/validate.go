@@ -127,6 +127,12 @@ type LedgerSource interface {
 	// links/links.jsonl log the way it walks the per-file record families.
 	ListLinkEventIDs() ([]string, error)
 	ReadLinkEventErr(id string) error
+	// ListSecretRefIDs enumerates the secret-reference event locators in
+	// append order, and ReadSecretRefErr validates the one line a locator
+	// names. The schema sweep sees catalog structure only, never secret
+	// material.
+	ListSecretRefIDs() ([]string, error)
+	ReadSecretRefErr(id string) error
 	// PersonRedirect returns the redirect_to of a person record — the empty
 	// string for a canonical record or one that cannot be read (the schema
 	// check reports an unreadable record; the redirect check does not

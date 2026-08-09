@@ -39,6 +39,22 @@ shape. Binding rules:
   environment and holds them in memory only; it implements no
   keychain, no crypto store, no token refresh of its own.
 
+### Reference catalog
+
+Lucid may keep a first-class, append-only catalog of secret **names**, extending
+the existing rule that configuration and calibration may name a secret but
+never carry its value. The catalog stores only the name, an optional note, and
+record metadata; removing a reference appends a tombstone rather than rewriting
+history.
+
+This narrows and hardens the decision rather than superseding it. Lucid builds
+no path from the catalog to reveal or store secret material and never shells out
+to hush for either operation. Storage and retrieval remain inside hush,
+TTY-guarded and performed directly by the owner. The existing spawn-time
+injection rule remains limited to operational credentials a deployed Lucid
+process already requires; catalog entries do not cause injection and confer no
+access.
+
 ## Consequences
 
 * A dead or locked vault degrades *sends*, never the chain: bell and

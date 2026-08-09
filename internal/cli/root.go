@@ -125,6 +125,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newCompanionCmd())
 	root.AddCommand(newWitnessCmd())
 	root.AddCommand(newAnchorCmd())
+	root.AddCommand(newSecretCmd())
 	root.AddCommand(newMetricsCmd())
 	root.AddCommand(newStormCmd())
 	root.AddCommand(newProfileCmd())
