@@ -94,6 +94,29 @@ func TestRecall_ByPetJSON(t *testing.T) {
 	assert.Empty(t, view.Items)
 }
 
+// TestRecall_ByPetWithLifeSpan proves a browsed pet surfaces its backdate-aware
+// life-span in the documented field order (species → start → end → note), so a
+// past companion reads back with the dates it was recorded under.
+func TestRecall_ByPetWithLifeSpan(t *testing.T) {
+	isolatedHome(t)
+
+	petKey := seedRegistry(t, "pet", "Old Sable",
+		"--species", "dog", "--start", "2005", "--end", "2012-06", "--status", "passed")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--pet", petKey, "--json")
+	require.NoError(t, err)
+
+	var view recallView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	require.NotNil(t, view.Referent)
+	assert.Equal(t, "passed", view.Referent.Status)
+	assert.Equal(t, []recallFieldView{
+		{Label: "Species", Value: "dog"},
+		{Label: "Start", Value: "2005"},
+		{Label: "End", Value: "2012-06"},
+	}, view.Referent.Fields, "life-span renders in the documented order, precision fields stay hidden")
+}
+
 // TestRecall_ByEraJSON seeds an era + a linked story and proves the --era browse
 // returns the referent and the cited story in the stable --json shape (AC-10,
 // AC-11).

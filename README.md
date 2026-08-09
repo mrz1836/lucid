@@ -299,7 +299,7 @@ flag-parse error.
 | `reflect [gate]` | — | Recall your validated insights; never proposes a new pattern. |
 | `reflect week` | `--days` `--since` `--week` | Read-only weekly deep-dive since your last reflection. `reflect week apply` persists a candidate through the resonance gate (JSON on stdin); `reflect week close` stamps the cursor. |
 | `ask <question…>` | — | Grounded, cited Q&A across your validated insights and reflections. |
-| `recall` | `--era` `--injury` `--thread` | Browse the archive by era, thread, or injury (never writes). |
+| `recall` | `--era` `--injury` `--thread` `--pet` | Browse the archive by era, thread, injury, or pet (never writes). |
 | `excavate` | — | Select the next memory cluster to excavate (never writes). |
 | `person <name>` | — | Look up a person you've mentioned. |
 | `person reconcile` | — | List likely-duplicate people with a suggested merge — read-only, no-LLM, changes nothing. |
@@ -314,6 +314,7 @@ flag-parse error.
 | `era <name>` | `--start` `--end` `--note` | Record or amend a life chapter. |
 | `injury <name>` | `--onset` `--status` `--body-area` `--severity` `--cause` `--timeline` `--treatments` `--lasting-effects` `--current-limitations` `--uncertainty` `--note` | Record or amend an injury in your body history — testimony, not a clinical scale. |
 | `thread <name>` | `--intent` `--status` `--domain` `--note` | Record or amend an ongoing thread. |
+| `pet <name>` | `--species` `--status` `--start` `--end` `--note` | Record or amend a companion in your pet registry — status is its own `active`/`rehomed`/`passed` vocabulary; `--start`/`--end` are backdate-aware, so a companion from years ago is recorded with whatever precision you remember. |
 | `self [<key-or-prefix>]` | `--history` | Read the durable self-profile — atemporal facts under `identity.` `body.` `constraint.` `pref.` `misc.` |
 | `self set <key> <value…>` | `--note` `--since` | Record one durable fact. Append-only: a correction is just another `set`. |
 | `self move <key> <new-key>`<br>`self retire <key> [reason…]` | — | Re-categorize a fact, or retire one that stopped being true. History carries forward; nothing is ever deleted. |

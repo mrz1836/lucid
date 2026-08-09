@@ -77,19 +77,19 @@ func TestRegisterSubjectKind_RefusesBadKindNilAndDuplicate(t *testing.T) {
 	require.Error(t, a.RegisterSubjectKind("person", ok))
 }
 
-// TestSubjectKinds_ListsTheTwelveLaunchKindsSorted pins the launch set: the
-// twelve kinds resolve out of the box, sorted, so a kind can never be silently
+// TestSubjectKinds_ListsTheThirteenLaunchKindsSorted pins the launch set: the
+// thirteen kinds resolve out of the box, sorted, so a kind can never be silently
 // dropped from or added to the default taxonomy without this test noticing.
-func TestSubjectKinds_ListsTheTwelveLaunchKindsSorted(t *testing.T) {
+func TestSubjectKinds_ListsTheThirteenLaunchKindsSorted(t *testing.T) {
 	a := New(t.TempDir())
 	want := []string{
 		"anchor", "day", "era", "injury", "memory", "observation",
-		"person", "place", "raw", "self", "storm", "thread",
+		"person", "pet", "place", "raw", "self", "storm", "thread",
 	}
 	assert.Equal(t, want, a.SubjectKinds())
 }
 
-// --- Task 19: the twelve resolvers ---
+// --- Task 19: the thirteen resolvers ---
 
 // seededSubject is one kind with a key that resolves and a well-formed key that
 // does not, driven from the same seeded Ledger.
@@ -99,10 +99,10 @@ type seededSubject struct {
 	invalidKey string
 }
 
-// seedAllTwelveSubjects seeds one subject of every launch kind into a scaffolded
-// Ledger and returns the resolve/refuse table over them. Every seeded value is
-// synthetic — no real person, injury, place, or content.
-func seedAllTwelveSubjects(t *testing.T, a *Adapter) ([]seededSubject, observations.Event) {
+// seedAllThirteenSubjects seeds one subject of every launch kind into a
+// scaffolded Ledger and returns the resolve/refuse table over them. Every seeded
+// value is synthetic — no real person, injury, place, or content.
+func seedAllThirteenSubjects(t *testing.T, a *Adapter) ([]seededSubject, observations.Event) {
 	t.Helper()
 	at := fixedTime().Format(time.RFC3339)
 
@@ -110,12 +110,13 @@ func seedAllTwelveSubjects(t *testing.T, a *Adapter) ([]seededSubject, observati
 	pr, err := a.UpdatePerson(PersonMention{DisplayName: "Test Alpha", RawEntryID: "raw_2026_07_05_09_00", At: fixedTime()})
 	require.NoError(t, err)
 
-	// injury / thread / era / place — seeded under explicit synthetic keys.
+	// injury / thread / era / place / pet — seeded under explicit synthetic keys.
 	registrySeed := map[string]string{
 		observations.RegistryInjury: "injury_test-a",
 		observations.RegistryThread: "thread_test-a",
 		observations.RegistryEra:    "era_test-a",
 		observations.RegistryPlace:  "place_test-a",
+		observations.RegistryPet:    "pet_test-a",
 	}
 	for kind, key := range registrySeed {
 		_, uerr := a.UpdateRegistry(kind, key, observations.RegistryPatch{DisplayName: "Test " + kind, At: at})
@@ -143,6 +144,7 @@ func seedAllTwelveSubjects(t *testing.T, a *Adapter) ([]seededSubject, observati
 		{"thread", "thread_test-a", "thread_none"},
 		{"era", "era_test-a", "era_none"},
 		{"place", "place_test-a", "place_none"},
+		{"pet", "pet_test-a", "pet_none"},
 		{"raw", rr.RawID, "raw_2000_01_01_00_00"},
 		{"day", "2020-01-01", "2999-01-01"}, // shape+ceiling: a past day resolves, a future one does not
 		{"observation", mem.ID, "obs_2000_01_01_001"},
@@ -170,14 +172,14 @@ func seedObservation(t *testing.T, a *Adapter, kind observations.Kind) observati
 	return ev
 }
 
-// TestSubjectResolvers_AllTwelveKindsResolve (AC-4): every launch kind resolves a
-// seeded subject and refuses a well-formed key that names nothing — driven from
+// TestSubjectResolvers_AllThirteenKindsResolve (AC-4): every launch kind resolves
+// a seeded subject and refuses a well-formed key that names nothing — driven from
 // one seeded Ledger so a kind can never be silently dropped from the launch set.
-func TestSubjectResolvers_AllTwelveKindsResolve(t *testing.T) {
+func TestSubjectResolvers_AllThirteenKindsResolve(t *testing.T) {
 	a := newEngineAdapter(t)
-	table, _ := seedAllTwelveSubjects(t, a)
+	table, _ := seedAllThirteenSubjects(t, a)
 
-	require.Len(t, table, 12, "every launch kind must be exercised")
+	require.Len(t, table, 13, "every launch kind must be exercised")
 	for _, s := range table {
 		t.Run(s.kind, func(t *testing.T) {
 			require.NoError(t, a.ResolveSubject(s.kind, s.validKey), "seeded %s must resolve", s.kind)

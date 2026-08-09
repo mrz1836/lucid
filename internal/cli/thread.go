@@ -46,7 +46,10 @@ func newThreadCmd() *cobra.Command {
 
 			res, err := r.WriteThread(req)
 			if err != nil {
-				return err
+				// The root silences returned errors, so a rejected status would
+				// otherwise be a bare exit code. A rejection has to say what it
+				// wanted (error-states.md §St-1).
+				return emitErr(cmd, err)
 			}
 			return renderRegistryWrite(cmd, res)
 		},

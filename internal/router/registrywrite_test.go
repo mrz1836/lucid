@@ -317,6 +317,73 @@ func TestWriteInjury_RejectsUnreadableOnset(t *testing.T) {
 	assert.Empty(t, recs, "a rejected onset leaves no record behind")
 }
 
+// TestWritePet_LifeSpanRoundTrip proves a pet carries a backdate-aware start/end
+// life-span with precision recorded alongside — the same strict grammar and
+// as-typed storage as an era — through the shared append-only merge, and that a
+// later amend preserves the range while appending history.
+func TestWritePet_LifeSpanRoundTrip(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	created, err := r.WritePet(PetWriteRequest{
+		Name:    "Old Sable",
+		Species: "dog",
+		Status:  observations.StatusPassed,
+		Start:   "2005",
+		End:     "2012-06",
+		Now:     fixedNow(),
+	})
+	require.NoError(t, err)
+	assert.True(t, created.Created)
+	assert.Equal(t, observations.RegistryPet, created.Kind)
+	assert.Equal(t, observations.StatusPassed, created.Status)
+	assert.Equal(t, "2005", created.Fields["start"], "a year-only start is stored as typed, never snapped to 2005-01-01")
+	assert.Equal(t, observations.PrecisionApproximate, created.Fields["start_precision"])
+	assert.Equal(t, "2012-06", created.Fields["end"], "a YYYY-MM end is stored as typed")
+	assert.Equal(t, observations.PrecisionApproximate, created.Fields["end_precision"])
+	assert.Equal(t, "dog", created.Fields["species"])
+
+	// An amend that only adds a note leaves the life-span and status intact.
+	amended, err := r.WritePet(PetWriteRequest{Name: "Old Sable", Note: "best good boy", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.False(t, amended.Created)
+	assert.Equal(t, observations.StatusPassed, amended.Status, "an amend with no status keeps the status in force")
+	assert.Equal(t, "2005", amended.Fields["start"], "prior range preserved on amend")
+	assert.Equal(t, "2012-06", amended.Fields["end"])
+	assert.Equal(t, "best good boy", amended.Fields["note"])
+
+	rec, found, err := a.ReadRegistry(observations.RegistryPet, amended.Key)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Len(t, rec.StatusHistory, 2, "amend appends, never overwrites")
+}
+
+// TestWritePet_RejectsUnreadableOrFutureDate proves the strict tier reaches the
+// pet verb on both bounds: free text and a future day are refused before any
+// field is built, so the registry is left empty rather than half-written.
+func TestWritePet_RejectsUnreadableOrFutureDate(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+
+	for _, tc := range []struct {
+		name string
+		req  PetWriteRequest
+	}{
+		{"free-text start", PetWriteRequest{Name: "Ghost Pup", Start: "last summer", Now: fixedNow()}},
+		{"free-text end", PetWriteRequest{Name: "Ghost Pup", Start: "2005", End: "sometime later", Now: fixedNow()}},
+		{"future start", PetWriteRequest{Name: "Ghost Pup", Start: "2030", Now: fixedNow()}},
+		{"future end", PetWriteRequest{Name: "Ghost Pup", Start: "2005", End: "2030-01-01", Now: fixedNow()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := r.WritePet(tc.req)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "nothing was saved")
+		})
+	}
+
+	recs, err := a.ReadRegistryKind(observations.RegistryPet)
+	require.NoError(t, err)
+	assert.Empty(t, recs, "a rejected date leaves no pet behind")
+}
+
 // TestWriteThread_RejectsBadStatus rejects an unknown thread status with
 // nothing written.
 func TestWriteThread_RejectsBadStatus(t *testing.T) {

@@ -149,8 +149,8 @@ through the same append-only merge path as `injury`.
   a stray `--field`. A thread carries no dated occurrence, so it takes
   no date flag.
 
-**Registry date values (binding).** `injury --onset` and `era
---start`/`--end` read the one shared date grammar
+**Registry date values (binding).** `injury --onset`, `era
+--start`/`--end`, and `pet --start`/`--end` read the one shared date grammar
 ([`../usage/commands.md`](../usage/commands.md#backdating-with---day))
 on its **strict** tier: they accept `@yesterday`, `YYYY-MM-DD`,
 `YYYY-MM`, and `YYYY`, and reject anything else — including free text
@@ -339,12 +339,21 @@ The `pet` registry uses only these conventional `Fields` keys:
 | `Fields` key | Type | Meaning | Synthetic example |
 |--------------|------|---------|-------------------|
 | `species` | string (free-form) | The companion's species, in the owner's words. | `"dog"` |
+| `start` | string (approximate) | When the companion came into your life — backdate-aware, so a companion from years ago is placeable in time. Same **strict** grammar as `era --start` (§4 "Registry date values"): `@yesterday`, `YYYY-MM-DD`, or an approximate `YYYY-MM` / `YYYY`; a partial value is stored **as typed**, precision recorded alongside. | `"2005"` |
+| `end` | string (approximate) | When the companion passed or was rehomed; omit for a companion still with you. Same grammar as `start`. | `"2012-06"` |
 | `note` | string (verbatim) | Optional owner-authored context. | `"prefers the blue blanket"` |
 
 Alternate names use the first-class `aka[]` column, not a `Fields`
-key. There are deliberately no adopted-on, health, or reminder fields:
-observations are inventory, never obligation (Sanctuary). The free-form
-map does not enforce this convention; the written contract does.
+key. The `start`/`end` pair is a **life-span range** — read through the
+same strict date grammar as `era` (§4) and stored the same way, so a
+companion from the past is placed in time exactly as a life chapter is,
+down to the *degree* of imprecision a year-only memory carries. That
+range is the one temporal concession, and it stays **inventory**: there
+are deliberately **no** health, feeding, reminder, or obligation fields,
+and the range itself carries no streak, target, or countdown — a passed
+companion is not a lapsed streak (Sanctuary: observations are inventory,
+never obligation). The free-form map does not enforce this convention;
+the written contract does.
 
 Pet status is kind-specific: `active`, `rehomed`, or `passed`. Injury
 and thread retain `active`, `managed`, or `resolved`. A kind-aware

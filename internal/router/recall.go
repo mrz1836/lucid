@@ -50,7 +50,7 @@ var recallFieldOrder = map[string][]string{ //nolint:gochecknoglobals // the fix
 	RecallInjury: {"onset", "timeline", "body_area", "cause", "severity", "lasting_effects", "current_limitations", "treatments", "uncertainty", "note"},
 	RecallEra:    {"start", "end", "note"},
 	RecallThread: {"intent", "domains", "note"},
-	RecallPet:    {"species", "note"},
+	RecallPet:    {"species", "start", "end", "note"},
 }
 
 // RecallRequest is the read-only browse selector (mvp/life-archive.md §7):

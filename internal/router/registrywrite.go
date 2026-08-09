@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -10,9 +11,9 @@ import (
 )
 
 // registrywrite.go is the user-facing registry-write path for the life-archive
-// module (mvp/life-archive.md §2–§4). Until now the only verb that wrote a
+// module (mvp/life-archive.md §2–§4, §8). Until now the only verb that wrote a
 // registry was a sticky location (router/observation.go resolvePlace); this
-// fills the CLI gap with create/amend verbs for the injury, era, and thread
+// fills the CLI gap with create/amend verbs for the injury, era, thread, and pet
 // registries. Every write is deterministic and agent-free — resolve the salted
 // key, build a RegistryPatch of the convention Fields present, and merge through
 // the append-only UpdateRegistry path (observations.md §1). No model runs here.
@@ -70,12 +71,19 @@ type ThreadWriteRequest struct {
 
 // PetWriteRequest carries one `lucid pet` create/amend turn
 // (life-archive.md §8): a named companion with optional species, lifecycle
-// status, and a note kept verbatim. Pet status uses the kind-specific
-// active/rehomed/passed vocabulary. A zero Now defaults to the wall clock.
+// status, a backdate-aware Start/End life-span, and a note kept verbatim. Pet
+// status uses the kind-specific active/rehomed/passed vocabulary. Start and End
+// are strict-tier dates (@yesterday / YYYY-MM-DD / a partial YYYY-MM or YYYY —
+// free text and a future day are rejected, see [resolveRegistryDate]), stored
+// as typed with their precision recorded alongside, exactly like an era range —
+// so a companion from years ago is placeable in time. An open End is a companion
+// still with you. A zero Now defaults to the wall clock.
 type PetWriteRequest struct {
 	Name    string
 	Species string
 	Status  string
+	Start   string
+	End     string
 	Note    string
 	Now     time.Time
 }
@@ -83,7 +91,7 @@ type PetWriteRequest struct {
 // RegistryWriteResult reports what a registry-write verb persisted and the
 // inventory ack to show. Created is true when this call first minted the record
 // (its status_history has exactly one entry); Fields is the merged result after
-// the patch. Kind is the registry kind (injury/era/thread).
+// the patch. Kind is the registry kind (injury/era/thread/pet).
 type RegistryWriteResult struct {
 	Kind        string
 	Key         string
@@ -206,8 +214,11 @@ func (r *Router) WriteThread(req ThreadWriteRequest) (RegistryWriteResult, error
 
 // WritePet creates or amends a pet registry record (life-archive.md §8). It
 // records lifecycle transitions on the shared append-only status history and
-// stores only the documented species and note Fields. It is deterministic and
-// agent-free; a malformed status is rejected before any write.
+// stores the documented species, backdate-aware start/end life-span, and note
+// Fields — the range resolving through the same strict grammar as an era, each
+// precision recorded alongside. It is deterministic and agent-free; a malformed
+// status or an unreadable/future date is rejected before any write, so the
+// record stays byte-unchanged (error-states.md §St-1, §B-3, §B-4).
 func (r *Router) WritePet(req PetWriteRequest) (RegistryWriteResult, error) {
 	now := whenOr(req.Now)
 	name := strings.TrimSpace(req.Name)
@@ -221,8 +232,27 @@ func (r *Router) WritePet(req PetWriteRequest) (RegistryWriteResult, error) {
 		)
 	}
 
+	// Both bounds resolve before the first field is built, so a rejected end
+	// cannot leave a half-applied range behind (error-states.md §B-3, §B-4).
+	start, startPrec, err := resolveRegistryDate(req.Start, now)
+	if err != nil {
+		return RegistryWriteResult{}, err
+	}
+	end, endPrec, err := resolveRegistryDate(req.End, now)
+	if err != nil {
+		return RegistryWriteResult{}, err
+	}
+
 	fields := map[string]any{}
 	putField(fields, "species", req.Species)
+	if start != "" {
+		fields["start"] = start
+		fields["start_precision"] = startPrec
+	}
+	if end != "" {
+		fields["end"] = end
+		fields["end_precision"] = endPrec
+	}
 	putField(fields, "note", req.Note)
 
 	return r.writeRegistry(observations.RegistryPet, name, req.Status, fields, now)
@@ -339,15 +369,7 @@ func registryStatusVocab(kind string) []string {
 // validRegistryStatus reports whether s is empty (no transition) or belongs to
 // the documented vocabulary for kind.
 func validRegistryStatus(kind, s string) bool {
-	if s == "" {
-		return true
-	}
-	for _, allowed := range registryStatusVocab(kind) {
-		if s == allowed {
-			return true
-		}
-	}
-	return false
+	return s == "" || slices.Contains(registryStatusVocab(kind), s)
 }
 
 // humanList formats a non-empty vocabulary for validation copy.

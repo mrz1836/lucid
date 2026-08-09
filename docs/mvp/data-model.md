@@ -103,7 +103,8 @@ follow documented conventions on the **frozen** free-form
 `current_limitations`, `treatments`, `uncertainty`), the era range
 (`start`/`end`), the thread `intent`/`domains` (with **no**
 progress/percent/streak field — the obliquity guard), and the pet
-`species`/`note`. Pet status is kind-specific — `active`, `rehomed`, or
+`species`/`note` plus a backdate-aware `start`/`end` life-span (the era
+date grammar, stored as typed with precision). Pet status is kind-specific — `active`, `rehomed`, or
 `passed` — while injury and thread retain `active`, `managed`, or
 `resolved`; [`life-archive.md`](life-archive.md) §8 records the field
 and status contract. Story

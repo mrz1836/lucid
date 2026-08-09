@@ -58,7 +58,7 @@ own *scope*; the older MVP docs own *conventions*.
 | `lucid era <name> [--start …] [--end …]` · `lucid thread <name> [--intent …]` | Create or amend an `era` (name + date range) or `thread` (name + intent — **no progress number**, the obliquity guard) registry record ([`life-archive.md`](life-archive.md) §4). | `registries/eras\|threads/<key>.json` |
 | `lucid memory "<text>" [--certainty …] [--era …] [--place …] [--day …] [--attach <path>]` | Capture a backdated story `memory` event with the payload/`refs` convention ([`life-archive.md`](life-archive.md) §3). Optional media reuses `lucid attach`, referenced via `refs.entry`; a text-only story omits it and is never gated. | One `memory` event under `observations/YYYY/MM/…`; `--attach` also writes `media/` + a linked `raw/` entry |
 | `lucid excavate` | **Read-only:** select the next injury/story cluster to excavate and emit its generic prompts ([`life-archive.md`](life-archive.md) §5–§6). Deterministic, agent-free; honest-empty over a thin store, no model call. | None |
-| `lucid recall [--era\|--thread\|--injury <key>]` | **Read-only:** browse the archive by era/thread/injury (bare = an index), each surfaced item cited with its source context ([`life-archive.md`](life-archive.md) §7). | None |
+| `lucid recall [--era\|--thread\|--injury\|--pet <key>]` | **Read-only:** browse the archive by era/thread/injury/pet (bare = an index), each surfaced item cited with its source context ([`life-archive.md`](life-archive.md) §7). | None |
 
 Acks return within one second; no LLM call exists in the path, so
 offline capture works. `logical_date` derivation (rollover for exact

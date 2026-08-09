@@ -10,10 +10,12 @@ import (
 )
 
 // newPetCmd wires `lucid pet <name> [flags]`: the registry-write verb for a
-// named companion (mvp/life-archive.md §8). It stores only the documented
-// species and note Fields, with lifecycle transitions recorded on the shared
-// append-only status history. Dispatch is deterministic and agent-free. A name
-// may contain spaces, joined from the trailing args.
+// named companion (mvp/life-archive.md §8). It stores the documented species, a
+// free-text note, and a backdate-aware start/end life-span, recording any
+// lifecycle transition on the shared append-only status history. --start/--end
+// read the same strict date grammar as `lucid era`, so a companion from years
+// ago is placeable in time. Dispatch is deterministic and agent-free. A name may
+// contain spaces, joined from the trailing args.
 func newPetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pet <name>",
@@ -31,11 +33,17 @@ func newPetCmd() *cobra.Command {
 			}
 			req.Species, _ = f.GetString(flagSpecies)
 			req.Status, _ = f.GetString(flagStatus)
+			req.Start, _ = f.GetString(flagStart)
+			req.End, _ = f.GetString(flagEnd)
 			req.Note, _ = f.GetString(flagNote)
 
 			res, err := r.WritePet(req)
 			if err != nil {
-				return err
+				// The root silences returned errors, so a rejected status or
+				// --start/--end date would otherwise be a bare exit code. A
+				// rejection has to say what it wanted (error-states.md §St-1,
+				// §B-3, §B-4).
+				return emitErr(cmd, err)
 			}
 			return renderRegistryWrite(cmd, res)
 		},
@@ -43,6 +51,8 @@ func newPetCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.String(flagSpecies, "", "Species, in your words (free text)")
 	f.String(flagStatus, "", "Status transition: active | rehomed | passed")
+	f.String(flagStart, "", "When they came into your life: @yesterday, YYYY-MM-DD, or a partial date like 2005 or 2005-06")
+	f.String(flagEnd, "", "When they passed or were rehomed, same forms as --start (omit for a companion still with you)")
 	f.String(flagNote, "", "A free-text note kept verbatim")
 	cmd.AddCommand(newPetMigrateCmd())
 	return cmd

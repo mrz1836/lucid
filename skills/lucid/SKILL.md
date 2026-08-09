@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.17.0"
+min_lucid_version: "0.18.0"
 ---
 
 # Lucid
@@ -78,11 +78,12 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | Verb | Reason it is not a chat command |
 |------|---------------------------------|
 | `lucid anchor` | Record days-since milestones (anchors); a consequential lifecycle verb that is echoed and confirmed rather than chat-mapped. |
-| `lucid recall` | Read-only: browse the archive by era, thread, or injury (never writes). |
+| `lucid recall` | Read-only: browse the archive by era, thread, injury, or pet (never writes). |
 | `lucid memory` | Record a story from your past — backdated, linked, kept. |
 | `lucid era` | Record or amend a life chapter (era). |
 | `lucid injury` | Record or amend an injury in your body history. |
 | `lucid thread` | Record or amend a thread you're working on. |
+| `lucid pet` | Record or amend a companion in your pet registry — a first-class named referent with its own `active`/`rehomed`/`passed` lifecycle. |
 | `lucid link` | Point a stored media attachment at a subject it is about — a person, injury, day, anchor, or thread — through the append-only link ledger; a retroactive curation verb reached by its CLI form. |
 | `lucid unlink` | Retire a media↔subject association by appending an unlink event — nothing is destroyed, the pair just stops being live. |
 | `lucid annotate` | Attach a free-text note to a media↔subject association without changing whether it is linked. |

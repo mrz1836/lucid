@@ -34,9 +34,9 @@ const (
 type SubjectResolver func(a *Adapter, key string) error
 
 // RegisterSubjectKind adds a resolver for a new subject kind, additively. It is
-// the structural promise of the open taxonomy: a future kind (a pet, say, and
-// anything after) becomes linkable by registering one resolver here, with no
-// change to links.go or the on-disk record. The kind must match
+// the structural promise of the open taxonomy: a future kind becomes linkable
+// by registering one resolver here, with no change to links.go or the on-disk
+// record. The kind must match
 // ^[a-z][a-z0-9_]*$, and an already-registered kind is refused rather than
 // silently replaced — a silent replace would let a caller hijack person.
 func (a *Adapter) RegisterSubjectKind(kind string, fn SubjectResolver) error {
@@ -92,11 +92,11 @@ func (a *Adapter) subjectResolvers() map[string]SubjectResolver {
 	return a.subjects
 }
 
-// defaultSubjectResolvers returns the twelve launch resolvers, each keyed by its
-// kind and resolving through that family's own native key helper — no new key
-// scheme (data-model.md §"Link ledger" kind table). memory is an alias over a
-// KindMemory observation, not its own record family (D11); a new kind such as a
-// pet joins for free the moment its resolver is registered.
+// defaultSubjectResolvers returns the thirteen launch resolvers, each keyed by
+// its kind and resolving through that family's own native key helper — no new
+// key scheme (data-model.md §"Link ledger" kind table). memory is an alias over
+// a KindMemory observation, not its own record family (D11); any further kind
+// joins for free the moment its resolver is registered here.
 func defaultSubjectResolvers() map[string]SubjectResolver {
 	return map[string]SubjectResolver{
 		"person":      resolvePersonSubject,
@@ -104,6 +104,7 @@ func defaultSubjectResolvers() map[string]SubjectResolver {
 		"thread":      registrySubjectResolver(observations.RegistryThread),
 		"era":         registrySubjectResolver(observations.RegistryEra),
 		"place":       registrySubjectResolver(observations.RegistryPlace),
+		"pet":         registrySubjectResolver(observations.RegistryPet),
 		"raw":         resolveRawSubject,
 		"day":         resolveDaySubject,
 		"observation": resolveObservationSubject,
@@ -127,7 +128,7 @@ func resolvePersonSubject(a *Adapter, key string) error {
 }
 
 // registrySubjectResolver builds the resolver for a registry-backed kind
-// (injury, thread, era, place): the key is the kind-prefixed registry key, and
+// (injury, thread, era, place, pet): the key is the kind-prefixed registry key, and
 // resolution is a straight ReadRegistry lookup — no rename/alias layer, because
 // a registry key is stable once assigned.
 func registrySubjectResolver(kind string) SubjectResolver {

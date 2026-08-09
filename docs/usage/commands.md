@@ -2045,20 +2045,30 @@ lucid thread "the memoir" --intent "write the messy years down" --status active 
 ### pet
 
 ```
-lucid pet <name> [--species <text>] [--status active|rehomed|passed] [--note <text>] [--json]
+lucid pet <name> [--species <text>] [--status active|rehomed|passed] [--start <date>] [--end <date>] [--note <text>] [--json]
 ```
 
 Record or amend a companion in the `pet` registry
 ([`life-archive.md`](life-archive.md);
 [`../mvp/life-archive.md`](../mvp/life-archive.md) §8). `--species` is
 free-form, and status uses the pet-specific `active`, `rehomed`, or
-`passed` vocabulary. The command uses the same append-only merge and
-`{kind, key, display_name, status, created, fields}` `--json` shape as
-the other registry verbs. Re-mentioning a companion under another name
+`passed` vocabulary. `--start`/`--end` record the companion's life-span
+and are **backdate-aware** — they read the same strict date grammar as
+`era` ([Backdating with `--day`](#backdating-with---day)): `@yesterday`,
+`YYYY-MM-DD`, or an approximate `YYYY-MM` / `YYYY`, with a partial value
+stored as typed and a future date rejected. So a pet from years ago is
+recorded with whatever precision you remember — `--start 2005` is enough.
+Omit `--end` for a companion still with you. The command uses the same
+append-only merge and `{kind, key, display_name, status, created,
+fields}` `--json` shape as the other registry verbs, so re-running it
+amends the same record; re-mentioning a companion under another name
 accrues that name in the first-class `aka[]` column rather than a field.
+Media links to a pet (`lucid attach --to pet:<key>`, `lucid link … --to
+pet:<key>`) resolve like any other subject.
 
 ```sh
 lucid pet "Fixture Pet" --species dog --status active
+lucid pet "Old Sable" --species dog --start 2005 --end 2012-06 --status passed
 lucid pet "Fixture Pet" --note "prefers the blue blanket" --json
 ```
 
