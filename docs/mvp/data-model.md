@@ -521,6 +521,23 @@ in full — and it is an explicit entry in the backup manifest
 (`deploy.BackupManifest`, [`local-runtime.md`](local-runtime.md)
 §Rebuildability), so the claim and the manifest agree.
 
+### Read projections — `day`, and the `gallery` timeline
+
+Nothing in the media store is ever mutated by a read. Two read-only surfaces
+project the sidecars above: [`day`](../usage/commands.md#day) surfaces a single
+day's media as an inventory line, and [`gallery`](../usage/commands.md#gallery)
+projects media **across time** — a date-ordered timeline for before/after
+comparison. `gallery` reads the media store here plus the link ledger
+(§"Link ledger", for its `--to <kind>:<key>` single-subject filter) and orders the
+result **ascending by `logical_day`**; it introduces **no new on-disk state** — no
+new file, directory, or sidecar field. Its `--json` emits the sidecar's **nine
+stored fields verbatim** — `id`, `sha256`, `original_filename`, `captured_at`,
+`logical_day`, `caption`, `alt`, `raw_entry_id`, `source` — plus one **derived**
+field, `stored_path`: the on-disk path (`~/.lucid/media/YYYY/MM/<id>`) computed
+from `logical_day` + `id` at read time and **never** written into the sidecar (the
+same derived path `attach --json` returns and `day` prints). The nine stored
+fields are the whole sidecar; a read adds `stored_path` and invents nothing else.
+
 ## Link ledger — `~/.lucid/links/`
 
 **Format:** newline-delimited JSON (JSONL). One event per line.

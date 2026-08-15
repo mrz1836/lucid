@@ -2194,6 +2194,50 @@ lucid recall --injury left-knee --json
 lucid recall --pet pet_a-cedar --json
 ```
 
+### gallery
+
+```
+lucid gallery [--since <YYYY-MM-DD>] [--until <YYYY-MM-DD>] [--to <kind>:<key>] [--json]
+```
+
+**Read-only.** Browse stored media as a **date-ordered timeline** — the
+before/after view a progress-photo baseline needs. It lists attachments in
+**ascending `logical_day` order** (04:00-rollover attribution, the same logical
+day every other dated record uses), optionally narrowed to an inclusive date
+window and/or a single subject, and returns the logical day, caption, and stored
+path per item. Nothing is written and no model runs, mirroring [`recall`](#recall)
+and [`day`](#day): it reads the media store (`~/.lucid/media/`) and the link
+ledger only ([`../mvp/data-model.md`](../mvp/data-model.md) §"Media attachments",
+§"Link ledger"; [`../mvp/life-archive.md`](../mvp/life-archive.md) §7). A window or
+subject that matches nothing prints an honest empty result.
+
+| Flag | Effect |
+|------|--------|
+| `--since <YYYY-MM-DD>` | Keep only media whose `logical_day` is **on or after** this day — **inclusive** on this end, so a boundary day is included. Compared against `logical_day` directly (a zero-padded ISO date orders chronologically as a string). Usable on its own. |
+| `--until <YYYY-MM-DD>` | Keep only media whose `logical_day` is **on or before** this day — **inclusive** on this end too. Usable on its own; pair it with `--since` for a closed range. |
+| `--to <kind>:<key>` | Narrow to media linked to **one** subject through the [link ledger](#link), using the same `<kind>:<key>` grammar as [`link`](#link) / [`attach`](#attach) (split on the first colon; the resolvable kinds are the ones under [Linkable kinds](#linkable-kinds)). Unlike the write family's **repeatable** `--to`, this is a **single** subject filter — it selects the one subject to browse. An unknown or unresolvable subject is a clean error and nothing is browsed. Combinable with the date window. |
+
+**Ordering.** Ascending by `logical_day`, with a deterministic same-day tiebreak
+of `captured_at` then `id`, so a day carrying several attachments always reads in
+a stable order.
+
+**Output.** The human form prints one bullet per item — the `logical_day`, the
+caption (omitted honestly when the attachment has none), and the stored path —
+never a table, the same posture as `day`'s inventory `Media:` line. `--json`
+emits the full media sidecar projection: all nine stored fields (`id`, `sha256`,
+`original_filename`, `captured_at`, `logical_day`, `caption`, `alt`,
+`raw_entry_id`, `source`) plus the derived `stored_path` — the on-disk path
+computed at read time, never stored in the sidecar (the same field `attach --json`
+returns).
+
+```sh
+lucid gallery
+lucid gallery --since 2026-05-01 --until 2026-07-30
+lucid gallery --since 2026-05-01 --json
+lucid gallery --to anchor:anchor_2026_05_01_a --json
+lucid gallery --to injury:injury_a-cedar --since 2026-05-01 --until 2026-07-30
+```
+
 ### structure
 
 ```
