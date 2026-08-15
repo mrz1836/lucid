@@ -300,6 +300,7 @@ flag-parse error.
 | `reflect week` | `--days` `--since` `--week` | Read-only weekly deep-dive since your last reflection. `reflect week apply` persists a candidate through the resonance gate (JSON on stdin); `reflect week close` stamps the cursor. |
 | `ask <question…>` | — | Grounded, cited Q&A across your validated insights and reflections. |
 | `recall` | `--era` `--injury` `--thread` `--pet` | Browse the archive by era, thread, injury, or pet (never writes). |
+| `gallery` | `--since` `--until` `--to` | Browse stored media as a date-ordered timeline for before/after comparison — filterable by an inclusive date window and/or one linked subject (never writes). |
 | `excavate` | — | Select the next memory cluster to excavate (never writes). |
 | `person <name>` | — | Look up a person you've mentioned. |
 | `person reconcile` | — | List likely-duplicate people with a suggested merge — read-only, no-LLM, changes nothing. |

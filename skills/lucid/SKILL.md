@@ -79,6 +79,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 |------|---------------------------------|
 | `lucid anchor` | Record days-since milestones (anchors); a consequential lifecycle verb that is echoed and confirmed rather than chat-mapped. |
 | `lucid recall` | Read-only: browse the archive by era, thread, injury, or pet (never writes). |
+| `lucid gallery` | Read-only: browse stored media as a date-ordered timeline (before/after), filterable by an inclusive date window and/or one linked subject (never writes). |
 | `lucid memory` | Record a story from your past — backdated, linked, kept. |
 | `lucid era` | Record or amend a life chapter (era). |
 | `lucid injury` | Record or amend an injury in your body history. |

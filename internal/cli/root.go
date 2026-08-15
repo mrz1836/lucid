@@ -143,6 +143,7 @@ append-only Ledger under ~/.lucid/.`,
 	root.AddCommand(newMemoryCmd())
 	root.AddCommand(newExcavateCmd())
 	root.AddCommand(newRecallCmd())
+	root.AddCommand(newGalleryCmd())
 	root.AddCommand(newStructureCmd())
 
 	// Self-update (alias: upgrade) plus the passive "a new version is available"

@@ -266,6 +266,25 @@ surfaced item is uncited** — the source-context ids are the browse's
 contract, so the same projection-only reads are consumable by the
 weekly reflection surface without a second data path.
 
+### The media-over-time browse (`gallery`)
+
+`recall` browses the archive's **registry** dimensions; its media sibling
+`gallery` browses the **media store over time**. Where `recall` answers "what
+belongs to this era / thread / injury / pet?", `gallery` answers "show me the
+photos in order" — the before/after progress-photo view. It is a read-only
+projection over the media store (`~/.lucid/media/`) and the link ledger
+([`data-model.md`](data-model.md) §"Media attachments", §"Link ledger"):
+`GalleryRequest{since, until, subject_kind, subject_key}` → media ordered
+**ascending by `logical_day`** (04:00-rollover attribution), optionally narrowed
+to an **inclusive** `[since, until]` date window and/or a **single** linked
+subject (the `--to <kind>:<key>` filter, resolved through the same link-ledger
+seam), each item carrying its `logical_day`, caption, and stored path. Like the
+contracts above it is **deterministic and model-free**, reads the media store and
+link ledger only through the storage adapter's read seams (the same sanctuary
+boundary), writes nothing, and degrades to an honest empty result on a thin or
+missing store. It introduces **no new record, field, or on-disk state** — the
+timeline is a lens over the existing media sidecars and link ledger, nothing more.
+
 ## 8. Data-contract decision — no net-new observation kind in v1
 
 This module was scoped to *default to the frozen model and reach past it
