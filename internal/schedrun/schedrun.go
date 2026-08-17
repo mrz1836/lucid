@@ -294,8 +294,8 @@ func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter, s
 	if err != nil {
 		return err
 	}
-	bellCron := cronFromMinutes(bellMin)
-	fallbackCron := cronFromMinutes(bellFallbackMinutes(bellMin))
+	bellCron := clockmark.CronOfMinutes(bellMin)
+	fallbackCron := clockmark.CronOfMinutes(bellFallbackMinutes(bellMin))
 	tripwireCron, err := cronFromHM(tripwireMark)
 	if err != nil {
 		return err
@@ -360,12 +360,6 @@ func markMinutes(hm string) (int, error) {
 	return mark.Minutes(), nil
 }
 
-// cronFromMinutes renders minutes since local midnight as a daily 5-field cron
-// expression: 1290 -> "30 21 * * *".
-func cronFromMinutes(total int) string {
-	return fmt.Sprintf("%d %d * * *", total%60, total/60)
-}
-
 // cronFromHM turns an "HH:MM" clock mark into a daily 5-field cron expression:
 // "21:30" -> "30 21 * * *".
 func cronFromHM(hm string) (string, error) {
@@ -373,7 +367,7 @@ func cronFromHM(hm string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cronFromMinutes(total), nil
+	return clockmark.CronOfMinutes(total), nil
 }
 
 // DefaultDBPath resolves the disposable Engine job-DB path: an explicit override

@@ -2,6 +2,7 @@ package clockmark
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,6 +71,54 @@ func TestParse_Invalid(t *testing.T) {
 			_, err := Parse(tc.in)
 			require.Error(t, err, "expected %q to be rejected", tc.in)
 		})
+	}
+}
+
+// TestMark_At places the mark on now's calendar date and location, reading
+// nothing from now but its year/month/day and zone: the same mark resolves the
+// same civil time whatever the wall time or day the fire runs on.
+func TestMark_At(t *testing.T) {
+	m, err := Parse("06:30")
+	require.NoError(t, err)
+
+	// A fire at any wall time on 2026-07-06 resolves 06:30 that day.
+	now := time.Date(2026, 7, 6, 15, 42, 17, 999, time.UTC)
+	assert.Equal(t, time.Date(2026, 7, 6, 6, 30, 0, 0, time.UTC), m.At(now),
+		"the mark lands on now's date with seconds and nanoseconds zeroed")
+
+	// The zero mark is midnight of now's date.
+	var midnight Mark
+	assert.Equal(t, time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC), midnight.At(now))
+
+	// now's location is preserved, not flattened to UTC.
+	loc := time.FixedZone("test", 5*3600)
+	got := m.At(time.Date(2026, 3, 1, 9, 0, 0, 0, loc))
+	assert.Equal(t, time.Date(2026, 3, 1, 6, 30, 0, 0, loc), got)
+	assert.Equal(t, loc, got.Location(), "the mark keeps now's location")
+}
+
+// TestCronOfMinutes renders minutes since midnight as a daily cron, and matches
+// Mark.Cron for every mark so the two renderings can never drift.
+func TestCronOfMinutes(t *testing.T) {
+	cases := []struct {
+		total int
+		want  string
+	}{
+		{0, "0 0 * * *"},
+		{450, "30 7 * * *"},
+		{1290, "30 21 * * *"},
+		{1439, "59 23 * * *"},
+	}
+	for _, tc := range cases {
+		assert.Equalf(t, tc.want, CronOfMinutes(tc.total), "CronOfMinutes(%d)", tc.total)
+	}
+
+	// Mark.Cron delegates to CronOfMinutes, so the two agree for every mark.
+	for h := range 24 {
+		for min := range 60 {
+			m := Mark{hour: h, minute: min}
+			assert.Equalf(t, CronOfMinutes(m.Minutes()), m.Cron(), "Cron vs CronOfMinutes for %02d:%02d", h, min)
+		}
 	}
 }
 

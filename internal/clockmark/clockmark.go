@@ -12,16 +12,21 @@
 // rejection of malformed input — and makes a mark that passes config validation
 // build a valid cron everywhere.
 //
-// It is pure: no filesystem, no clock, no model, no obligation — only fmt,
-// strconv, and strings. Callers keep their own public wrappers, return shapes,
-// and error wording (mirroring internal/keyderive); this package owns only the
-// one parsing rule and the renderings derived from it.
+// It is pure: no filesystem, no model, no obligation, and it never reads the
+// clock — [Mark.At] resolves a mark against a caller-supplied instant. It
+// depends only on fmt, strconv, strings, and time (the last solely for the
+// calendar arithmetic in [Mark.At]). Callers keep their own public wrappers,
+// return shapes, and error wording (mirroring internal/keyderive); this package
+// owns only the one parsing rule and the renderings derived from it —
+// [Mark.String], [Mark.Minutes], [Mark.Cron], [Mark.At], and the
+// minutes-first [CronOfMinutes].
 package clockmark
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Mark is a validated time of day: an hour in [0,23] and a minute in [0,59].
@@ -76,5 +81,26 @@ func (m Mark) Minutes() int { return m.hour*60 + m.minute }
 func (m Mark) String() string { return fmt.Sprintf("%02d:%02d", m.hour, m.minute) }
 
 // Cron renders the mark as a daily five-field cron expression
-// ("minute hour * * *"): 21:30 -> "30 21 * * *".
-func (m Mark) Cron() string { return fmt.Sprintf("%d %d * * *", m.minute, m.hour) }
+// ("minute hour * * *"): 21:30 -> "30 21 * * *". It delegates to
+// [CronOfMinutes] so a mark and a minutes-derived fire time render identically.
+func (m Mark) Cron() string { return CronOfMinutes(m.Minutes()) }
+
+// At returns the wall-clock instant of the mark on now's calendar date, in
+// now's location: the mark's hour and minute placed on now's year/month/day
+// (seconds and nanoseconds zeroed). It reads nothing from now but its date and
+// location, so a fire on any day resolves the same civil time. It is the shared
+// body of every daemon's per-day mark-to-instant resolution — the reference a
+// missed-fire window compares against — so a mark config accepted resolves the
+// identical instant everywhere.
+func (m Mark) At(now time.Time) time.Time {
+	return time.Date(now.Year(), now.Month(), now.Day(), m.hour, m.minute, 0, 0, now.Location())
+}
+
+// CronOfMinutes renders minutes since local midnight (0–1439) as a daily
+// five-field cron expression: 1290 -> "30 21 * * *". It is the shared body
+// behind [Mark.Cron] and the daemons' backstop/fallback arithmetic, which
+// derives a fire mark in minutes (a grace past another mark, wrapped at
+// midnight) and needs the same rendering without first rebuilding a Mark.
+func CronOfMinutes(total int) string {
+	return fmt.Sprintf("%d %d * * *", total%60, total/60)
+}

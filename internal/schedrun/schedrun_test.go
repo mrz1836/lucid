@@ -397,14 +397,6 @@ func TestBellFallbackMinutes_StaysOnTheBellsCalendarDay(t *testing.T) {
 	}
 }
 
-// TestCronFromMinutes covers the minutes-to-cron rendering the evening marks are
-// scheduled through.
-func TestCronFromMinutes(t *testing.T) {
-	assert.Equal(t, "0 0 * * *", cronFromMinutes(0))
-	assert.Equal(t, "30 21 * * *", cronFromMinutes(21*60+30))
-	assert.Equal(t, "59 23 * * *", cronFromMinutes(minutesPerDay-1))
-}
-
 // TestCompanionNightCutoffMatchesCompanion locks the one constant this package
 // duplicates. The backstop's whole no-race argument is that it fires only after
 // the companion has stopped trying, so if the companion's night cut-off moves
