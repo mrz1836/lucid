@@ -190,6 +190,8 @@ func buildWatchOuts(r Report) []string {
 }
 
 // pct renders a 0..1 ratio as a whole-number percent for the honest-number
-// copy. It truncates toward zero, so a reported figure never rounds up past the
-// real adherence.
-func pct(ratio float64) int { return int(ratio * 100) }
+// copy. It rounds to the nearest (half-up at the .5 midpoint) — the identical
+// rule the router's status/metrics/person surfaces and the companion's status
+// panel apply, so a witness report and the daily surfaces never disagree by a
+// point (e.g. 2/3 reads 67% everywhere, not 66% here and 67% there).
+func pct(ratio float64) int { return int(ratio*100 + 0.5) }

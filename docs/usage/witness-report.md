@@ -146,8 +146,11 @@ For each weekly fire the compose worker:
 1. Reads the chain's **honest live numbers** in-process, from the exact projection
    `lucid metrics --json` exposes — streak, longest streak, 30-day adherence,
    error budget, and per-anchor days-since — and computes a 7-day window for "this
-   week" (completed / decided / logged days). Numbers are copied straight from the
-   chain, never rounded or invented.
+   week" (completed / decided / logged days). The counts are copied straight from
+   the chain, never invented. The 30-day adherence is shown as a whole percent, its
+   0–1 ratio rounded to the **nearest** (half-up at the .5 midpoint) — the identical
+   rounding `lucid status`, `lucid metrics`, and the companion apply, so a witness
+   report and the daily surfaces never disagree by a point.
 2. Derives the **watch-outs** deterministically from those real signals:
    this-week misses at or above the threshold, a 30-day adherence dip, a spent
    error budget, an anchor aging past its mark, and — first of all — **thin

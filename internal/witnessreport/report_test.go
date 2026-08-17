@@ -239,6 +239,30 @@ func TestBuildReport_ReaderErrorsPropagate(t *testing.T) {
 // provider/agent/model package and no observations/journal reader, so a private
 // detail or a model can never reach the honest-number scaffold. The compose
 // pass added later lives in its own files; these two stay pure.
+// TestPct locks the whole-percent rounding at half-up (to nearest), the same
+// rule the router's status/metrics/person surfaces and the companion's status
+// panel apply. The two-thirds and above-midpoint rows are the ones the former
+// truncation rendered a point low (66 rather than 67), the drift this corrects.
+func TestPct(t *testing.T) {
+	cases := []struct {
+		name  string
+		ratio float64
+		want  int
+	}{
+		{"exact whole percent", 0.80, 80},
+		{"two thirds rounds up (was 66 under truncation)", 2.0 / 3.0, 67},
+		{"above midpoint rounds up (was 66)", 0.666, 67},
+		{"below midpoint rounds down", 0.664, 66},
+		{"zero", 0, 0},
+		{"full", 1, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, pct(tc.ratio))
+		})
+	}
+}
+
 func TestDeterministicCore_NoProviderImport(t *testing.T) {
 	forbidden := []string{
 		"internal/provider",
