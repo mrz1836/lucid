@@ -3,7 +3,6 @@ package workout
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +17,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -40,48 +40,6 @@ func (f *fakeComposer) Compose(_ context.Context, _ time.Time) (Result, error) {
 		return Result{}, f.err
 	}
 	return f.res, nil
-}
-
-// sendRecord is one delivered send or alert the fake deliverer captured.
-type sendRecord struct{ channel, text string }
-
-// fakeDeliverer captures every SendReturningID (real delivery), Send (alert),
-// and VerifyPresent (read-back / idempotency probe), and lets a test drive the
-// failure branches: sendErr fails delivery, verifyErr fails every read-back, and
-// verifyErrFor fails one specific message id (the "receipt's message is gone"
-// case). It needs no token or socket.
-type fakeDeliverer struct {
-	sends        []sendRecord
-	alerts       []sendRecord
-	verifies     []string
-	sendErr      error
-	verifyErr    error
-	verifyErrFor map[string]error
-	idSeq        int
-}
-
-func (f *fakeDeliverer) SendReturningID(_ context.Context, channel, text string) (string, error) {
-	f.sends = append(f.sends, sendRecord{channel, text})
-	if f.sendErr != nil {
-		return "", f.sendErr
-	}
-	f.idSeq++
-	return fmt.Sprintf("msg-%d", f.idSeq), nil
-}
-
-func (f *fakeDeliverer) VerifyPresent(_ context.Context, _, messageID string) error {
-	f.verifies = append(f.verifies, messageID)
-	if f.verifyErrFor != nil {
-		if e, ok := f.verifyErrFor[messageID]; ok {
-			return e
-		}
-	}
-	return f.verifyErr
-}
-
-func (f *fakeDeliverer) Send(_ context.Context, channel, text string) error {
-	f.alerts = append(f.alerts, sendRecord{channel, text})
-	return nil
 }
 
 // --- fixtures ---------------------------------------------------------------
@@ -132,7 +90,7 @@ func newJobDB(t *testing.T) *gorm.DB {
 // verified receipt keyed on the day + the workout window.
 func TestFire_OnTime_DeliversAndWritesReceipt(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	now := at(2026, 7, 20, 12, 0)
@@ -141,11 +99,11 @@ func TestFire_OnTime_DeliversAndWritesReceipt(t *testing.T) {
 
 	assert.True(t, out.Delivered)
 	assert.False(t, out.Late)
-	require.Len(t, del.sends, 1)
-	assert.Equal(t, engine.ChannelUser, del.sends[0].channel)
-	assert.Equal(t, "TODAY: LEGS", del.sends[0].text, "an on-time fire carries no late note")
-	assert.Empty(t, del.alerts, "a clean delivery raises no alert")
-	assert.Equal(t, []string{out.MessageID}, del.verifies, "the delivered id is read back")
+	require.Len(t, del.Sends, 1)
+	assert.Equal(t, engine.ChannelUser, del.Sends[0].Channel)
+	assert.Equal(t, "TODAY: LEGS", del.Sends[0].Text, "an on-time fire carries no late note")
+	assert.Empty(t, del.Alerts, "a clean delivery raises no alert")
+	assert.Equal(t, []string{out.MessageID}, del.Verifies, "the delivered id is read back")
 
 	rec, ok, rerr := store.ReadCompanionReceipt("workout")
 	require.NoError(t, rerr)
@@ -160,21 +118,21 @@ func TestFire_OnTime_DeliversAndWritesReceipt(t *testing.T) {
 // (an operator previewing/forcing the send) delivers on-time with no late note.
 func TestFire_EarlyBeforeMark_DeliversOnTime(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "MORNING PREVIEW"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), at(2026, 7, 20, 8, 0))
 	require.NoError(t, err)
 	assert.True(t, out.Delivered)
 	assert.False(t, out.Late)
-	assert.Equal(t, "MORNING PREVIEW", del.sends[0].text)
+	assert.Equal(t, "MORNING PREVIEW", del.Sends[0].Text)
 }
 
 // TestFire_ConfiguredSlotHonored: the slot mark is the configured time, not a
 // hard-coded noon — an evening slot's on-time / late boundary tracks it.
 func TestFire_ConfiguredSlotHonored(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "EVENING"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	store := newStore(t)
 	r := &Runner{compose: comp, deliver: del, store: store, slot: "18:00"}
 
@@ -192,7 +150,7 @@ func TestFire_ConfiguredSlotHonored(t *testing.T) {
 // no re-compose.
 func TestFire_RetrySameDay_IsIdempotentSkip(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 	now := at(2026, 7, 20, 12, 0)
 
@@ -202,8 +160,8 @@ func TestFire_RetrySameDay_IsIdempotentSkip(t *testing.T) {
 	out2, err := r.Fire(context.Background(), now.Add(2*time.Minute))
 	require.NoError(t, err)
 	assert.True(t, out2.Skipped)
-	assert.Equal(t, skipAlreadyDelivered, out2.SkipReason)
-	assert.Len(t, del.sends, 1, "the retry re-uses the receipt; no second send")
+	assert.Equal(t, flynode.SkipAlreadyDelivered, out2.SkipReason)
+	assert.Len(t, del.Sends, 1, "the retry re-uses the receipt; no second send")
 	assert.Equal(t, 1, comp.calls, "the retry does not re-compose")
 }
 
@@ -212,7 +170,7 @@ func TestFire_RetrySameDay_IsIdempotentSkip(t *testing.T) {
 // day is never left silently empty.
 func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: PUSH"}}
-	del := &fakeDeliverer{verifyErrFor: map[string]error{}}
+	del := &lucidtest.FakeDeliverer{VerifyErrFor: map[string]error{}}
 	r, _ := newRunner(t, comp, del)
 	now := at(2026, 7, 20, 12, 0)
 
@@ -221,13 +179,13 @@ func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 
 	// The first message is now gone: the idempotency read-back on the next fire
 	// fails, so the day re-delivers rather than skipping into silence.
-	del.verifyErrFor[out1.MessageID] = errors.New("404 unknown message")
+	del.VerifyErrFor[out1.MessageID] = errors.New("404 unknown message")
 	out2, err := r.Fire(context.Background(), now.Add(time.Minute))
 	require.NoError(t, err)
 
 	assert.True(t, out2.Delivered)
 	assert.NotEqual(t, out1.MessageID, out2.MessageID)
-	assert.Len(t, del.sends, 2, "a receipt whose message is gone re-delivers")
+	assert.Len(t, del.Sends, 2, "a receipt whose message is gone re-delivers")
 }
 
 // --- Fire: bounded missed-fire catch-up -------------------------------------
@@ -236,16 +194,16 @@ func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 // backfill on a host that overslept the slot) prefixes the honest late note.
 func TestFire_Late_PrependsLateNote(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), at(2026, 7, 20, 13, 0))
 	require.NoError(t, err)
 	assert.True(t, out.Delivered)
 	assert.True(t, out.Late)
-	require.Len(t, del.sends, 1)
-	assert.Equal(t, lateNote+"\n\nTODAY: LEGS", del.sends[0].text)
-	assert.True(t, strings.HasPrefix(del.sends[0].text, "(late — host was asleep)"))
+	require.Len(t, del.Sends, 1)
+	assert.Equal(t, lateNote+"\n\nTODAY: LEGS", del.Sends[0].Text)
+	assert.True(t, strings.HasPrefix(del.Sends[0].Text, "(late — host was asleep)"))
 }
 
 // TestFire_PastCutoff_SkipsAndAlerts: past the delivery window (a 12:00 slot's
@@ -253,16 +211,16 @@ func TestFire_Late_PrependsLateNote(t *testing.T) {
 // alerts Z, and never composes.
 func TestFire_PastCutoff_SkipsAndAlerts(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), at(2026, 7, 20, 18, 30))
 	require.NoError(t, err)
 	assert.True(t, out.Skipped)
-	assert.Equal(t, skipPastCutoff, out.SkipReason)
-	assert.Empty(t, del.sends, "no stale message is posted past the cut-off")
-	require.Len(t, del.alerts, 1, "past the cut-off Z is alerted instead of left silent")
-	assert.Contains(t, del.alerts[0].text, "delivery window")
+	assert.Equal(t, flynode.SkipPastCutoff, out.SkipReason)
+	assert.Empty(t, del.Sends, "no stale message is posted past the cut-off")
+	require.Len(t, del.Alerts, 1, "past the cut-off Z is alerted instead of left silent")
+	assert.Contains(t, del.Alerts[0].Text, "delivery window")
 	assert.Equal(t, 0, comp.calls, "past the cut-off there is no compose")
 
 	_, ok, _ := store.ReadCompanionReceipt("workout")
@@ -275,12 +233,12 @@ func TestFire_PastCutoff_SkipsAndAlerts(t *testing.T) {
 // and returns a loud error — and writes no receipt, so a retry re-sends.
 func TestFire_DeliveryError_AlertsAndErrors(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{sendErr: errors.New("discord 503")}
+	del := &lucidtest.FakeDeliverer{SendErr: errors.New("discord 503")}
 	r, store := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err)
-	require.Len(t, del.alerts, 1, "a total send failure fires a loud alert")
+	require.Len(t, del.Alerts, 1, "a total send failure fires a loud alert")
 
 	_, ok, _ := store.ReadCompanionReceipt("workout")
 	assert.False(t, ok, "a failed delivery writes no receipt")
@@ -290,12 +248,12 @@ func TestFire_DeliveryError_AlertsAndErrors(t *testing.T) {
 // failure — the alert fires and the error surfaces, and no receipt is written.
 func TestFire_VerifyError_AlertsAndErrors(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{verifyErr: errors.New("404 after send")}
+	del := &lucidtest.FakeDeliverer{VerifyErr: errors.New("404 after send")}
 	r, store := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err)
-	require.Len(t, del.alerts, 1)
+	require.Len(t, del.Alerts, 1)
 
 	_, ok, _ := store.ReadCompanionReceipt("workout")
 	assert.False(t, ok, "an unverified send writes no receipt")
@@ -306,13 +264,13 @@ func TestFire_VerifyError_AlertsAndErrors(t *testing.T) {
 // rather than sending an empty message.
 func TestFire_ComposeError_AlertsAndErrors(t *testing.T) {
 	comp := &fakeComposer{err: errors.New("program file missing")}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err)
-	require.Len(t, del.alerts, 1)
-	assert.Empty(t, del.sends, "no message goes out on a compose failure")
+	require.Len(t, del.Alerts, 1)
+	assert.Empty(t, del.Sends, "no message goes out on a compose failure")
 }
 
 // TestFire_FallbackFlagPropagates: a deterministic-fallback compose still
@@ -320,21 +278,21 @@ func TestFire_ComposeError_AlertsAndErrors(t *testing.T) {
 // the provider-down message still goes out, rendered deterministically).
 func TestFire_FallbackFlagPropagates(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "DETERMINISTIC", Fallback: true}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.NoError(t, err)
 	assert.True(t, out.Delivered)
 	assert.True(t, out.Fallback)
-	assert.Equal(t, "DETERMINISTIC", del.sends[0].text)
+	assert.Equal(t, "DETERMINISTIC", del.Sends[0].Text)
 }
 
 // TestFire_MalformedSlot_Errors rejects a slot the config gate would never have
 // admitted (a defensive guard on the runner's own mark).
 func TestFire_MalformedSlot_Errors(t *testing.T) {
 	store := newStore(t)
-	r := &Runner{compose: &fakeComposer{}, deliver: &fakeDeliverer{}, store: store, slot: "24:61"}
+	r := &Runner{compose: &fakeComposer{}, deliver: &lucidtest.FakeDeliverer{}, store: store, slot: "24:61"}
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err)
 }
@@ -401,7 +359,7 @@ func TestUpsertPeriodic_RejectsMalformedSlot(t *testing.T) {
 type rig struct {
 	db     *gorm.DB
 	store  *storage.Adapter
-	del    *fakeDeliverer
+	del    *lucidtest.FakeDeliverer
 	comp   *fakeComposer
 	sched  *flywheel.Scheduler
 	runner *flywheel.Runner
@@ -411,7 +369,7 @@ func newRig(t *testing.T, clock models.Clock) *rig {
 	t.Helper()
 	store := newStore(t)
 	db := newJobDB(t)
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	comp := &fakeComposer{res: Result{Text: "COMPOSED"}}
 	r := &Runner{compose: comp, deliver: del, store: store, slot: "12:00"}
 	reg := buildRegistry(r, clock)
@@ -446,9 +404,9 @@ func TestRun_DailyPeriodicFiresAndDelivers(t *testing.T) {
 
 	require.NoError(t, r.runner.RunUntilIdle(tickCtx))
 
-	require.Len(t, r.del.sends, 1, "the workout slot delivers")
-	assert.Equal(t, engine.ChannelUser, r.del.sends[0].channel)
-	assert.Equal(t, "COMPOSED", r.del.sends[0].text)
+	require.Len(t, r.del.Sends, 1, "the workout slot delivers")
+	assert.Equal(t, engine.ChannelUser, r.del.Sends[0].Channel)
+	assert.Equal(t, "COMPOSED", r.del.Sends[0].Text)
 }
 
 // --- Run: production wiring --------------------------------------------------
@@ -468,7 +426,7 @@ func TestRun_ReconcilesThenDrainsCleanly(t *testing.T) {
 	go func() {
 		done <- Run(ctx, Options{
 			Store:    store,
-			Notifier: &fakeDeliverer{},
+			Notifier: &lucidtest.FakeDeliverer{},
 			Metrics:  fakeMetrics{},
 			Config:   cfg,
 			DBPath:   dbPath,
@@ -504,13 +462,13 @@ func closeGorm(db *gorm.DB) {
 // TestRun_RejectsMissingCollaborators guards the required-field errors.
 func TestRun_RejectsMissingCollaborators(t *testing.T) {
 	require.ErrorIs(t, Run(context.Background(), Options{
-		Notifier: &fakeDeliverer{}, Metrics: fakeMetrics{},
+		Notifier: &lucidtest.FakeDeliverer{}, Metrics: fakeMetrics{},
 	}), errNoStore)
 	require.ErrorIs(t, Run(context.Background(), Options{
 		Store: newStore(t), Metrics: fakeMetrics{},
 	}), errNoNotifier)
 	require.ErrorIs(t, Run(context.Background(), Options{
-		Store: newStore(t), Notifier: &fakeDeliverer{},
+		Store: newStore(t), Notifier: &lucidtest.FakeDeliverer{},
 	}), errNoMetrics)
 }
 

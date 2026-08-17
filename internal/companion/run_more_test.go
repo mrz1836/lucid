@@ -11,6 +11,8 @@ import (
 	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/lucidtest"
 )
 
 // skipIfRoot guards the chmod-based write-failure injection: root ignores the
@@ -34,13 +36,13 @@ func corruptChain(t *testing.T, home string) {
 // schedule — no send, and no receipt.
 func TestFire_ChainReadError_IsLoud(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "GM"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 	corruptChain(t, store.Home())
 
 	_, err := r.Fire(context.Background(), ModeMorning, at(2026, 7, 6, 6, 0))
 	require.Error(t, err)
-	assert.Empty(t, del.sends, "no send when the chain cannot be read")
+	assert.Empty(t, del.Sends, "no send when the chain cannot be read")
 	assert.Equal(t, 0, comp.calls, "no compose when the chain cannot be read")
 }
 
@@ -49,7 +51,7 @@ func TestFire_ChainReadError_IsLoud(t *testing.T) {
 // risking a double-post by treating it as "never delivered".
 func TestFire_ReceiptReadError_IsLoud(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "GM"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	companionDir := filepath.Join(store.Home(), "engine", "companion")
@@ -58,7 +60,7 @@ func TestFire_ReceiptReadError_IsLoud(t *testing.T) {
 
 	_, err := r.Fire(context.Background(), ModeMorning, at(2026, 7, 6, 6, 0))
 	require.Error(t, err)
-	assert.Empty(t, del.sends, "a corrupt receipt is not treated as a fresh window")
+	assert.Empty(t, del.Sends, "a corrupt receipt is not treated as a fresh window")
 }
 
 // TestFire_ReceiptWriteError_IsLoud: a fire that delivers and verifies but then
@@ -67,7 +69,7 @@ func TestFire_ReceiptReadError_IsLoud(t *testing.T) {
 func TestFire_ReceiptWriteError_IsLoud(t *testing.T) {
 	skipIfRoot(t)
 	comp := &fakeComposer{res: Result{Text: "GM"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	companionDir := filepath.Join(store.Home(), "engine", "companion")
@@ -77,8 +79,8 @@ func TestFire_ReceiptWriteError_IsLoud(t *testing.T) {
 
 	_, err := r.Fire(context.Background(), ModeMorning, at(2026, 7, 6, 6, 0))
 	require.Error(t, err)
-	require.Len(t, del.sends, 1, "the message did go out; it is the receipt that failed")
-	assert.Empty(t, del.alerts, "a receipt-write failure surfaces through the returned error, not a duplicate alert")
+	require.Len(t, del.Sends, 1, "the message did go out; it is the receipt that failed")
+	assert.Empty(t, del.Alerts, "a receipt-write failure surfaces through the returned error, not a duplicate alert")
 }
 
 // TestMorningWorker_FireError_Propagates: a delivery failure inside the morning
@@ -86,7 +88,7 @@ func TestFire_ReceiptWriteError_IsLoud(t *testing.T) {
 // the supervisor's retry ladder rather than silently dropping the send.
 func TestMorningWorker_FireError_Propagates(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "GM"}}
-	del := &fakeDeliverer{sendErr: errors.New("discord 503")}
+	del := &lucidtest.FakeDeliverer{SendErr: errors.New("discord 503")}
 	r, _ := newRunner(t, comp, del)
 	now := at(2026, 7, 6, 6, 0)
 	w := morningWorker{r: r, clock: models.NewFixedClock(now)}
@@ -99,7 +101,7 @@ func TestMorningWorker_FireError_Propagates(t *testing.T) {
 // delivery failure is a job failure too.
 func TestNightWorker_FireError_Propagates(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "GN"}}
-	del := &fakeDeliverer{sendErr: errors.New("discord 503")}
+	del := &lucidtest.FakeDeliverer{SendErr: errors.New("discord 503")}
 	r, _ := newRunner(t, comp, del)
 	now := at(2026, 7, 6, 19, 0)
 	w := nightWorker{r: r, clock: models.NewFixedClock(now)}
@@ -113,7 +115,7 @@ func TestNightWorker_FireError_Propagates(t *testing.T) {
 // safety net, so its own failure must be loud rather than swallowed.
 func TestBackstopWorker_FireError_Propagates(t *testing.T) {
 	comp := &fakeComposer{res: Result{Text: "GM"}}
-	del := &fakeDeliverer{sendErr: errors.New("discord 503")}
+	del := &lucidtest.FakeDeliverer{SendErr: errors.New("discord 503")}
 	r, _ := newRunner(t, comp, del)
 	now := at(2026, 7, 6, 7, 0) // inside the 10:00 cut-off
 	w := morningBackstopWorker{r: r, clock: models.NewFixedClock(now)}
@@ -147,7 +149,7 @@ func TestRun_DBPathResolutionError_IsReturned(t *testing.T) {
 
 	err := Run(context.Background(), Options{
 		Store:    store,
-		Notifier: &fakeDeliverer{},
+		Notifier: &lucidtest.FakeDeliverer{},
 		Numbers:  fakeNumbers{},
 		Verdict:  fakeVerdict{},
 		// DBPath left empty on purpose.

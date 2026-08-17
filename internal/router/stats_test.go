@@ -2,7 +2,6 @@ package router
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -19,13 +19,9 @@ import (
 // elimination, mood). It is the seeding surface for the stats projection tests.
 func statsRouter(t *testing.T) (*Router, *storage.Adapter) {
 	t.Helper()
-	a := storage.New(filepath.Join(t.TempDir(), ".lucid"))
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldObservations())
-	require.NoError(t, a.ScaffoldEngine())
+	_, a := lucidtest.Ledger(t, lucidtest.NestedHome(), lucidtest.WithObservations(), lucidtest.WithEngine())
 	r := New(a)
-	_, err = r.Boot()
+	_, err := r.Boot()
 	require.NoError(t, err)
 	return r, a
 }

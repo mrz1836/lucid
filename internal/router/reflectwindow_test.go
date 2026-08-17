@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/isoweek"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -268,13 +269,9 @@ func TestResolveReflectWindow_RejectsIncompleteOptions(t *testing.T) {
 // this on every invocation, and a resolver that scaffolded its own receipt would
 // mark days reflected that nobody sat with.
 func TestResolveReflectWindow_ReadsNothingIntoTheTree(t *testing.T) {
-	a := storage.New(filepath.Join(t.TempDir(), ".lucid"))
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldObservations())
-	require.NoError(t, a.ScaffoldEngine())
+	_, a := lucidtest.Ledger(t, lucidtest.NestedHome(), lucidtest.WithObservations(), lucidtest.WithEngine())
 	r := New(a)
-	_, err = r.Boot()
+	_, err := r.Boot()
 	require.NoError(t, err)
 
 	win, err := r.resolveReflectWindow(weekOf(), ReflectWindowOptions{})

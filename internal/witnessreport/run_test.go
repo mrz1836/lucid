@@ -19,6 +19,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/storage"
@@ -192,7 +193,7 @@ func TestFire_RetrySameWeek_IsIdempotentSkip(t *testing.T) {
 	out2, err := r.Fire(context.Background(), reportNow().Add(2*time.Hour))
 	require.NoError(t, err)
 	assert.True(t, out2.Skipped)
-	assert.Equal(t, skipAlreadyDelivered, out2.SkipReason)
+	assert.Equal(t, flynode.SkipAlreadyDelivered, out2.SkipReason)
 	assert.Len(t, del.sends, 1, "the retry re-uses the receipt; no second send")
 	assert.Equal(t, 1, comp.calls, "the retry does not re-compose")
 }
@@ -233,7 +234,7 @@ func TestFire_PastCutoff_SkipsAndAlerts(t *testing.T) {
 	out, err := r.Fire(context.Background(), reportNow().Add(49*time.Hour))
 	require.NoError(t, err)
 	assert.True(t, out.Skipped)
-	assert.Equal(t, skipPastCutoff, out.SkipReason)
+	assert.Equal(t, flynode.SkipPastCutoff, out.SkipReason)
 	assert.Empty(t, del.sends, "no stale report is posted past the cut-off")
 	require.Len(t, del.alerts, 1, "past the cut-off the user is alerted instead of left silent")
 	assert.Equal(t, engine.ChannelUser, del.alerts[0].channel)

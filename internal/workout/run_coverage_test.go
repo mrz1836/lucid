@@ -42,13 +42,13 @@ func TestFireGuardReceiptReadErrorIsLoud(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "receipt_workout.json"), []byte("{bad"), 0o600))
 
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r := &Runner{compose: comp, deliver: del, store: store, slot: "12:00"}
 
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err, "a corrupt receipt fails the guard loudly")
 	assert.Equal(t, 0, comp.calls, "the guard fails before any compose")
-	assert.Empty(t, del.sends, "the guard fails before any send")
+	assert.Empty(t, del.Sends, "the guard fails before any send")
 }
 
 // TestFireWriteReceiptErrorIsLoud proves a receipt that cannot be persisted after
@@ -66,13 +66,13 @@ func TestFireWriteReceiptErrorIsLoud(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r := &Runner{compose: comp, deliver: del, store: store, slot: "12:00"}
 
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err, "an unwritable receipt directory fails the fire")
-	assert.Len(t, del.sends, 1, "the send still went out before the receipt failed")
-	assert.Empty(t, del.alerts, "a receipt-write failure is a returned error, not an alert")
+	assert.Len(t, del.Sends, 1, "the send still went out before the receipt failed")
+	assert.Empty(t, del.Alerts, "a receipt-write failure is a returned error, not an alert")
 }
 
 // TestWorkPropagatesFireError proves the daily worker surfaces a fire failure as a
@@ -81,7 +81,7 @@ func TestWorkPropagatesFireError(t *testing.T) {
 	t.Parallel()
 
 	comp := &fakeComposer{res: Result{Text: "TODAY: LEGS"}}
-	del := &fakeDeliverer{sendErr: errors.New("discord 503")}
+	del := &lucidtest.FakeDeliverer{SendErr: errors.New("discord 503")}
 	r, _ := newRunner(t, comp, del)
 
 	w := dailyWorker{r: r, clock: models.NewFixedClock(at(2026, 7, 20, 12, 0))}
@@ -103,7 +103,7 @@ func TestRunRejectsUnresolvableDBPath(t *testing.T) {
 
 	err := Run(context.Background(), Options{
 		Store:    store,
-		Notifier: &fakeDeliverer{},
+		Notifier: &lucidtest.FakeDeliverer{},
 		Metrics:  fakeMetrics{},
 		Config:   cfg,
 		DBPath:   "",

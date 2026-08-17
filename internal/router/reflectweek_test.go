@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/frameworks"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/storage"
@@ -21,14 +22,9 @@ import (
 // the home path, so the read-only assertion can walk the whole tree.
 func reflectWeekRouter(t *testing.T) (*Router, *storage.Adapter, string) {
 	t.Helper()
-	home := filepath.Join(t.TempDir(), ".lucid")
-	a := storage.New(home)
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldObservations())
-	require.NoError(t, a.ScaffoldEngine())
+	home, a := lucidtest.Ledger(t, lucidtest.NestedHome(), lucidtest.WithObservations(), lucidtest.WithEngine())
 	r := New(a)
-	_, err = r.Boot()
+	_, err := r.Boot()
 	require.NoError(t, err)
 	return r, a, home
 }

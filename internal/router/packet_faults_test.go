@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/engine"
-	"github.com/mrz1836/lucid/internal/storage"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 )
 
 // brokenObsRouter returns a booted router whose observations/config.json has
@@ -17,16 +17,12 @@ import (
 // fails — the seam for exercising the router's config-read error branches.
 func brokenObsRouter(t *testing.T) *Router {
 	t.Helper()
-	home := t.TempDir()
-	a := storage.New(home)
-	_, err := a.Scaffold()
-	require.NoError(t, err)
-	require.NoError(t, a.ScaffoldObservations())
+	home, a := lucidtest.Ledger(t, lucidtest.WithObservations())
 	cfgPath := filepath.Join(home, "observations", "config.json")
 	require.NoError(t, os.RemoveAll(cfgPath))
 	require.NoError(t, os.Mkdir(cfgPath, 0o700))
 	r := New(a)
-	_, err = r.Boot() // lucid.json is intact; only the obs config is broken
+	_, err := r.Boot() // lucid.json is intact; only the obs config is broken
 	require.NoError(t, err)
 	return r
 }

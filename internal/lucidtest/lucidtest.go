@@ -1,12 +1,14 @@
-// Package lucidtest holds shared test helpers for building an isolated Ledger.
-// Every package that exercises the storage adapter used to re-roll the same
+// Package lucidtest holds shared test helpers. [Ledger] builds an isolated,
+// scaffolded Ledger under t.TempDir() — the option-driven replacement for the
 // New(t.TempDir()) + Scaffold() (+ ScaffoldEngine/ScaffoldObservations)
-// constructor; [Ledger] is the single, option-driven replacement.
+// constructor every storage-exercising package used to re-roll. [FakeDeliverer]
+// is the shared text-message delivery double the companion and workout node
+// tests drive (their Deliverer interfaces are structurally identical).
 //
-// It imports only internal/storage, so any package that already depends on
-// storage may use it. The two white-box test packages that cannot (a storage
-// or observations package test importing this would form an import cycle) keep
-// their own thin local builders.
+// It imports internal/storage (and, for the delivery double, only the standard
+// library), so any package that already depends on storage may use it. The two
+// white-box test packages that cannot (a storage or observations package test
+// importing this would form an import cycle) keep their own thin local builders.
 package lucidtest
 
 import (
