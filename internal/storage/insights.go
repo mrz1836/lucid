@@ -257,7 +257,10 @@ func (a *Adapter) SetInsightRule(insightID, rule string, at time.Time) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, filePerm)
+	if err = os.WriteFile(path, content, filePerm); err != nil {
+		return fmt.Errorf("storage: write insight %q: %w", insightID, err)
+	}
+	return nil
 }
 
 // insightPath resolves insights/<id>.md, rejecting a separator-bearing id so a
