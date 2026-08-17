@@ -1,9 +1,12 @@
-// Package composekit holds the tiny compose/provider-adjacent helpers the
+// Package composekit holds the small compose/provider-adjacent helpers the
 // message daemons' composers share verbatim: reading an operator's explicit
-// prompt file, and applying a per-feature model override onto the base provider
-// config. It is deliberately separate from internal/flynode — flynode is
-// provider-free by construction, and these helpers name config.ProviderConfig —
-// and it owns nothing of the daemons' distinct compose/render domain logic.
+// prompt file, applying a per-feature model override onto the base provider
+// config, the shared [ProviderBuilder] backend-constructor type, and the
+// bullet-stripping [StripBullet] each reply parser trims lines with. It is
+// deliberately separate from internal/flynode — flynode is provider-free by
+// construction, and these helpers name config.ProviderConfig and
+// provider.Provider — and it owns nothing of the daemons' distinct
+// compose/render domain logic.
 package composekit
 
 import (
@@ -12,7 +15,23 @@ import (
 	"strings"
 
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/provider"
 )
+
+// ProviderBuilder constructs a model backend from a resolved provider config.
+// Each composer (companion, workout, witness report) defaults it to
+// factory.Build and lets a test inject a builder returning a [provider.Fake], so
+// no compose test needs live vendor auth (ADR-0006). It lives here because the
+// three composers declared this signature identically.
+type ProviderBuilder func(config.ProviderConfig) (provider.Provider, error)
+
+// StripBullet trims one model-reply line to its content: outer whitespace, then
+// a leading run of bullet markers (-, *, •), then whitespace again. It is the
+// shared body of the composers' ask/action line parsers, which drop a line that
+// strips to empty. It only removes framing — the text itself is unchanged.
+func StripBullet(line string) string {
+	return strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*•"))
+}
 
 // ReadPromptFile reads one explicit, opaque prompt file for a compose call. It
 // opens exactly the operator-configured path — never a directory walk — and

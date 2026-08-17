@@ -48,3 +48,23 @@ func TestWithModelOverride(t *testing.T) {
 		assert.Equal(t, "base-model", base.Model, "the caller's provider config is taken by value")
 	})
 }
+
+func TestStripBullet(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"- do the thing", "do the thing"},
+		{"* do the thing", "do the thing"},
+		{"• do the thing", "do the thing"},
+		{"  -   spaced  ", "spaced"},
+		{"-*• over-marked", "over-marked"},
+		{"no marker", "no marker"},
+		{"", ""},
+		{"   ", ""},
+		{"- ", ""},
+		{"mid - dash stays", "mid - dash stays"},
+	}
+	for _, tc := range cases {
+		assert.Equalf(t, tc.want, StripBullet(tc.in), "StripBullet(%q)", tc.in)
+	}
+}

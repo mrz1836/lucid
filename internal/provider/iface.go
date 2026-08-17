@@ -81,3 +81,13 @@ var (
 	// (ADR-0006 §Consequences; architecture P9).
 	ErrUnavailable = errors.New("provider: no model reachable")
 )
+
+// IsOutage reports whether err is one of the transport-outage sentinels
+// ([ErrTimeout] or [ErrUnavailable]) — the "model momentarily unreachable"
+// class a composer degrades to its deterministic fallback on, as distinct from
+// a garbage reply the agent raises itself. Composers branch on this rather than
+// repeating the two errors.Is checks; it owns the pair so a new outage sentinel
+// is added in one place.
+func IsOutage(err error) bool {
+	return errors.Is(err, ErrTimeout) || errors.Is(err, ErrUnavailable)
+}

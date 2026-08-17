@@ -124,11 +124,13 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   daemons share. Transport- and model-free by construction (reconcile/send/
   verify/compose/alert are injected closures); *enforced by
   [`flynode/purity_test.go`](internal/flynode/purity_test.go)*.
-- [`internal/composekit`](internal/composekit) — the two compose/provider-
+- [`internal/composekit`](internal/composekit) — the small compose/provider-
   adjacent helpers the three message composers share: `ReadPromptFile` (open one
-  explicit operator prompt path, never a dir walk) and `WithModelOverride` (layer
-  a feature's optional `model` onto `provider.model`). Kept out of `flynode` so
-  that package stays provider-free.
+  explicit operator prompt path, never a dir walk), `WithModelOverride` (layer a
+  feature's optional `model` onto `provider.model`), the shared `ProviderBuilder`
+  backend-constructor type, and `StripBullet` (trim one reply line's bullet
+  framing). Names `config.ProviderConfig`/`provider.Provider`, so it is kept out
+  of `flynode` so that package stays provider-free.
 - [`internal/observations`](internal/observations) — micro-logs, salted
   registries, day-view join, curiosity, enrichment; `exports/` = CSV +
   clinician packet.

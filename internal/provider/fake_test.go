@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,6 +58,18 @@ func TestFake_TimeoutAndUnavailable(t *testing.T) {
 
 	_, err = f.Complete(context.Background(), provider.Request{})
 	require.ErrorIs(t, err, provider.ErrUnavailable)
+}
+
+// TestIsOutage folds the two transport-outage sentinels behind one predicate:
+// both sentinels (bare and wrapped) are outages, and a garbage-reply error or a
+// nil error is not.
+func TestIsOutage(t *testing.T) {
+	assert.True(t, provider.IsOutage(provider.ErrTimeout))
+	assert.True(t, provider.IsOutage(provider.ErrUnavailable))
+	assert.True(t, provider.IsOutage(fmt.Errorf("compose: %w", provider.ErrTimeout)), "a wrapped sentinel is still an outage")
+	assert.True(t, provider.IsOutage(fmt.Errorf("build: %w", provider.ErrUnavailable)))
+	assert.False(t, provider.IsOutage(errors.New("malformed reply")), "a garbage reply is not an outage")
+	assert.False(t, provider.IsOutage(nil), "no error is not an outage")
 }
 
 // TestFake_ContextCanceled shows a canceled context short-circuiting
