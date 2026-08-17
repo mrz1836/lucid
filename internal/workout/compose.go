@@ -11,7 +11,6 @@ package workout
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,11 +44,6 @@ const contextHeader = "CONTEXT — Lucid has already decided today's session and
 // short, warm, non-commanding note. Everything structural is Lucid's, so the
 // model is asked for prose and nothing else.
 const slotInstruction = "Respond with ONLY 2–4 short sentences in a warm, grounded, non-clinical voice that phrase today's session and invite the user to take whichever option fits how their body actually feels. Do not list the options (Lucid renders them below), do not name any medical condition, and never tell them what they \"should\" or \"must\" do. Write nothing but those sentences."
-
-// ProviderBuilder constructs the model backend from a resolved provider config.
-// It defaults to [factory.Build]; tests inject a builder that returns a
-// [provider.Fake] so no compose test needs live vendor auth (ADR-0006).
-type ProviderBuilder func(config.ProviderConfig) (provider.Provider, error)
 
 // MetricsReader is the read-only engine projection the composer folds the streak
 // and adherence from — the same fold `lucid metrics` exposes, read in-process so
@@ -89,7 +83,7 @@ type Deps struct {
 	Observations ObservationsReader
 	Injuries     InjuryReader
 	// Build overrides the provider builder; nil defaults to factory.Build.
-	Build ProviderBuilder
+	Build composekit.ProviderBuilder
 }
 
 // Composer is the model-allowed on-demand surface: it loads the program, reads
@@ -104,7 +98,7 @@ type Composer struct {
 	metrics      MetricsReader
 	observations ObservationsReader
 	injuries     InjuryReader
-	build        ProviderBuilder
+	build        composekit.ProviderBuilder
 }
 
 // New constructs a Composer over its dependencies, defaulting the provider
@@ -206,7 +200,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: composeBody(tmpl, rec, tr, anchor)}},
 	})
 	if err != nil {
-		if errors.Is(err, provider.ErrTimeout) || errors.Is(err, provider.ErrUnavailable) {
+		if provider.IsOutage(err) {
 			res.Text = Render(rec, tr, anchor, now)
 			res.Fallback = true
 			return res, nil

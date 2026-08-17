@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
@@ -100,9 +101,9 @@ func writeProgram(t *testing.T, prog Program) string {
 	return path
 }
 
-// fakeBuilder returns a ProviderBuilder that always yields the given fake, so the
-// compose runs fully offline (ADR-0006).
-func fakeBuilder(f *provider.Fake) ProviderBuilder {
+// fakeBuilder returns a composekit.ProviderBuilder that always yields the given
+// fake, so the compose runs fully offline (ADR-0006).
+func fakeBuilder(f *provider.Fake) composekit.ProviderBuilder {
 	return func(config.ProviderConfig) (provider.Provider, error) { return f, nil }
 }
 

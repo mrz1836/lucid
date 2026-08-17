@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/flynode"
@@ -129,12 +130,6 @@ type Outcome struct {
 	Skipped       bool
 	SkipReason    string
 }
-
-// The two skip reasons a fire can report.
-const (
-	skipPastCutoff       = "past-cutoff"
-	skipAlreadyDelivered = "already-delivered"
-)
 
 // Fire composes and delivers this week's report at `now`, honoring the whole
 // reliability contract in order: refuse a stale send past the cut-off (alert
@@ -302,7 +297,7 @@ type Options struct {
 	Notifier Deliverer
 	DBPath   string
 	Clock    models.Clock
-	Build    ProviderBuilder
+	Build    composekit.ProviderBuilder
 }
 
 // weeklyArgs is the empty typed payload for the periodic: it carries no input —

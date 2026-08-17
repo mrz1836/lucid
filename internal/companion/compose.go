@@ -2,7 +2,6 @@ package companion
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -179,11 +178,6 @@ type ObservationsReader interface {
 	RecentObservations(now time.Time, windowDays int) ([]observations.Event, error)
 }
 
-// ProviderBuilder constructs the model backend from a resolved provider config.
-// It defaults to [factory.Build]; tests inject a builder that returns a
-// [provider.Fake] so no compose test needs live vendor auth (ADR-0006).
-type ProviderBuilder func(config.ProviderConfig) (provider.Provider, error)
-
 // Deps is everything a [Composer] needs, wired by the composition root
 // (internal/cli) from the concrete router, scheduler, and storage adapter. The
 // reader dependencies are interfaces so the compose core is testable with fakes
@@ -198,7 +192,7 @@ type Deps struct {
 	Chain        ChainReader
 	Observations ObservationsReader
 	// Build overrides the provider builder; nil defaults to factory.Build.
-	Build ProviderBuilder
+	Build composekit.ProviderBuilder
 }
 
 // Composer is the model-allowed compose core: it gathers the deterministic
@@ -216,7 +210,7 @@ type Composer struct {
 	verdict      VerdictReader
 	chain        ChainReader
 	observations ObservationsReader
-	build        ProviderBuilder
+	build        composekit.ProviderBuilder
 }
 
 // New constructs a Composer over its dependencies, defaulting the provider
@@ -343,7 +337,7 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: composeBody(tmpl, mode, panel, sections, routine)}},
 	})
 	if err != nil {
-		if errors.Is(err, provider.ErrTimeout) || errors.Is(err, provider.ErrUnavailable) {
+		if provider.IsOutage(err) {
 			return c.deterministicFallback(res, brief)
 		}
 		return Result{}, fmt.Errorf("companion: compose %s: %w", mode, err)

@@ -2,7 +2,6 @@ package witnessreport
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -51,12 +50,6 @@ const slotInstruction = "Respond with EXACTLY these four labeled slots and nothi
 	narrativeDelim + "\n<warm read>\n\n" +
 	asksDelim + "\n- <ask>"
 
-// ProviderBuilder constructs the model backend from a resolved provider config.
-// It defaults to [factory.Build]; tests inject a builder that returns a
-// [provider.Fake] so no compose test needs live vendor auth (ADR-0006), exactly
-// as the companion composer does.
-type ProviderBuilder func(config.ProviderConfig) (provider.Provider, error)
-
 // Deps is everything a [Composer] needs, wired by the composition root
 // (internal/cli, Phase 4) from the concrete router, storage adapter, and the
 // witness_report config block. It is credential-dumb: it carries no channel id
@@ -77,7 +70,7 @@ type Deps struct {
 	Numbers      NumbersReader
 	Records      RecordsReader
 	// Build overrides the provider builder; nil defaults to factory.Build.
-	Build ProviderBuilder
+	Build composekit.ProviderBuilder
 }
 
 // Composer is the model-allowed compose core for the weekly witness report: it
@@ -98,7 +91,7 @@ type Composer struct {
 	provider     config.ProviderConfig
 	numbers      NumbersReader
 	records      RecordsReader
-	build        ProviderBuilder
+	build        composekit.ProviderBuilder
 }
 
 // New constructs a Composer over its dependencies, defaulting the provider
@@ -178,7 +171,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: composeBody(tmpl, r)}},
 	})
 	if err != nil {
-		if errors.Is(err, provider.ErrTimeout) || errors.Is(err, provider.ErrUnavailable) {
+		if provider.IsOutage(err) {
 			r.Fallback = true
 			return r, nil
 		}
@@ -352,10 +345,7 @@ func parseSlots(resp string) narrativeSlots {
 func parseAskLines(lines []string) []string {
 	var out []string
 	for _, ln := range lines {
-		t := strings.TrimSpace(ln)
-		t = strings.TrimLeft(t, "-*•")
-		t = strings.TrimSpace(t)
-		if t != "" {
+		if t := composekit.StripBullet(ln); t != "" {
 			out = append(out, t)
 		}
 	}
@@ -388,9 +378,7 @@ func readCuratedAsks(path string) []string {
 	}
 	var asks []string
 	for _, ln := range strings.Split(string(b), "\n") {
-		t := strings.TrimSpace(ln)
-		t = strings.TrimLeft(t, "-*•")
-		t = strings.TrimSpace(t)
+		t := composekit.StripBullet(ln)
 		if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "<!--") {
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
 )
@@ -353,10 +354,7 @@ func parseSlots(resp string) (interpretation string, actions []string, ok bool) 
 func parseActionLines(lines []string) []string {
 	var out []string
 	for _, ln := range lines {
-		t := strings.TrimSpace(ln)
-		t = strings.TrimLeft(t, "-*•")
-		t = strings.TrimSpace(t)
-		if t != "" {
+		if t := composekit.StripBullet(ln); t != "" {
 			out = append(out, t)
 		}
 	}

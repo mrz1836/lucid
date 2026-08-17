@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/flynode"
@@ -262,12 +263,6 @@ func (r *Runner) fire(ctx context.Context, mode Mode, now time.Time, note string
 	}, nil
 }
 
-// The two skip reasons a fire can report.
-const (
-	skipPastCutoff       = "past-cutoff"
-	skipAlreadyDelivered = "already-delivered"
-)
-
 // alert posts a best-effort loud ping to the user channel when a companion fire
 // cannot deliver its real message — the "never silent" floor. It is
 // deliberately best-effort: if the channel itself is unreachable the returned
@@ -331,7 +326,7 @@ type Options struct {
 	Notifier Deliverer
 	DBPath   string
 	Clock    models.Clock
-	Build    ProviderBuilder
+	Build    composekit.ProviderBuilder
 }
 
 // companionArgs is the empty typed payload for both periodics: neither carries
@@ -501,8 +496,8 @@ func upsertPeriodics(ctx context.Context, db *gorm.DB, store *storage.Adapter) e
 	if err != nil {
 		return err
 	}
-	morningCron := cronFromMinutes(tripwireMin)
-	backstopCron := cronFromMinutes(morningBackstopMinutes(tripwireMin))
+	morningCron := clockmark.CronOfMinutes(tripwireMin)
+	backstopCron := clockmark.CronOfMinutes(morningBackstopMinutes(tripwireMin))
 	nightCron, err := cronFromHM(bellMark)
 	if err != nil {
 		return err
@@ -545,11 +540,11 @@ func morningBackstopMinutes(tripwireMin int) int {
 // crosses a boundary. A malformed mark is rejected rather than silently
 // mis-scheduled.
 func atClock(now time.Time, hm string) (time.Time, error) {
-	h, m, err := parseHM(hm)
+	mark, err := clockmark.Parse(hm)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, fmt.Errorf("companion: %w", err)
 	}
-	return time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location()), nil
+	return mark.At(now), nil
 }
 
 // cronFromHM turns an "HH:MM" clock mark into a daily 5-field cron expression:
@@ -560,7 +555,7 @@ func cronFromHM(hm string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cronFromMinutes(total), nil
+	return clockmark.CronOfMinutes(total), nil
 }
 
 // markMinutes parses an "HH:MM" clock mark into minutes since local midnight —
@@ -573,22 +568,6 @@ func markMinutes(hm string) (int, error) {
 		return 0, fmt.Errorf("companion: %w", err)
 	}
 	return mark.Minutes(), nil
-}
-
-// cronFromMinutes renders minutes since local midnight as a daily 5-field cron
-// expression: 1290 -> "30 21 * * *".
-func cronFromMinutes(total int) string {
-	return fmt.Sprintf("%d %d * * *", total%60, total/60)
-}
-
-// parseHM parses an "HH:MM" clock mark into its hour and minute, rejecting a
-// wrong shape, an out-of-range field, or a non-numeric field.
-func parseHM(hm string) (hour, minute int, err error) {
-	mark, err := clockmark.Parse(hm)
-	if err != nil {
-		return 0, 0, fmt.Errorf("companion: %w", err)
-	}
-	return mark.Hour(), mark.Minute(), nil
 }
 
 // DefaultDBPath resolves the disposable companion job-DB path: an explicit

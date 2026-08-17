@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/flynode"
@@ -139,12 +140,6 @@ type Outcome struct {
 	Text       string
 }
 
-// The two skip reasons a fire can report.
-const (
-	skipPastCutoff       = "past-cutoff"
-	skipAlreadyDelivered = "already-delivered"
-)
-
 // Fire composes and delivers the day's workout message at `now`, honoring the
 // whole reliability contract in order: refuse a stale send past the cut-off
 // (alert instead), skip an already-delivered day idempotently (a verified
@@ -254,7 +249,7 @@ type Options struct {
 	Notifier     Deliverer
 	DBPath       string
 	Clock        models.Clock
-	Build        ProviderBuilder
+	Build        composekit.ProviderBuilder
 }
 
 // workoutArgs is the empty typed payload for the daily periodic: it carries no
@@ -364,11 +359,11 @@ func slotOrDefault(slot string) string {
 // date, in now's location — the reference the missed-fire window compares
 // against. A malformed mark is rejected rather than silently mis-scheduled.
 func atClock(now time.Time, hm string) (time.Time, error) {
-	h, m, err := parseHM(hm)
+	mark, err := clockmark.Parse(hm)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, fmt.Errorf("workout: invalid slot time: %w", err)
 	}
-	return time.Date(now.Year(), now.Month(), now.Day(), h, m, 0, 0, now.Location()), nil
+	return mark.At(now), nil
 }
 
 // cronFromHM turns an "HH:MM" slot mark into a daily 5-field cron expression:
@@ -380,16 +375,6 @@ func cronFromHM(hm string) (string, error) {
 		return "", fmt.Errorf("workout: invalid slot time: %w", err)
 	}
 	return mark.Cron(), nil
-}
-
-// parseHM parses an "HH:MM" clock mark into its hour and minute, rejecting a
-// wrong shape, an out-of-range field, or a non-numeric field.
-func parseHM(hm string) (hour, minute int, err error) {
-	mark, err := clockmark.Parse(hm)
-	if err != nil {
-		return 0, 0, fmt.Errorf("workout: invalid slot time: %w", err)
-	}
-	return mark.Hour(), mark.Minute(), nil
 }
 
 // DefaultDBPath resolves the disposable workout job-DB path: an explicit
