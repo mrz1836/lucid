@@ -57,6 +57,7 @@ These rules trace directly to
 │   ├── days/2026/07/day_2026_07_02.json
 │   └── status.json
 ├── observations/           # frozen-envelope events — owned by observations-module.md
+├── reframes/               # append-only catch→flip inner-work entries + surface_state.json projection — owned by reframes.md
 ├── registries/             # injuries, threads, places, eras, pets — same key derivation as people/
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
 ├── secrets/                # append-only names-only reference catalog (secrets.jsonl)
@@ -126,6 +127,7 @@ Full vocabulary and types: [`life-archive.md`](life-archive.md) §2–§4.
 | Session id | `session_YYYY_MM_DD_HH_MM` (thread open time, same `_SS` rule). | `session_2026_05_05_19_42` |
 | Person key | `person_<initial>-<word>` derived deterministically from the display name. See "person_key derivation" below. | `person_a-river` |
 | Reflection id | `reflection_YYYY_wWW` (ISO week). | `reflection_2026_w18` |
+| Reframe id | `reframe_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A correction appends a new entry whose `refs.corrects` names the superseded id — history is never rewritten. See [`reframes.md`](../reframes.md). | `reframe_2026_08_23_001` |
 
 People keys deliberately do not encode real names; the storage adapter
 maintains a `display_name` field separately so the on-disk filenames

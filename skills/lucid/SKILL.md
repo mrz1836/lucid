@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.19.0"
+min_lucid_version: "0.21.0"
 ---
 
 # Lucid
@@ -84,6 +84,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid era` | Record or amend a life chapter (era). |
 | `lucid injury` | Record or amend an injury in your body history. |
 | `lucid thread` | Record or amend a thread you're working on. |
+| `lucid reframe` | Keep and rotate your self-talk reframes (a *catch → flip* pair) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`, where `surface` returns one reframe per logical day (least-recently-surfaced, idempotent within the day). Deterministic, no model in any path. |
 | `lucid pet` | Record or amend a companion in your pet registry — a first-class named referent with its own `active`/`rehomed`/`passed` lifecycle. |
 | `lucid link` | Point a stored media attachment at a subject it is about — a person, injury, day, anchor, or thread — through the append-only link ledger; a retroactive curation verb reached by its CLI form. |
 | `lucid unlink` | Retire a media↔subject association by appending an unlink event — nothing is destroyed, the pair just stops being live. |

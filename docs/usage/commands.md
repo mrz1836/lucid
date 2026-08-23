@@ -39,8 +39,8 @@ Every verb that stamps a logical day reads **one** date grammar, so a token that
 works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
 the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
 flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
-[`workout log`](#workout), [`mode`](#mode), [`storm`](#storm), and
-[`closeout`](#closeout).
+[`reframe add`](#reframe), [`workout log`](#workout), [`mode`](#mode),
+[`storm`](#storm), and [`closeout`](#closeout).
 
 **The grammar.** A leading `@` is optional on every form.
 
@@ -123,8 +123,8 @@ registry now carries the future ceiling, so it is not on this list:
 | `self set`'s date is optional entirely | It is the one write surface where a date is not required at all. A self fact is atemporal by definition — most have no origin worth recording, and inventing one would be worse than the silence. |
 
 **The closed write surface.** Every verb that stamps a logical day is named
-above: `log`, `attach`, `obs`, `memory`, `workout log`, `era`, `injury`,
-`anchor`, `mode`, `storm`, `closeout`. Three write verbs are deliberately N/A —
+above: `log`, `attach`, `obs`, `reframe add`, `memory`, `workout log`,
+`era`, `injury`, `anchor`, `mode`, `storm`, `closeout`. Three write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
 id or window, rather than capturing a new one, and [`self`](#self) records
@@ -654,6 +654,50 @@ lucid obs where Lisbon    # enable context.location first
 
 `@`-backdating, `#tags`, and the full micro-log grammar are in
 [`../observations.md`](../observations.md).
+
+### reframe
+
+```
+lucid reframe add <catch> <flip> [--day <date>]
+lucid reframe list [--json]
+lucid reframe surface [--json]
+```
+
+Keep and rotate your self-talk **reframes** — "when I catch myself saying
+X, I say instead Y" (a *catch → flip* pair). Deterministic, no LLM, an
+append-only record family under `~/.lucid/reframes/`, modeled on `obs`.
+Full layer spec (schema, id format, append-only corrections, and the
+surface-state rotation): [`../reframes.md`](../reframes.md).
+
+- **`add <catch> <flip>`** appends one immutable entry and prints its
+  receipt id (`reframe_<logical_date>_<seq>`). Both arguments are required
+  and stored verbatim; an empty `catch` or `flip` is a usage error and
+  nothing is written. Human-first — `add` ignores `--json` like `log` and
+  `obs`.
+- **`list`** reads the stored reframes (corrections folded, superseded
+  entries omitted) and prints them; `--json` emits the structured list.
+- **`surface`** returns **exactly one** reframe for the logical day and
+  records that it was shown. Repeated calls **within the same logical day
+  return the same pick** (idempotent, no advance); successive days rotate
+  the **least-recently-surfaced** entry, unsurfaced entries first, ties
+  broken by reframe id ascending. `--json` emits the single pick. This is
+  the daily one-per-day source the morning surface reads.
+
+Corrections are append-only: a refined pair is a new `add` whose entry
+carries `refs.corrects` naming the id it supersedes — the old line stays
+on disk, and the superseded entry drops out of `list` and `surface`.
+
+`reframe add` carries the `--day` flag ([Backdating with --day](#backdating-with---day)),
+the **strict** tier: `--day @yesterday` and `--day @YYYY-MM-DD` set the
+entry's `logical_date`; an unreadable token or a future day is a clean
+error and nothing is captured. `recorded_at` is always the real write time.
+
+```sh
+lucid reframe add "I can't do this" "I can learn this"
+lucid reframe add "I always mess up" "I'm still practicing" --day @yesterday
+lucid reframe list --json
+lucid reframe surface
+```
 
 ### day
 

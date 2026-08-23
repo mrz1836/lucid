@@ -315,6 +315,7 @@ flag-parse error.
 | `era <name>` | `--start` `--end` `--note` | Record or amend a life chapter. |
 | `injury <name>` | `--onset` `--status` `--body-area` `--severity` `--cause` `--timeline` `--treatments` `--lasting-effects` `--current-limitations` `--uncertainty` `--note` | Record or amend an injury in your body history — testimony, not a clinical scale. |
 | `thread <name>` | `--intent` `--status` `--domain` `--note` | Record or amend an ongoing thread. |
+| `reframe add <catch> <flip>`<br>`reframe list` · `reframe surface` | `--day` (on `add`) `--json` (on `list`/`surface`) | Keep and rotate your self-talk reframes — a *catch → flip* pair. Append-only; `surface` shows one per logical day, least-recently-surfaced (idempotent within the day). |
 | `pet <name>` | `--species` `--status` `--start` `--end` `--note` | Record or amend a companion in your pet registry — status is its own `active`/`rehomed`/`passed` vocabulary; `--start`/`--end` are backdate-aware, so a companion from years ago is recorded with whatever precision you remember. |
 | `self [<key-or-prefix>]` | `--history` | Read the durable self-profile — atemporal facts under `identity.` `body.` `constraint.` `pref.` `misc.` |
 | `self set <key> <value…>` | `--note` `--since` | Record one durable fact. Append-only: a correction is just another `set`. |
