@@ -1,0 +1,131 @@
+package cli
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/mrz1836/lucid/internal/router"
+)
+
+// newReframeCmd wires `lucid reframe` (reframes.md §3–§5): keep and rotate the
+// self-talk "catch → flip" pairs. It is a thin dispatch group over three
+// subcommands — deterministic, agent-free, no LLM in any path (architecture P9),
+// modeled on `lucid obs`:
+//
+//	lucid reframe add "I can't do this" "I can learn this"
+//	lucid reframe add "This is too hard" "This is worth the effort" --day @yesterday
+//	lucid reframe list --json
+//	lucid reframe surface
+//
+// add appends one immutable entry and prints its receipt id; list reads the
+// live pool; surface returns exactly one reframe for the logical day and records
+// that it was shown (rotating least-recently-surfaced, idempotent within a day).
+func newReframeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reframe",
+		Short: "Keep and rotate your self-talk reframes (catch → flip)",
+	}
+	cmd.AddCommand(newReframeAddCmd(), newReframeListCmd(), newReframeSurfaceCmd())
+	return cmd
+}
+
+// newReframeAddCmd wires `lucid reframe add <catch> <flip> [--day <date>]`. Both
+// positional arguments are required and stored verbatim; any trailing `#tag`
+// tokens are copied into the entry's tags (obs-parity, optional). `--day` is the
+// strict backdating tier — a bad token or a future day is a clean refusal that
+// writes nothing, printed to stderr like the observation micro-log's `--day`.
+// It ignores `--json` (a write verb, same as `log`/`obs`).
+func newReframeAddCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add <catch> <flip>",
+		Short: "Append a reframe (catch → flip)",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			day, _ := cmd.Flags().GetString(flagDay)
+			res, err := r.AddReframe(router.AddReframeRequest{
+				Catch:  args[0],
+				Flip:   args[1],
+				Tags:   reframeTags(args[2:]),
+				DayArg: day,
+				Now:    time.Now(),
+			})
+			if err != nil {
+				return emitRefusedDay(cmd, err)
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+	registerDayFlag(cmd)
+	return cmd
+}
+
+// newReframeListCmd wires `lucid reframe list [--json]`: the live pool
+// (corrections folded, superseded entries omitted), human-first by default with
+// the structured list under `--json` (ADR-0007). It writes nothing.
+func newReframeListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List stored reframes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.ListReframes()
+			if err != nil {
+				return err
+			}
+			return emit(cmd, res.View, res.Lines)
+		},
+	}
+}
+
+// newReframeSurfaceCmd wires `lucid reframe surface [--json]`: the one reframe
+// for the logical day, recording that it was shown. It is the daily one-per-day
+// source the morning surface reads. Human-first by default; the single pick as a
+// structured object under `--json`.
+func newReframeSurfaceCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "surface",
+		Short: "Surface one reframe for the day",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.SurfaceReframe(time.Now())
+			if err != nil {
+				return err
+			}
+			return emit(cmd, res.View, res.Lines)
+		},
+	}
+}
+
+// reframeTags copies the trailing arguments after catch/flip into tags,
+// stripping an optional leading `#` from each so both `#growth` and `growth`
+// land the same tag. Empty tokens are dropped; no trailing tokens means no tags
+// (the entry marshals `tags` as `[]`).
+func reframeTags(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	tags := make([]string, 0, len(args))
+	for _, a := range args {
+		t := strings.TrimPrefix(strings.TrimSpace(a), "#")
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
