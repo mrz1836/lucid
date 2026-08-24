@@ -98,7 +98,7 @@ func (a *Adapter) AppendFocus(f focus.Focus) (focus.Focus, error) {
 	if err != nil {
 		return focus.Focus{}, err
 	}
-	f.ID = focus.FocusID(f.LogicalDate, seq)
+	f.ID = focus.ID(f.LogicalDate, seq)
 
 	if err = f.Validate(); err != nil {
 		return focus.Focus{}, err
@@ -145,7 +145,7 @@ func (a *Adapter) RetireFocus(id, dayKey, recordedAt string) (focus.Focus, error
 	if err != nil {
 		return focus.Focus{}, err
 	}
-	marker.ID = focus.FocusID(marker.LogicalDate, seq)
+	marker.ID = focus.ID(marker.LogicalDate, seq)
 	if err = marker.Validate(); err != nil {
 		return focus.Focus{}, err
 	}
@@ -203,13 +203,13 @@ func (a *Adapter) ReadFocus() ([]focus.Focus, error) {
 }
 
 // ReadFocusByID reads a single stored entry by its id, deriving the logical day
-// the id encodes ([focus.FocusDate]) and scanning that day's file. A missing
+// the id encodes ([focus.Date]) and scanning that day's file. A missing
 // entry — an unparseable id, an absent day file, or a day that holds no such id —
 // is (zero, false, nil), never an error, so a caller can treat absence as a clean
 // "not found". It returns the raw stored entry (unfolded), the direct lookup
 // `surface` uses to resolve a picked id to its content.
 func (a *Adapter) ReadFocusByID(id string) (focus.Focus, bool, error) {
-	date, ok := focus.FocusDate(id)
+	date, ok := focus.Date(id)
 	if !ok {
 		return focus.Focus{}, false, nil
 	}

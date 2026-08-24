@@ -212,11 +212,11 @@ func FoldState(in []Focus) []Focus {
 	return out
 }
 
-// FocusID renders the entry id for a logical date and sequence (focus.md §2:
+// ID renders the entry id for a logical date and sequence (focus.md §2:
 // focus_<logical_date>_<seq>, the date in underscores, seq zero-padded to three
 // digits, wider values legal). A backdated entry's id therefore encodes the
 // logical date, not the recording time.
-func FocusID(logicalDate string, seq int) string {
+func ID(logicalDate string, seq int) string {
 	return fmt.Sprintf("focus_%s_%03d", strings.ReplaceAll(logicalDate, "-", "_"), seq)
 }
 
@@ -239,13 +239,13 @@ func ParseSeq(id string) (seq int, ok bool) {
 	return n, true
 }
 
-// FocusDate extracts the YYYY-MM-DD logical date a focus id encodes — the
-// read-side inverse of [FocusID] (focus_<logical_date>_<seq>, the date in
+// Date extracts the YYYY-MM-DD logical date a focus id encodes — the
+// read-side inverse of [ID] (focus_<logical_date>_<seq>, the date in
 // underscores). It reports ok=false for anything that is not a well-formed focus
 // id: a missing focus_ prefix, a date component that is not three underscore-
 // joined fields forming a real civil date, or no sequence field after them. The
 // date is returned in dashed form so it feeds the day-file readers directly.
-func FocusDate(id string) (date string, ok bool) {
+func Date(id string) (date string, ok bool) {
 	rest, cut := strings.CutPrefix(id, "focus_")
 	if !cut {
 		return "", false

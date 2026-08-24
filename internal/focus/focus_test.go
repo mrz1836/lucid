@@ -12,19 +12,19 @@ import (
 // synthFocus returns a synthetic, valid active entry. Every fixture in this
 // package is invented — real focus items live only in the private Ledger
 // (focus.md §6).
-func synthFocus(id, text, success, logicalDate string) Focus {
+func synthFocus(id, text, success string) Focus {
 	return Focus{
 		ID: id, Schema: Schema, Text: text, SuccessCriterion: success, State: StateActive,
-		RecordedAt: "2026-08-23T21:45:10-04:00", LogicalDate: logicalDate,
+		RecordedAt: "2026-08-23T21:45:10-04:00", LogicalDate: "2026-08-23",
 		Source: SourceFocus,
 	}
 }
 
 func TestFocusID(t *testing.T) {
-	assert.Equal(t, "focus_2026_08_23_001", FocusID("2026-08-23", 1))
-	assert.Equal(t, "focus_2026_08_23_042", FocusID("2026-08-23", 42))
+	assert.Equal(t, "focus_2026_08_23_001", ID("2026-08-23", 1))
+	assert.Equal(t, "focus_2026_08_23_042", ID("2026-08-23", 42))
 	// Wider values are legal (parsed numerically, not fixed width).
-	assert.Equal(t, "focus_2026_08_23_1000", FocusID("2026-08-23", 1000))
+	assert.Equal(t, "focus_2026_08_23_1000", ID("2026-08-23", 1000))
 }
 
 func TestParseSeq(t *testing.T) {
@@ -46,33 +46,33 @@ func TestParseSeq(t *testing.T) {
 }
 
 func TestFocusDate(t *testing.T) {
-	d, ok := FocusDate("focus_2026_08_23_001")
+	d, ok := Date("focus_2026_08_23_001")
 	require.True(t, ok)
 	assert.Equal(t, "2026-08-23", d)
 
 	// A bare date with no seq field is not a valid id.
-	_, ok = FocusDate("focus_2026_08_23")
+	_, ok = Date("focus_2026_08_23")
 	assert.False(t, ok)
 	// A non-date component is rejected.
-	_, ok = FocusDate("focus_2026_13_40_001")
+	_, ok = Date("focus_2026_13_40_001")
 	assert.False(t, ok)
 	// Wrong prefix.
-	_, ok = FocusDate("reframe_2026_08_23_001")
+	_, ok = Date("reframe_2026_08_23_001")
 	assert.False(t, ok)
 
-	// Round-trips with FocusID for a range of seqs.
-	id := FocusID("2026-01-05", 3)
-	d, ok = FocusDate(id)
+	// Round-trips with ID for a range of seqs.
+	id := ID("2026-01-05", 3)
+	d, ok = Date(id)
 	require.True(t, ok)
 	assert.Equal(t, "2026-01-05", d)
 }
 
 func TestValidate(t *testing.T) {
-	valid := synthFocus("focus_2026_08_23_001", "Take the stairs today", "I skipped the elevator", "2026-08-23")
+	valid := synthFocus("focus_2026_08_23_001", "Take the stairs today", "I skipped the elevator")
 	require.NoError(t, valid.Validate())
 
 	// An item with no explicit success criterion is still valid.
-	noSuccess := synthFocus("focus_2026_08_23_002", "Read ten pages", "", "2026-08-23")
+	noSuccess := synthFocus("focus_2026_08_23_002", "Read ten pages", "")
 	require.NoError(t, noSuccess.Validate())
 
 	bad := valid
@@ -105,7 +105,7 @@ func TestValidate(t *testing.T) {
 }
 
 func TestMarshalLine_RoundTripAndStableShape(t *testing.T) {
-	f := synthFocus("focus_2026_08_23_001", "Text an old friend", "I hit send", "2026-08-23")
+	f := synthFocus("focus_2026_08_23_001", "Text an old friend", "I hit send")
 
 	line, err := f.MarshalLine()
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestMarshalLine_RoundTripAndStableShape(t *testing.T) {
 	assert.NotContains(t, string(line), "\n")
 
 	// success_criterion is always emitted (no omitempty), even when empty.
-	empty := synthFocus("focus_2026_08_23_002", "Water the plants", "", "2026-08-23")
+	empty := synthFocus("focus_2026_08_23_002", "Water the plants", "")
 	emptyLine, err := empty.MarshalLine()
 	require.NoError(t, err)
 	assert.Contains(t, string(emptyLine), `"success_criterion":""`)
@@ -138,7 +138,7 @@ func TestMarshalLine_RoundTripAndStableShape(t *testing.T) {
 }
 
 func TestMarshalLine_FieldOrderMatchesSchema(t *testing.T) {
-	f := synthFocus("focus_2026_08_23_001", "Ask a question in standup", "I raised my hand", "2026-08-23")
+	f := synthFocus("focus_2026_08_23_001", "Ask a question in standup", "I raised my hand")
 	f.Tags = []string{"growth"}
 
 	line, err := f.MarshalLine()
@@ -154,12 +154,12 @@ func TestMarshalLine_FieldOrderMatchesSchema(t *testing.T) {
 }
 
 func TestRetiresAndFoldState(t *testing.T) {
-	a := synthFocus("focus_2026_08_23_001", "Take the stairs today", "I skipped the elevator", "2026-08-23")
+	a := synthFocus("focus_2026_08_23_001", "Take the stairs today", "I skipped the elevator")
 	_, ok := a.Retires()
 	assert.False(t, ok, "a plain entry retires nothing")
 	assert.False(t, a.IsRetirement())
 
-	b := synthFocus("focus_2026_08_23_002", "Text an old friend", "", "2026-08-23")
+	b := synthFocus("focus_2026_08_23_002", "Text an old friend", "")
 
 	// A retirement event references the item it retires by id.
 	marker := NewRetirement(a.ID, "2026-08-24", "2026-08-24T09:00:00-04:00")
@@ -169,7 +169,7 @@ func TestRetiresAndFoldState(t *testing.T) {
 	assert.True(t, marker.IsRetirement())
 
 	// A non-string / empty retires value is ignored.
-	junk := synthFocus("focus_2026_08_23_003", "junk", "", "2026-08-23")
+	junk := synthFocus("focus_2026_08_23_003", "junk", "")
 	junk.Refs = map[string]any{"retires": 7}
 	_, ok = junk.Retires()
 	assert.False(t, ok)

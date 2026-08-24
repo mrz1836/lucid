@@ -20,9 +20,9 @@ func bootedFocus(t *testing.T) *Router {
 	return r
 }
 
-func addFocus(t *testing.T, r *Router, text, success string, now time.Time) focus.Focus {
+func addFocus(t *testing.T, r *Router, text string, now time.Time) focus.Focus {
 	t.Helper()
-	res, err := r.AddFocus(AddFocusRequest{Text: text, SuccessCriterion: success, Now: now})
+	res, err := r.AddFocus(AddFocusRequest{Text: text, Now: now})
 	require.NoError(t, err)
 	return res.Focus
 }
@@ -57,7 +57,7 @@ func TestAddFocus_ReturnsReceiptAndPersists(t *testing.T) {
 func TestAddFocus_OptionalSuccessCriterion(t *testing.T) {
 	r := bootedFocus(t)
 
-	res := addFocus(t, r, "A plain work-on", "", day1())
+	res := addFocus(t, r, "A plain work-on", day1())
 	assert.Empty(t, res.SuccessCriterion)
 }
 
@@ -96,8 +96,8 @@ func TestAddFocus_DayStrictRejectIsDayRejectedError(t *testing.T) {
 // its state resolved to retired.
 func TestListFocus_ActiveOnlyByDefaultAllIncludesRetired(t *testing.T) {
 	r := bootedFocus(t)
-	first := addFocus(t, r, "First work-on", "", day1())  // focus_..._001
-	second := addFocus(t, r, "Second work-on", "", day1()) // focus_..._002
+	first := addFocus(t, r, "First work-on", day1())   // focus_..._001
+	second := addFocus(t, r, "Second work-on", day1()) // focus_..._002
 
 	_, err := r.RetireFocus(RetireFocusRequest{ID: first.ID, Now: day2()})
 	require.NoError(t, err)
@@ -123,8 +123,8 @@ func TestListFocus_ActiveOnlyByDefaultAllIncludesRetired(t *testing.T) {
 // the all-unsurfaced tie by focus id ascending (focus.md §4).
 func TestSurfaceFocus_ColdStartLowestID(t *testing.T) {
 	r := bootedFocus(t)
-	addFocus(t, r, "A work-on", "", day1())
-	addFocus(t, r, "B work-on", "", day1())
+	addFocus(t, r, "A work-on", day1())
+	addFocus(t, r, "B work-on", day1())
 
 	res, err := r.SurfaceFocus(day1())
 	require.NoError(t, err)
@@ -138,8 +138,8 @@ func TestSurfaceFocus_ColdStartLowestID(t *testing.T) {
 // returns the same pick and does not advance rotation (focus.md §4).
 func TestSurfaceFocus_IdempotentWithinDay(t *testing.T) {
 	r := bootedFocus(t)
-	addFocus(t, r, "A work-on", "", day1())
-	addFocus(t, r, "B work-on", "", day1())
+	addFocus(t, r, "A work-on", day1())
+	addFocus(t, r, "B work-on", day1())
 
 	first, err := r.SurfaceFocus(day1())
 	require.NoError(t, err)
@@ -155,8 +155,8 @@ func TestSurfaceFocus_IdempotentWithinDay(t *testing.T) {
 // (focus.md §4).
 func TestSurfaceFocus_RotatesAcrossDays(t *testing.T) {
 	r := bootedFocus(t)
-	addFocus(t, r, "A work-on", "", day1()) // focus_..._001
-	addFocus(t, r, "B work-on", "", day1()) // focus_..._002
+	addFocus(t, r, "A work-on", day1()) // focus_..._001
+	addFocus(t, r, "B work-on", day1()) // focus_..._002
 
 	d1, err := r.SurfaceFocus(day1())
 	require.NoError(t, err)
@@ -178,8 +178,8 @@ func TestSurfaceFocus_RotatesAcrossDays(t *testing.T) {
 // only picks from the active pool.
 func TestSurfaceFocus_SkipsRetired(t *testing.T) {
 	r := bootedFocus(t)
-	first := addFocus(t, r, "A work-on", "", day1()) // focus_..._001
-	addFocus(t, r, "B work-on", "", day1())          // focus_..._002
+	first := addFocus(t, r, "A work-on", day1()) // focus_..._001
+	addFocus(t, r, "B work-on", day1())          // focus_..._002
 
 	_, err := r.RetireFocus(RetireFocusRequest{ID: first.ID, Now: day1()})
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestSurfaceFocus_EmptyPool(t *testing.T) {
 // clean error and nothing is appended.
 func TestRetireFocus_RejectsUnknown(t *testing.T) {
 	r := bootedFocus(t)
-	addFocus(t, r, "A work-on", "", day1())
+	addFocus(t, r, "A work-on", day1())
 
 	_, err := r.RetireFocus(RetireFocusRequest{ID: "focus_2026_07_02_999", Now: day1()})
 	require.Error(t, err)
@@ -222,7 +222,7 @@ func TestRetireFocus_RejectsUnknown(t *testing.T) {
 // error (no second marker).
 func TestRetireFocus_RejectsDouble(t *testing.T) {
 	r := bootedFocus(t)
-	first := addFocus(t, r, "A work-on", "", day1())
+	first := addFocus(t, r, "A work-on", day1())
 
 	_, err := r.RetireFocus(RetireFocusRequest{ID: first.ID, Now: day1()})
 	require.NoError(t, err)
