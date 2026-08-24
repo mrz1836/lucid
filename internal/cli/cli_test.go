@@ -72,7 +72,7 @@ func TestVersion_RejectsArgs(t *testing.T) {
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	want := []string{"init", "log", "attach", "link", "unlink", "annotate", "closeout", "mode", "status", "obs", "reframe", "day", "stats", "validate", "export", "backup", "restore", "version", "update", "scheduler", "companion", "anchor", "metrics", "storm", "profile", "person", "bootstrap", "serve", "reflect", "ask", "injury", "era", "thread", "structure"}
+	want := []string{"init", "log", "attach", "link", "unlink", "annotate", "closeout", "mode", "status", "obs", "reframe", "focus", "day", "stats", "validate", "export", "backup", "restore", "version", "update", "scheduler", "companion", "anchor", "metrics", "storm", "profile", "person", "bootstrap", "serve", "reflect", "ask", "injury", "era", "thread", "structure"}
 	got := map[string]bool{}
 	for _, c := range root.Commands() {
 		got[c.Name()] = true
@@ -154,4 +154,18 @@ func TestAnchorCmd_HasFourSubcommands(t *testing.T) {
 		assert.Truef(t, got[want], "anchor group missing %q", want)
 	}
 	assert.Len(t, got, 4, "anchor exposes exactly add, sunset, rename, and backfill-ids")
+}
+
+// TestFocusCmd_HasSubcommands guards the focus command tree: a dropped
+// registration would ship a missing verb silently, since the group itself still
+// renders. Mirrors TestAnchorCmd_HasFourSubcommands one level down.
+func TestFocusCmd_HasSubcommands(t *testing.T) {
+	got := map[string]bool{}
+	for _, c := range newFocusCmd().Commands() {
+		got[c.Name()] = true
+	}
+	for _, want := range []string{"add", "list", "surface", "retire"} {
+		assert.Truef(t, got[want], "focus group missing %q", want)
+	}
+	assert.Len(t, got, 4, "focus exposes exactly add, list, surface, and retire")
 }
