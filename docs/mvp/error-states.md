@@ -32,6 +32,13 @@ The cross-cutting principles below bind all three tables.
   and honest. They do not perform empathy and do not invent a status
   the system did not earn ("I held that response — let me ask
   differently.", not "Sorry, my brain is broken!").
+* **User-facing errors read as prose, not package internals.** A message
+  the user sees names what happened and its remedy in plain language; it
+  never leaks a package prefix (`storage:`, `engine:`) or a Go type. When
+  a storage or engine op already composed a complete user sentence, the
+  router strips its prefix so the sentence reaches the user unadorned (the
+  `self` / `person` / `gratitude merge` paths); an opaque I/O failure is
+  wrapped with intent instead ("could not read the …: …").
 * **No external send is ever a recovery option.** Failure recovery
   never escalates to a webhook, email, or DM. Lucid is local-first
   per [`product-principles.md`](product-principles.md) §3 and §7.
