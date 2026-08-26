@@ -39,8 +39,9 @@ Every verb that stamps a logical day reads **one** date grammar, so a token that
 works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
 the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
 flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
-[`reframe add`](#reframe), [`focus add`](#focus), [`workout log`](#workout),
-[`mode`](#mode), [`storm`](#storm), and [`closeout`](#closeout).
+[`reframe add`](#reframe), [`focus add`](#focus), [`gratitude add`](#gratitude),
+[`workout log`](#workout), [`mode`](#mode), [`storm`](#storm), and
+[`closeout`](#closeout).
 
 **The grammar.** A leading `@` is optional on every form.
 
@@ -123,8 +124,9 @@ registry now carries the future ceiling, so it is not on this list:
 | `self set`'s date is optional entirely | It is the one write surface where a date is not required at all. A self fact is atemporal by definition — most have no origin worth recording, and inventing one would be worse than the silence. |
 
 **The closed write surface.** Every verb that stamps a logical day is named
-above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `memory`,
-`workout log`, `era`, `injury`, `anchor`, `mode`, `storm`, `closeout`. Three write verbs are deliberately N/A —
+above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `gratitude add`,
+`memory`, `workout log`, `era`, `injury`, `anchor`, `mode`, `storm`,
+`closeout`. Three write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
 id or window, rather than capturing a new one, and [`self`](#self) records
@@ -753,6 +755,75 @@ lucid focus list --json
 lucid focus list --all
 lucid focus surface
 lucid focus retire focus_2026_08_20_001
+```
+
+### gratitude
+
+```
+lucid gratitude add <thing> [--into <id>] [--day <date>]
+lucid gratitude add <thing> --count <N> --first <date> --last <date>
+lucid gratitude list [--json]
+lucid gratitude merge <src> <dst>
+lucid gratitude import <thing> --count <N> --first <date> --last <date>
+```
+
+Keep a running **gratitude tally** — the count of things you return to
+gratitude for ("grateful for my morning coffee ×15"). Deterministic, no LLM, an
+append-only **registry** kind under `~/.lucid/registries/gratitude/`, reusing
+the same salted-key identity and append-and-redirect merge as `injury`/`pet`/
+`person`. The verbatim nightly gratitude itself is a separate, unchanged
+`lucid log` (`#gratitude`) — this verb only tallies. Full layer spec (schema,
+the typed occurrence/seed/merge history, the derived Count/First/Last, and the
+canonical-key seam): [`../gratitude.md`](../gratitude.md).
+
+- **`add <thing>`** derives the salted **canonical key** from the normalized
+  phrase and either **bumps** the live entry that holds it (appends an
+  `occurrence`, +1, last-date refreshed) or **creates** a new entry — then
+  prints the write's receipt id (`grat_<logical_date>_<seq>`). v1 auto-match is
+  canonical-key only: two phrasings that normalize equal land on the same entry;
+  differing wordings land on different entries (matching "my house" to a stored
+  "a roof over my head" is **R-011**, not this — see `../gratitude.md` §7).
+  Human-first — `add` ignores `--json` like `log` and `obs`.
+- **`add <thing> --into <id>`** bumps a **specific** entry by its stable id
+  (`gratitude_<slug>`, shown by `list`) regardless of tonight's wording — the
+  interim by-meaning path the agent drives until R-011. The new wording is
+  recorded into the entry's `aka[]`; the canonical key is unchanged. An `<id>`
+  that resolves to no live entry is a clean error and appends nothing.
+- **`list`** folds each live entry's Count/First/Last and prints the tally
+  **sorted by count then recency**, each row showing its **stable id** for
+  `--into` / `merge` targeting; `--json` emits the structured tally.
+- **`merge <src> <dst>`** folds `<src>`'s whole count and first/last span into
+  `<dst>` (a `merge` event on `<dst>`, `aka[]` absorbed) and rewrites `<src>` as
+  a **redirect tombstone** (`redirect_to: <dst>`) — omitted from the active
+  `list` but auditably kept, never deleted. Single-hop, no cycles (the
+  `person merge` invariant). This repairs an accidental duplicate without
+  hand-editing storage.
+- **`import <thing> --count N --first <date> --last <date>`** (and the
+  equivalent `add --count …`) is the **one-time migration** path: it writes one
+  entry carrying a single `seed` event with the explicit Count/First/Last and
+  **fabricates no per-occurrence dates** — distinct from the nightly `add`,
+  which records one dated occurrence. **`import` is not idempotent** (re-running
+  double-counts): a migration is a single pass, and a retry restores the
+  pre-migration `lucid backup` first.
+
+Every mutation (`add`, `add --into`, `merge`, `import`) appends one event and
+returns **that event's** receipt id — distinct from the stable entry id, so two
+writes to the same entry return two different receipts.
+
+`gratitude add` carries the `--day` flag ([Backdating with --day](#backdating-with---day)),
+the **strict** tier: `--day @yesterday` and `--day @YYYY-MM-DD` set the
+occurrence's logical date (and so the entry's derived last-date); an unreadable
+token or a future day is a clean error and nothing is captured. The event's
+write time is always the real `at`.
+
+```sh
+lucid gratitude add "my morning coffee"
+lucid gratitude add "clean drinking water"
+lucid gratitude add "my house" --into gratitude_a-river
+lucid gratitude add "a walk outside" --day @yesterday
+lucid gratitude list --json
+lucid gratitude merge gratitude_b-stone gratitude_a-river
+lucid gratitude import "clean drinking water" --count 22 --first 2025-11-02 --last 2026-08-20
 ```
 
 ### day
