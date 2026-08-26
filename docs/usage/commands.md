@@ -51,7 +51,7 @@ flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 | `@YYYY-MM-DD` · `YYYY-MM-DD` | That civil day, taken literally | `approximate` |
 | `YYYY-MM-DDTHH:MM[:SS]` | That exact instant | `exact` |
 | `HH:MM` | Today at that time | `exact` |
-| `HH:MM-HH:MM` | A span within today — also sets `occurred_at_end` | `range` |
+| `HH:MM-HH:MM` | A span that starts today at the first time and ends at the second — also sets `occurred_at_end`. If the end reads earlier on the clock than the start, it wrapped past midnight, so the end rolls to the next day (`22:00-02:00` is a four-hour span, not a negative one) | `range` |
 | `<day> <time>` — e.g. `--day "@yesterday 19:30"` | That day at that time | `exact` |
 | `YYYY-MM` | The first day of that month | `approximate` |
 | `YYYY` | January 1st of that year | `approximate` |
