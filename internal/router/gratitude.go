@@ -19,11 +19,35 @@ import (
 // normalized string derivation, and by-meaning matching is the deferred R-011.
 
 // AddGratitudeRequest is one `lucid gratitude add` turn (gratitude.md §3): the
-// verbatim phrase, the strict-tier --day value, and now (injected so backdating
-// and receipt ids are deterministic in tests).
+// verbatim phrase, the strict-tier --day value, an optional Into target, and now
+// (injected so backdating and receipt ids are deterministic in tests). When Into
+// is set, the phrase bumps that specific stable entry regardless of wording (the
+// interim by-meaning path, gratitude.md §4) instead of resolving a canonical key.
 type AddGratitudeRequest struct {
 	Thing  string
 	DayArg string
+	Into   string
+	Now    time.Time
+}
+
+// ImportGratitudeRequest is one `lucid gratitude import` (or `add --count …`)
+// turn (gratitude.md §5): the one-time seed/migration path. It writes a single
+// entry carrying one `seed` event with the explicit Count/First/Last and
+// fabricates no per-occurrence dates — distinct from the nightly `add`.
+type ImportGratitudeRequest struct {
+	Thing string
+	Count int
+	First string
+	Last  string
+	Now   time.Time
+}
+
+// GratitudeMergeRequest is one `lucid gratitude merge <src> <dst>` turn
+// (gratitude.md §4): fold an accidental duplicate's whole tally into the
+// canonical entry and rewrite the source as a redirect tombstone.
+type GratitudeMergeRequest struct {
+	Source string
+	Target string
 	Now    time.Time
 }
 
@@ -98,12 +122,11 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 	}
 	logicalDate := when.LogicalDate
 
-	// v1 canonical-key match seam: the normalized phrase resolves-or-creates by
-	// its salted key. Differing wording lands a new entry — the interim by-meaning
-	// path (`--into`/`merge`) and the eventual automatic match are R-011.
-	key, err := r.store.ResolveGratitudeKey(thing)
+	// Resolve which entry this occurrence lands on (the `--into` target verbatim
+	// or the v1 canonical-key seam) and whether the write refreshes the display.
+	key, makePrimary, err := r.resolveGratitudeAddKey(req.Into, thing)
 	if err != nil {
-		return GratitudeWriteResult{}, fmt.Errorf("could not resolve the gratitude key; nothing was saved: %w", err)
+		return GratitudeWriteResult{}, err
 	}
 
 	ev := observations.GratitudeEvent{
@@ -111,7 +134,7 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 		Date:   logicalDate,
 		Source: observations.GratitudeSourceGratitude,
 	}
-	entry, appended, err := r.store.AppendGratitudeEvent(key, thing, logicalDate, true, ev, now)
+	entry, appended, err := r.store.AppendGratitudeEvent(key, thing, logicalDate, makePrimary, ev, now)
 	if err != nil {
 		return GratitudeWriteResult{}, fmt.Errorf("could not add the gratitude; nothing was saved: %w", err)
 	}
@@ -129,6 +152,34 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 		Created: created,
 		Ack:     gratitudeAddAck(entry.DisplayName, tally.Count, appended.ID, created),
 	}, nil
+}
+
+// resolveGratitudeAddKey picks the entry key an `add` lands on and whether the
+// write refreshes the display wording. With `--into` the stable id is targeted
+// verbatim (the interim by-meaning path, gratitude.md §4): it must already name a
+// live entry — a bump never creates one, and tonight's differing wording only
+// joins aka[] (makePrimary=false). Without it, the v1 canonical-key seam
+// resolves-or-creates by the normalized phrase (makePrimary=true; the eventual
+// automatic by-meaning match is R-011).
+func (r *Router) resolveGratitudeAddKey(into, thing string) (key string, makePrimary bool, err error) {
+	into = strings.TrimSpace(into)
+	if into == "" {
+		key, err = r.store.ResolveGratitudeKey(thing)
+		if err != nil {
+			return "", false, fmt.Errorf("could not resolve the gratitude key; nothing was saved: %w", err)
+		}
+		return key, true, nil
+	}
+	existing, found, rerr := r.store.ReadGratitude(into)
+	if rerr != nil {
+		return "", false, fmt.Errorf("could not read the gratitude entry; nothing was saved: %w", rerr)
+	}
+	if !found || existing.IsTombstone() {
+		return "", false, fmt.Errorf(
+			"no live gratitude entry %q to bump; run `lucid gratitude list` for the id; nothing was saved", into,
+		)
+	}
+	return into, false, nil
 }
 
 // GratitudeList reads the live tally, folds each entry's Count/First/Last, and
@@ -175,6 +226,113 @@ func (r *Router) GratitudeList() (GratitudeListResult, error) {
 	}, nil
 }
 
+// ImportGratitude seeds one gratitude entry from a pre-counted tally row
+// (gratitude.md §5): the one-time migration path, distinct from nightly `add`.
+// It resolves the canonical key from the phrase and appends a single `seed`
+// event carrying the explicit Count/First/Last — fabricating no per-occurrence
+// dates, since the raw per-night truth already lives in the separate `#gratitude`
+// logs. It is deliberately NOT idempotent: a second import appends a second seed
+// and double-counts (a retry restores the pre-migration backup first). An empty
+// phrase, a non-positive count, a malformed date, or first-after-last is a clean
+// error and nothing is written.
+func (r *Router) ImportGratitude(req ImportGratitudeRequest) (GratitudeWriteResult, error) {
+	now := whenOr(req.Now)
+	thing := strings.TrimSpace(req.Thing)
+	if thing == "" {
+		return GratitudeWriteResult{}, fmt.Errorf("gratitude import needs something you're grateful for; nothing was saved")
+	}
+	if req.Count < 1 {
+		return GratitudeWriteResult{}, fmt.Errorf("gratitude import needs --count of at least 1; nothing was saved")
+	}
+	first, last, err := validateSeedSpan(req.First, req.Last)
+	if err != nil {
+		return GratitudeWriteResult{}, err
+	}
+	if err = r.prepareGratitude(); err != nil {
+		return GratitudeWriteResult{}, err
+	}
+
+	key, err := r.store.ResolveGratitudeKey(thing)
+	if err != nil {
+		return GratitudeWriteResult{}, fmt.Errorf("could not resolve the gratitude key; nothing was saved: %w", err)
+	}
+
+	ev := observations.GratitudeEvent{
+		Type:   observations.GratitudeEventSeed,
+		Source: observations.GratitudeSourceMigration,
+		Count:  req.Count,
+		First:  first,
+		Last:   last,
+	}
+	// The seed's receipt encodes its last date — the representative day of the
+	// pre-counted span — so the id is meaningful without inventing occurrences.
+	entry, appended, err := r.store.AppendGratitudeEvent(key, thing, last, true, ev, now)
+	if err != nil {
+		return GratitudeWriteResult{}, fmt.Errorf("could not import the gratitude; nothing was saved: %w", err)
+	}
+
+	tally := entry.Tally()
+	created := len(entry.History) == 1
+	return GratitudeWriteResult{
+		Entry:   entry,
+		Receipt: appended.ID,
+		Key:     entry.Key,
+		Thing:   entry.DisplayName,
+		Count:   tally.Count,
+		First:   tally.First,
+		Last:    tally.Last,
+		Created: created,
+		Ack:     gratitudeImportAck(entry.DisplayName, tally.Count, first, last, appended.ID),
+	}, nil
+}
+
+// MergeGratitude folds an accidental duplicate into a canonical entry
+// (gratitude.md §4): the source's whole count and first/last span move into the
+// target via a `merge` event, the target absorbs the source's wordings, and the
+// source becomes a redirect tombstone omitted from the active tally but kept for
+// audit. A self-merge or a missing/tombstoned source or target is a clean error
+// that changes nothing. It returns the merged target and the merge event's
+// receipt, like every other mutation.
+func (r *Router) MergeGratitude(req GratitudeMergeRequest) (GratitudeWriteResult, error) {
+	now := whenOr(req.Now)
+	entry, appended, err := r.store.MergeGratitude(req.Source, req.Target, now)
+	if err != nil {
+		return GratitudeWriteResult{}, err
+	}
+	tally := entry.Tally()
+	return GratitudeWriteResult{
+		Entry:   entry,
+		Receipt: appended.ID,
+		Key:     entry.Key,
+		Thing:   entry.DisplayName,
+		Count:   tally.Count,
+		First:   tally.First,
+		Last:    tally.Last,
+		Created: false,
+		Ack:     gratitudeMergeAck(appended.SourceKey, entry.DisplayName, entry.Key, tally.Count, appended.ID),
+	}, nil
+}
+
+// validateSeedSpan checks a seed/import span: both dates must be civil
+// YYYY-MM-DD and first must not fall after last. It returns the trimmed dates so
+// the seed event stores them exactly as documented.
+func validateSeedSpan(first, last string) (string, string, error) {
+	first = strings.TrimSpace(first)
+	last = strings.TrimSpace(last)
+	fd, err := observations.ParseDate(first, time.UTC)
+	if err != nil {
+		return "", "", fmt.Errorf("gratitude import --first %q is not a civil YYYY-MM-DD date; nothing was saved", first)
+	}
+	ld, err := observations.ParseDate(last, time.UTC)
+	if err != nil {
+		return "", "", fmt.Errorf("gratitude import --last %q is not a civil YYYY-MM-DD date; nothing was saved", last)
+	}
+	if fd.After(ld) {
+		return "", "", fmt.Errorf("gratitude import --first %q is after --last %q; nothing was saved", first, last)
+	}
+	return first, last, nil
+}
+
 // prepareGratitude scaffolds the gratitude tree idempotently, wrapping any
 // failure with the shared message the gratitude verbs report.
 func (r *Router) prepareGratitude() error {
@@ -194,6 +352,21 @@ func gratitudeAddAck(thing string, count int, receipt string, created bool) stri
 		verb = "Started tally for"
 	}
 	return fmt.Sprintf("%s %q (×%d) as `%s`.", verb, thing, count, receipt)
+}
+
+// gratitudeImportAck builds the ack emitted after a one-time seed lands: the
+// thing, its seeded running count, the migrated first/last span, and the receipt
+// id — provenance over magic, distinct from the nightly `add` ack so a migration
+// seed reads as what it is (gratitude.md §5).
+func gratitudeImportAck(thing string, count int, first, last, receipt string) string {
+	return fmt.Sprintf("Seeded %q (×%d, first %s · last %s) as `%s`.", thing, count, first, last, receipt)
+}
+
+// gratitudeMergeAck builds the ack emitted after a merge folds a duplicate: the
+// source key that was absorbed, the canonical thing + id it folded into, the
+// resulting running count, and the merge event's receipt id (gratitude.md §4).
+func gratitudeMergeAck(sourceKey, thing, targetKey string, count int, receipt string) string {
+	return fmt.Sprintf("Merged `%s` into %q (`%s`, now ×%d) as `%s`.", sourceKey, thing, targetKey, count, receipt)
 }
 
 // gratitudeListLines renders the human-first tally: a count header then one line

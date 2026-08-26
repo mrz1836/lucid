@@ -62,17 +62,23 @@ func TestGratitudeAddAccumulates(t *testing.T) {
 // TestGratitudeWritesReturnDistinctReceipts: every mutating write returns its own
 // unique receipt id — distinct from the stable entry id and distinct across
 // repeated writes to the SAME entry, even on the same logical day (AC-3). The
-// seq is per-entry, not per-day, so two same-day bumps still differ.
+// seq is per-entry, not per-day, so two same-day bumps still differ. Every
+// mutation kind is exercised: plain `add`, same-day `add`, `add --into`,
+// `import`, and `merge`.
 func TestGratitudeWritesReturnDistinctReceipts(t *testing.T) {
 	r := bootedGratitude(t)
 
 	seen := map[string]bool{}
+	record := func(receipt string) {
+		require.NotEmpty(t, receipt, "every mutation returns a receipt id")
+		assert.False(t, seen[receipt], "receipt %q repeated", receipt)
+		seen[receipt] = true
+	}
+
 	var key string
-	for i, now := range []time.Time{day1(), day2(), day3()} {
+	for _, now := range []time.Time{day1(), day2(), day3()} {
 		res := addGratitude(t, r, "my morning coffee", now)
-		require.NotEmpty(t, res.Receipt, "every write returns a receipt id")
-		assert.False(t, seen[res.Receipt], "receipt %q repeated on write %d", res.Receipt, i)
-		seen[res.Receipt] = true
+		record(res.Receipt)
 		if key == "" {
 			key = res.Key
 		}
@@ -85,9 +91,183 @@ func TestGratitudeWritesReturnDistinctReceipts(t *testing.T) {
 	a := addGratitude(t, r, "my morning coffee", day1())
 	b := addGratitude(t, r, "my morning coffee", day1())
 	assert.Equal(t, a.Key, b.Key)
-	assert.NotEqual(t, a.Receipt, b.Receipt, "same-day repeats mint distinct receipts")
+	record(a.Receipt)
+	record(b.Receipt)
 
-	assert.Len(t, seen, 3)
+	// A targeted `--into` bump mints its own receipt against the same entry.
+	into, err := r.AddGratitude(AddGratitudeRequest{Thing: "the first cup of the day", Into: key, Now: day2()})
+	require.NoError(t, err)
+	assert.Equal(t, key, into.Key)
+	record(into.Receipt)
+
+	// A one-time `import` seed mints its own receipt on a fresh entry.
+	seed, err := r.ImportGratitude(ImportGratitudeRequest{
+		Thing: "clean drinking water", Count: 9, First: "2026-01-01", Last: "2026-08-01", Now: day1(),
+	})
+	require.NoError(t, err)
+	record(seed.Receipt)
+
+	// A `merge` mints its own receipt on the destination.
+	merged, err := r.MergeGratitude(GratitudeMergeRequest{Source: seed.Key, Target: key, Now: day3()})
+	require.NoError(t, err)
+	assert.Equal(t, key, merged.Key)
+	record(merged.Receipt)
+
+	assert.Len(t, seen, 8, "each of the eight mutations minted a distinct receipt")
+}
+
+// TestGratitudeAddInto: `add --into <id>` bumps a specific entry regardless of
+// tonight's wording — count + last-date refreshed — while keeping the canonical
+// display and recording the new wording into aka[]. An id naming no live entry is
+// a clean error that writes nothing (AC-5).
+func TestGratitudeAddInto(t *testing.T) {
+	r := bootedGratitude(t)
+
+	roof := addGratitude(t, r, "a roof over my head", day1())
+	addGratitude(t, r, "my morning coffee", day1()) // a distractor entry
+
+	// A differing wording bumps the targeted entry, not a canonical-key match.
+	res, err := r.AddGratitude(AddGratitudeRequest{Thing: "my house", Into: roof.Key, Now: day2()})
+	require.NoError(t, err)
+	assert.False(t, res.Created, "--into bumps, it never creates")
+	assert.Equal(t, roof.Key, res.Key, "the targeted entry is the one bumped")
+	assert.Equal(t, 2, res.Count)
+	assert.Equal(t, observations.DateString(observations.DateOf(day2())), res.Last, "the last date refreshes")
+	assert.NotEqual(t, roof.Receipt, res.Receipt, "the bump mints its own receipt")
+
+	// The canonical display stays the stored phrase; tonight's wording joins aka[].
+	entry, found, err := r.store.ReadGratitude(roof.Key)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "a roof over my head", entry.DisplayName, "--into keeps the canonical wording")
+	assert.Contains(t, entry.Aka, "my house", "the differing wording is recorded into aka")
+
+	// No new entry was created from the differently-worded bump.
+	list, err := r.GratitudeList()
+	require.NoError(t, err)
+	assert.Equal(t, 2, list.View.Count)
+
+	// An --into id that resolves to no live entry is a clean error, nothing written.
+	_, err = r.AddGratitude(AddGratitudeRequest{Thing: "my house", Into: "gratitude_does-not-exist", Now: day2()})
+	require.Error(t, err)
+	after, err := r.GratitudeList()
+	require.NoError(t, err)
+	assert.Equal(t, 2, after.View.Count, "the rejected --into wrote nothing")
+}
+
+// TestGratitudeImportExplicitCounts: `import` (seed) writes exactly one entry
+// carrying a single seed event with the explicit Count/First/Last, fabricating no
+// per-occurrence dates; a later nightly add accumulates on top; a bad count/date/
+// span is a clean error that writes nothing (AC-10).
+func TestGratitudeImportExplicitCounts(t *testing.T) {
+	r := bootedGratitude(t)
+
+	res, err := r.ImportGratitude(ImportGratitudeRequest{
+		Thing: "clean drinking water", Count: 22, First: "2025-11-02", Last: "2026-08-20", Now: day1(),
+	})
+	require.NoError(t, err)
+	assert.True(t, res.Created)
+	assert.Equal(t, 22, res.Count)
+	assert.Equal(t, "2025-11-02", res.First)
+	assert.Equal(t, "2026-08-20", res.Last)
+	assert.Contains(t, res.Receipt, "grat_2026_08_20_", "the seed receipt encodes its last date")
+
+	// Exactly one seed event: no per-occurrence dates are fabricated.
+	entry, found, err := r.store.ReadGratitude(res.Key)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, entry.History, 1, "import writes exactly one event")
+	ev := entry.History[0]
+	assert.Equal(t, observations.GratitudeEventSeed, ev.Type)
+	assert.Equal(t, 22, ev.Count)
+	assert.Equal(t, "2025-11-02", ev.First)
+	assert.Equal(t, "2026-08-20", ev.Last)
+	assert.Equal(t, observations.GratitudeSourceMigration, ev.Source)
+	assert.Empty(t, ev.Date, "a seed carries no single occurrence date")
+
+	// A later nightly add accumulates on top of the seeded count.
+	bump, err := r.AddGratitude(AddGratitudeRequest{Thing: "clean drinking water", Now: day2()})
+	require.NoError(t, err)
+	assert.Equal(t, 23, bump.Count, "a nightly add accumulates on the seed")
+
+	// Guard rails: bad count, malformed date, inverted span each write nothing.
+	for _, bad := range []ImportGratitudeRequest{
+		{Thing: "shelter", Count: 0, First: "2025-11-02", Last: "2026-08-20", Now: day1()},
+		{Thing: "shelter", Count: 3, First: "not-a-date", Last: "2026-08-20", Now: day1()},
+		{Thing: "shelter", Count: 3, First: "2026-08-20", Last: "2025-11-02", Now: day1()},
+	} {
+		_, ierr := r.ImportGratitude(bad)
+		require.Error(t, ierr)
+	}
+	list, err := r.GratitudeList()
+	require.NoError(t, err)
+	assert.Equal(t, 1, list.View.Count, "the rejected imports wrote nothing")
+}
+
+// TestGratitudeMerge: `merge <src> <dst>` folds the source's whole count and
+// span into the target via one merge event, retains the source as an auditable
+// redirect tombstone omitted from the active tally, and refuses a self-merge or a
+// missing/tombstoned entry (AC-6).
+func TestGratitudeMerge(t *testing.T) {
+	r := bootedGratitude(t)
+
+	dst := addGratitude(t, r, "a roof over my head", day1()) // ×1, last day1
+	src := addGratitude(t, r, "my house", day2())            // ×1
+	src2 := addGratitude(t, r, "my house", day3())           // ×2, first day2 last day3
+	require.Equal(t, src.Key, src2.Key)
+	require.NotEqual(t, dst.Key, src.Key, "the two wordings are distinct v1 entries")
+
+	res, err := r.MergeGratitude(GratitudeMergeRequest{Source: src.Key, Target: dst.Key, Now: day3()})
+	require.NoError(t, err)
+	assert.Equal(t, dst.Key, res.Key, "the merge folds into the target")
+	assert.Equal(t, 3, res.Count, "the target absorbs the source's whole count")
+	assert.Equal(t, observations.DateString(observations.DateOf(day1())), res.First, "the span widens to the earliest date")
+	assert.Equal(t, observations.DateString(observations.DateOf(day3())), res.Last, "the span widens to the latest date")
+	require.NotEmpty(t, res.Receipt)
+	assert.NotEqual(t, res.Key, res.Receipt, "the merge mints its own receipt, distinct from the entry id")
+
+	// The source is auditably retained as a redirect tombstone.
+	srcRec, found, err := r.store.ReadGratitude(src.Key)
+	require.NoError(t, err)
+	require.True(t, found, "the merged-away source is kept, never deleted")
+	assert.True(t, srcRec.IsTombstone())
+	assert.Equal(t, dst.Key, srcRec.RedirectTo)
+
+	// The active tally holds only the canonical entry, at the folded count.
+	list, err := r.GratitudeList()
+	require.NoError(t, err)
+	require.Len(t, list.View.Entries, 1, "the tombstone is omitted from the active tally")
+	assert.Equal(t, dst.Key, list.View.Entries[0].ID)
+	assert.Equal(t, 3, list.View.Entries[0].Count)
+	assert.Contains(t, list.View.Entries[0].Aka, "my house", "the target absorbs the source's wording")
+
+	// The fold is one auditable merge event naming the source it absorbed.
+	dstRec, _, err := r.store.ReadGratitude(dst.Key)
+	require.NoError(t, err)
+	mergeEvents := 0
+	for _, ev := range dstRec.History {
+		if ev.Type == observations.GratitudeEventMerge {
+			mergeEvents++
+			assert.Equal(t, src.Key, ev.SourceKey)
+			assert.Equal(t, 2, ev.SourceCount)
+		}
+	}
+	assert.Equal(t, 1, mergeEvents, "exactly one merge event records the fold")
+
+	// Error paths change nothing.
+	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: dst.Key, Target: dst.Key, Now: day3()})
+	require.Error(t, err, "a self-merge is refused")
+	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: "gratitude_missing", Target: dst.Key, Now: day3()})
+	require.Error(t, err, "a missing source is refused")
+	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: dst.Key, Target: src.Key, Now: day3()})
+	require.Error(t, err, "merging into a tombstone is refused")
+	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: src.Key, Target: dst.Key, Now: day3()})
+	require.Error(t, err, "merging a tombstoned source is refused")
+
+	after, err := r.GratitudeList()
+	require.NoError(t, err)
+	require.Len(t, after.View.Entries, 1, "the rejected merges changed nothing")
+	assert.Equal(t, 3, after.View.Entries[0].Count)
 }
 
 // TestGratitudeAddBackdated: `--day` files the occurrence under the backdated

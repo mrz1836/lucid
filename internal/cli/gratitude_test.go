@@ -156,3 +156,121 @@ func TestGratitude_CLI_DayStrictRejectWritesNothing(t *testing.T) {
 	require.NoError(t, lerr)
 	assert.Contains(t, listOut, "No gratitude tallied yet", "a refused day writes nothing")
 }
+
+// gratitudeListEntries runs `gratitude list --json` and returns the folded rows.
+func gratitudeListEntries(t *testing.T) []struct {
+	ID    string   `json:"id"`
+	Thing string   `json:"thing"`
+	Aka   []string `json:"aka"`
+	Count int      `json:"count"`
+	First string   `json:"first"`
+	Last  string   `json:"last"`
+} {
+	t.Helper()
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "list", "--json")
+	require.NoError(t, err)
+	var payload struct {
+		Count   int `json:"count"`
+		Entries []struct {
+			ID    string   `json:"id"`
+			Thing string   `json:"thing"`
+			Aka   []string `json:"aka"`
+			Count int      `json:"count"`
+			First string   `json:"first"`
+			Last  string   `json:"last"`
+		} `json:"entries"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	return payload.Entries
+}
+
+// TestGratitude_CLI_AddInto: `add --into <id>` bumps a specific entry by its
+// stable id regardless of wording, keeping the canonical display and folding the
+// new wording into aka[] (AC-5). An unknown id is a clean error.
+func TestGratitude_CLI_AddInto(t *testing.T) {
+	isolatedHome(t)
+
+	addGratitudeCLI(t, "a roof over my head")
+	entries := gratitudeListEntries(t)
+	require.Len(t, entries, 1)
+	id := entries[0].ID
+
+	bumpOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "my house", "--into", id)
+	require.NoError(t, err)
+	assert.Contains(t, bumpOut, "×2", "the targeted entry's count bumps")
+
+	entries = gratitudeListEntries(t)
+	require.Len(t, entries, 1, "the differently-worded bump created no new entry")
+	assert.Equal(t, "a roof over my head", entries[0].Thing, "the canonical wording is kept")
+	assert.Equal(t, 2, entries[0].Count)
+	assert.Contains(t, entries[0].Aka, "my house", "tonight's wording joins aka[]")
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "my house", "--into", "gratitude_nope")
+	require.Error(t, err, "an --into id naming no live entry is a clean error")
+}
+
+// TestGratitude_CLI_Merge: `merge <src> <dst>` folds a duplicate into the
+// canonical entry and drops the source from the active tally (AC-6).
+func TestGratitude_CLI_Merge(t *testing.T) {
+	isolatedHome(t)
+
+	addGratitudeCLI(t, "a roof over my head")
+	addGratitudeCLI(t, "my house")
+
+	entries := gratitudeListEntries(t)
+	require.Len(t, entries, 2)
+	ids := map[string]string{}
+	for _, e := range entries {
+		ids[e.Thing] = e.ID
+	}
+	src, dst := ids["my house"], ids["a roof over my head"]
+	require.NotEmpty(t, src)
+	require.NotEmpty(t, dst)
+
+	mergeOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "merge", src, dst)
+	require.NoError(t, err)
+	assert.Contains(t, mergeOut, "Merged")
+	assert.Contains(t, mergeOut, "grat_", "the merge prints its receipt id")
+
+	entries = gratitudeListEntries(t)
+	require.Len(t, entries, 1, "the merged-away source is omitted from the active tally")
+	assert.Equal(t, dst, entries[0].ID)
+	assert.Equal(t, 2, entries[0].Count, "the target absorbs the source's count")
+}
+
+// TestGratitude_CLI_Import: `import <thing> --count N --first --last` seeds a
+// pre-counted row faithfully (AC-10). The equivalent `add --count …` alias
+// routes to the same seed path.
+func TestGratitude_CLI_Import(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"gratitude", "import", "clean drinking water", "--count", "22", "--first", "2025-11-02", "--last", "2026-08-20")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Seeded")
+	assert.Contains(t, out, "×22")
+	assert.Contains(t, out, "grat_2026_08_20_", "the seed receipt encodes its last date")
+
+	entries := gratitudeListEntries(t)
+	require.Len(t, entries, 1)
+	assert.Equal(t, 22, entries[0].Count)
+	assert.Equal(t, "2025-11-02", entries[0].First)
+	assert.Equal(t, "2026-08-20", entries[0].Last)
+
+	// The `add --count …` alias routes to the seed path (a distinct entry here).
+	aliasOut, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"gratitude", "add", "warm sunlight", "--count", "5", "--first", "2026-02-01", "--last", "2026-08-01")
+	require.NoError(t, err)
+	assert.Contains(t, aliasOut, "Seeded")
+	assert.Contains(t, aliasOut, "×5")
+
+	// --into and --count cannot be combined.
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"},
+		"gratitude", "add", "warm sunlight", "--into", "gratitude_x", "--count", "5", "--first", "2026-02-01", "--last", "2026-08-01")
+	require.Error(t, err, "--into and --count are mutually exclusive")
+
+	// A malformed date is a clean error.
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"},
+		"gratitude", "import", "a walk outside", "--count", "3", "--first", "nope", "--last", "2026-08-01")
+	require.Error(t, err)
+}

@@ -153,6 +153,137 @@ func (a *Adapter) AppendGratitudeEvent(
 	return entry, ev, nil
 }
 
+// MergeGratitude folds the source gratitude entry into the target (gratitude.md
+// §4; the same append-and-redirect identity model [Adapter.MergePersons] uses).
+// The whole of the source's tally — its derived count and its first/last span —
+// is folded into the target via a single `merge` event appended to the target
+// that names the absorbed source key, and the target's aka[] absorbs the
+// source's wordings. The source is then rewritten as a redirect tombstone
+// forwarding to the target: omitted from the active tally (gratitude.md §6) but
+// auditably kept, never deleted. Every tombstone that already pointed at the
+// source is re-pointed at the target so the redirect graph stays single-hop.
+//
+// Both keys must name live entries: a self-merge, a missing source or target,
+// and a source or target that is itself a tombstone are each a clean error that
+// changes nothing. It returns the merged target entry and the appended merge
+// event (with its receipt id) so the caller can ack the receipt like every other
+// mutation. This is the only writer of the two files it touches (architecture P3).
+func (a *Adapter) MergeGratitude(
+	sourceKey, targetKey string, now time.Time,
+) (observations.GratitudeEntry, observations.GratitudeEvent, error) {
+	if err := a.ScaffoldGratitude(); err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+	sourceKey = strings.TrimSpace(sourceKey)
+	targetKey = strings.TrimSpace(targetKey)
+	if sourceKey == "" || targetKey == "" {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: merge needs a source and a target gratitude id; nothing was changed",
+		)
+	}
+	if sourceKey == targetKey {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: cannot merge gratitude entry %q into itself; nothing was changed", sourceKey,
+		)
+	}
+
+	source, found, err := a.ReadGratitude(sourceKey)
+	if err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+	if !found {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: no gratitude entry %q to merge; nothing was changed", sourceKey,
+		)
+	}
+	if source.IsTombstone() {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: gratitude entry %q was already merged into %q; nothing was changed", sourceKey, source.RedirectTo,
+		)
+	}
+	target, found, err := a.ReadGratitude(targetKey)
+	if err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+	if !found {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: no gratitude entry %q to merge into; nothing was changed", targetKey,
+		)
+	}
+	if target.IsTombstone() {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: gratitude entry %q was merged into %q; merge into that entry instead", targetKey, target.RedirectTo,
+		)
+	}
+
+	nowStr := now.Format(time.RFC3339)
+	srcTally := source.Tally()
+
+	// The target absorbs the source's wordings for readability; resolution stays
+	// by canonical key + tombstone, never by scanning aka[] (the people precedent).
+	target.Aka = addUnique(target.Aka, source.DisplayName)
+	for _, aka := range source.Aka {
+		target.Aka = addUnique(target.Aka, aka)
+	}
+
+	// The whole source tally folds into the target as one auditable merge event,
+	// minted under the single-writer discipline. Its receipt encodes today's
+	// logical date — the day the fold happened.
+	seq := observations.NextGratitudeSeq(target.History)
+	receiptDate := observations.DateString(observations.DateOf(now))
+	ev := observations.GratitudeEvent{
+		ID:          observations.GratitudeReceiptID(receiptDate, seq),
+		At:          nowStr,
+		Type:        observations.GratitudeEventMerge,
+		SourceKey:   sourceKey,
+		SourceCount: srcTally.Count,
+		SourceFirst: srcTally.First,
+		SourceLast:  srcTally.Last,
+	}
+	target.History = append(slices.Clone(target.History), ev)
+	target.UpdatedAt = nowStr
+	if verr := target.Validate(); verr != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, verr
+	}
+	if werr := a.writeGratitude(target); werr != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, werr
+	}
+
+	// Rewrite the source as a redirect tombstone; its history is frozen and kept
+	// for audit, but it is now omitted from the active tally.
+	source.RedirectTo = targetKey
+	source.UpdatedAt = nowStr
+	if werr := a.writeGratitude(source); werr != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, werr
+	}
+
+	if ferr := a.flattenGratitudeRedirects(sourceKey, targetKey); ferr != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, ferr
+	}
+	return target, ev, nil
+}
+
+// flattenGratitudeRedirects re-points every tombstone forwarding to oldTarget so
+// it forwards to newTarget instead, keeping the redirect graph single-hop after a
+// merge would otherwise chain two records (gratitude.md §4). It mirrors the
+// people-merge flatten precedent.
+func (a *Adapter) flattenGratitudeRedirects(oldTarget, newTarget string) error {
+	all, err := a.ReadGratitudeAll()
+	if err != nil {
+		return err
+	}
+	for _, e := range all {
+		if !e.IsTombstone() || e.RedirectTo != oldTarget || e.Key == newTarget {
+			continue
+		}
+		e.RedirectTo = newTarget
+		if werr := a.writeGratitude(e); werr != nil {
+			return werr
+		}
+	}
+	return nil
+}
+
 // writeGratitude persists one gratitude entry as indented JSON, creating the
 // subtree if needed. It is the only writer of a gratitude file (architecture P3).
 func (a *Adapter) writeGratitude(entry observations.GratitudeEntry) error {
