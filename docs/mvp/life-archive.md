@@ -379,6 +379,19 @@ and thread retain `active`, `managed`, or `resolved`. A kind-aware
 `validRegistryStatus` enforces the distinction; this is the template
 for future kinds whose lifecycles require their own humane vocabulary.
 
+The inner-work **gratitude tally** is a second net-new registry kind minted on
+this same template ([`../gratitude.md`](../gratitude.md)): a `gratitude` entry
+is a distinct named referent — the thing you keep returning to gratitude for —
+with its own identity, `aka[]`, and append-and-redirect merge, reached by its
+own verb (`lucid gratitude add` / `list` / `merge` / `import`). It is documented
+in its own layer spec rather than here because it diverges from the injury/era/
+thread `Fields` model in one way: instead of a `status_history` it carries a
+**typed occurrence history** whose `occurrence` / `seed` / `merge` events fold
+into a derived Count/First/Last, and its v1 canonical-key match names **R-011**
+as the future owner of automatic by-meaning matching. The registry machinery it
+reuses (salted keys, `aka[]`, the redirect tombstone) is exactly the pet-kind
+template above.
+
 ## 9. Boundaries (inherited, restated)
 
 * **Never diagnosis, never treatment advice.** The injury projection

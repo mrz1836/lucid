@@ -59,7 +59,7 @@ These rules trace directly to
 ├── observations/           # frozen-envelope events — owned by observations-module.md
 ├── reframes/               # append-only catch→flip inner-work entries + surface_state.json projection — owned by reframes.md
 ├── focus/                   # append-only focus work-ons (+ retirement events) + surface_state.json projection — owned by focus.md
-├── registries/             # injuries, threads, places, eras, pets — same key derivation as people/
+├── registries/             # injuries, threads, places, eras, pets, gratitude — same key derivation as people/
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
 ├── secrets/                # append-only names-only reference catalog (secrets.jsonl)
 └── projections/            # rebuildable views/exports — deletable wholesale
@@ -115,7 +115,14 @@ and status contract. Story
 `follow_up`, beside the existing `text`/`certainty`) and a fixed `refs`
 shape (`era`/`place`/`person`, plus `entry` for an attached photo's raw
 id) — all additive on the frozen event envelope, no new top-level field.
-Full vocabulary and types: [`life-archive.md`](life-archive.md) §2–§4.
+Full vocabulary and types: [`life-archive.md`](life-archive.md) §2–§4. The
+inner-work **gratitude tally** ([`gratitude.md`](../gratitude.md)) adds one
+further registry kind — `gratitude` — that reuses the same salted-key identity,
+`aka[]`, and append-and-redirect tombstone (`person merge` precedent), but
+diverges from the injury/era/thread `Fields` model: instead of a
+`status_history`, a gratitude entry carries a **typed occurrence history**
+(`occurrence` / `seed` / `merge` events) from which its Count/First/Last are
+folded at read time, so it never stores a derived number.
 
 ### Naming conventions
 
@@ -130,6 +137,8 @@ Full vocabulary and types: [`life-archive.md`](life-archive.md) §2–§4.
 | Reflection id | `reflection_YYYY_wWW` (ISO week). | `reflection_2026_w18` |
 | Reframe id | `reframe_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A correction appends a new entry whose `refs.corrects` names the superseded id — history is never rewritten. See [`reframes.md`](../reframes.md). | `reframe_2026_08_23_001` |
 | Focus id | `focus_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A retirement appends a new entry whose `refs.retires` names the target id, folding it to `retired` — history is never rewritten or deleted. See [`focus.md`](../focus.md). | `focus_2026_08_23_001` |
+| Gratitude entry id | `gratitude_<slug>` — the salted registry key derived from the normalized phrase (the `people/` key derivation), stable across the entry's life; shown by `list` and targeted by `--into` / `merge`. See [`gratitude.md`](../gratitude.md). | `gratitude_a-river` |
+| Gratitude receipt id | `grat_YYYY_MM_DD_<seq>` — one per appended tally event (`occurrence` / `seed` / `merge`), assigned single-writer as max-seq+1; returned by every `add` / `import` / `merge`, distinct from the stable entry id. See [`gratitude.md`](../gratitude.md). | `grat_2026_08_24_001` |
 
 People keys deliberately do not encode real names; the storage adapter
 maintains a `display_name` field separately so the on-disk filenames
