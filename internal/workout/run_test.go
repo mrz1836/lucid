@@ -3,6 +3,7 @@ package workout
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -177,9 +178,10 @@ func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 	out1, err := r.Fire(context.Background(), now)
 	require.NoError(t, err)
 
-	// The first message is now gone: the idempotency read-back on the next fire
-	// fails, so the day re-delivers rather than skipping into silence.
-	del.VerifyErrFor[out1.MessageID] = errors.New("404 unknown message")
+	// The first message is provably gone (a clean 404 → ErrMessageAbsent): the
+	// idempotency read-back on the next fire proves absence, so the day
+	// re-delivers rather than skipping into silence.
+	del.VerifyErrFor[out1.MessageID] = fmt.Errorf("404 unknown message: %w", flynode.ErrMessageAbsent)
 	out2, err := r.Fire(context.Background(), now.Add(time.Minute))
 	require.NoError(t, err)
 

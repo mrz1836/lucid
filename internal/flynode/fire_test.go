@@ -3,6 +3,7 @@ package flynode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -78,6 +79,8 @@ func (h *harness) delivery(cutoff, lateAt time.Time) Delivery[string] {
 		ComposeAlert: "compose-alert",
 		SendAlert:    "send-alert",
 		VerifyAlert:  "verify-alert",
+		GuardAlert:   "guard-alert",
+		ReceiptAlert: "receipt-alert",
 	}
 	if h.postSet {
 		d.PostSend = func(payload string) {
@@ -120,14 +123,49 @@ func TestFire_AlreadyDelivered_SkipsNoSend(t *testing.T) {
 func TestFire_StaleReceipt_ReDelivers(t *testing.T) {
 	h := newHarness()
 	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true}
-	h.verifyER["old-id"] = errors.New("gone") // the receipt's message no longer reads back
+	// The receipt's message is PROVABLY gone (a clean 404 → ErrMessageAbsent);
+	// only this verdict falls through to a fresh delivery.
+	h.verifyER["old-id"] = ErrMessageAbsent
 	cutoff, lateAt := onTime()
 	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
 	require.NoError(t, err)
 	assert.True(t, fired.Delivered)
 	assert.Equal(t, "new-id", fired.MessageID)
 	assert.Equal(t, []string{"guard", "verify:old-id", "compose", "send", "verify:new-id", "write", "postsend"}, h.log,
-		"a stale receipt falls through to a fresh delivery")
+		"a provably-absent receipt falls through to a fresh delivery")
+	assert.Empty(t, h.alerts, "a clean re-delivery never alerts")
+}
+
+// TestFire_IndeterminateReceiptProbe_AlertsAndDoesNotReSend is the H1 guard: a
+// prior receipt whose read-back is INDETERMINATE (a transport blip, a 5xx/429 —
+// not a clean 404) leaves the message's presence unknown, so Fire must NOT
+// re-post (which could double-send). It alerts and returns the retryable error
+// without composing or sending; the supervised retry re-probes.
+func TestFire_IndeterminateReceiptProbe_AlertsAndDoesNotReSend(t *testing.T) {
+	h := newHarness()
+	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true}
+	h.verifyER["old-id"] = errors.New("discord 503") // indeterminate, not ErrMessageAbsent
+	cutoff, lateAt := onTime()
+	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
+	require.Error(t, err, "an indeterminate probe is a retryable error, not a skip")
+	assert.NotContains(t, h.log, "send", "presence is unknown, so it must not re-post")
+	assert.NotContains(t, h.log, "compose", "and must not even compose a fresh message")
+	assert.Equal(t, []string{"guard", "verify:old-id", "alert"}, h.log)
+	assert.Equal(t, []string{"guard-alert"}, h.alerts)
+}
+
+// TestFire_IndeterminateWrapsErrMessageAbsent proves the classification is by
+// errors.Is, not identity: an ErrMessageAbsent wrapped in daemon context (as the
+// real Verify closures wrap it) still falls through to a fresh delivery.
+func TestFire_WrappedErrMessageAbsent_ReDelivers(t *testing.T) {
+	h := newHarness()
+	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true}
+	h.verifyER["old-id"] = fmt.Errorf("companion: verify morning delivery: %w", ErrMessageAbsent)
+	cutoff, lateAt := onTime()
+	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
+	require.NoError(t, err)
+	assert.True(t, fired.Delivered)
+	assert.Empty(t, h.alerts, "a wrapped provable-absence is a clean re-delivery")
 }
 
 func TestFire_ComposeError_AlertsAndErrorsNoSend(t *testing.T) {
@@ -182,15 +220,36 @@ func TestFire_VerifyError_AlertsAndDoesNotSaveReceipt(t *testing.T) {
 	assert.Equal(t, []string{"verify-alert"}, h.alerts)
 }
 
-func TestFire_WriteReceiptError_ErrorsWithoutPostSend(t *testing.T) {
+// TestFire_WriteReceiptError_AlertsAndErrorsWithoutPostSend is the H3 guard: a
+// verified send whose receipt cannot be persisted is the one failure that leaves
+// the idempotency guard blind, so Fire both returns the error AND fires the loud
+// alert (a retry could otherwise re-post invisibly). The post-send hook is still
+// skipped — it runs only after the receipt is saved.
+func TestFire_WriteReceiptError_AlertsAndErrorsWithoutPostSend(t *testing.T) {
 	h := newHarness()
 	h.writeER = errors.New("disk full")
 	cutoff, lateAt := onTime()
 	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
 	require.Error(t, err)
 	assert.NotContains(t, h.log, "postsend", "the post-send hook runs only after the receipt is saved")
-	assert.Empty(t, h.alerts, "a write-receipt failure is a loud return, not an alert")
-	assert.Equal(t, []string{"guard", "compose", "send", "verify:new-id", "write"}, h.log)
+	assert.Equal(t, []string{"receipt-alert"}, h.alerts, "a write-receipt failure now alerts loudly (H3)")
+	assert.Equal(t, []string{"guard", "compose", "send", "verify:new-id", "write", "alert"}, h.log)
+}
+
+// TestFire_CanceledContext_Guard: a context canceled before Fire runs surfaces
+// through the first ctx-aware closure (the guard here) as a loud error and stops
+// the send path — no compose, no send. It is the Fire-level cancellation guard
+// the send daemons rely on for a clean shutdown mid-run (error-states Sc-6).
+func TestFire_CanceledContext_Guard(t *testing.T) {
+	h := newHarness()
+	h.guardER = context.Canceled // the guard observes the canceled ctx
+	cutoff, lateAt := onTime()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Fire(ctx, fireNow(), h.delivery(cutoff, lateAt))
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, []string{"guard"}, h.log, "a canceled ctx stops the path at the guard — no compose, no send")
+	assert.Empty(t, h.alerts, "the canceled ctx is itself the loud signal; no alert")
 }
 
 func TestFire_HappyPath_OrdersDeliversAndRunsPostSend(t *testing.T) {

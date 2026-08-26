@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 )
 
 // capturedRequest records what the fake Discord endpoint received so tests can
@@ -240,12 +241,29 @@ func TestVerifyPresent_PresentSucceeds(t *testing.T) {
 	assert.Equal(t, "Bot tok-abc", got.auth)
 }
 
+// TestVerifyPresent_AbsentErrors: a clean 404 is proof the message is gone, so
+// the read-back returns the flynode.ErrMessageAbsent sentinel — the one verdict
+// Fire re-sends on.
 func TestVerifyPresent_AbsentErrors(t *testing.T) {
 	d, _ := newStubServer(t, http.StatusNotFound, `{"message":"Unknown Message"}`)
 
 	err := d.VerifyPresent(context.Background(), engine.ChannelUser, "777")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "status")
+	require.ErrorIs(t, err, flynode.ErrMessageAbsent, "a clean 404 is the provable-absence sentinel")
+	assert.Contains(t, err.Error(), "777", "the error still names the message")
+}
+
+// TestVerifyPresent_IndeterminateStatusIsNotAbsent: a non-404 error status (a
+// 5xx/429) leaves presence unknown, so it is an ordinary error — NOT
+// ErrMessageAbsent — and Fire must never re-post on it.
+func TestVerifyPresent_IndeterminateStatusIsNotAbsent(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		d, _ := newStubServer(t, status, `{"message":"try again"}`)
+		err := d.VerifyPresent(context.Background(), engine.ChannelUser, "777")
+		require.Error(t, err)
+		require.NotErrorIs(t, err, flynode.ErrMessageAbsent, "an indeterminate %d read-back must not read as provable absence", status)
+		assert.Contains(t, err.Error(), "status", "an indeterminate read-back names the status")
+	}
 }
 
 func TestVerifyPresent_MismatchedIDErrors(t *testing.T) {

@@ -213,6 +213,8 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 		ComposeAlert: "Lucid weekly witness report could not be composed — the scheduled report did not go out.",
 		SendAlert:    "Lucid weekly witness report failed to deliver — the scheduled report did not go out.",
 		VerifyAlert:  "Lucid weekly witness report sent a report that could not be verified in the channel.",
+		GuardAlert:   "Lucid weekly witness report could not confirm the earlier delivery is still posted — not re-sending to avoid a duplicate; it will retry.",
+		ReceiptAlert: "Lucid weekly witness report delivered but could not record the receipt — a retry may re-post; check the channel.",
 	})
 	if err != nil {
 		return Outcome{}, err

@@ -65,8 +65,9 @@ const (
 	// is still honestly "morning", far inside the 10:00 cut-off. Deriving the
 	// backstop from the morning mark rather than the cut-off is the mirror image
 	// of the evening backstop's reasoning: the morning window re-runs the *same*
-	// send behind the same receipt, so it cannot double-post and needs no
-	// cut-off-relative separation.
+	// send behind the same receipt, so it does not re-post a delivery whose
+	// receipt it can confirm (the bounded process-death window aside — see
+	// [Runner.FireBackstop]) and needs no cut-off-relative separation.
 	morningBackstopGrace = 60 * time.Minute
 
 	// minutesPerDay is the wrap modulus for clock-mark arithmetic.
@@ -156,8 +157,12 @@ func (r *Runner) Fire(ctx context.Context, mode Mode, now time.Time) (Outcome, e
 // — the same compose-and-deliver path [Runner.Fire] takes, so the backstop
 // inherits every guarantee rather than reimplementing any of them. In
 // particular it reads the same delivery receipt through the same guard, so a
-// morning the primary send already delivered is an idempotent skip and a
-// double-post is impossible by construction.
+// morning the primary send already delivered is an idempotent skip: the backstop
+// never posts a second copy of a delivery whose receipt it can see and confirm.
+// The one residual double-post window is the shared-spine one ([flynode.Fire]):
+// a process death between a verified send and its receipt write leaves the next
+// run's guard blind, at the cost of a bounded at-most-one extra post — never a
+// silent miss.
 //
 // It differs from Fire in exactly one respect: the note a late fire carries.
 // Every backstop fire is late by definition (it sits an hour past the mark), so
@@ -169,8 +174,8 @@ func (r *Runner) FireBackstop(ctx context.Context, now time.Time) (Outcome, erro
 // fire is the shared body behind [Runner.Fire] and [Runner.FireBackstop]. The
 // prefix a late fire carries is the only axis the two differ on; everything
 // else — the cut-off, the receipt guard, the compose, the read-back, the alerts
-// — is identical for both callers, which is what keeps the backstop honest
-// about exactly-once.
+// — is identical for both callers, which is what keeps the backstop's idempotency
+// (never a silent miss, at most one bounded double-post) the same as Fire's.
 func (r *Runner) fire(ctx context.Context, mode Mode, now time.Time, note string) (Outcome, error) {
 	win, err := windowFor(mode)
 	if err != nil {
@@ -246,6 +251,8 @@ func (r *Runner) fire(ctx context.Context, mode Mode, now time.Time, note string
 		ComposeAlert: fmt.Sprintf("Lucid %s companion could not compose a message — the scheduled send did not go out.", mode),
 		SendAlert:    fmt.Sprintf("Lucid %s companion failed to deliver — the scheduled send did not go out.", mode),
 		VerifyAlert:  fmt.Sprintf("Lucid %s companion sent a message that could not be verified in the channel.", mode),
+		GuardAlert:   fmt.Sprintf("Lucid %s companion could not confirm the earlier delivery is still posted — not re-sending to avoid a duplicate; it will retry.", mode),
+		ReceiptAlert: fmt.Sprintf("Lucid %s companion delivered but could not record the receipt — a retry may re-post; check the channel.", mode),
 	})
 	if err != nil {
 		return Outcome{}, err

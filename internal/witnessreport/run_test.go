@@ -209,9 +209,10 @@ func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 	out1, err := r.Fire(context.Background(), reportNow())
 	require.NoError(t, err)
 
-	// The first message is now gone: the idempotency read-back on the next fire
-	// fails, so the week re-delivers rather than skipping into silence.
-	del.verifyErrFor[out1.MessageID] = errors.New("404 unknown message")
+	// The first message is provably gone (a clean 404 → ErrMessageAbsent): the
+	// idempotency read-back on the next fire proves absence, so the week
+	// re-delivers rather than skipping into silence.
+	del.verifyErrFor[out1.MessageID] = fmt.Errorf("404 unknown message: %w", flynode.ErrMessageAbsent)
 	out2, err := r.Fire(context.Background(), reportNow().Add(3*time.Hour))
 	require.NoError(t, err)
 

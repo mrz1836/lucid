@@ -72,7 +72,11 @@ func TestFireWriteReceiptErrorIsLoud(t *testing.T) {
 	_, err := r.Fire(context.Background(), at(2026, 7, 20, 12, 0))
 	require.Error(t, err, "an unwritable receipt directory fails the fire")
 	assert.Len(t, del.Sends, 1, "the send still went out before the receipt failed")
-	assert.Empty(t, del.Alerts, "a receipt-write failure is a returned error, not an alert")
+	// H3: the receipt is the idempotency guard, so a delivery it cannot record
+	// alerts loudly as well as returning the error — a retry could otherwise
+	// re-post invisibly.
+	require.Len(t, del.Alerts, 1, "a receipt-write failure now alerts loudly (H3)")
+	assert.Contains(t, del.Alerts[0].Text, "could not record the receipt")
 }
 
 // TestWorkPropagatesFireError proves the daily worker surfaces a fire failure as a

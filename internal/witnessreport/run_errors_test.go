@@ -60,6 +60,10 @@ func TestFire_ReceiptWriteError_Errors(t *testing.T) {
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err, "a receipt write failure surfaces loudly")
 	require.Len(t, del.sends, 1, "the send lands; only the receipt persistence fails")
+	// H3: a delivery the idempotency guard cannot see (verified send, no receipt)
+	// alerts loudly as well as erroring, since a retry could otherwise re-post.
+	require.Len(t, del.alerts, 1, "a receipt-write failure alerts loudly (H3)")
+	assert.Contains(t, del.alerts[0].text, "could not record the receipt")
 }
 
 // TestWork_FireErrorPropagates: the weekly worker returns a fire's error to the

@@ -207,6 +207,8 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 		ComposeAlert: "Lucid workout slot could not compose a recommendation — the scheduled send did not go out.",
 		SendAlert:    "Lucid workout slot failed to deliver — the scheduled send did not go out.",
 		VerifyAlert:  "Lucid workout slot sent a message that could not be verified in the channel.",
+		GuardAlert:   "Lucid workout slot could not confirm the earlier delivery is still posted — not re-sending to avoid a duplicate; it will retry.",
+		ReceiptAlert: "Lucid workout slot delivered but could not record the receipt — a retry may re-post; check the channel.",
 	})
 	if err != nil {
 		return Outcome{}, err

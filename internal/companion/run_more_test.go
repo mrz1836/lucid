@@ -64,8 +64,10 @@ func TestFire_ReceiptReadError_IsLoud(t *testing.T) {
 }
 
 // TestFire_ReceiptWriteError_IsLoud: a fire that delivers and verifies but then
-// cannot persist its receipt fails loudly — the receipt is the exactly-once
+// cannot persist its receipt fails loudly — the receipt is the idempotency
 // guard, and a delivery it cannot record must surface rather than pass silently.
+// It both returns the error AND fires the loud alert (H3), because that delivery
+// is invisible to the guard, so a retry could re-post with no other signal.
 func TestFire_ReceiptWriteError_IsLoud(t *testing.T) {
 	skipIfRoot(t)
 	comp := &fakeComposer{res: Result{Text: "GM"}}
@@ -80,7 +82,8 @@ func TestFire_ReceiptWriteError_IsLoud(t *testing.T) {
 	_, err := r.Fire(context.Background(), ModeMorning, at(2026, 7, 6, 6, 0))
 	require.Error(t, err)
 	require.Len(t, del.Sends, 1, "the message did go out; it is the receipt that failed")
-	assert.Empty(t, del.Alerts, "a receipt-write failure surfaces through the returned error, not a duplicate alert")
+	require.Len(t, del.Alerts, 1, "a receipt-write failure alerts loudly as well as returning the error (H3)")
+	assert.Contains(t, del.Alerts[0].Text, "could not record the receipt")
 }
 
 // TestMorningWorker_FireError_Propagates: a delivery failure inside the morning

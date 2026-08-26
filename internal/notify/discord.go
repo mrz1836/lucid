@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 )
 
 // Injected environment variables (ADR-0005). The token names the generic
@@ -240,10 +241,17 @@ func (d *Discord) SendEmbedReturningID(ctx context.Context, channel string, e Em
 
 // VerifyPresent confirms a previously created message id is actually present in
 // the channel by GETting it from the Discord REST API — the read-back half of
-// the companion's "a real message id reappears in the channel" guarantee. A
-// non-2xx status (a 404 for a message that never landed), a body whose id does
-// not match, or an empty id argument is a clear error so a delivery is never
-// recorded as verified when the message is not really there.
+// the companion's "a real message id reappears in the channel" guarantee. It
+// distinguishes two failure classes so the caller ([flynode.Fire]) can act
+// safely on a stale-receipt read-back:
+//
+//   - A clean HTTP 404 is proof the message is absent (it never landed, or was
+//     deleted). It returns [flynode.ErrMessageAbsent] (wrapped), the one verdict
+//     Fire treats as "send a fresh one."
+//   - Every other failure — a transport error, a 5xx/429, an id mismatch, an
+//     empty id — leaves the message's presence unknown, so it returns an ordinary
+//     error. Fire must never re-post on one of these, or a delivered message
+//     could be sent twice.
 func (d *Discord) VerifyPresent(ctx context.Context, channel, messageID string) error {
 	id, err := d.resolve(channel)
 	if err != nil {
@@ -266,6 +274,12 @@ func (d *Discord) VerifyPresent(ctx context.Context, channel, messageID string) 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusNotFound {
+		// A clean 404 is proof of absence — the one status Fire may re-send on.
+		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyCap))
+		return fmt.Errorf("%w: read-back of message %s in channel %s: %s",
+			flynode.ErrMessageAbsent, messageID, id, strings.TrimSpace(string(snippet)))
+	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, errBodyCap))
 		return fmt.Errorf("notify: read-back of message %s in channel %s returned status %d: %s",
