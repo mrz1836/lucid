@@ -25,23 +25,10 @@ const (
 	focusFileExt    = ".jsonl"
 )
 
-// focusSurfaceState is the verb-owned rotation projection (focus.md §4): the
-// per-id last-surfaced logical-date and the current day's pick. It is rebuildable
-// and disposable — the entry JSONL is the source of truth, and deleting it only
-// resets rotation memory. It records only which focus item was shown when, never
-// anything that grades the user (focus.md §0).
-type focusSurfaceState struct {
-	Schema       int               `json:"schema"`
-	LastSurfaced map[string]string `json:"last_surfaced"`
-	Today        *focusTodayPick   `json:"today"`
-}
-
-// focusTodayPick is the current logical day's recorded pick — the day key and the
-// chosen focus id — that makes `surface` idempotent within a day.
-type focusTodayPick struct {
-	Day string `json:"day"`
-	ID  string `json:"id"`
-}
+// The focus rotation reuses the shared surface-state projection and rotation
+// (surface.go): its type, read/write, and one-per-day selection are family-
+// agnostic. focus.go keeps only the active-only filter (a retired item is never
+// surfaced) that the reframe family has no analog for.
 
 // focusDir returns ~/.lucid/focus/.
 func (a *Adapter) focusDir() string { return filepath.Join(a.home, focusDirName) }
@@ -299,35 +286,11 @@ func (a *Adapter) SurfaceFocus(dayKey string) (focus.Focus, bool, error) {
 	if err != nil {
 		return focus.Focus{}, false, err
 	}
+	// The active-only filter is the one axis focus adds over the shared rotation:
+	// a retired item is kept in history (the audit view) but never surfaced.
 	pool := activeFocus(all)
-	if len(pool) == 0 {
-		return focus.Focus{}, false, nil
-	}
-	st, err := a.readFocusSurfaceState()
-	if err != nil {
-		return focus.Focus{}, false, err
-	}
-
-	// Within-day idempotence: return the recorded pick unchanged, no advance.
-	if st.Today != nil && st.Today.Day == dayKey {
-		if f, ok := findFocusByID(pool, st.Today.ID); ok {
-			return f, true, nil
-		}
-		// The recorded pick was retired since it was chosen: fall through and
-		// re-pick from the current active pool so the day still surfaces a live item.
-	}
-
-	pick := leastRecentlySurfacedFocus(pool, st.LastSurfaced)
-	if st.LastSurfaced == nil {
-		st.LastSurfaced = map[string]string{}
-	}
-	st.Schema = surfaceStateSchema
-	st.LastSurfaced[pick.ID] = dayKey
-	st.Today = &focusTodayPick{Day: dayKey, ID: pick.ID}
-	if err := a.writeFocusSurfaceState(st); err != nil {
-		return focus.Focus{}, false, err
-	}
-	return pick, true, nil
+	return surfaceOne(a, a.focusDir(), "focus", a.focusSurfaceStatePath(), dayKey, pool,
+		func(f focus.Focus) string { return f.ID })
 }
 
 // activeFocus returns only the active items from a folded pool, preserving order
@@ -340,52 +303,4 @@ func activeFocus(pool []focus.Focus) []focus.Focus {
 		}
 	}
 	return out
-}
-
-// leastRecentlySurfacedFocus returns the entry surfaced least recently. pool is
-// already sorted by id; a stable sort keyed by the last-surfaced date leaves
-// equal-date entries (including the cold-start case where every date is the empty
-// string, which sorts before any real YYYY-MM-DD) in id-ascending order, so the
-// pick is fully deterministic (focus.md §4).
-func leastRecentlySurfacedFocus(pool []focus.Focus, last map[string]string) focus.Focus {
-	ordered := slices.Clone(pool)
-	slices.SortStableFunc(ordered, func(x, y focus.Focus) int {
-		return cmp.Compare(last[x.ID], last[y.ID])
-	})
-	return ordered[0]
-}
-
-// findFocusByID returns the pool entry with the given id.
-func findFocusByID(pool []focus.Focus, id string) (focus.Focus, bool) {
-	for _, f := range pool {
-		if f.ID == id {
-			return f, true
-		}
-	}
-	return focus.Focus{}, false
-}
-
-// readFocusSurfaceState reads the rotation projection, treating both a missing and
-// a corrupt file as a fresh (cold-start) state rather than an error — it is
-// rebuildable and disposable (focus.md §4), so a torn write only resets rotation
-// memory and the next surface re-cold-starts.
-func (a *Adapter) readFocusSurfaceState() (focusSurfaceState, error) {
-	return readJSONResilient[focusSurfaceState](a.focusSurfaceStatePath(), "focus surface state")
-}
-
-// writeFocusSurfaceState persists the rotation projection, creating the focus tree
-// if needed. It is the only writer of the focus surface_state.json (architecture
-// P3).
-func (a *Adapter) writeFocusSurfaceState(st focusSurfaceState) error {
-	if err := ensureDir(a.focusDir(), "focus"); err != nil {
-		return err
-	}
-	b, err := marshalJSON(st)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(a.focusSurfaceStatePath(), b, filePerm); err != nil {
-		return fmt.Errorf("storage: write focus surface state: %w", err)
-	}
-	return nil
 }

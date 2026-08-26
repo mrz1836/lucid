@@ -48,12 +48,16 @@ const (
 )
 
 // GratitudeEvent is one append-only entry in a gratitude record's typed history
-// (gratitude.md §2). Each event carries its own unique receipt id, a real write
-// timestamp At, a Type, and the type-specific fields the fold reads. Collection
-// and per-type fields are omitempty so an occurrence line stays lean and a seed
-// line carries only its count/span. The receipt id encodes the event's logical
-// date, so a backdated occurrence's receipt reflects the logical day, not the
-// recording time.
+// (gratitude.md §2). Each event carries a receipt id unique within its entry
+// (the seq is minted per-entry: max over this entry's history + 1), a real write
+// timestamp At, a Type, and the type-specific fields the fold reads. The id is
+// NOT globally unique — two different referents tallied the same night both get
+// `grat_<date>_001` — which is sound because nothing looks a receipt up across
+// entries; a receipt is only ever read back within the entry that minted it.
+// Collection and per-type fields are omitempty so an occurrence line stays lean
+// and a seed line carries only its count/span. The receipt id encodes the
+// event's logical date, so a backdated occurrence's receipt reflects the logical
+// day, not the recording time.
 type GratitudeEvent struct {
 	ID     string `json:"id"`
 	At     string `json:"at"`

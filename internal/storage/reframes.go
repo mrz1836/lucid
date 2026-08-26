@@ -22,30 +22,13 @@ const (
 	reframesDirName   = "reframes"
 	reframeFilePrefix = "reframe_"
 	reframeFileExt    = ".jsonl"
-	surfaceStateFile  = "surface_state.json"
-	// surfaceStateSchema versions the rebuildable projection independently of
-	// the entry schema; it is disposable, so a bump only changes how a stale
-	// file is read, never entry history.
-	surfaceStateSchema = 1
 )
 
-// reframeSurfaceState is the verb-owned rotation projection (reframes.md §4):
-// the per-id last-surfaced logical-date and the current day's pick. It is
-// rebuildable and disposable — the entry JSONL is the source of truth, and
-// deleting it only resets rotation memory. It records only which reframe was
-// shown when, never anything that grades the user (reframes.md §0).
-type reframeSurfaceState struct {
-	Schema       int               `json:"schema"`
-	LastSurfaced map[string]string `json:"last_surfaced"`
-	Today        *reframeTodayPick `json:"today"`
-}
-
-// reframeTodayPick is the current logical day's recorded pick — the day key and
-// the chosen reframe id — that makes `surface` idempotent within a day.
-type reframeTodayPick struct {
-	Day string `json:"day"`
-	ID  string `json:"id"`
-}
+// The reframe rotation reuses the shared surface-state projection and rotation
+// (surface.go): its type (surfaceState), read/write, and one-per-day selection
+// (surfaceOne) are family-agnostic. reframes.go adds no filter over the folded
+// pool — every non-superseded reframe is eligible, so it hands surfaceOne the
+// whole live pool where focus hands it the active-only subset.
 
 // reframesDir returns ~/.lucid/reframes/.
 func (a *Adapter) reframesDir() string { return filepath.Join(a.home, reframesDirName) }
@@ -248,79 +231,8 @@ func (a *Adapter) SurfaceReframe(dayKey string) (reframes.Reframe, bool, error) 
 	if err != nil {
 		return reframes.Reframe{}, false, err
 	}
-	if len(pool) == 0 {
-		return reframes.Reframe{}, false, nil
-	}
-	st, err := a.readSurfaceState()
-	if err != nil {
-		return reframes.Reframe{}, false, err
-	}
-
-	// Within-day idempotence: return the recorded pick unchanged, no advance.
-	if st.Today != nil && st.Today.Day == dayKey {
-		if rf, ok := findReframeByID(pool, st.Today.ID); ok {
-			return rf, true, nil
-		}
-		// The recorded pick was superseded since it was chosen: fall through and
-		// re-pick from the current pool so the day still surfaces a live entry.
-	}
-
-	pick := leastRecentlySurfaced(pool, st.LastSurfaced)
-	if st.LastSurfaced == nil {
-		st.LastSurfaced = map[string]string{}
-	}
-	st.Schema = surfaceStateSchema
-	st.LastSurfaced[pick.ID] = dayKey
-	st.Today = &reframeTodayPick{Day: dayKey, ID: pick.ID}
-	if err := a.writeSurfaceState(st); err != nil {
-		return reframes.Reframe{}, false, err
-	}
-	return pick, true, nil
-}
-
-// leastRecentlySurfaced returns the entry surfaced least recently. pool is
-// already sorted by id; a stable sort keyed by the last-surfaced date leaves
-// equal-date entries (including the cold-start case where every date is the
-// empty string, which sorts before any real YYYY-MM-DD) in id-ascending order,
-// so the pick is fully deterministic (reframes.md §4).
-func leastRecentlySurfaced(pool []reframes.Reframe, last map[string]string) reframes.Reframe {
-	ordered := slices.Clone(pool)
-	slices.SortStableFunc(ordered, func(x, y reframes.Reframe) int {
-		return cmp.Compare(last[x.ID], last[y.ID])
-	})
-	return ordered[0]
-}
-
-// findReframeByID returns the pool entry with the given id.
-func findReframeByID(pool []reframes.Reframe, id string) (reframes.Reframe, bool) {
-	for _, rf := range pool {
-		if rf.ID == id {
-			return rf, true
-		}
-	}
-	return reframes.Reframe{}, false
-}
-
-// readSurfaceState reads the rotation projection, treating both a missing and a
-// corrupt file as a fresh (cold-start) state rather than an error — it is
-// rebuildable and disposable (reframes.md §4), so a torn write only resets
-// rotation memory and the next surface re-cold-starts.
-func (a *Adapter) readSurfaceState() (reframeSurfaceState, error) {
-	return readJSONResilient[reframeSurfaceState](a.surfaceStatePath(), "reframe surface state")
-}
-
-// writeSurfaceState persists the rotation projection, creating the reframes tree
-// if needed. It is the only writer of surface_state.json (architecture P3).
-func (a *Adapter) writeSurfaceState(st reframeSurfaceState) error {
-	if err := ensureDir(a.reframesDir(), "reframes"); err != nil {
-		return err
-	}
-	b, err := marshalJSON(st)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(a.surfaceStatePath(), b, filePerm); err != nil {
-		return fmt.Errorf("storage: write reframe surface state: %w", err)
-	}
-	return nil
+	// No filter: the folded pool already dropped superseded entries, so every
+	// reframe in it is eligible (where focus first filters to active items).
+	return surfaceOne(a, a.reframesDir(), "reframe", a.surfaceStatePath(), dayKey, pool,
+		func(rf reframes.Reframe) string { return rf.ID })
 }
