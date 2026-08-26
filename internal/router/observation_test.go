@@ -58,6 +58,39 @@ func readBack(t *testing.T, r *Router, res CaptureResult) observations.Event {
 	return observations.Event{}
 }
 
+// TestCapture_ClockRangeSpansMidnight is the end-to-end guard for the crossing-
+// midnight clock range: `--day "22:00-02:00"` stores a positive span whose end
+// lands on the next logical day, and the day view for that next day surfaces it
+// as a spanning range. The old same-day end recorded a span ~20h backwards,
+// which the 04:00 rollover then read onto the day before the start.
+func TestCapture_ClockRangeSpansMidnight(t *testing.T) {
+	r := bootedObs(t)
+
+	res, err := r.Capture(CaptureRequest{Tokens: []string{"mood", "3"}, Now: nowEDT(), DayArg: "22:00-02:00"})
+	require.NoError(t, err)
+	require.False(t, res.Rejected)
+
+	ev := readBack(t, r, res)
+	require.Equal(t, observations.PrecisionRange, ev.OccurredAtPrecision)
+	require.NotNil(t, ev.OccurredAtEnd)
+
+	start, err := time.Parse(time.RFC3339, ev.OccurredAt)
+	require.NoError(t, err)
+	end, err := time.Parse(time.RFC3339, *ev.OccurredAtEnd)
+	require.NoError(t, err)
+	assert.Equal(t, 4*time.Hour, end.Sub(start), "22:00→02:00 is a positive four-hour span")
+	assert.Equal(t, "2026-07-02", ev.LogicalDate, "the range keys on its start day")
+
+	// The next logical day's view surfaces it as a spanning range.
+	next, err := r.DayView("2026-07-03", nowEDT())
+	require.NoError(t, err)
+	found := false
+	for _, e := range next.View.Obs.RangeEvents {
+		found = found || e.ID == ev.ID
+	}
+	assert.True(t, found, "the spanning range appears on the next day's view")
+}
+
 // TestCapture_ShorthandsWriteValidEnvelopes: every named shorthand and the
 // generic form writes a valid frozen envelope with the documented kind (AC-7).
 func TestCapture_ShorthandsWriteValidEnvelopes(t *testing.T) {

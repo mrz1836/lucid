@@ -165,6 +165,52 @@ func TestResolveDay_Rollover(t *testing.T) {
 	}
 }
 
+// TestParseClockRange covers the clock-range grammar, including the wrap past
+// midnight that used to record an end ~20h before the start (a sleep or workout
+// across the day boundary) and the equal-bounds zero-length edge. now is on
+// 2026-07-02, so the start always lands on that civil day.
+func TestParseClockRange(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		isRange    bool
+		start, end time.Time
+	}{
+		{"same-day span", "09:00-12:30", true, at(2026, 7, 2, 9, 0), at(2026, 7, 2, 12, 30)},
+		{"wraps past midnight to the next day", "22:00-02:00", true, at(2026, 7, 2, 22, 0), at(2026, 7, 3, 2, 0)},
+		{"just past midnight still wraps", "23:30-00:15", true, at(2026, 7, 2, 23, 30), at(2026, 7, 3, 0, 15)},
+		{"equal bounds are a zero-length span, not a wrap", "12:00-12:00", true, at(2026, 7, 2, 12, 0), at(2026, 7, 2, 12, 0)},
+		{"not a range shape", "09:00", false, time.Time{}, time.Time{}},
+		{"looks like a range but a half is not a clock", "09:00-nope", false, time.Time{}, time.Time{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, end, isRange := parseClockRange(tc.body, now)
+			assert.Equal(t, tc.isRange, isRange)
+			if !tc.isRange {
+				return
+			}
+			assert.Equal(t, tc.start, start, "start")
+			assert.Equal(t, tc.end, end, "end")
+			assert.False(t, end.Before(start), "the end must never precede the start")
+		})
+	}
+}
+
+// TestResolveDay_ClockRangeWrapsPastMidnight proves the wrap surfaces through the
+// public grammar entry: `22:00-02:00` keys on the start day and exposes an end on
+// the next day, so the span is positive.
+func TestResolveDay_ClockRangeWrapsPastMidnight(t *testing.T) {
+	res, err := ResolveDay("22:00-02:00", now, DayOptions{AllowPartial: true})
+	require.NoError(t, err)
+	assert.Equal(t, PrecisionRange, res.Precision)
+	assert.Equal(t, at(2026, 7, 2, 22, 0), res.OccurredAt, "the start stays on today")
+	require.NotNil(t, res.End)
+	assert.Equal(t, at(2026, 7, 3, 2, 0), *res.End, "the end rolls to the next day so the span is positive")
+	assert.Equal(t, "2026-07-02", res.LogicalDate, "a range keys on its start day")
+	assert.True(t, res.End.After(res.OccurredAt), "a wrapped range is a positive span")
+}
+
 // TestResolveDay_StrictTier proves the deliberate-flag contract: an unreadable
 // value, a future day, or a partial date the command cannot use is a clean
 // error, so the caller writes nothing.

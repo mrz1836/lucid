@@ -246,10 +246,17 @@ func parseDayToken(body, following string, now time.Time, allowPartial bool) (
 	return time.Time{}, "", nil, GranularityDay, false, false, false
 }
 
-// parseClockRange resolves an HH:MM-HH:MM body to a start and end within
-// today. It reports isRange=false when the body is not a range shape, or when
-// it looks like one but either half is not a clock time — in which case the
-// caller falls through to the remaining branches, as it always has.
+// parseClockRange resolves an HH:MM-HH:MM body to a start and end. The start is
+// placed on today; the end is placed on today too, unless it reads earlier on
+// the clock than the start — a range that wrapped past midnight (`22:00-02:00`,
+// a sleep or workout across the day boundary) — in which case the end rolls to
+// the next day so the span is positive and the "sleep/workout across midnight"
+// case captures correctly rather than recording an end ~20h before the start.
+// The wrap is preferred over a rejection so the plausible case still captures
+// (product-principles.md P10 — capture is total). It reports isRange=false when
+// the body is not a range shape, or when it looks like one but either half is
+// not a clock time — in which case the caller falls through to the remaining
+// branches, as it always has.
 func parseClockRange(body string, now time.Time) (start, end time.Time, isRange bool) {
 	a, b, looksRange := splitTimeRange(body)
 	if !looksRange {
@@ -261,7 +268,12 @@ func parseClockRange(body string, now time.Time) (start, end time.Time, isRange 
 		return time.Time{}, time.Time{}, false
 	}
 	day := DateOf(now)
-	return atTime(day, from), atTime(day, to), true
+	start = atTime(day, from)
+	end = atTime(day, to)
+	if end.Before(start) {
+		end = end.AddDate(0, 0, 1)
+	}
+	return start, end, true
 }
 
 // parsePartialDate reads a YYYY or YYYY-MM value and snaps it to the period's

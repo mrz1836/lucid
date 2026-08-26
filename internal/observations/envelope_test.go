@@ -179,6 +179,23 @@ func TestEvent_Validate(t *testing.T) {
 	bad.OccurredAtPrecision = PrecisionRange // range without an end
 	require.Error(t, bad.Validate())
 
+	// A range whose end precedes its start is rejected (the ordering backstop);
+	// a well-ordered range — including one that wrapped past midnight to the next
+	// day — is fine.
+	endBefore := "2026-07-02T02:00:00-04:00"
+	backwards := valid
+	backwards.OccurredAtPrecision = PrecisionRange
+	backwards.OccurredAt = "2026-07-02T22:00:00-04:00"
+	backwards.OccurredAtEnd = &endBefore
+	require.Error(t, backwards.Validate(), "a range end before its start is rejected")
+
+	endAfter := "2026-07-03T02:00:00-04:00"
+	wrapped := valid
+	wrapped.OccurredAtPrecision = PrecisionRange
+	wrapped.OccurredAt = "2026-07-02T22:00:00-04:00"
+	wrapped.OccurredAtEnd = &endAfter
+	require.NoError(t, wrapped.Validate(), "a range that wrapped past midnight is well-ordered")
+
 	bad = valid
 	bad.LogicalDate = ""
 	require.Error(t, bad.Validate())

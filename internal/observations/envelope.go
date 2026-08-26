@@ -122,6 +122,18 @@ func (e Event) Validate() error {
 	if e.OccurredAtPrecision == PrecisionRange && e.OccurredAtEnd == nil {
 		return fmt.Errorf("observations: range precision requires occurred_at_end")
 	}
+	// A range end must not precede its start. The capture grammar already rolls a
+	// clock range past midnight ([parseClockRange]); this is the backstop for any
+	// other range builder. It only fires when both bounds are RFC3339 — an
+	// unparseable placeholder is left to the format-agnostic checks above, so
+	// capture never blocks on it here.
+	if e.OccurredAtPrecision == PrecisionRange && e.OccurredAtEnd != nil {
+		if start, serr := time.Parse(time.RFC3339, e.OccurredAt); serr == nil {
+			if end, eerr := time.Parse(time.RFC3339, *e.OccurredAtEnd); eerr == nil && end.Before(start) {
+				return fmt.Errorf("observations: range end %q precedes start %q", *e.OccurredAtEnd, e.OccurredAt)
+			}
+		}
+	}
 	if e.LogicalDate == "" {
 		return fmt.Errorf("observations: logical_date is required")
 	}
