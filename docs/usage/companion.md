@@ -289,16 +289,28 @@ The companion degrades in layers and is designed to **never fall silent** — a 
   confusing hours-stale "morning" at noon. A fire within a short grace of its mark
   is treated as on-time and carries no late note.
 - **Double-fire on a retry** (idempotency): each delivery writes a per-day,
-  per-window receipt through the binary. If a retry finds a receipt whose message
-  still reads back in the channel, it skips rather than double-posts.
+  per-window receipt through the binary. On a retry the receipt's message is read
+  back, and the verdict decides what happens next — the read-back distinguishes
+  two failure classes so a blip can never trigger a duplicate post:
+  - **Still present** → skip; the window is already delivered.
+  - **Provably gone** (a clean `404` — the message never landed or was deleted) →
+    send a fresh one, so the window is never left silently empty.
+  - **Indeterminate** (a transient `5xx`/`429`, a network blip — presence is
+    *unknown*) → do **not** re-post; alert and let the supervised retry re-probe.
+    Re-posting on an unknown would risk a genuine duplicate.
 - **Read-back verify**: a delivery is not considered done until the message id
   returned by the send is confirmed present in the channel — a real message that
   actually reappears, not a fire-and-forget POST.
 - **Total miss** (loud alert): a compose failure, a delivery failure, a failed
-  read-back, or a past-cut-off skip fires a best-effort alert to the user channel.
-  If even that channel is unreachable, the job returns a loud error that fails the
-  scheduled job and lands in the supervised daemon log. Silence is the one outcome
-  the companion never produces.
+  read-back, an indeterminate idempotency probe, a **receipt that could not be
+  written after a verified send**, or a past-cut-off skip fires a best-effort alert
+  to the user channel. If even that channel is unreachable, the job returns a loud
+  error that fails the scheduled job and lands in the supervised daemon log.
+  Silence is the one outcome the companion never produces. The guarantee is *never
+  a silent miss*, not exactly-once: if the process dies in the narrow window
+  between a verified send and its receipt write, the next run — seeing no receipt —
+  re-sends, a bounded at-most-one-extra post (which is why that receipt-write
+  failure alerts loudly rather than passing quietly).
 - **A missed night window** (any of the above ending in no delivery): the Engine's
   [evening backstop](#how-it-coexists-with-the-engine) posts the ordinary
   pre-committed Bell after the cut-off, so the accountability window itself is not

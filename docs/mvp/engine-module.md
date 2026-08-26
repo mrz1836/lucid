@@ -132,6 +132,18 @@ condition. `bell.enabled: false` silences it exactly as it silences the
 bell. The gate reads one engine-tree receipt — no Mirror content, no
 model, no new template — so the ceiling below holds unchanged.
 
+**The shared send path's guarantee is *never a silent miss*, not
+exactly-once.** Every autonomous sender (companion, workout slot, weekly
+witness report) runs the same reliability order, whose idempotency turns on the
+delivery receipt and a read-back of the prior message: a read-back that proves
+the message is gone (a clean `404`) re-sends so the window is never silently
+empty; an *indeterminate* read-back (a transient `5xx`/`429`) holds and lets the
+supervised retry re-probe rather than risk a duplicate; and the one residual
+window — a process death between a verified send and its receipt write — costs a
+bounded, at-most-one-extra post, which is announced with a loud alert rather than
+passing quietly (see [`../usage/companion.md`](../usage/companion.md) §"When
+things go wrong").
+
 Binding rules: these are the **only** autonomous sends in the MVP; all
 three use fixed templates with no LLM in the path; L2 cannot be
 enabled until `witness.json` has `confirmed_at`; disabling any of them
