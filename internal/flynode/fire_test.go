@@ -91,198 +91,225 @@ func (h *harness) delivery(cutoff, lateAt time.Time) Delivery[string] {
 	return d
 }
 
-// onTime returns a cut-off in the future and a late threshold in the future, so
-// a fire at fireNow() proceeds and is on time.
-func onTime() (cutoff, lateAt time.Time) {
-	return fireNow().Add(time.Hour), fireNow().Add(time.Hour)
+// staleReceipt scripts the guard to find a prior delivery, so the read-back
+// branch (present / provably-absent / indeterminate) is what a case then drives.
+func staleReceipt(h *harness) { h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true} }
+
+// fullDelivery is the ordered log of a clean compose-and-deliver with a
+// post-send hook. Several branches converge on it after their own preamble.
+var fullDelivery = []string{"guard", "compose", "send", "verify:new-id", "write", "postsend"} //nolint:gochecknoglobals // shared expected-order fixture
+
+// fireCase drives one Fire branch: it scripts the harness, runs Fire with the
+// given cut-off/late offsets from fireNow (zero ⇒ the on-time default of +1h),
+// and asserts the ordered send-path log, the loud alerts, and any branch-specific
+// outcome. The dozen-plus near-identical branch funcs this replaced were each
+// "setup → assert log → assert alerts"; the table keeps every branch a row and
+// the shared assertions in one place — and is the natural home for a new branch.
+type fireCase struct {
+	name        string
+	setup       func(*harness)
+	cutoffOff   time.Duration // added to fireNow() for CutoffAt (0 ⇒ +1h, not stale)
+	lateOff     time.Duration // added to fireNow() for LateAt   (0 ⇒ +1h, on time)
+	canceledCtx bool          // run under an already-canceled context
+	wantErr     bool
+	wantLog     []string
+	wantAlerts  []string // nil ⇒ assert no alert fired
+	check       func(t *testing.T, fired Fired[string], h *harness, err error)
 }
 
-func TestFire_PastCutoff_AlertsAndSkipsNoSend(t *testing.T) {
-	h := newHarness()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(fireNow().Add(-time.Hour), fireNow().Add(time.Hour)))
-	require.NoError(t, err)
-	assert.True(t, fired.Skipped)
-	assert.Equal(t, SkipPastCutoff, fired.SkipReason)
-	assert.Equal(t, []string{"alert"}, h.log, "past the cut-off: alert only, never a send")
-	assert.Equal(t, []string{"cutoff-alert"}, h.alerts)
+func TestFire(t *testing.T) {
+	t.Parallel()
+	cases := []fireCase{
+		{
+			name:       "past the cut-off: alert only, never a send",
+			cutoffOff:  -time.Hour,
+			wantLog:    []string{"alert"},
+			wantAlerts: []string{"cutoff-alert"},
+			check: func(t *testing.T, f Fired[string], _ *harness, _ error) {
+				assert.True(t, f.Skipped)
+				assert.Equal(t, SkipPastCutoff, f.SkipReason)
+			},
+		},
+		{
+			name:    "a live receipt skips before composing or sending",
+			setup:   staleReceipt, // verify of old-id succeeds (no scripted error)
+			wantLog: []string{"guard", "verify:old-id"},
+			check: func(t *testing.T, f Fired[string], _ *harness, _ error) {
+				assert.True(t, f.Skipped)
+				assert.Equal(t, SkipAlreadyDelivered, f.SkipReason)
+				assert.Equal(t, "old-id", f.MessageID)
+				assert.Equal(t, "user", f.Channel)
+			},
+		},
+		{
+			name: "a provably-absent receipt (404) falls through to a fresh delivery",
+			setup: func(h *harness) {
+				staleReceipt(h)
+				h.verifyER["old-id"] = ErrMessageAbsent
+			},
+			wantLog: []string{"guard", "verify:old-id", "compose", "send", "verify:new-id", "write", "postsend"},
+			check: func(t *testing.T, f Fired[string], _ *harness, _ error) {
+				assert.True(t, f.Delivered)
+				assert.Equal(t, "new-id", f.MessageID)
+			},
+		},
+		{
+			name: "a wrapped provable-absence still re-delivers (errors.Is, not identity)",
+			setup: func(h *harness) {
+				staleReceipt(h)
+				h.verifyER["old-id"] = fmt.Errorf("companion: verify morning delivery: %w", ErrMessageAbsent)
+			},
+			wantLog: []string{"guard", "verify:old-id", "compose", "send", "verify:new-id", "write", "postsend"},
+			check:   func(t *testing.T, f Fired[string], _ *harness, _ error) { assert.True(t, f.Delivered) },
+		},
+		{
+			name: "an indeterminate probe alerts and does not re-post",
+			setup: func(h *harness) {
+				staleReceipt(h)
+				h.verifyER["old-id"] = errors.New("discord 503") // indeterminate, not ErrMessageAbsent
+			},
+			wantErr:    true,
+			wantLog:    []string{"guard", "verify:old-id", "alert"},
+			wantAlerts: []string{"guard-alert"},
+		},
+		{
+			name:       "a compose failure alerts and never sends",
+			setup:      func(h *harness) { h.compER = errors.New("no prompt") },
+			wantErr:    true,
+			wantLog:    []string{"guard", "compose", "alert"},
+			wantAlerts: []string{"compose-alert"},
+		},
+		{
+			name:    "a late fire applies the prefix to the payload before Send",
+			lateOff: -time.Hour,
+			wantLog: []string{"guard", "compose", "lateprefix", "send", "verify:new-id", "write", "postsend"},
+			check: func(t *testing.T, f Fired[string], h *harness, _ error) {
+				assert.True(t, f.Late)
+				assert.Equal(t, "LATE:body", h.sentBody, "the late prefix is applied before Send")
+				assert.Equal(t, "LATE:body", f.Payload)
+			},
+		},
+		{
+			name:    "an on-time fire sends the composed payload unprefixed",
+			wantLog: fullDelivery,
+			check: func(t *testing.T, f Fired[string], h *harness, _ error) {
+				assert.False(t, f.Late)
+				assert.Equal(t, "body", h.sentBody)
+				assert.NotContains(t, h.log, "lateprefix")
+			},
+		},
+		{
+			name:       "a send failure alerts and does not verify or write",
+			setup:      func(h *harness) { h.sendER = errors.New("discord down") },
+			wantErr:    true,
+			wantLog:    []string{"guard", "compose", "send", "alert"},
+			wantAlerts: []string{"send-alert"},
+		},
+		{
+			name:       "a post-send verify failure alerts and saves no receipt",
+			setup:      func(h *harness) { h.verifyER["new-id"] = errors.New("not present") },
+			wantErr:    true,
+			wantLog:    []string{"guard", "compose", "send", "verify:new-id", "alert"},
+			wantAlerts: []string{"verify-alert"},
+		},
+		{
+			// H3: a verified send whose receipt cannot be persisted is the one
+			// failure that leaves the idempotency guard blind, so it BOTH returns
+			// the error AND alerts loudly. The post-send hook is still skipped.
+			name:       "a receipt-write failure alerts loudly and skips post-send (H3)",
+			setup:      func(h *harness) { h.writeER = errors.New("disk full") },
+			wantErr:    true,
+			wantLog:    []string{"guard", "compose", "send", "verify:new-id", "write", "alert"},
+			wantAlerts: []string{"receipt-alert"},
+		},
+		{
+			// Sc-6: a stop signal cancels the run ctx; the guard observes it and
+			// the path stops there — no compose, no send, and the canceled ctx is
+			// itself the loud signal, so no alert.
+			name:        "a canceled context stops the path at the guard, no alert",
+			setup:       func(h *harness) { h.guardER = context.Canceled },
+			canceledCtx: true,
+			wantErr:     true,
+			wantLog:     []string{"guard"},
+			check:       func(t *testing.T, _ Fired[string], _ *harness, err error) { require.ErrorIs(t, err, context.Canceled) },
+		},
+		{
+			name:    "the happy path delivers in the fixed order and runs post-send",
+			wantLog: fullDelivery,
+			check: func(t *testing.T, f Fired[string], h *harness, _ error) {
+				assert.True(t, f.Delivered)
+				assert.Equal(t, "new-id", f.MessageID)
+				assert.Equal(t, "user", f.Channel)
+				assert.Equal(t, "body", f.Payload)
+				assert.Equal(t, "body", h.postSeen, "PostSend sees the delivered payload")
+			},
+		},
+		{
+			name:    "a nil PostSend hook is simply skipped",
+			setup:   func(h *harness) { h.postSet = false },
+			wantLog: []string{"guard", "compose", "send", "verify:new-id", "write"},
+			check:   func(t *testing.T, f Fired[string], _ *harness, _ error) { assert.True(t, f.Delivered) },
+		},
+		{
+			name:    "a receipt-read failure returns loudly before composing, no alert",
+			setup:   func(h *harness) { h.guardER = errors.New("read receipt failed") },
+			wantErr: true,
+			wantLog: []string{"guard"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, tc.run)
+	}
 }
 
-func TestFire_AlreadyDelivered_SkipsNoSend(t *testing.T) {
+// run scripts a harness for the case, fires with the case's timing, and asserts
+// the ordered log, the alerts, and any branch-specific outcome. Extracted from
+// the loop so each row stays a plain data literal and TestFire stays flat.
+func (tc fireCase) run(t *testing.T) {
+	t.Parallel()
 	h := newHarness()
-	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true} // verify of old-id succeeds (no scripted error)
-	cutoff, lateAt := onTime()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.NoError(t, err)
-	assert.True(t, fired.Skipped)
-	assert.Equal(t, SkipAlreadyDelivered, fired.SkipReason)
-	assert.Equal(t, "old-id", fired.MessageID)
-	assert.Equal(t, "user", fired.Channel)
-	assert.Equal(t, []string{"guard", "verify:old-id"}, h.log, "a live receipt skips before composing or sending")
+	if tc.setup != nil {
+		tc.setup(h)
+	}
+	cutoffOff := cmpOr(tc.cutoffOff, time.Hour)
+	lateOff := cmpOr(tc.lateOff, time.Hour)
+
+	ctx := context.Background()
+	if tc.canceledCtx {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		cancel()
+	}
+
+	fired, err := Fire(ctx, fireNow(), h.delivery(fireNow().Add(cutoffOff), fireNow().Add(lateOff)))
+
+	if tc.wantErr {
+		require.Error(t, err)
+	} else {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, tc.wantLog, h.log, "the send-path steps ran in the expected order")
+	assert.Equal(t, tc.wantAlerts, alertsOrEmpty(h.alerts), "the loud alerts fired as expected")
+	if tc.check != nil {
+		tc.check(t, fired, h, err)
+	}
 }
 
-func TestFire_StaleReceipt_ReDelivers(t *testing.T) {
-	h := newHarness()
-	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true}
-	// The receipt's message is PROVABLY gone (a clean 404 → ErrMessageAbsent);
-	// only this verdict falls through to a fresh delivery.
-	h.verifyER["old-id"] = ErrMessageAbsent
-	cutoff, lateAt := onTime()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.NoError(t, err)
-	assert.True(t, fired.Delivered)
-	assert.Equal(t, "new-id", fired.MessageID)
-	assert.Equal(t, []string{"guard", "verify:old-id", "compose", "send", "verify:new-id", "write", "postsend"}, h.log,
-		"a provably-absent receipt falls through to a fresh delivery")
-	assert.Empty(t, h.alerts, "a clean re-delivery never alerts")
+// cmpOr returns v when it is non-zero, else fallback — the on-time timing default
+// (a zero offset means "use the +1h not-stale / on-time default").
+func cmpOr(v, fallback time.Duration) time.Duration {
+	if v == 0 {
+		return fallback
+	}
+	return v
 }
 
-// TestFire_IndeterminateReceiptProbe_AlertsAndDoesNotReSend is the H1 guard: a
-// prior receipt whose read-back is INDETERMINATE (a transport blip, a 5xx/429 —
-// not a clean 404) leaves the message's presence unknown, so Fire must NOT
-// re-post (which could double-send). It alerts and returns the retryable error
-// without composing or sending; the supervised retry re-probes.
-func TestFire_IndeterminateReceiptProbe_AlertsAndDoesNotReSend(t *testing.T) {
-	h := newHarness()
-	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true}
-	h.verifyER["old-id"] = errors.New("discord 503") // indeterminate, not ErrMessageAbsent
-	cutoff, lateAt := onTime()
-	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.Error(t, err, "an indeterminate probe is a retryable error, not a skip")
-	assert.NotContains(t, h.log, "send", "presence is unknown, so it must not re-post")
-	assert.NotContains(t, h.log, "compose", "and must not even compose a fresh message")
-	assert.Equal(t, []string{"guard", "verify:old-id", "alert"}, h.log)
-	assert.Equal(t, []string{"guard-alert"}, h.alerts)
-}
-
-// TestFire_IndeterminateWrapsErrMessageAbsent proves the classification is by
-// errors.Is, not identity: an ErrMessageAbsent wrapped in daemon context (as the
-// real Verify closures wrap it) still falls through to a fresh delivery.
-func TestFire_WrappedErrMessageAbsent_ReDelivers(t *testing.T) {
-	h := newHarness()
-	h.guard = Receipt{MessageID: "old-id", Channel: "user", Found: true}
-	h.verifyER["old-id"] = fmt.Errorf("companion: verify morning delivery: %w", ErrMessageAbsent)
-	cutoff, lateAt := onTime()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.NoError(t, err)
-	assert.True(t, fired.Delivered)
-	assert.Empty(t, h.alerts, "a wrapped provable-absence is a clean re-delivery")
-}
-
-func TestFire_ComposeError_AlertsAndErrorsNoSend(t *testing.T) {
-	h := newHarness()
-	h.compER = errors.New("no prompt")
-	cutoff, lateAt := onTime()
-	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.Error(t, err)
-	assert.Equal(t, []string{"guard", "compose", "alert"}, h.log, "a compose failure alerts and never sends")
-	assert.Equal(t, []string{"compose-alert"}, h.alerts)
-}
-
-func TestFire_Late_AppliesPrefixToPayload(t *testing.T) {
-	h := newHarness()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(fireNow().Add(time.Hour), fireNow().Add(-time.Hour)))
-	require.NoError(t, err)
-	assert.True(t, fired.Late)
-	assert.Equal(t, "LATE:body", h.sentBody, "the late prefix is applied to the payload before Send")
-	assert.Equal(t, "LATE:body", fired.Payload)
-	assert.Equal(t, []string{"guard", "compose", "lateprefix", "send", "verify:new-id", "write", "postsend"}, h.log)
-}
-
-func TestFire_OnTime_NoLatePrefix(t *testing.T) {
-	h := newHarness()
-	cutoff, lateAt := onTime()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.NoError(t, err)
-	assert.False(t, fired.Late)
-	assert.Equal(t, "body", h.sentBody, "an on-time fire sends the composed payload unprefixed")
-	assert.NotContains(t, h.log, "lateprefix")
-}
-
-func TestFire_SendError_AlertsAndErrors(t *testing.T) {
-	h := newHarness()
-	h.sendER = errors.New("discord down")
-	cutoff, lateAt := onTime()
-	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.Error(t, err)
-	assert.Equal(t, []string{"guard", "compose", "send", "alert"}, h.log, "a send failure alerts and does not verify or write")
-	assert.Equal(t, []string{"send-alert"}, h.alerts)
-}
-
-func TestFire_VerifyError_AlertsAndDoesNotSaveReceipt(t *testing.T) {
-	h := newHarness()
-	h.verifyER["new-id"] = errors.New("not present")
-	cutoff, lateAt := onTime()
-	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.Error(t, err)
-	assert.NotContains(t, h.log, "write", "a verify failure must not persist a receipt")
-	assert.NotContains(t, h.log, "postsend", "and must not run the post-send hook")
-	assert.Equal(t, []string{"guard", "compose", "send", "verify:new-id", "alert"}, h.log)
-	assert.Equal(t, []string{"verify-alert"}, h.alerts)
-}
-
-// TestFire_WriteReceiptError_AlertsAndErrorsWithoutPostSend is the H3 guard: a
-// verified send whose receipt cannot be persisted is the one failure that leaves
-// the idempotency guard blind, so Fire both returns the error AND fires the loud
-// alert (a retry could otherwise re-post invisibly). The post-send hook is still
-// skipped — it runs only after the receipt is saved.
-func TestFire_WriteReceiptError_AlertsAndErrorsWithoutPostSend(t *testing.T) {
-	h := newHarness()
-	h.writeER = errors.New("disk full")
-	cutoff, lateAt := onTime()
-	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.Error(t, err)
-	assert.NotContains(t, h.log, "postsend", "the post-send hook runs only after the receipt is saved")
-	assert.Equal(t, []string{"receipt-alert"}, h.alerts, "a write-receipt failure now alerts loudly (H3)")
-	assert.Equal(t, []string{"guard", "compose", "send", "verify:new-id", "write", "alert"}, h.log)
-}
-
-// TestFire_CanceledContext_Guard: a context canceled before Fire runs surfaces
-// through the first ctx-aware closure (the guard here) as a loud error and stops
-// the send path — no compose, no send. It is the Fire-level cancellation guard
-// the send daemons rely on for a clean shutdown mid-run (error-states Sc-6).
-func TestFire_CanceledContext_Guard(t *testing.T) {
-	h := newHarness()
-	h.guardER = context.Canceled // the guard observes the canceled ctx
-	cutoff, lateAt := onTime()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := Fire(ctx, fireNow(), h.delivery(cutoff, lateAt))
-	require.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, []string{"guard"}, h.log, "a canceled ctx stops the path at the guard — no compose, no send")
-	assert.Empty(t, h.alerts, "the canceled ctx is itself the loud signal; no alert")
-}
-
-func TestFire_HappyPath_OrdersDeliversAndRunsPostSend(t *testing.T) {
-	h := newHarness()
-	cutoff, lateAt := onTime()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.NoError(t, err)
-	assert.True(t, fired.Delivered)
-	assert.Equal(t, "new-id", fired.MessageID)
-	assert.Equal(t, "user", fired.Channel)
-	assert.Equal(t, "body", fired.Payload)
-	assert.Equal(t, "body", h.postSeen, "PostSend sees the delivered payload")
-	assert.Equal(t, []string{"guard", "compose", "send", "verify:new-id", "write", "postsend"}, h.log,
-		"the fixed order: guard → compose → send → verify → write receipt → post-send")
-	assert.Empty(t, h.alerts, "a clean delivery never alerts")
-}
-
-func TestFire_NoPostSendHook_IsSkipped(t *testing.T) {
-	h := newHarness()
-	h.postSet = false // companion/workout wire no post-send hook
-	cutoff, lateAt := onTime()
-	fired, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.NoError(t, err)
-	assert.True(t, fired.Delivered)
-	assert.Equal(t, []string{"guard", "compose", "send", "verify:new-id", "write"}, h.log, "a nil PostSend is simply skipped")
-}
-
-func TestFire_GuardError_ReturnsWithoutSendOrAlert(t *testing.T) {
-	h := newHarness()
-	h.guardER = errors.New("read receipt failed")
-	cutoff, lateAt := onTime()
-	_, err := Fire(context.Background(), fireNow(), h.delivery(cutoff, lateAt))
-	require.Error(t, err)
-	assert.Equal(t, []string{"guard"}, h.log, "a receipt-read failure returns loudly before composing")
-	assert.Empty(t, h.alerts, "the read error is itself the loud signal; no alert")
+// alertsOrEmpty normalizes a nil alert slice to nil so a case that expects no
+// alert (wantAlerts nil) compares equal to a harness that fired none.
+func alertsOrEmpty(alerts []string) []string {
+	if len(alerts) == 0 {
+		return nil
+	}
+	return alerts
 }

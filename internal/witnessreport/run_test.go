@@ -21,7 +21,6 @@ import (
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/lucidtest"
-	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -45,53 +44,12 @@ func (f *runFakeComposer) Compose(_ context.Context, _ time.Time) (Report, error
 	return f.report, nil
 }
 
-// alertRecord is one loud alert the fake deliverer captured.
-type alertRecord struct{ channel, text string }
-
-// embedRecord is one delivered rich embed the fake deliverer captured.
-type embedRecord struct {
-	channel string
-	embed   notify.Embed
-}
-
-// runFakeDeliverer captures every SendEmbedReturningID (real delivery), Send
-// (alert), and VerifyPresent (read-back / idempotency probe), and lets a test
-// drive the failure branches: sendErr fails delivery, verifyErr fails every
-// read-back, and verifyErrFor fails one specific message id (the "receipt's
-// message is gone" case). It needs no token or socket.
-type runFakeDeliverer struct {
-	sends        []embedRecord
-	alerts       []alertRecord
-	verifies     []string
-	sendErr      error
-	verifyErr    error
-	verifyErrFor map[string]error
-	idSeq        int
-}
-
-func (f *runFakeDeliverer) SendEmbedReturningID(_ context.Context, channel string, e notify.Embed) (string, error) {
-	f.sends = append(f.sends, embedRecord{channel, e})
-	if f.sendErr != nil {
-		return "", f.sendErr
-	}
-	f.idSeq++
-	return fmt.Sprintf("msg-%d", f.idSeq), nil
-}
-
-func (f *runFakeDeliverer) VerifyPresent(_ context.Context, _, messageID string) error {
-	f.verifies = append(f.verifies, messageID)
-	if f.verifyErrFor != nil {
-		if e, ok := f.verifyErrFor[messageID]; ok {
-			return e
-		}
-	}
-	return f.verifyErr
-}
-
-func (f *runFakeDeliverer) Send(_ context.Context, channel, text string) error {
-	f.alerts = append(f.alerts, alertRecord{channel, text})
-	return nil
-}
+// The witness-report daemon delivers an embed, so its tests drive the shared
+// embed-capable lucidtest.FakeDeliverer (its Deliverer interface —
+// SendEmbedReturningID / VerifyPresent / Send — is satisfied structurally): the
+// capture slices (Embeds / Alerts / Verifies) and the failure steering (SendErr
+// / VerifyErr / VerifyErrFor) that used to be re-implemented here now live once
+// in internal/lucidtest.
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -139,7 +97,7 @@ func newJobDB(t *testing.T) *gorm.DB {
 // verified receipt keyed on the ISO week.
 func TestFire_OnTime_DeliversAndWritesReceipt(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), reportNow())
@@ -147,10 +105,10 @@ func TestFire_OnTime_DeliversAndWritesReceipt(t *testing.T) {
 
 	assert.True(t, out.Delivered)
 	assert.Equal(t, "2026-W29", out.Week)
-	require.Len(t, del.sends, 1)
-	assert.Equal(t, engine.ChannelUser, del.sends[0].channel, "preview mode posts to the user channel")
-	assert.Empty(t, del.alerts, "a clean delivery raises no alert")
-	assert.Equal(t, []string{out.MessageID}, del.verifies, "the delivered id is read back")
+	require.Len(t, del.Embeds, 1)
+	assert.Equal(t, engine.ChannelUser, del.Embeds[0].Channel, "preview mode posts to the user channel")
+	assert.Empty(t, del.Alerts, "a clean delivery raises no alert")
+	assert.Equal(t, []string{out.MessageID}, del.Verifies, "the delivered id is read back")
 
 	rec, ok, rerr := store.ReadWitnessReportReceipt()
 	require.NoError(t, rerr)
@@ -165,15 +123,15 @@ func TestFire_OnTime_DeliversAndWritesReceipt(t *testing.T) {
 // friend-facing witness channel — flipping preview → auto is a mode change only.
 func TestFire_AutoModePostsToWitness(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 	r.mode = config.WitnessReportModeAuto
 
 	out, err := r.Fire(context.Background(), reportNow())
 	require.NoError(t, err)
 	assert.True(t, out.Delivered)
-	require.Len(t, del.sends, 1)
-	assert.Equal(t, engine.ChannelWitness, del.sends[0].channel)
+	require.Len(t, del.Embeds, 1)
+	assert.Equal(t, engine.ChannelWitness, del.Embeds[0].Channel)
 	assert.Equal(t, engine.ChannelWitness, out.Channel)
 }
 
@@ -184,7 +142,7 @@ func TestFire_AutoModePostsToWitness(t *testing.T) {
 // send, no re-compose.
 func TestFire_RetrySameWeek_IsIdempotentSkip(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), reportNow())
@@ -194,7 +152,7 @@ func TestFire_RetrySameWeek_IsIdempotentSkip(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, out2.Skipped)
 	assert.Equal(t, flynode.SkipAlreadyDelivered, out2.SkipReason)
-	assert.Len(t, del.sends, 1, "the retry re-uses the receipt; no second send")
+	assert.Len(t, del.Embeds, 1, "the retry re-uses the receipt; no second send")
 	assert.Equal(t, 1, comp.calls, "the retry does not re-compose")
 }
 
@@ -203,7 +161,7 @@ func TestFire_RetrySameWeek_IsIdempotentSkip(t *testing.T) {
 // week is never left silently empty.
 func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{verifyErrFor: map[string]error{}}
+	del := &lucidtest.FakeDeliverer{VerifyErrFor: map[string]error{}}
 	r, _ := newRunner(t, comp, del)
 
 	out1, err := r.Fire(context.Background(), reportNow())
@@ -212,13 +170,13 @@ func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 	// The first message is provably gone (a clean 404 → ErrMessageAbsent): the
 	// idempotency read-back on the next fire proves absence, so the week
 	// re-delivers rather than skipping into silence.
-	del.verifyErrFor[out1.MessageID] = fmt.Errorf("404 unknown message: %w", flynode.ErrMessageAbsent)
+	del.VerifyErrFor[out1.MessageID] = fmt.Errorf("404 unknown message: %w", flynode.ErrMessageAbsent)
 	out2, err := r.Fire(context.Background(), reportNow().Add(3*time.Hour))
 	require.NoError(t, err)
 
 	assert.True(t, out2.Delivered)
 	assert.NotEqual(t, out1.MessageID, out2.MessageID)
-	assert.Len(t, del.sends, 2, "a receipt whose message is gone re-delivers")
+	assert.Len(t, del.Embeds, 2, "a receipt whose message is gone re-delivers")
 }
 
 // --- Fire: missed-fire cut-off (AC-1) ---------------------------------------
@@ -228,7 +186,7 @@ func TestFire_ReceiptMessageGone_ReDelivers(t *testing.T) {
 // skips, alerts the user, never composes, and writes no receipt.
 func TestFire_PastCutoff_SkipsAndAlerts(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	// Monday 09:00 + 49h = Wednesday 10:00, past the 48h cut-off.
@@ -236,10 +194,10 @@ func TestFire_PastCutoff_SkipsAndAlerts(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, out.Skipped)
 	assert.Equal(t, flynode.SkipPastCutoff, out.SkipReason)
-	assert.Empty(t, del.sends, "no stale report is posted past the cut-off")
-	require.Len(t, del.alerts, 1, "past the cut-off the user is alerted instead of left silent")
-	assert.Equal(t, engine.ChannelUser, del.alerts[0].channel)
-	assert.Contains(t, del.alerts[0].text, "cut-off")
+	assert.Empty(t, del.Embeds, "no stale report is posted past the cut-off")
+	require.Len(t, del.Alerts, 1, "past the cut-off the user is alerted instead of left silent")
+	assert.Equal(t, engine.ChannelUser, del.Alerts[0].Channel)
+	assert.Contains(t, del.Alerts[0].Text, "cut-off")
 	assert.Equal(t, 0, comp.calls, "past the cut-off there is no compose")
 
 	_, ok, _ := store.ReadWitnessReportReceipt()
@@ -250,13 +208,13 @@ func TestFire_PastCutoff_SkipsAndAlerts(t *testing.T) {
 // the 48h window) is a healthy backfill after an overnight outage — it delivers.
 func TestFire_WithinCutoff_StillDelivers(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), reportNow().Add(24*time.Hour))
 	require.NoError(t, err)
 	assert.True(t, out.Delivered)
-	require.Len(t, del.sends, 1)
+	require.Len(t, del.Embeds, 1)
 }
 
 // --- Fire: never silent -----------------------------------------------------
@@ -265,12 +223,12 @@ func TestFire_WithinCutoff_StillDelivers(t *testing.T) {
 // and returns a loud error — and writes no receipt, so a retry re-sends.
 func TestFire_DeliveryError_AlertsAndErrors(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{sendErr: errors.New("discord 503")}
+	del := &lucidtest.FakeDeliverer{SendErr: errors.New("discord 503")}
 	r, store := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err)
-	require.Len(t, del.alerts, 1, "a total send failure fires a loud alert")
+	require.Len(t, del.Alerts, 1, "a total send failure fires a loud alert")
 
 	_, ok, _ := store.ReadWitnessReportReceipt()
 	assert.False(t, ok, "a failed delivery writes no receipt")
@@ -280,12 +238,12 @@ func TestFire_DeliveryError_AlertsAndErrors(t *testing.T) {
 // failure — the alert fires and the error surfaces, and no receipt is written.
 func TestFire_VerifyError_AlertsAndErrors(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{verifyErr: errors.New("404 after send")}
+	del := &lucidtest.FakeDeliverer{VerifyErr: errors.New("404 after send")}
 	r, store := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err)
-	require.Len(t, del.alerts, 1)
+	require.Len(t, del.Alerts, 1)
 
 	_, ok, _ := store.ReadWitnessReportReceipt()
 	assert.False(t, ok, "an unverified send writes no receipt")
@@ -296,13 +254,13 @@ func TestFire_VerifyError_AlertsAndErrors(t *testing.T) {
 // report.
 func TestFire_ComposeError_AlertsAndErrors(t *testing.T) {
 	comp := &runFakeComposer{err: errors.New("prompt file missing")}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err)
-	require.Len(t, del.alerts, 1)
-	assert.Empty(t, del.sends, "no report goes out on a compose failure")
+	require.Len(t, del.Alerts, 1)
+	assert.Empty(t, del.Embeds, "no report goes out on a compose failure")
 }
 
 // TestFire_SafetyTripped_DeliversAndAlerts: a report whose model prose tripped the
@@ -313,16 +271,16 @@ func TestFire_SafetyTripped_DeliversAndAlerts(t *testing.T) {
 	rep.SafetyTripped = true
 	rep.Fallback = true
 	comp := &runFakeComposer{report: rep}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), reportNow())
 	require.NoError(t, err)
 	assert.True(t, out.Delivered, "the metrics-only report still lands")
 	assert.True(t, out.SafetyTripped)
-	require.Len(t, del.sends, 1)
-	require.Len(t, del.alerts, 1, "a tripped scan alerts the operator to review")
-	assert.Contains(t, del.alerts[0].text, "witness-safe scan")
+	require.Len(t, del.Embeds, 1)
+	require.Len(t, del.Alerts, 1, "a tripped scan alerts the operator to review")
+	assert.Contains(t, del.Alerts[0].Text, "witness-safe scan")
 
 	_, ok, _ := store.ReadWitnessReportReceipt()
 	assert.True(t, ok, "a delivered report writes its receipt even when the scan tripped")
@@ -335,20 +293,20 @@ func TestFire_FallbackFlagPropagates(t *testing.T) {
 	rep := sampleReport()
 	rep.Fallback = true
 	comp := &runFakeComposer{report: rep}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, _ := newRunner(t, comp, del)
 
 	out, err := r.Fire(context.Background(), reportNow())
 	require.NoError(t, err)
 	assert.True(t, out.Delivered)
 	assert.True(t, out.Fallback)
-	assert.Empty(t, del.alerts, "a plain fallback is not an alert — only the warmth was lost")
+	assert.Empty(t, del.Alerts, "a plain fallback is not an alert — only the warmth was lost")
 }
 
 // TestFire_UnknownMode_Errors rejects a Runner built with a bogus mode before any
 // send.
 func TestFire_UnknownMode_Errors(t *testing.T) {
-	r, _ := newRunner(t, &runFakeComposer{report: sampleReport()}, &runFakeDeliverer{})
+	r, _ := newRunner(t, &runFakeComposer{report: sampleReport()}, &lucidtest.FakeDeliverer{})
 	r.mode = "bogus"
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err)
@@ -357,7 +315,7 @@ func TestFire_UnknownMode_Errors(t *testing.T) {
 // TestFire_MalformedMark_Errors: a Runner with a malformed clock mark rejects the
 // fire rather than mis-scheduling the cut-off.
 func TestFire_MalformedMark_Errors(t *testing.T) {
-	r, _ := newRunner(t, &runFakeComposer{report: sampleReport()}, &runFakeDeliverer{})
+	r, _ := newRunner(t, &runFakeComposer{report: sampleReport()}, &lucidtest.FakeDeliverer{})
 	r.markHM = "nope"
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err)
@@ -450,7 +408,7 @@ func TestUpsertWeeklyPeriodic_RejectsMalformedConfig(t *testing.T) {
 type rig struct {
 	db     *gorm.DB
 	store  *storage.Adapter
-	del    *runFakeDeliverer
+	del    *lucidtest.FakeDeliverer
 	comp   *runFakeComposer
 	sched  *flywheel.Scheduler
 	runner *flywheel.Runner
@@ -460,7 +418,7 @@ func newRig(t *testing.T, clock models.Clock) *rig {
 	t.Helper()
 	store := runStore(t)
 	db := newJobDB(t)
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	comp := &runFakeComposer{report: sampleReport()}
 	r := &Runner{compose: comp, deliver: del, store: store, mode: config.WitnessReportModePreview, weekday: 1, markHM: "09:00"}
 	reg := buildRegistry(r, clock)
@@ -495,8 +453,8 @@ func TestRun_WeeklyPeriodicFiresAndDelivers(t *testing.T) {
 
 	require.NoError(t, r.runner.RunUntilIdle(tickCtx))
 
-	require.Len(t, r.del.sends, 1, "the weekly report delivers")
-	assert.Equal(t, engine.ChannelUser, r.del.sends[0].channel)
+	require.Len(t, r.del.Embeds, 1, "the weekly report delivers")
+	assert.Equal(t, engine.ChannelUser, r.del.Embeds[0].Channel)
 
 	rec, ok, err := r.store.ReadWitnessReportReceipt()
 	require.NoError(t, err)
@@ -527,7 +485,7 @@ func TestRun_ReconcilesThenDrainsCleanly(t *testing.T) {
 			Config:   cfg,
 			Numbers:  fakeNumbers{},
 			Records:  fakeRecords{},
-			Notifier: &runFakeDeliverer{},
+			Notifier: &lucidtest.FakeDeliverer{},
 			DBPath:   dbPath,
 		})
 	}()
@@ -561,16 +519,16 @@ func closeGorm(db *gorm.DB) {
 // TestRun_RejectsMissingCollaborators guards the required-field errors.
 func TestRun_RejectsMissingCollaborators(t *testing.T) {
 	require.ErrorIs(t, Run(context.Background(), Options{
-		Notifier: &runFakeDeliverer{}, Numbers: fakeNumbers{}, Records: fakeRecords{},
+		Notifier: &lucidtest.FakeDeliverer{}, Numbers: fakeNumbers{}, Records: fakeRecords{},
 	}), errNoStore)
 	require.ErrorIs(t, Run(context.Background(), Options{
 		Store: runStore(t), Numbers: fakeNumbers{}, Records: fakeRecords{},
 	}), errNoNotifier)
 	require.ErrorIs(t, Run(context.Background(), Options{
-		Store: runStore(t), Notifier: &runFakeDeliverer{}, Records: fakeRecords{},
+		Store: runStore(t), Notifier: &lucidtest.FakeDeliverer{}, Records: fakeRecords{},
 	}), errNoNumbers)
 	require.ErrorIs(t, Run(context.Background(), Options{
-		Store: runStore(t), Notifier: &runFakeDeliverer{}, Numbers: fakeNumbers{},
+		Store: runStore(t), Notifier: &lucidtest.FakeDeliverer{}, Numbers: fakeNumbers{},
 	}), errNoRecords)
 }
 

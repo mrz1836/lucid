@@ -14,6 +14,7 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/lucidtest"
 )
 
 // skipIfRoot skips a chmod-driven permission test under root, where the write
@@ -31,7 +32,7 @@ func skipIfRoot(t *testing.T) {
 // Guard read failure aborts the fire before any send.
 func TestFire_ReceiptReadError_Errors(t *testing.T) {
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	witnessDir := filepath.Join(store.Home(), "engine", "witness")
@@ -40,20 +41,20 @@ func TestFire_ReceiptReadError_Errors(t *testing.T) {
 
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err, "a corrupt receipt is loud, not a silent re-send")
-	assert.Empty(t, del.sends, "the read failure aborts before any send")
+	assert.Empty(t, del.Embeds, "the read failure aborts before any send")
 }
 
 // ctxAlertDeliverer records the cancellation state of the context its alert Send
 // received, so a test can prove the loud floor runs detached from a canceled run.
 type ctxAlertDeliverer struct {
-	runFakeDeliverer
+	lucidtest.FakeDeliverer
 
 	alertCtxErr error
 }
 
 func (d *ctxAlertDeliverer) Send(ctx context.Context, channel, text string) error {
 	d.alertCtxErr = ctx.Err()
-	return d.runFakeDeliverer.Send(ctx, channel, text)
+	return d.FakeDeliverer.Send(ctx, channel, text)
 }
 
 // TestAlert_SurvivesCanceledRunContext is the Sc-6 guard for the loud floor: a
@@ -67,7 +68,7 @@ func TestAlert_SurvivesCanceledRunContext(t *testing.T) {
 	cancel()
 	r.alert(ctx, "loud floor")
 
-	require.Len(t, del.alerts, 1, "the alert still fires under a canceled run ctx")
+	require.Len(t, del.Alerts, 1, "the alert still fires under a canceled run ctx")
 	require.NoError(t, del.alertCtxErr, "the alert ran on a context detached from the run's cancellation")
 }
 
@@ -77,7 +78,7 @@ func TestAlert_SurvivesCanceledRunContext(t *testing.T) {
 func TestFire_ReceiptWriteError_Errors(t *testing.T) {
 	skipIfRoot(t)
 	comp := &runFakeComposer{report: sampleReport()}
-	del := &runFakeDeliverer{}
+	del := &lucidtest.FakeDeliverer{}
 	r, store := newRunner(t, comp, del)
 
 	witnessDir := filepath.Join(store.Home(), "engine", "witness")
@@ -87,18 +88,18 @@ func TestFire_ReceiptWriteError_Errors(t *testing.T) {
 
 	_, err := r.Fire(context.Background(), reportNow())
 	require.Error(t, err, "a receipt write failure surfaces loudly")
-	require.Len(t, del.sends, 1, "the send lands; only the receipt persistence fails")
+	require.Len(t, del.Embeds, 1, "the send lands; only the receipt persistence fails")
 	// H3: a delivery the idempotency guard cannot see (verified send, no receipt)
 	// alerts loudly as well as erroring, since a retry could otherwise re-post.
-	require.Len(t, del.alerts, 1, "a receipt-write failure alerts loudly (H3)")
-	assert.Contains(t, del.alerts[0].text, "could not record the receipt")
+	require.Len(t, del.Alerts, 1, "a receipt-write failure alerts loudly (H3)")
+	assert.Contains(t, del.Alerts[0].Text, "could not record the receipt")
 }
 
 // TestWork_FireErrorPropagates: the weekly worker returns a fire's error to the
 // flywheel runner (so a supervised retry sees it) rather than swallowing it — a
 // bogus mode fails the fire before any send.
 func TestWork_FireErrorPropagates(t *testing.T) {
-	r, _ := newRunner(t, &runFakeComposer{report: sampleReport()}, &runFakeDeliverer{})
+	r, _ := newRunner(t, &runFakeComposer{report: sampleReport()}, &lucidtest.FakeDeliverer{})
 	r.mode = "bogus"
 	w := weeklyWorker{r: r, clock: models.NewFixedClock(reportNow())}
 
@@ -119,7 +120,7 @@ func TestRun_DBPathError(t *testing.T) {
 
 	err := Run(context.Background(), Options{
 		Store:    store,
-		Notifier: &runFakeDeliverer{},
+		Notifier: &lucidtest.FakeDeliverer{},
 		Numbers:  fakeNumbers{},
 		Records:  fakeRecords{},
 		Config: config.WitnessReportConfig{

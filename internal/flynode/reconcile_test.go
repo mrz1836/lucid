@@ -91,6 +91,7 @@ func activeOf(t *testing.T, db *gorm.DB, slug string, readAt time.Time) bool {
 // configuration deliberately suppresses stays suppressed, so repair can never
 // fight a setting.
 func TestReconcile_InjectedGuardDecidesWhatIsRepaired(t *testing.T) {
+	t.Parallel()
 	const slug = "seam-periodic"
 	cases := []struct {
 		name        string
@@ -141,6 +142,7 @@ func TestReconcile_InjectedGuardDecidesWhatIsRepaired(t *testing.T) {
 // not invent one from the store it is inspecting. It scans, reports, and changes
 // nothing.
 func TestReconcile_NilGuardRepairsNothing(t *testing.T) {
+	t.Parallel()
 	const slug = "seam-periodic"
 	now := reconcileNow()
 	db := newSeamDB(t)
@@ -159,6 +161,7 @@ func TestReconcile_NilGuardRepairsNothing(t *testing.T) {
 // what lets an operator repair one parked send on a busy store without the pass
 // forming an opinion about anything else in it.
 func TestReconcile_SlugNarrowsThePassToOneRow(t *testing.T) {
+	t.Parallel()
 	const target, bystander = "seam-target", "seam-bystander"
 	now := reconcileNow()
 	db := newSeamDB(t)
@@ -187,6 +190,7 @@ func TestReconcile_SlugNarrowsThePassToOneRow(t *testing.T) {
 // difference between "deliver it late" and "let this one go" — the choice an
 // operator makes, and the only path that writes a new cursor.
 func TestReconcile_NoFireResetsTheCursorForward(t *testing.T) {
+	t.Parallel()
 	const slug = "seam-periodic"
 	now := reconcileNow()
 	db := newSeamDB(t)
@@ -220,6 +224,7 @@ func TestReconcile_NoFireResetsTheCursorForward(t *testing.T) {
 // round trip is proven — and the only place that shows the re-arm is written to
 // the file rather than to one connection's view of it.
 func TestReconcileStore_RepairsAStoreOnDisk(t *testing.T) {
+	t.Parallel()
 	const slug = "seam-periodic"
 	now := reconcileNow()
 	path := filepath.Join(t.TempDir(), "job.db")
@@ -260,6 +265,7 @@ func TestReconcileStore_RepairsAStoreOnDisk(t *testing.T) {
 // the property that keeps the Engine's messages byte-identical after the move,
 // and that tells a supervised log which node's store actually failed.
 func TestReconcile_PkgTagsErrors(t *testing.T) {
+	t.Parallel()
 	t.Run("a missing store names the package and the path", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "absent", "job.db")
 
@@ -295,6 +301,7 @@ func TestReconcile_PkgTagsErrors(t *testing.T) {
 // daemon as broken every day between the mark and the next poll, and would make
 // this pass a writer on a healthy store rather than a no-op.
 func TestParked_InactiveOrStuckCursor(t *testing.T) {
+	t.Parallel()
 	now := reconcileNow()
 	cases := []struct {
 		name string
@@ -320,6 +327,7 @@ func TestParked_InactiveOrStuckCursor(t *testing.T) {
 // in a supervised log, while a genuine failure with a live context still
 // surfaces.
 func TestStartupErr(t *testing.T) {
+	t.Parallel()
 	boom := context.DeadlineExceeded // any non-nil error stands in for a real failure
 
 	t.Run("a live context surfaces the failure", func(t *testing.T) {

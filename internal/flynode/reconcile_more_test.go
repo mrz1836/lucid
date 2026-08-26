@@ -63,6 +63,7 @@ func queryOnlyDB(t *testing.T, path string) *gorm.DB {
 // listed (here, the handle is closed under it), the pass fails loudly with the
 // caller's package tag rather than silently reporting a clean scan.
 func TestReconcile_ListPeriodicsError_IsTagged(t *testing.T) {
+	t.Parallel()
 	now := reconcileNow()
 	db := newSeamDB(t)
 	seedParked(t, db, "seam-periodic", now.Add(-24*time.Hour))
@@ -77,6 +78,7 @@ func TestReconcile_ListPeriodicsError_IsTagged(t *testing.T) {
 // active flag with a single write; when that write cannot land the pass returns
 // the tagged error rather than reporting a repair that never happened.
 func TestReconcile_RearmWriteError_IsPropagated(t *testing.T) {
+	t.Parallel()
 	now := reconcileNow()
 	path := seededStorePath(t, "seam-periodic", now.Add(-24*time.Hour))
 	db := queryOnlyDB(t, path)
@@ -90,6 +92,7 @@ func TestReconcile_RearmWriteError_IsPropagated(t *testing.T) {
 // cursor inside a transaction; a store that rejects the write surfaces the
 // tagged reset error rather than half-applying it.
 func TestReconcile_NoFireResetError_IsPropagated(t *testing.T) {
+	t.Parallel()
 	now := reconcileNow()
 	path := seededStorePath(t, "seam-periodic", now.Add(-24*time.Hour))
 	db := queryOnlyDB(t, path)
@@ -103,6 +106,7 @@ func TestReconcile_NoFireResetError_IsPropagated(t *testing.T) {
 // cursor reset: an every-N periodic is re-declared from its own interval (not a
 // cron) and resumes at a future occurrence, the missed one skipped.
 func TestReconcile_NoFireResetsAnIntervalPeriodic(t *testing.T) {
+	t.Parallel()
 	const slug = "seam-interval"
 	now := reconcileNow()
 	db := newSeamDB(t)
@@ -124,6 +128,7 @@ func TestReconcile_NoFireResetsAnIntervalPeriodic(t *testing.T) {
 // and the slug when the periodic it expects is not in the store — the "missing
 // after re-arm" invariant a corrupted store would otherwise hide.
 func TestNextRunOf_MissingSlugAfterRearm(t *testing.T) {
+	t.Parallel()
 	now := reconcileNow()
 	db := newSeamDB(t)
 	seedParked(t, db, "present", now.Add(-24*time.Hour))
@@ -137,6 +142,7 @@ func TestNextRunOf_MissingSlugAfterRearm(t *testing.T) {
 // tagged list error from the cursor read-back too, not only from the top-level
 // scan.
 func TestNextRunOf_ListError_IsTagged(t *testing.T) {
+	t.Parallel()
 	now := reconcileNow()
 	db := newSeamDB(t)
 	closeSeamDB(t, db)
