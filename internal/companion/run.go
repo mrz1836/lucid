@@ -270,13 +270,27 @@ func (r *Runner) fire(ctx context.Context, mode Mode, now time.Time, note string
 	}, nil
 }
 
+// alertTimeout bounds a detached best-effort alert: it sits above the notifier's
+// own ~20s HTTP budget so a legitimately slow (cold-start) alert is never cut
+// short, while still bounding how long a wedged channel can delay a shutdown.
+const alertTimeout = 30 * time.Second
+
 // alert posts a best-effort loud ping to the user channel when a companion fire
 // cannot deliver its real message — the "never silent" floor. It is
 // deliberately best-effort: if the channel itself is unreachable the returned
 // error from [Runner.Fire] is the loud signal (it fails the job and lands in the
 // supervised daemon log), and a failed alert must not mask that original error.
+//
+// The alert runs on a context DETACHED from the run's cancellation
+// (context.WithoutCancel): a stop signal mid-send (error-states Sc-6) cancels
+// the Fire ctx, and reusing it here would abort the alert POST at the transport
+// exactly when a run is torn down — the loud floor going silent at the one
+// moment it matters most. A bounded deadline still keeps a wedged channel from
+// hanging shutdown.
 func (r *Runner) alert(ctx context.Context, text string) {
-	_ = r.deliver.Send(ctx, engine.ChannelUser, text)
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), alertTimeout)
+	defer cancel()
+	_ = r.deliver.Send(actx, engine.ChannelUser, text)
 }
 
 // window is the per-mode scheduling metadata: the periodic identity, the

@@ -55,6 +55,34 @@ func TestFireGuardReceiptReadErrorIsLoud(t *testing.T) {
 // a verified send is a loud error: the send goes out and reads back, but an
 // unwritable receipt directory fails the fire so a supervised retry re-sends
 // rather than the day being recorded as delivered on a receipt that never landed.
+// ctxAlertDeliverer records the cancellation state of the context its alert Send
+// received, so a test can prove the loud floor runs detached from a canceled run.
+type ctxAlertDeliverer struct {
+	lucidtest.FakeDeliverer
+
+	alertCtxErr error
+}
+
+func (d *ctxAlertDeliverer) Send(ctx context.Context, channel, text string) error {
+	d.alertCtxErr = ctx.Err()
+	return d.FakeDeliverer.Send(ctx, channel, text)
+}
+
+// TestAlert_SurvivesCanceledRunContext is the Sc-6 guard for the loud floor: a
+// stop signal cancels the Fire ctx, but the best-effort alert must still reach
+// the channel — it runs on a context detached from that cancellation.
+func TestAlert_SurvivesCanceledRunContext(t *testing.T) {
+	del := &ctxAlertDeliverer{}
+	r := &Runner{deliver: del}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r.alert(ctx, "loud floor")
+
+	require.Len(t, del.Alerts, 1, "the alert still fires under a canceled run ctx")
+	require.NoError(t, del.alertCtxErr, "the alert ran on a context detached from the run's cancellation")
+}
+
 func TestFireWriteReceiptErrorIsLoud(t *testing.T) {
 	skipIfRoot(t)
 	t.Parallel()

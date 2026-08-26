@@ -63,6 +63,35 @@ func TestFire_ReceiptReadError_IsLoud(t *testing.T) {
 	assert.Empty(t, del.Sends, "a corrupt receipt is not treated as a fresh window")
 }
 
+// ctxAlertDeliverer records the cancellation state of the context its alert Send
+// received, so a test can prove the loud floor runs detached from a canceled run.
+type ctxAlertDeliverer struct {
+	lucidtest.FakeDeliverer
+
+	alertCtxErr error
+}
+
+func (d *ctxAlertDeliverer) Send(ctx context.Context, channel, text string) error {
+	d.alertCtxErr = ctx.Err()
+	return d.FakeDeliverer.Send(ctx, channel, text)
+}
+
+// TestAlert_SurvivesCanceledRunContext is the Sc-6 guard for the loud floor: a
+// stop signal cancels the Fire ctx, but the best-effort alert must still reach
+// the channel — it runs on a context detached from that cancellation, so a run
+// torn down mid-send does not silence the one signal that matters most.
+func TestAlert_SurvivesCanceledRunContext(t *testing.T) {
+	del := &ctxAlertDeliverer{}
+	r := &Runner{deliver: del}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r.alert(ctx, "loud floor")
+
+	require.Len(t, del.Alerts, 1, "the alert still fires under a canceled run ctx")
+	require.NoError(t, del.alertCtxErr, "the alert ran on a context detached from the run's cancellation")
+}
+
 // TestFire_ReceiptWriteError_IsLoud: a fire that delivers and verifies but then
 // cannot persist its receipt fails loudly — the receipt is the idempotency
 // guard, and a delivery it cannot record must surface rather than pass silently.

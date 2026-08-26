@@ -43,6 +43,34 @@ func TestFire_ReceiptReadError_Errors(t *testing.T) {
 	assert.Empty(t, del.sends, "the read failure aborts before any send")
 }
 
+// ctxAlertDeliverer records the cancellation state of the context its alert Send
+// received, so a test can prove the loud floor runs detached from a canceled run.
+type ctxAlertDeliverer struct {
+	runFakeDeliverer
+
+	alertCtxErr error
+}
+
+func (d *ctxAlertDeliverer) Send(ctx context.Context, channel, text string) error {
+	d.alertCtxErr = ctx.Err()
+	return d.runFakeDeliverer.Send(ctx, channel, text)
+}
+
+// TestAlert_SurvivesCanceledRunContext is the Sc-6 guard for the loud floor: a
+// stop signal cancels the Fire ctx, but the best-effort alert must still reach
+// the channel — it runs on a context detached from that cancellation.
+func TestAlert_SurvivesCanceledRunContext(t *testing.T) {
+	del := &ctxAlertDeliverer{}
+	r := &Runner{deliver: del}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r.alert(ctx, "loud floor")
+
+	require.Len(t, del.alerts, 1, "the alert still fires under a canceled run ctx")
+	require.NoError(t, del.alertCtxErr, "the alert ran on a context detached from the run's cancellation")
+}
+
 // TestFire_ReceiptWriteError_Errors: a receipt that cannot be persisted after a
 // verified send is a loud error — the fire never returns success on a durability
 // failure that would let the next week double-post.
