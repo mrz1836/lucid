@@ -103,7 +103,7 @@ func (r *Router) AddReframe(req AddReframeRequest) (AddReframeResult, error) {
 func (r *Router) ListReframes() (ListReframesResult, error) {
 	entries, err := r.store.ReadReframes()
 	if err != nil {
-		return ListReframesResult{}, err
+		return ListReframesResult{}, fmt.Errorf("could not read the reframes: %w", err)
 	}
 	if entries == nil {
 		entries = []reframes.Reframe{}

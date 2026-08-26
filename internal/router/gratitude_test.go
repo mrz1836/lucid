@@ -1,6 +1,8 @@
 package router
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -9,6 +11,23 @@ import (
 
 	"github.com/mrz1836/lucid/internal/observations"
 )
+
+// TestGratitudeList_ReadError_IsWrappedWithIntent: a corrupt gratitude entry
+// file surfaces through GratitudeList as a wrapped, intent-named error rather
+// than a bare storage return (Finding 5 — the read-path sibling of the write
+// wraps).
+func TestGratitudeList_ReadError_IsWrappedWithIntent(t *testing.T) {
+	r := bootedGratitude(t)
+	res := addGratitude(t, r, "a warm house", day1())
+
+	// Corrupt the entry's JSON so ReadGratitudeAll's per-entry decode fails.
+	path := filepath.Join(r.store.Home(), "registries", "gratitude", res.Key+".json")
+	require.NoError(t, os.WriteFile(path, []byte("{bad"), 0o600))
+
+	_, err := r.GratitudeList()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not read the gratitude tally")
+}
 
 // bootedGratitude returns a booted router over a fresh scaffolded Ledger.
 // (edt / day1..day3 live in the sibling reframe/observation test files, same
@@ -254,15 +273,22 @@ func TestGratitudeMerge(t *testing.T) {
 	}
 	assert.Equal(t, 1, mergeEvents, "exactly one merge event records the fold")
 
-	// Error paths change nothing.
+	// Error paths change nothing — and each refusal reads as clean user prose,
+	// never leaking the storage: package prefix (Finding 2; the CLI prints it raw).
 	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: dst.Key, Target: dst.Key, Now: day3()})
 	require.Error(t, err, "a self-merge is refused")
+	assert.NotContains(t, err.Error(), "storage:", "the refusal reaches the user as prose, not a package leak")
+	assert.Contains(t, err.Error(), "into itself")
+	assert.Contains(t, err.Error(), "nothing was changed")
 	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: "gratitude_missing", Target: dst.Key, Now: day3()})
 	require.Error(t, err, "a missing source is refused")
+	assert.NotContains(t, err.Error(), "storage:")
 	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: dst.Key, Target: src.Key, Now: day3()})
 	require.Error(t, err, "merging into a tombstone is refused")
+	assert.NotContains(t, err.Error(), "storage:")
 	_, err = r.MergeGratitude(GratitudeMergeRequest{Source: src.Key, Target: dst.Key, Now: day3()})
 	require.Error(t, err, "merging a tombstoned source is refused")
+	assert.NotContains(t, err.Error(), "storage:")
 
 	after, err := r.GratitudeList()
 	require.NoError(t, err)

@@ -132,7 +132,7 @@ func (r *Router) AddFocus(req AddFocusRequest) (AddFocusResult, error) {
 func (r *Router) ListFocus(req ListFocusRequest) (ListFocusResult, error) {
 	entries, err := r.store.ReadFocus()
 	if err != nil {
-		return ListFocusResult{}, err
+		return ListFocusResult{}, fmt.Errorf("could not read the focus items: %w", err)
 	}
 	if !req.IncludeRetired {
 		entries = activeFocusItems(entries)

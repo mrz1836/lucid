@@ -2,6 +2,7 @@ package router
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -9,6 +10,22 @@ import (
 
 	"github.com/mrz1836/lucid/internal/observations"
 )
+
+// storagePrefix is the package prefix the storage adapter stamps on its errors.
+// A gratitude-merge storage error is the one gratitude return whose message is
+// already a complete user-facing sentence (a self-merge, a missing or tombstoned
+// source/target — each ending "nothing was changed"), so surfacing it cleanly is
+// a matter of stripping this prefix, matching the self/person path's enginePrefix
+// stripping (self.go). The add/import paths wrap their opaque I/O failures with
+// intent instead.
+const storagePrefix = "storage: "
+
+// surfaceMergeError turns a gratitude-merge storage error into clean user-facing
+// prose by stripping the storage: prefix, so cli/output.go prints the sentence
+// the storage op composed rather than leaking the package name.
+func surfaceMergeError(err error) error {
+	return errors.New(strings.TrimPrefix(err.Error(), storagePrefix))
+}
 
 // gratitude.go is the user-facing gratitude-tally path (gratitude.md §3, §6):
 // the accumulating nightly-gratitude count. `add` tallies one occurrence —
@@ -188,7 +205,7 @@ func (r *Router) resolveGratitudeAddKey(into, thing string) (key string, makePri
 func (r *Router) GratitudeList() (GratitudeListResult, error) {
 	all, err := r.store.ReadGratitudeAll()
 	if err != nil {
-		return GratitudeListResult{}, err
+		return GratitudeListResult{}, fmt.Errorf("could not read the gratitude tally: %w", err)
 	}
 	entries := make([]GratitudeListEntry, 0, len(all))
 	for _, e := range all {
@@ -297,7 +314,7 @@ func (r *Router) MergeGratitude(req GratitudeMergeRequest) (GratitudeWriteResult
 	now := whenOr(req.Now)
 	entry, appended, err := r.store.MergeGratitude(req.Source, req.Target, now)
 	if err != nil {
-		return GratitudeWriteResult{}, err
+		return GratitudeWriteResult{}, surfaceMergeError(err)
 	}
 	tally := entry.Tally()
 	return GratitudeWriteResult{
