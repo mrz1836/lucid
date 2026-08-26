@@ -17,6 +17,13 @@ const (
 	RegistryPlace  = "place"
 	RegistryEra    = "era"
 	RegistryPet    = "pet"
+	// RegistryGratitude is the accumulating-tally kind (gratitude.md §1). A
+	// gratitude referent shares the salted low-signal key derivation and the
+	// aka/tombstone identity of the other registries, but replaces the plain
+	// status_history with a typed occurrence/seed/merge history that the count
+	// and the first/last span are folded from ([GratitudeEntry]). Its on-disk
+	// shape lives in gratitude.go, not the shared [Registry] struct.
+	RegistryGratitude = "gratitude"
 )
 
 // Registry status values are recorded in an append-only status_history, never
@@ -43,6 +50,8 @@ func RegistryDir(kind string) (string, bool) {
 		return "eras", true
 	case RegistryPet:
 		return "pets", true
+	case RegistryGratitude:
+		return "gratitude", true
 	default:
 		return "", false
 	}
