@@ -26,15 +26,16 @@ func ensureDir(dir, label string) error {
 // fails leaves the previous file exactly as it was. label names the record for
 // the error messages, matching this package's "storage: <verb> <label>" shape.
 //
-// The scope is deliberately narrow, and saying so is part of the contract: this
-// exists for the self-facts store, whose file is years of semantic memory where
-// a torn write costs the user their whole self-profile rather than a handful of
-// recoverable records. Every other writer in the adapter still calls
-// os.WriteFile, and making them all atomic is a separate change — the helper
-// takes exactly os.WriteFile's arguments plus a label so that change would be
-// one line per call site.
-//
-//nolint:unparam // label is kept explicit so a second caller is a one-line change, not a signature change
+// This is the adapter's standard writer for a durable whole-file record — a
+// record that is not rebuildable, so a torn write is a hard read error that
+// breaks a whole surface rather than costing one recoverable line. It began
+// life scoped to the self-facts store (years of semantic memory) and, as the
+// doc-comment always promised, was extended one line per call site to every
+// such record: the observations config carrying key_salt, gratitude and person
+// records, the off-limits registry, the registry records, and the engine
+// chain/anchors/status projections. The rebuildable, append-line, and
+// disposable-projection paths keep their own disciplines (appendLineFsync, the
+// surface-state resilient readers) and do not route through here.
 func writeFileAtomic(path string, content []byte, label string) error {
 	dir := filepath.Dir(path)
 

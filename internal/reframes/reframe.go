@@ -103,6 +103,9 @@ func (r Reframe) Validate() error {
 	if r.LogicalDate == "" {
 		return fmt.Errorf("reframes: logical_date is required")
 	}
+	if _, err := time.Parse(dateLayout, r.LogicalDate); err != nil {
+		return fmt.Errorf("reframes: logical_date must be YYYY-MM-DD, got %q", r.LogicalDate)
+	}
 	if r.Source == "" {
 		return fmt.Errorf("reframes: source is required")
 	}

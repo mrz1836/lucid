@@ -347,30 +347,28 @@ func TestReadRegistryKind_CorruptRecordErrors(t *testing.T) {
 }
 
 // TestWriteFailures_OnReadOnlyTargets covers the write-error branches when the
-// target cannot be written: a read-only config file blocks the config
-// overwrite, and a read-only tree blocks creating a new day shard. Skipped
-// under root (which bypasses the permission bits).
+// target cannot be written: a read-only observations tree blocks both the
+// atomic config write (its temp file stages in that dir) and the creation of a
+// new day shard. Skipped under root (which bypasses the permission bits).
 func TestWriteFailures_OnReadOnlyTargets(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses permission bits")
 	}
 	a := newObsStore(t)
 
-	// A read-only config.json blocks SaveObservationsConfig (an overwrite
-	// truncates the existing file, which needs the file to be writable).
 	cfg, err := a.ReadObservationsConfig()
 	require.NoError(t, err)
-	require.NoError(t, os.Chmod(a.obsConfigPath(), 0o400))
-	t.Cleanup(func() { _ = os.Chmod(a.obsConfigPath(), 0o600) })
-	require.Error(t, a.SaveObservationsConfig(cfg))
 
-	// A read-only observations tree blocks creating a new day shard (MkdirAll
-	// of a not-yet-existing subdir in a non-writable parent fails reliably,
-	// unlike creating a file in a read-only dir, which some macOS temp-dir
-	// ACLs still permit).
+	// A read-only observations tree fails SaveObservationsConfig: the atomic
+	// write stages a temp file in config.json's own dir, so a read-only target
+	// alone would just be replaced by the rename — the dir must be read-only.
+	// The same read-only tree also blocks MkdirAll of a not-yet-existing day
+	// shard, which some macOS temp-dir ACLs permit for a plain file create.
 	obsDir := a.observationsDir()
 	require.NoError(t, os.Chmod(obsDir, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(obsDir, 0o700) })
+
+	require.Error(t, a.SaveObservationsConfig(cfg))
 	_, err = a.AppendObservation(microEvent(observations.KindPain, "2026-08-02", map[string]any{"intensity": 6}))
 	require.Error(t, err)
 }

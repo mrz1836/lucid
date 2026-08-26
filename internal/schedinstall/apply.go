@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // ErrUnsupported is returned by [Apply] and [Uninstall] on a non-macOS host:
@@ -103,6 +104,31 @@ func printArgs(uid int, label string) []string {
 // per-user job by.
 func guiTarget(uid int, label string) string {
 	return "gui/" + strconv.Itoa(uid) + "/" + label
+}
+
+// validateLabel rejects a launchd label that is not a plain reverse-DNS token,
+// so a free-form --label can never derive a plist path (or bootout target)
+// outside the LaunchAgents dir. Without it, `--label ../../../../tmp/x` would
+// resolve [plistPath] to `/tmp/x.plist` and let an uninstall os.Remove it. The
+// rule is a decision, not a host action, so it lives in this untagged file
+// (Linux/CI covers it directly); the darwin Apply/WriteArtifacts/Uninstall call
+// it before deriving any path or shelling out to launchctl.
+func validateLabel(label string) error {
+	if label == "" {
+		return errors.New("schedinstall: launchd label is required")
+	}
+	if strings.Contains(label, "..") {
+		return fmt.Errorf("schedinstall: invalid launchd label %q (must not contain \"..\")", label)
+	}
+	for _, r := range label {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			// reverse-DNS charset: letters, digits, '.', '-', '_'
+		default:
+			return fmt.Errorf("schedinstall: invalid launchd label %q (must be reverse-DNS: letters, digits, '.', '-', '_')", label)
+		}
+	}
+	return nil
 }
 
 // plistPath resolves the launchd plist path for a label under a LaunchAgents dir.

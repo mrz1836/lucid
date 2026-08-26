@@ -95,6 +95,15 @@ func TestValidate(t *testing.T) {
 	bad.LogicalDate = ""
 	require.Error(t, bad.Validate(), "missing logical_date rejected")
 
+	// A logical_date must be a real YYYY-MM-DD civil day, not a separator- or
+	// dot-bearing value that a day-file path could be built from, and not a
+	// partial period (focus.md §2; defense-in-depth for the storage day path).
+	for _, shape := range []string{"2026-08-23/../../etc", "2026-08", "2026-13-01", "not-a-date"} {
+		bad = valid
+		bad.LogicalDate = shape
+		require.Error(t, bad.Validate(), "malformed logical_date %q rejected", shape)
+	}
+
 	bad = valid
 	bad.Source = ""
 	require.Error(t, bad.Validate(), "missing source rejected")

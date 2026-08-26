@@ -95,10 +95,13 @@ func TestRunTripwire_CorruptDayRecordErrors(t *testing.T) {
 func TestRunTripwire_EscalationWriteFailureSurfaced(t *testing.T) {
 	skipIfRoot(t)
 	sc, a, _ := newSched(t)
-	seed(t, a, completedRec("2026-07-05")) // completed reference → no sends, no storm write
-	statusPath := filepath.Join(a.Home(), "engine", "status.json")
-	require.NoError(t, os.Chmod(statusPath, 0o400))
-	t.Cleanup(func() { _ = os.Chmod(statusPath, 0o600) })
+	seed(t, a, completedRec("2026-07-05")) // completed reference → no sends, no storm write; chain_start already stamped
+	// The atomic status.json write renames a temp file over the target, so a
+	// read-only file no longer blocks it — a read-only engine dir does. seed
+	// stamped chain_start, so the rebuild writes only status.json here.
+	engineDir := filepath.Join(a.Home(), "engine")
+	require.NoError(t, os.Chmod(engineDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(engineDir, 0o700) })
 
 	_, err := sc.RunTripwire(context.Background(), at(2026, 7, 6, 9, 0))
 	require.Error(t, err)

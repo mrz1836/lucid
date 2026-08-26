@@ -72,9 +72,11 @@ func TestAnchorAdd_AppendFailureSurfaced(t *testing.T) {
 	_, err := r.AnchorAdd(AnchorAddRequest{Label: "gate-30", Date: "2026-01-01", Now: fixedNow()})
 	require.NoError(t, err)
 
-	anchorsPath := filepath.Join(home, "engine", "anchors.json")
-	require.NoError(t, os.Chmod(anchorsPath, 0o400)) // readable, so the failure is the write
-	t.Cleanup(func() { _ = os.Chmod(anchorsPath, 0o600) })
+	// The atomic anchors.json write renames a temp file over the target, so a
+	// read-only file no longer blocks it — a read-only engine dir does.
+	engineDir := filepath.Join(home, "engine")
+	require.NoError(t, os.Chmod(engineDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(engineDir, 0o700) })
 
 	_, err = r.AnchorAdd(AnchorAddRequest{Label: "sobriety", Date: "2026-02-01", Now: fixedNow()})
 	require.Error(t, err)

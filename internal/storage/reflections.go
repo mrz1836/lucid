@@ -126,7 +126,10 @@ func (a *Adapter) rewriteInsight(insightID string, ins Insight) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, filePerm)
+	if err := os.WriteFile(path, content, filePerm); err != nil {
+		return fmt.Errorf("storage: write insight %q: %w", insightID, err)
+	}
+	return nil
 }
 
 // timePtr returns a pointer to t (the nullable *At fields on an insight are

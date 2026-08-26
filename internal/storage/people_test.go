@@ -278,7 +278,9 @@ func TestUpdatePerson_WriteFailureSurfaces(t *testing.T) {
 
 	_, err := a.UpdatePerson(PersonMention{DisplayName: "M.", RawEntryID: "raw_x", At: personAt(5)})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "write person")
+	// The atomic write stages its temp file in the read-only people/ dir, so the
+	// surfaced error names the person record it failed to write.
+	assert.Contains(t, err.Error(), "person")
 }
 
 // writePersonTombstone writes a redirect tombstone at key pointing forward to

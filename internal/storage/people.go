@@ -259,10 +259,9 @@ func (a *Adapter) writePerson(rec PersonRecord) error {
 	if err != nil {
 		return err
 	}
-	if err = os.WriteFile(path, content, filePerm); err != nil {
-		return fmt.Errorf("storage: write person %q: %w", rec.PersonKey, err)
-	}
-	return nil
+	// Atomic: a person record carries the user-authored dob/relationship/notes
+	// and the merge redirect graph, so a torn write must not truncate it.
+	return writeFileAtomic(path, content, fmt.Sprintf("person %q", rec.PersonKey))
 }
 
 // personKeyOwner reports the normalized name currently stored at a candidate

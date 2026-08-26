@@ -139,6 +139,9 @@ func (f Focus) Validate() error {
 	if f.LogicalDate == "" {
 		return fmt.Errorf("focus: logical_date is required")
 	}
+	if _, err := time.Parse(dateLayout, f.LogicalDate); err != nil {
+		return fmt.Errorf("focus: logical_date must be YYYY-MM-DD, got %q", f.LogicalDate)
+	}
 	if f.Source == "" {
 		return fmt.Errorf("focus: source is required")
 	}

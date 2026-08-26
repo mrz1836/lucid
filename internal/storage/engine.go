@@ -268,10 +268,9 @@ func (a *Adapter) WriteChainConfig(c engine.ChainConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.chainPath(), content, filePerm); err != nil {
-		return fmt.Errorf("storage: write chain.json: %w", err)
-	}
-	return nil
+	// Atomic: chain.json carries chain_start and the hand-edited commitment; a
+	// torn write breaks every status rebuild that folds against it.
+	return writeFileAtomic(a.chainPath(), content, "chain.json")
 }
 
 // ReadProfileState reads profile.json.
@@ -339,10 +338,9 @@ func (a *Adapter) AppendAnchors(anchors ...engine.Anchor) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.anchorsPath(), content, filePerm); err != nil {
-		return fmt.Errorf("storage: write anchors.json: %w", err)
-	}
-	return nil
+	// Atomic: anchors.json is the append-only milestone history; a torn write
+	// would truncate years of milestones the fold cannot rebuild.
+	return writeFileAtomic(a.anchorsPath(), content, "anchors.json")
 }
 
 // AppendAnchor records one milestone. It is [Adapter.AppendAnchors] with a
@@ -510,8 +508,11 @@ func (a *Adapter) buildAndWriteStatus(loc *time.Location, escalation engine.Esca
 	if err != nil {
 		return engine.Status{}, err
 	}
-	if err := os.WriteFile(a.statusPath(), content, filePerm); err != nil {
-		return engine.Status{}, fmt.Errorf("storage: write status.json: %w", err)
+	// Atomic: status.json is rebuildable, but a torn write leaves the daily
+	// surface reading a truncated projection until the next rebuild; the whole-
+	// file swap keeps a reader on the previous good status meanwhile.
+	if err := writeFileAtomic(a.statusPath(), content, "status.json"); err != nil {
+		return engine.Status{}, err
 	}
 	return status, nil
 }

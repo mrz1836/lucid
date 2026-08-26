@@ -50,7 +50,7 @@ func TestCovEnsureObservationsConfig_WriteFails(t *testing.T) {
 func TestCovAppendObservation_SeqReadError(t *testing.T) {
 	a := newObsStore(t)
 	ev := microEvent(observations.KindPain, "2026-07-02", map[string]any{"score": 3})
-	mkdirAt(t, a.obsDayPath("2026-07-02"))
+	mkdirAt(t, a.obsDayPathT(t, "2026-07-02"))
 	_, err := a.AppendObservation(ev)
 	assert.Error(t, err)
 }
@@ -60,7 +60,7 @@ func TestCovAppendObservation_SeqReadError(t *testing.T) {
 func TestCovAppendObservation_AppendFsyncError(t *testing.T) {
 	skipIfRoot(t)
 	a := newObsStore(t)
-	shard := filepath.Dir(a.obsDayPath("2026-07-02"))
+	shard := filepath.Dir(a.obsDayPathT(t, "2026-07-02"))
 	require.NoError(t, os.MkdirAll(shard, 0o700))
 	require.NoError(t, os.Chmod(shard, 0o500))
 	t.Cleanup(func() { _ = os.Chmod(shard, 0o700) })
@@ -72,7 +72,7 @@ func TestCovAppendObservation_AppendFsyncError(t *testing.T) {
 // directory surfaces as a read error rather than being silently skipped.
 func TestCovReadObservationsRange_DayReadError(t *testing.T) {
 	a := newObsStore(t)
-	mkdirAt(t, a.obsDayPath("2026-07-01"))
+	mkdirAt(t, a.obsDayPathT(t, "2026-07-01"))
 	_, err := a.ReadObservationsRange("2026-07-01", "2026-07-02")
 	assert.Error(t, err)
 }
@@ -95,7 +95,7 @@ func TestCovReadObservationsKind_WalkError(t *testing.T) {
 func TestCovReadObservationsKind_FileReadError(t *testing.T) {
 	skipIfRoot(t)
 	a := newObsStore(t)
-	path := a.obsDayPath("2026-07-02")
+	path := a.obsDayPathT(t, "2026-07-02")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 	require.NoError(t, os.WriteFile(path, []byte(`{"kind":"pain"}`), 0o600))
 	require.NoError(t, os.Chmod(path, 0o000))
@@ -184,7 +184,7 @@ func TestCovReadDayView_NilLocDefaults(t *testing.T) {
 // join at the observation read.
 func TestCovReadDayView_DayReadError(t *testing.T) {
 	a := newObsStore(t)
-	mkdirAt(t, a.obsDayPath("2026-07-02"))
+	mkdirAt(t, a.obsDayPathT(t, "2026-07-02"))
 	_, err := a.ReadDayView("2026-07-02", loc)
 	assert.Error(t, err)
 }
@@ -205,7 +205,7 @@ func TestCovRangeCandidatesFor_EventReadError(t *testing.T) {
 	entry, err := json.Marshal(rangeIndexEntry{ID: "obs_2026_07_01_1", Start: "2026-07-01", End: "2026-07-05"})
 	require.NoError(t, err)
 	require.NoError(t, appendLineFsync(filepath.Join(a.projectionsDir(), rangeIndexFile), entry))
-	mkdirAt(t, a.obsDayPath("2026-07-01"))
+	mkdirAt(t, a.obsDayPathT(t, "2026-07-01"))
 	_, err = a.rangeCandidatesFor("2026-07-03")
 	assert.Error(t, err)
 }
@@ -389,7 +389,7 @@ func TestCovEnrichment_ScaffoldFails(t *testing.T) {
 // directory surfaces from the per-day read.
 func TestCovRunEnrichment_DayReadError(t *testing.T) {
 	a := enrichStore(t)
-	mkdirAt(t, a.obsDayPath("2026-07-07"))
+	mkdirAt(t, a.obsDayPathT(t, "2026-07-07"))
 	_, err := a.RunEnrichment(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC), time.UTC)
 	assert.Error(t, err)
 }
@@ -553,7 +553,7 @@ func TestCovAppendContextDay_Errors(t *testing.T) {
 	})
 	t.Run("append fails", func(t *testing.T) {
 		a := newObsStore(t)
-		mkdirAt(t, a.obsDayPath("2026-07-02"))
+		mkdirAt(t, a.obsDayPathT(t, "2026-07-02"))
 		var rep EnrichmentReport
 		err := a.appendContextDay("weather", "2026-07-02", map[string]any{"weekday": "Sunday"}, now, time.UTC, &rep)
 		assert.Error(t, err)

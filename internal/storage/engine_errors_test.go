@@ -79,8 +79,10 @@ func TestAppendEngineCorrection_BadID(t *testing.T) {
 func TestWriteChainConfig_WriteFails(t *testing.T) {
 	skipIfRoot(t)
 	a := newEngineAdapter(t)
-	require.NoError(t, os.Chmod(a.chainPath(), 0o400))
-	t.Cleanup(func() { _ = os.Chmod(a.chainPath(), 0o600) })
+	// The atomic write stages a temp file in the engine dir and renames it over
+	// chain.json, so a read-only target no longer blocks it — a read-only dir does.
+	require.NoError(t, os.Chmod(a.engineDir(), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(a.engineDir(), 0o700) })
 
 	err := a.WriteChainConfig(engine.DefaultChain())
 	assert.Error(t, err)
@@ -99,8 +101,10 @@ func TestAppendProfileEvent_WriteFails(t *testing.T) {
 func TestAppendAnchor_WriteFails(t *testing.T) {
 	skipIfRoot(t)
 	a := newEngineAdapter(t)
-	require.NoError(t, os.Chmod(a.anchorsPath(), 0o400))
-	t.Cleanup(func() { _ = os.Chmod(a.anchorsPath(), 0o600) })
+	// Atomic write: the failure is a read-only engine dir (temp-file staging),
+	// not a read-only anchors.json (which a rename would replace regardless).
+	require.NoError(t, os.Chmod(a.engineDir(), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(a.engineDir(), 0o700) })
 
 	err := a.AppendAnchor(engine.Anchor{Label: "quit-x", Date: "2026-01-01", RecordedAt: "2026-01-01T21:00:00Z"})
 	assert.Error(t, err)
@@ -116,8 +120,10 @@ func TestAppendAnchors_NoWriteOnUnwritableStore(t *testing.T) {
 	before, err := os.ReadFile(a.anchorsPath())
 	require.NoError(t, err)
 
-	require.NoError(t, os.Chmod(a.anchorsPath(), 0o400)) // still readable, so the failure is the write
-	t.Cleanup(func() { _ = os.Chmod(a.anchorsPath(), 0o600) })
+	// A read-only engine dir fails the atomic temp-file staging; the r-x bits
+	// keep anchors.json itself readable, so the failure is the write, not the read.
+	require.NoError(t, os.Chmod(a.engineDir(), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(a.engineDir(), 0o700) })
 
 	err = a.AppendAnchors(
 		engine.Anchor{Label: "gate-30", Date: "2026-02-01", RecordedAt: "2026-08-04T12:00:00Z", State: engine.AnchorStateSunset},
@@ -189,10 +195,11 @@ func TestRebuildEngineStatus_ChainStartWriteFails(t *testing.T) {
 	skipIfRoot(t)
 	a := newEngineAdapter(t)
 	require.NoError(t, a.WriteEngineDay(completedRecord("2026-07-05", 3)))
-	// chain_start is still nil; a completed day means the rebuild will try
-	// to stamp it — but chain.json is read-only, so the write fails.
-	require.NoError(t, os.Chmod(a.chainPath(), 0o400))
-	t.Cleanup(func() { _ = os.Chmod(a.chainPath(), 0o600) })
+	// chain_start is still nil; a completed day means the rebuild will try to
+	// stamp it — but the engine dir is read-only, so the atomic chain.json write
+	// (temp-file staging in that dir) fails.
+	require.NoError(t, os.Chmod(a.engineDir(), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(a.engineDir(), 0o700) })
 
 	_, err := a.RebuildEngineStatus(time.UTC)
 	assert.Error(t, err)

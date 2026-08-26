@@ -114,10 +114,9 @@ func (a *Adapter) ensureObservationsConfig() error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.obsConfigPath(), b, filePerm); err != nil {
-		return fmt.Errorf("storage: write observations config: %w", err)
-	}
-	return nil
+	// Atomic: a torn config write loses key_salt, which fails all salted key
+	// derivation and every registry read — the highest-stakes write here.
+	return writeFileAtomic(a.obsConfigPath(), b, "observations config")
 }
 
 // ReadObservationsConfig reads observations/config.json.
@@ -138,10 +137,9 @@ func (a *Adapter) SaveObservationsConfig(cfg observations.Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.obsConfigPath(), b, filePerm); err != nil {
-		return fmt.Errorf("storage: write observations config: %w", err)
-	}
-	return nil
+	// Atomic, matching ensureObservationsConfig: a hand-edit that replaces the
+	// config must never tear key_salt out from under the salted key derivation.
+	return writeFileAtomic(a.obsConfigPath(), b, "observations config")
 }
 
 // AppendObservation assigns the next sequence id under the single-writer
@@ -155,7 +153,10 @@ func (a *Adapter) AppendObservation(ev observations.Event) (observations.Event, 
 		return observations.Event{}, fmt.Errorf("storage: observation is missing logical_date")
 	}
 	ev.Schema = observations.Schema
-	path := a.obsDayPath(ev.LogicalDate)
+	path, err := a.obsDayPath(ev.LogicalDate)
+	if err != nil {
+		return observations.Event{}, err
+	}
 
 	seq, err := a.nextObsSeq(path)
 	if err != nil {
@@ -205,7 +206,11 @@ func (a *Adapter) nextObsSeq(path string) (int, error) {
 // lines and reporting how many were skipped (observations-module.md §Error
 // states: "Reader skips bad lines, reports count").
 func (a *Adapter) ReadObservationsDay(date string) (events []observations.Event, skipped int, err error) {
-	return a.readObsFile(a.obsDayPath(date))
+	path, err := a.obsDayPath(date)
+	if err != nil {
+		return nil, 0, err
+	}
+	return a.readObsFile(path)
 }
 
 // ReadObservationsRange reads the events whose logical_date falls in
@@ -392,8 +397,8 @@ func (a *Adapter) UpdateRegistry(kind, key string, patch observations.RegistryPa
 	if err != nil {
 		return observations.Registry{}, err
 	}
-	if err := os.WriteFile(path, content, filePerm); err != nil {
-		return observations.Registry{}, fmt.Errorf("storage: write registry %q: %w", key, err)
+	if err := writeFileAtomic(path, content, fmt.Sprintf("registry %q", key)); err != nil {
+		return observations.Registry{}, err
 	}
 	return rec, nil
 }
@@ -556,24 +561,29 @@ func (a *Adapter) rawIDsForDate(date string) ([]string, error) {
 }
 
 // obsDayPath returns observations/YYYY/MM/obs_YYYY_MM_DD.jsonl for a logical
-// date (YYYY-MM-DD).
-func (a *Adapter) obsDayPath(date string) string {
-	parts := strings.Split(date, "-")
-	year, month := "0000", "00"
-	if len(parts) == 3 {
-		year, month = parts[0], parts[1]
+// date (YYYY-MM-DD). A malformed date is rejected by [safeDayShard] so it can
+// never build a path outside the observations tree (defense-in-depth: the
+// router derives every logical_date from the civil-day rule).
+func (a *Adapter) obsDayPath(date string) (string, error) {
+	year, month, err := safeDayShard(date)
+	if err != nil {
+		return "", err
 	}
 	name := obsFilePrefix + strings.ReplaceAll(date, "-", "_") + obsFileExt
-	return filepath.Join(a.observationsDir(), year, month, name)
+	return filepath.Join(a.observationsDir(), year, month, name), nil
 }
 
 // registryPath returns registries/<dir>/<key>.json for a registry kind+key.
+// The key is routed through [safeRecordPath] so a separator-bearing or empty
+// key can never escape the registry tree — the same guard personPath and
+// insightPath already apply (closing the `lucid link --to injury:../../../foo`
+// read-oracle before any read touches disk).
 func (a *Adapter) registryPath(kind, key string) (string, error) {
 	dir, ok := observations.RegistryDir(kind)
 	if !ok {
 		return "", fmt.Errorf("storage: unknown registry kind %q", kind)
 	}
-	return filepath.Join(a.registriesDir(), dir, key+".json"), nil
+	return safeRecordPath(filepath.Join(a.registriesDir(), dir), key, ".json", "registry key")
 }
 
 // generateKeySalt returns a hex-encoded random per-instance secret used to

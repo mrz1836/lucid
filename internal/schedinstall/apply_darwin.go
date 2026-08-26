@@ -45,6 +45,9 @@ var runLaunchctl = func(ctx context.Context, args ...string) error {
 // then load the job with launchctl (replacing an already-loaded one only with
 // Force). Split into writeArtifacts/loadAgent to fit the funlen budget.
 func Apply(ctx context.Context, p ApplyParams) (ApplyResult, error) {
+	if err := validateLabel(p.Label); err != nil {
+		return ApplyResult{}, err
+	}
 	dir, err := resolveLaunchAgentsDir(p.LaunchAgentsDir)
 	if err != nil {
 		return ApplyResult{}, err
@@ -68,6 +71,9 @@ func Apply(ctx context.Context, p ApplyParams) (ApplyResult, error) {
 // job with no hush to exec is not worth loading, and pre-loading it would force a
 // later --force to replace). It reuses the same write half Apply performs.
 func WriteArtifacts(p ApplyParams) (ApplyResult, error) {
+	if err := validateLabel(p.Label); err != nil {
+		return ApplyResult{}, err
+	}
 	dir, err := resolveLaunchAgentsDir(p.LaunchAgentsDir)
 	if err != nil {
 		return ApplyResult{}, err
@@ -129,6 +135,9 @@ func loadAgent(ctx context.Context, p ApplyParams, plistFile string) (replaced b
 // loaded") and remove the plist (tolerating absent). DryRun reports the plan
 // without mutating anything.
 func Uninstall(ctx context.Context, p UninstallParams) (UninstallResult, error) {
+	if err := validateLabel(p.Label); err != nil {
+		return UninstallResult{}, err
+	}
 	dir, err := resolveLaunchAgentsDir(p.LaunchAgentsDir)
 	if err != nil {
 		return UninstallResult{}, err

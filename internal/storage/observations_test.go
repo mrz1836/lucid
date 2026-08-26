@@ -37,9 +37,18 @@ func microEvent(kind observations.Kind, logicalDate string, payload map[string]a
 	}
 }
 
+// obsDayPathT is obsDayPath with the error asserted away — the tests only ever
+// pass well-formed dates, so a rejection is a test bug, not an expected path.
+func (a *Adapter) obsDayPathT(t *testing.T, date string) string {
+	t.Helper()
+	p, err := a.obsDayPath(date)
+	require.NoError(t, err)
+	return p
+}
+
 func (a *Adapter) dayFileBytes(t *testing.T, date string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(a.obsDayPath(date))
+	b, err := os.ReadFile(a.obsDayPathT(t, date))
 	require.NoError(t, err)
 	return b
 }
@@ -105,7 +114,7 @@ func TestReadObservationsDay_SkipsMalformedAndSeqIgnoresIt(t *testing.T) {
 	require.NoError(t, err)
 
 	// Inject a truncated line directly into the day file.
-	require.NoError(t, appendLineFsync(a.obsDayPath("2026-07-02"), []byte(`{"id":"obs_2026_07_02_002","sch`)))
+	require.NoError(t, appendLineFsync(a.obsDayPathT(t, "2026-07-02"), []byte(`{"id":"obs_2026_07_02_002","sch`)))
 
 	events, skipped, err := a.ReadObservationsDay("2026-07-02")
 	require.NoError(t, err)

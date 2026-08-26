@@ -56,15 +56,16 @@ func (a *Adapter) surfaceStatePath() string {
 }
 
 // reframeDayPath returns reframes/YYYY/MM/reframe_YYYY_MM_DD.jsonl for a logical
-// date (YYYY-MM-DD).
-func (a *Adapter) reframeDayPath(date string) string {
-	parts := strings.Split(date, "-")
-	year, month := "0000", "00"
-	if len(parts) == 3 {
-		year, month = parts[0], parts[1]
+// date (YYYY-MM-DD). A malformed date is rejected by [safeDayShard] so it can
+// never build a path outside the reframes tree (defense-in-depth: the CLI
+// derives every logical_date from the civil-day rule).
+func (a *Adapter) reframeDayPath(date string) (string, error) {
+	year, month, err := safeDayShard(date)
+	if err != nil {
+		return "", err
 	}
 	name := reframeFilePrefix + strings.ReplaceAll(date, "-", "_") + reframeFileExt
-	return filepath.Join(a.reframesDir(), year, month, name)
+	return filepath.Join(a.reframesDir(), year, month, name), nil
 }
 
 // ScaffoldReframes creates the reframes/ tree. It is idempotent — an existing
@@ -93,7 +94,10 @@ func (a *Adapter) AppendReframe(rf reframes.Reframe) (reframes.Reframe, error) {
 	if rf.Source == "" {
 		rf.Source = reframes.SourceReframe
 	}
-	path := a.reframeDayPath(rf.LogicalDate)
+	path, err := a.reframeDayPath(rf.LogicalDate)
+	if err != nil {
+		return reframes.Reframe{}, err
+	}
 
 	seq, err := a.nextReframeSeq(path)
 	if err != nil {
@@ -141,7 +145,11 @@ func (a *Adapter) nextReframeSeq(path string) (int, error) {
 // It does not fold corrections — that is [Adapter.ReadReframes]'s job, because a
 // correction of a backdated entry lives in a different day file.
 func (a *Adapter) ReadReframesDay(date string) (entries []reframes.Reframe, skipped int, err error) {
-	return a.readReframeFile(a.reframeDayPath(date))
+	path, err := a.reframeDayPath(date)
+	if err != nil {
+		return nil, 0, err
+	}
+	return a.readReframeFile(path)
 }
 
 // ReadReframes reads every stored reframe across the tree, sorted by id, with

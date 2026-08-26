@@ -112,7 +112,10 @@ func (a *Adapter) appendProposal(processedID string, mutate func(*processedJSON)
 	if err := ValidateProcessedArtifact(content); err != nil {
 		return fmt.Errorf("storage: processed %q failed validation after proposal append: %w", processedID, err)
 	}
-	return os.WriteFile(path, content, filePerm)
+	if err := os.WriteFile(path, content, filePerm); err != nil {
+		return fmt.Errorf("storage: write proposals %q: %w", processedID, err)
+	}
+	return nil
 }
 
 // RejectedShapeTags extracts the shape_tag of every rejected proposal on a
@@ -222,8 +225,7 @@ func (a *Adapter) WriteOffLimitsPersonKeys(keys []string) error {
 		return fmt.Errorf("storage: prepare ledger home: %w", err)
 	}
 	path := filepath.Join(a.home, offLimitsFile)
-	if err := os.WriteFile(path, content, filePerm); err != nil {
-		return fmt.Errorf("storage: write off-limits registry: %w", err)
-	}
-	return nil
+	// Atomic: the off-limits registry is a privacy control — a torn write that
+	// dropped a key would silently un-redact a person, so it must be all-or-nothing.
+	return writeFileAtomic(path, content, "off-limits registry")
 }

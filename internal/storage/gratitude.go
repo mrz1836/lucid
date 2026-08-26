@@ -30,9 +30,13 @@ func (a *Adapter) gratitudeDir() string {
 	return filepath.Join(a.registriesDir(), gratitudeDirName)
 }
 
-// gratitudePath returns registries/gratitude/<key>.json.
-func (a *Adapter) gratitudePath(key string) string {
-	return filepath.Join(a.gratitudeDir(), key+".json")
+// gratitudePath returns registries/gratitude/<key>.json. The key is routed
+// through [safeRecordPath] so a separator-bearing or empty key can never escape
+// the gratitude tree — the same guard the person/insight/registry paths apply
+// (closing the `lucid gratitude add --into ../../..` read-oracle before any read
+// touches disk).
+func (a *Adapter) gratitudePath(key string) (string, error) {
+	return safeRecordPath(a.gratitudeDir(), key, ".json", "gratitude key")
 }
 
 // ScaffoldGratitude ensures the gratitude subtree exists, plus the shared
@@ -69,7 +73,11 @@ func (a *Adapter) ResolveGratitudeKey(phrase string) (string, error) {
 // ReadGratitude reads one gratitude entry by key, returning (entry, found,
 // error). A missing entry is not an error.
 func (a *Adapter) ReadGratitude(key string) (observations.GratitudeEntry, bool, error) {
-	return readJSONOptional[observations.GratitudeEntry](a.gratitudePath(key), fmt.Sprintf("gratitude %q", key))
+	path, err := a.gratitudePath(key)
+	if err != nil {
+		return observations.GratitudeEntry{}, false, err
+	}
+	return readJSONOptional[observations.GratitudeEntry](path, fmt.Sprintf("gratitude %q", key))
 }
 
 // ReadGratitudeAll reads every gratitude entry — live and tombstoned — sorted by
@@ -287,15 +295,18 @@ func (a *Adapter) flattenGratitudeRedirects(oldTarget, newTarget string) error {
 // writeGratitude persists one gratitude entry as indented JSON, creating the
 // subtree if needed. It is the only writer of a gratitude file (architecture P3).
 func (a *Adapter) writeGratitude(entry observations.GratitudeEntry) error {
-	if err := ensureDir(a.gratitudeDir(), "gratitude"); err != nil {
+	path, err := a.gratitudePath(entry.Key)
+	if err != nil {
+		return err
+	}
+	if err = ensureDir(a.gratitudeDir(), "gratitude"); err != nil {
 		return err
 	}
 	content, err := marshalJSON(entry.Normalized())
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.gratitudePath(entry.Key), content, filePerm); err != nil {
-		return fmt.Errorf("storage: write gratitude %q: %w", entry.Key, err)
-	}
-	return nil
+	// Atomic: a gratitude entry holds an append-only multi-year tally, so a
+	// torn write must leave the previous entry intact rather than abort the tally.
+	return writeFileAtomic(path, content, fmt.Sprintf("gratitude %q", entry.Key))
 }

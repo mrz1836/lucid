@@ -34,9 +34,16 @@ func synthFocusEntry(text, success, logicalDate string) focus.Focus {
 	}
 }
 
+func (a *Adapter) focusDayPathT(t *testing.T, date string) string {
+	t.Helper()
+	p, err := a.focusDayPath(date)
+	require.NoError(t, err)
+	return p
+}
+
 func (a *Adapter) focusDayBytes(t *testing.T, date string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(a.focusDayPath(date))
+	b, err := os.ReadFile(a.focusDayPathT(t, date))
 	require.NoError(t, err)
 	return b
 }
@@ -104,7 +111,7 @@ func TestReadFocusDay_SkipsMalformedAndSeqIgnoresIt(t *testing.T) {
 	require.NoError(t, err)
 
 	// Inject a truncated line directly into the day file.
-	require.NoError(t, appendLineFsync(a.focusDayPath("2026-08-23"), []byte(`{"id":"focus_2026_08_23_002","sch`)))
+	require.NoError(t, appendLineFsync(a.focusDayPathT(t, "2026-08-23"), []byte(`{"id":"focus_2026_08_23_002","sch`)))
 
 	entries, skipped, err := a.ReadFocusDay("2026-08-23")
 	require.NoError(t, err)

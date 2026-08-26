@@ -221,6 +221,45 @@ func TestUninstall_Idempotent(t *testing.T) {
 	assert.False(t, res.PlistRemoved, "absent plist removed nothing")
 }
 
+// TestUninstall_RejectsTraversalLabel: a free-form --label that would resolve a
+// plist path outside LaunchAgents is refused before any launchctl bootout or
+// plist os.Remove — so `--label ../../../../tmp/x` can never delete /tmp/x.plist.
+func TestUninstall_RejectsTraversalLabel(t *testing.T) {
+	agents := t.TempDir()
+	// A decoy at the exact path the traversal label would resolve to.
+	victim := filepath.Join(filepath.Dir(agents), "evil.plist")
+	require.NoError(t, os.WriteFile(victim, []byte("keep me"), 0o644))
+	t.Cleanup(func() { _ = os.Remove(victim) })
+
+	called := false
+	swapLaunchctl(t, func(_ context.Context, _ ...string) error { called = true; return nil })
+
+	_, err := Uninstall(t.Context(), UninstallParams{Label: "../evil", LaunchAgentsDir: agents})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid launchd label")
+	assert.False(t, called, "no launchctl bootout for a rejected label")
+	_, statErr := os.Stat(victim)
+	require.NoError(t, statErr, "the decoy outside LaunchAgents is never removed")
+}
+
+// TestApply_RejectsTraversalLabel: the same guard on the install path — a
+// traversal label writes no plist and runs no launchctl.
+func TestApply_RejectsTraversalLabel(t *testing.T) {
+	agents := t.TempDir()
+	called := false
+	swapLaunchctl(t, func(_ context.Context, _ ...string) error { called = true; return nil })
+
+	_, err := Apply(t.Context(), ApplyParams{
+		Label: "../evil", PlistBody: "<plist/>", SuperviseBody: "s",
+		SuperviseConfigPath: filepath.Join(t.TempDir(), "s.toml"), LaunchAgentsDir: agents,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid launchd label")
+	assert.False(t, called, "no launchctl for a rejected label")
+	_, statErr := os.Stat(filepath.Join(filepath.Dir(agents), "evil.plist"))
+	require.ErrorIs(t, statErr, os.ErrNotExist, "no plist written outside LaunchAgents")
+}
+
 // TestUninstall_DryRun: a dry run runs no launchctl and removes nothing.
 func TestUninstall_DryRun(t *testing.T) {
 	agents := t.TempDir()

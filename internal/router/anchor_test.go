@@ -257,9 +257,11 @@ func TestAnchorSunset_AppendFailureSurfaced(t *testing.T) {
 	_, err := r.AnchorAdd(AnchorAddRequest{Label: "gate-30", Date: "2026-01-01", Now: fixedNow()})
 	require.NoError(t, err)
 
-	anchorsPath := filepath.Join(home, "engine", "anchors.json")
-	require.NoError(t, os.Chmod(anchorsPath, 0o400)) // still readable, so the failure is the write
-	t.Cleanup(func() { _ = os.Chmod(anchorsPath, 0o600) })
+	// The atomic anchors.json write renames a temp file over the target, so a
+	// read-only file no longer blocks it — a read-only engine dir does.
+	engineDir := filepath.Join(home, "engine")
+	require.NoError(t, os.Chmod(engineDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(engineDir, 0o700) })
 
 	_, err = r.AnchorSunset(AnchorSunsetRequest{Label: "gate-30", Now: fixedNow()})
 	require.Error(t, err)
@@ -406,8 +408,11 @@ func TestAnchorRename_LegacyPairIsAtomic(t *testing.T) {
 	anchorsPath := filepath.Join(home, "engine", "anchors.json")
 	before, err := os.ReadFile(anchorsPath)
 	require.NoError(t, err)
-	require.NoError(t, os.Chmod(anchorsPath, 0o400)) // still readable, so the failure is the write
-	t.Cleanup(func() { _ = os.Chmod(anchorsPath, 0o600) })
+	// r-x keeps anchors.json readable (the after-read below); the atomic write's
+	// temp-file staging in the engine dir is what fails.
+	engineDir := filepath.Join(home, "engine")
+	require.NoError(t, os.Chmod(engineDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(engineDir, 0o700) })
 
 	_, err = r.AnchorRename(AnchorRenameRequest{Label: "gate-30", NewLabel: "gate-thirty", Now: fixedNow()})
 	require.Error(t, err)
@@ -559,9 +564,11 @@ func TestAnchorRename_AppendFailureSurfaced(t *testing.T) {
 	_, err := r.AnchorAdd(AnchorAddRequest{Label: "gate-30", Date: "2026-01-01", Now: fixedNow()})
 	require.NoError(t, err)
 
-	anchorsPath := filepath.Join(home, "engine", "anchors.json")
-	require.NoError(t, os.Chmod(anchorsPath, 0o400)) // still readable, so the failure is the write
-	t.Cleanup(func() { _ = os.Chmod(anchorsPath, 0o600) })
+	// The atomic anchors.json write renames a temp file over the target, so a
+	// read-only file no longer blocks it — a read-only engine dir does.
+	engineDir := filepath.Join(home, "engine")
+	require.NoError(t, os.Chmod(engineDir, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(engineDir, 0o700) })
 
 	_, err = r.AnchorRename(AnchorRenameRequest{Label: "gate-30", NewLabel: "gate-thirty", Now: fixedNow()})
 	require.Error(t, err)

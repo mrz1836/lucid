@@ -32,6 +32,28 @@ func TestPlistPath(t *testing.T) {
 	assert.Equal(t, filepath.Join("/dir", "com.lucid.scheduler.plist"), plistPath("/dir", "com.lucid.scheduler"))
 }
 
+// TestValidateLabel covers the label guard the darwin Apply/WriteArtifacts/
+// Uninstall each run before deriving a plist path: a reverse-DNS label passes,
+// while an empty, "..", separator-bearing, or otherwise off-charset label is
+// refused so a free-form --label can never build a path outside LaunchAgents.
+func TestValidateLabel(t *testing.T) {
+	for _, ok := range []string{"com.lucid.scheduler", "com.lucid.scheduler-2", "a_b.c", "COM.Lucid.0"} {
+		require.NoError(t, validateLabel(ok), "reverse-DNS label %q is accepted", ok)
+	}
+	for _, bad := range []string{
+		"",                     // empty
+		"..",                   // parent ref
+		"../../../../tmp/x",    // traversal
+		"com.lucid/scheduler",  // forward slash
+		`com.lucid\scheduler`,  // backslash
+		"com.lucid.sched uler", // space
+		"com.lucid.a..b",       // embedded ..
+		"com.lucid.sched*",     // off-charset
+	} {
+		require.Error(t, validateLabel(bad), "label %q is rejected", bad)
+	}
+}
+
 func TestResolveLaunchAgentsDir_Override(t *testing.T) {
 	dir := t.TempDir()
 	got, err := resolveLaunchAgentsDir(dir)

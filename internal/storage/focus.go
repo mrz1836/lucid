@@ -52,15 +52,16 @@ func (a *Adapter) focusSurfaceStatePath() string {
 }
 
 // focusDayPath returns focus/YYYY/MM/focus_YYYY_MM_DD.jsonl for a logical date
-// (YYYY-MM-DD).
-func (a *Adapter) focusDayPath(date string) string {
-	parts := strings.Split(date, "-")
-	year, month := "0000", "00"
-	if len(parts) == 3 {
-		year, month = parts[0], parts[1]
+// (YYYY-MM-DD). A malformed date is rejected by [safeDayShard] so it can never
+// build a path outside the focus tree (defense-in-depth: the CLI derives every
+// logical_date from the civil-day rule).
+func (a *Adapter) focusDayPath(date string) (string, error) {
+	year, month, err := safeDayShard(date)
+	if err != nil {
+		return "", err
 	}
 	name := focusFilePrefix + strings.ReplaceAll(date, "-", "_") + focusFileExt
-	return filepath.Join(a.focusDir(), year, month, name)
+	return filepath.Join(a.focusDir(), year, month, name), nil
 }
 
 // ScaffoldFocus creates the focus/ tree. It is idempotent — an existing tree (and
@@ -92,7 +93,10 @@ func (a *Adapter) AppendFocus(f focus.Focus) (focus.Focus, error) {
 	if f.State == "" {
 		f.State = focus.StateActive
 	}
-	path := a.focusDayPath(f.LogicalDate)
+	path, err := a.focusDayPath(f.LogicalDate)
+	if err != nil {
+		return focus.Focus{}, err
+	}
 
 	seq, err := a.nextFocusSeq(path)
 	if err != nil {
@@ -140,7 +144,10 @@ func (a *Adapter) RetireFocus(id, dayKey, recordedAt string) (focus.Focus, error
 	}
 
 	marker := focus.NewRetirement(id, dayKey, recordedAt)
-	path := a.focusDayPath(marker.LogicalDate)
+	path, err := a.focusDayPath(marker.LogicalDate)
+	if err != nil {
+		return focus.Focus{}, err
+	}
 	seq, err := a.nextFocusSeq(path)
 	if err != nil {
 		return focus.Focus{}, err
@@ -187,7 +194,11 @@ func (a *Adapter) nextFocusSeq(path string) (int, error) {
 // It does not fold state — that is [Adapter.ReadFocus]'s job, because a retirement
 // event for a backdated item lives in a different day file.
 func (a *Adapter) ReadFocusDay(date string) (entries []focus.Focus, skipped int, err error) {
-	return a.readFocusFile(a.focusDayPath(date))
+	path, err := a.focusDayPath(date)
+	if err != nil {
+		return nil, 0, err
+	}
+	return a.readFocusFile(path)
 }
 
 // ReadFocus reads every stored focus entry across the tree, sorted by id, with
