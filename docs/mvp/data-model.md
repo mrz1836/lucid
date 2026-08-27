@@ -59,6 +59,7 @@ These rules trace directly to
 ├── observations/           # frozen-envelope events — owned by observations-module.md
 ├── reframes/               # append-only catch→flip inner-work entries + surface_state.json projection — owned by reframes.md
 ├── focus/                   # append-only focus work-ons (+ retirement events) + surface_state.json projection — owned by focus.md
+├── retro/                   # append-only retro parking-lot events (park + resolve/defer transitions), folded to open/resolved/deferred items — owned by retro.md
 ├── registries/             # injuries, threads, places, eras, pets, gratitude — same key derivation as people/
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
 ├── secrets/                # append-only names-only reference catalog (secrets.jsonl)
@@ -139,6 +140,8 @@ folded at read time, so it never stores a derived number.
 | Focus id | `focus_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A retirement appends a new entry whose `refs.retires` names the target id, folding it to `retired` — history is never rewritten or deleted. See [`focus.md`](../focus.md). | `focus_2026_08_23_001` |
 | Gratitude entry id | `gratitude_<slug>` — the salted registry key derived from the normalized phrase (the `people/` key derivation), stable across the entry's life; shown by `list` and targeted by `--into` / `merge`. See [`gratitude.md`](../gratitude.md). | `gratitude_a-river` |
 | Gratitude receipt id | `grat_YYYY_MM_DD_<seq>` — one per appended tally event (`occurrence` / `seed` / `merge`), assigned single-writer as max-seq+1; returned by every `add` / `import` / `merge`, distinct from the stable entry id. See [`gratitude.md`](../gratitude.md). | `grat_2026_08_24_001` |
+| Retro item id | `R-NNN` — the parked-item id, minted **globally monotonic** as the max `R-NNN` across all `park` lines plus one (zero-padded to three digits, wider values legal; `park` auto-mints, `import` supplies explicit ids). A `resolve` / `defer` references it without advancing the counter. Shown by `list`, targeted by `show` / `resolve` / `defer`. See [`retro.md`](../retro.md). | `R-012` |
+| Retro receipt id | `retro_event_YYYY_MM_DD_<seq>` — one per appended retro event (`park` / `resolve` / `defer`), assigned single-writer per logical-day as max-seq+1; returned by every write, distinct from the stable `R-NNN` item id. See [`retro.md`](../retro.md). | `retro_event_2026_08_23_001` |
 
 People keys deliberately do not encode real names; the storage adapter
 maintains a `display_name` field separately so the on-disk filenames
