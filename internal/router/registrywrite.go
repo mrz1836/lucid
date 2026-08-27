@@ -434,5 +434,16 @@ func registryAck(kind string, rec observations.Registry, created bool) string {
 	if created {
 		verb = "Recorded"
 	}
+	// An era is a chapter, not a graded state (life-archive.md §4), so its ack
+	// surfaces the chapter span rather than a status word — and drops the
+	// parenthetical entirely when the chapter carries no dates. Every other kind
+	// keeps surfacing its meaningful status. This is output-only: the stored
+	// status is untouched, merely never surfaced for an era.
+	if kind == observations.RegistryEra {
+		if span := eraSpan(fieldValue(rec.Fields["start"]), fieldValue(rec.Fields["end"])); span != "" {
+			return fmt.Sprintf("%s %s %q as `%s` (%s).", verb, kind, rec.DisplayName, rec.Key, span)
+		}
+		return fmt.Sprintf("%s %s %q as `%s`.", verb, kind, rec.DisplayName, rec.Key)
+	}
 	return fmt.Sprintf("%s %s %q as `%s` (%s).", verb, kind, rec.DisplayName, rec.Key, rec.Status)
 }

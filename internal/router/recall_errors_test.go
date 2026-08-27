@@ -12,14 +12,15 @@ import (
 )
 
 // TestRecallHelpers_PureBranches locks the render edges of the recall projection
-// helpers that a normal browse never exercises: the two-sided and open-start era
-// range, the untitled-memory fallback, the nil-map guards, the list-valued field
-// renders, and the empty-label humanizer.
+// helpers that a normal browse never exercises: the two-sided and end-only era
+// chapter span, the untitled-memory fallback, the nil-map guards, the list-valued
+// field renders, and the empty-label humanizer.
 func TestRecallHelpers_PureBranches(t *testing.T) {
-	// eraRange: both bounds, then an open start (end only).
-	assert.Equal(t, "2010-06-01 – 2012-01-01",
+	// eraRange now renders the chapter span through eraSpan (life-archive.md §4):
+	// both bounds join with the arrow, an end-only chapter reads "until <end>".
+	assert.Equal(t, "2010-06-01 → 2012-01-01",
 		eraRange(map[string]any{"start": "2010-06-01", "end": "2012-01-01"}))
-	assert.Equal(t, "– 2012-01-01", eraRange(map[string]any{"end": "2012-01-01"}))
+	assert.Equal(t, "until 2012-01-01", eraRange(map[string]any{"end": "2012-01-01"}))
 
 	// storyTitle falls back for a text-less (partial) memory payload.
 	assert.Equal(t, "(untitled memory)", storyTitle(nil))

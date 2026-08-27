@@ -44,6 +44,39 @@ func TestWriteEra_RangeRoundTrip(t *testing.T) {
 	assert.Len(t, rec.StatusHistory, 2, "amend appends, never overwrites")
 }
 
+// TestWriteEra_AckRendersChapterSpan proves the era write ack surfaces the
+// chapter span (arrow separator) in place of a status word, so an ended chapter
+// no longer acks as "(active)" (life-archive.md §4). Open and dateless eras take
+// their documented forms, and no era ack leaks a status word.
+func TestWriteEra_AckRendersChapterSpan(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+
+	ended, err := r.WriteEra(EraWriteRequest{Name: "the coast years", Start: "2008-09", End: "2010-01", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.Contains(t, ended.Ack, "(2008-09 → 2010-01)", "an ended era acks its chapter span, not its status")
+	assert.NotContains(t, ended.Ack, "active", "no status word leaks into an era ack")
+
+	open, err := r.WriteEra(EraWriteRequest{Name: "the city years", Start: "2004", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.Contains(t, open.Ack, "(ongoing since 2004)", "an open era acks as ongoing since its start")
+	assert.NotContains(t, open.Ack, "active")
+
+	bare, err := r.WriteEra(EraWriteRequest{Name: "the quiet years", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.NotContains(t, bare.Ack, "(", "a dateless era ack carries no trailing parenthetical")
+	assert.NotContains(t, bare.Ack, "active")
+}
+
+// TestWriteInjury_AckKeepsStatusWord proves the era output-only change does not
+// touch a status-bearing kind: an injury ack still surfaces its status word.
+func TestWriteInjury_AckKeepsStatusWord(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+
+	inj, err := r.WriteInjury(InjuryWriteRequest{Name: "left knee", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.Contains(t, inj.Ack, "(active)", "an injury ack keeps its meaningful status word")
+}
+
 // TestWriteThread_IntentAndDomains proves a thread round-trips its intent and
 // domains and carries NO progress/percent/streak field — the obliquity guard.
 func TestWriteThread_IntentAndDomains(t *testing.T) {

@@ -269,22 +269,27 @@ func indexDetail(dim string, rec observations.Registry) string {
 	return rec.Status
 }
 
-// eraRange renders an era's start/end as "start – end", either side omitted
-// when unset (an open end is a still-running chapter). An era with no dates
-// yields "".
-func eraRange(fields map[string]any) string {
-	start := fieldValue(fields["start"])
-	end := fieldValue(fields["end"])
+// eraSpan renders an era's chapter span (life-archive.md §4: a chapter, not a
+// graded state). Both bounds → "start → end"; start only → "ongoing since start";
+// end only → "until end"; neither → "".
+func eraSpan(start, end string) string {
 	switch {
 	case start != "" && end != "":
-		return start + " – " + end
+		return start + " → " + end
 	case start != "":
-		return start + " –"
+		return "ongoing since " + start
 	case end != "":
-		return "– " + end
+		return "until " + end
 	default:
 		return ""
 	}
+}
+
+// eraRange renders an era's chapter span from its start/end Fields, delegating to
+// the shared eraSpan helper so the bare index and the write ack cannot drift
+// (life-archive.md §4). An era with no dates yields "".
+func eraRange(fields map[string]any) string {
+	return eraSpan(fieldValue(fields["start"]), fieldValue(fields["end"]))
 }
 
 // storyTitle returns a memory's own words as its title, or an honest fallback
