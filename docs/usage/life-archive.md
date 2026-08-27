@@ -28,16 +28,16 @@ streak, or a target, and an unanswered prompt is never a debt (see
 | Verb | Kind | What it does |
 |------|------|--------------|
 | [`lucid injury`](#lucid-injury) | write | Record or amend an injury in your body history. |
-| [`lucid era`](#lucid-era) | write | Record or amend a life chapter (an era). |
+| [`lucid era`](#lucid-era) | read/write | `era list` (read-only), `era create`, or `era amend` a life chapter (an era). |
 | [`lucid thread`](#lucid-thread) | write | Record or amend a thread you're working on. |
 | [`lucid memory`](#lucid-memory) | write | Record a story from your past — backdated, linked, optionally with a photo. |
 | [`lucid excavate`](#lucid-excavate) | read-only | Select the next memory cluster to excavate and emit its prompts. |
 | [`lucid recall`](#lucid-recall) | read-only | Browse the archive by era, thread, or injury, with source context. |
 
 All six are **deterministic and agent-free** — no model runs in any of them. The
-read-only pair (`excavate`, `recall`) writes nothing; the write verbs
-acknowledge only *after* the record lands and say what was written. Each is also
-in the full [command reference](commands.md).
+read-only reads (`excavate`, `recall`, and the `era list` subcommand) write
+nothing; the write verbs acknowledge only *after* the record lands and say what
+was written. Each is also in the full [command reference](commands.md).
 
 > **The excavation ritual lives in a harness, not the binary.** `lucid excavate`
 > only does the deterministic half — pick the next cluster, emit generic prompts.
@@ -153,28 +153,53 @@ lucid injury "old ankle" --onset 2011 --json
 ## `lucid era`
 
 ```
-lucid era <name> [--start <date>] [--end <date>] [--note <text>] [--json]
+lucid era list  [--json]
+lucid era create <name> [--start <date>] [--end <date>] [--note <text>] [--json]
+lucid era amend  <name> [--start <date>] [--end <date>] [--note <text>] [--json]
 ```
 
-Record or amend a **life chapter** in the `era` registry — a named span of time
-you can hang stories on. Either bound may be approximate; omit `--end` for a
-still-running chapter. Stories attach to an era via their `--era` reference, so
-the past becomes browsable by chapter rather than by a date no one remembers.
-Same create-then-amend and append-only merge as `lucid injury`.
+**Life chapters** live in the `era` registry — named spans of time you can hang
+stories on. `era` is a small family of explicit subcommands so that *listing* your
+chapters and *minting* one can never be the same fat-fingered keystroke:
 
-Because an era is a chapter and not a graded state, its acknowledgement renders the
+- **`era list`** — **read-only.** Enumerate the chapters you already have, one
+  bullet each (`• <name> (<span>) — <key>`), or the stable `{eras: [...]}` shape
+  under `--json`. It writes nothing — a discovery command has no side effects — and
+  an empty store prints an honest `No eras recorded yet.` This is distinct from
+  [`recall --era <key>`](#lucid-recall), which browses the *stories* filed under
+  one chapter you already know; `era list` is how you learn those keys.
+- **`era create <name>`** — the **only** way to mint a new chapter. Either bound
+  may be approximate; omit `--end` for a still-running chapter.
+- **`era amend <name>`** — amend an existing chapter, merging the fields you
+  supply (append-only, same as `lucid injury`). A name that matches **no** existing
+  chapter is a **hard error** and nothing is written — only `era create` mints.
+
+**Bare `era <name>` is an amend-only alias** for `era amend`: it keeps working for
+muscle memory, amends when the name resolves, and hard-errors on a name that
+matches nothing — so a chapter that doesn't exist yet fails loudly instead of
+silently minting junk. Reserved, subcommand-shaped words — `list`, `ls`, `show`,
+`help`, and any name beginning with `-` — are rejected as era names on every write
+path (including `era create list`), so they can never become a chapter.
+
+Stories attach to an era via their `--era` reference, so the past becomes
+browsable by chapter rather than by a date no one remembers. Because an era is a
+chapter and not a graded state, a create/amend acknowledgement renders the
 **chapter span** rather than a status word: both bounds → `(2008-09 → 2010-01)`,
 open-ended → `(ongoing since 2008-09)`, end-only → `(until 2010-01)`, and no dates →
 no trailing parenthetical ([`../mvp/life-archive.md`](../mvp/life-archive.md) §4).
 
-`--json` emits `{kind, key, display_name, created, start, end, span, fields}` — the
-era view drops the internal `status` placeholder (never surfaced for a chapter) and
-adds the `start`/`end` bounds and the rendered `span`. `injury` and `thread` keep
-the `{kind, key, display_name, status, created, fields}` shape.
+`era create`/`era amend --json` emit `{kind, key, display_name, created, start,
+end, span, fields}` — the era view drops the internal `status` placeholder (never
+surfaced for a chapter) and adds the `start`/`end` bounds and the rendered `span`.
+`era list --json` emits `{eras: [{key, display_name, start, end, span}, ...]}`.
+`injury` and `thread` keep the `{kind, key, display_name, status, created, fields}`
+shape.
 
 ```sh
-lucid era "the coast years" --start 2010 --end 2014
-lucid era "wild summer" --start 2010-06-01 --json
+lucid era list                                      # read-only: see your chapters
+lucid era create "the coast years" --start 2010 --end 2014
+lucid era create "wild summer" --start 2010-06-01 --json
+lucid era amend  "the coast years" --note "the good boat, the bad landlord"
 ```
 
 ## `lucid thread`

@@ -2210,15 +2210,34 @@ lucid injury "left knee" --status managed --onset 2014-09 --current-limitations 
 ### era
 
 ```
-lucid era <name> [--start <date>] [--end <date>] [--note <text>] [--json]
+lucid era list  [--json]
+lucid era create <name> [--start <date>] [--end <date>] [--note <text>] [--json]
+lucid era amend  <name> [--start <date>] [--end <date>] [--note <text>] [--json]
 ```
 
-Record or amend a life chapter in the `era` registry ([`life-archive.md`](life-archive.md);
-[`../mvp/life-archive.md`](../mvp/life-archive.md) §4). Either bound may be
-approximate; omit `--end` for a still-running chapter. Stories attach to an era
-via `lucid memory --era <key>`, so the past becomes browsable by chapter. Same
-create-then-amend, append-only merge, and `{kind, key, display_name, status,
-created, fields}` `--json` shape as `injury`.
+Life chapters in the `era` registry ([`life-archive.md`](life-archive.md);
+[`../mvp/life-archive.md`](../mvp/life-archive.md) §4), split into explicit
+subcommands so a discovery keystroke can never mint junk:
+
+- **`era list`** — **read-only** enumeration of the chapters you have (bullets, or
+  `{eras: [...]}` under `--json`); writes nothing, prints `No eras recorded yet.`
+  over a thin store. Distinct from [`recall --era <key>`](#recall), which browses
+  the *stories* filed under one known chapter.
+- **`era create <name>`** — the **only** path that mints a chapter. Either bound
+  may be approximate; omit `--end` for a still-running chapter.
+- **`era amend <name>`** — amend an existing chapter (append-only merge, same as
+  `injury`). A **non-matching** name is a hard error and nothing is written.
+
+**Bare `era <name>` is an amend-only alias** for `era amend` (it never mints; a
+non-matching name hard-errors). Reserved, subcommand-shaped words — `list`, `ls`,
+`show`, `help`, and any name beginning with `-` — are rejected as era names on
+every write path (including `era create list`), so they can never become a chapter.
+
+`era create`/`era amend --json` emit `{kind, key, display_name, created, start,
+end, span, fields}` (the era view drops the internal `status` placeholder and adds
+`start`/`end`/`span`); `era list --json` emits
+`{eras: [{key, display_name, start, end, span}, ...]}`. Stories attach to an era
+via `lucid memory --era <key>`, so the past becomes browsable by chapter.
 
 `--start` and `--end` take the same **strict** registry date rules as
 [`injury --onset`](#injury) — `@yesterday`, `YYYY-MM-DD`, `YYYY-MM`, `YYYY`
@@ -2228,8 +2247,10 @@ to end on a known future date waits until it does, or records the expectation in
 `--note`.
 
 ```sh
-lucid era "wild summer" --start 2010-06-01
-lucid era "the coast years" --start 2010 --end 2014 --json
+lucid era list
+lucid era create "wild summer" --start 2010-06-01
+lucid era create "the coast years" --start 2010 --end 2014 --json
+lucid era amend  "the coast years" --note "the good boat, the bad landlord"
 ```
 
 ### thread

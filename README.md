@@ -312,7 +312,7 @@ flag-parse error.
 | Command | Flags | What it does |
 |---------|-------|--------------|
 | `memory <text>` | `--day` `--era` `--people` `--place` `--tone` `--why` `--certainty` `--followup` `--attach` `--caption` | Record a story from your past — backdated, linked, kept. |
-| `era <name>` | `--start` `--end` `--note` | Record or amend a life chapter. |
+| `era list`<br>`era create <name>` · `era amend <name>` | `--start` `--end` `--note` (on `create`/`amend`) `--json` | Life chapters, by subcommand: `era list` reads (never writes), `era create` mints a new chapter (the only path that does), `era amend` amends an existing one. A non-matching `amend` (or bare `era <name>`) hard-errors — no accidental chapters. |
 | `injury <name>` | `--onset` `--status` `--body-area` `--severity` `--cause` `--timeline` `--treatments` `--lasting-effects` `--current-limitations` `--uncertainty` `--note` | Record or amend an injury in your body history — testimony, not a clinical scale. |
 | `thread <name>` | `--intent` `--status` `--domain` `--note` | Record or amend an ongoing thread. |
 | `reframe add <catch> <flip>`<br>`reframe list` · `reframe surface` | `--day` (on `add`) `--json` (on `list`/`surface`) | Keep and rotate your self-talk reframes — a *catch → flip* pair. Append-only; `surface` shows one per logical day, least-recently-surfaced (idempotent within the day). |
