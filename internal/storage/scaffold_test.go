@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -194,10 +193,21 @@ func TestDefaultHome_EnvOverride(t *testing.T) {
 }
 
 func TestDefaultHome_Fallback(t *testing.T) {
+	// With no override the home resolves to <user home>/.lucid. Under the
+	// real-Ledger guard, resolving that path in a test process is refused
+	// (via LUCID_REFUSE_REAL_HOME) rather than returned — which proves the
+	// fallback still constructs <HOME>/.lucid without ever touching the real
+	// Ledger. HOME is pointed at a tempdir so the real ~/.lucid stays out of
+	// reach entirely.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
 	t.Setenv(EnvHome, "")
-	got, err := DefaultHome()
-	require.NoError(t, err)
-	assert.True(t, strings.HasSuffix(got, ".lucid"), "fallback home should end with .lucid, got %q", got)
+	t.Setenv(EnvRefuseRealHome, "1")
+
+	_, err := DefaultHome()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), filepath.Join(tmp, ".lucid"),
+		"the fallback constructs <HOME>/.lucid")
 }
 
 func TestOpen_UsesEnvHome(t *testing.T) {
