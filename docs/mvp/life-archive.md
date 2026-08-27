@@ -175,6 +175,32 @@ What the registry stores diverges from a capture on purpose:
   date-granular, so `--onset "2014-09-01 19:30"` records
   `"2014-09-01"` — an explicit truncation, not a silent one.
 
+### An era acknowledgement renders a chapter span, not a status
+
+Because **an era is a chapter, not a graded state**, an era carries no status
+vocabulary — unlike `injury`, `thread`, and `pet`, whose `status` words
+(`active`/`managed`/`resolved`, `active`/`rehomed`/`passed`) are meaningful. So
+every era **output surface** — the write acknowledgement, the `--json` view, and
+the `recall` referent — renders the era's **chapter span** rather than a status
+word. The forms are fixed so they stay stable and testable:
+
+* **both bounds** → `(2008-09 → 2010-01)` — the `start` and `end` joined by an
+  arrow `→`;
+* **open-ended** (a `start`, no `end` — a still-running chapter) →
+  `(ongoing since 2008-09)`;
+* **end-only** (an `end`, no `start`) → `(until 2010-01)`;
+* **no dates** → no trailing parenthetical at all.
+
+This is deliberately **output-only**: the stored `status` field is untouched — it
+stays as the internal placeholder the append-only merge writes (the era write path
+is unchanged) and is simply never *surfaced* for eras. Nothing on disk is
+rewritten. `injury`, `thread`, and `pet` acks and their `--json` are unaffected —
+their meaningful `status` word is still surfaced.
+
+A single shared span renderer backs both the write ack and `recall`'s era range, so
+the two surfaces cannot drift; the range standardizes on the arrow `→` (it
+previously showed a spaced en-dash `–`).
+
 ## 5. The excavation ritual (selection + prompts; the conversation lives elsewhere)
 
 The review is gentle, opt-in, and opens **one cluster at a time**. The

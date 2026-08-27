@@ -162,8 +162,15 @@ still-running chapter. Stories attach to an era via their `--era` reference, so
 the past becomes browsable by chapter rather than by a date no one remembers.
 Same create-then-amend and append-only merge as `lucid injury`.
 
-`--json` emits the same `{kind, key, display_name, status, created, fields}`
-shape.
+Because an era is a chapter and not a graded state, its acknowledgement renders the
+**chapter span** rather than a status word: both bounds → `(2008-09 → 2010-01)`,
+open-ended → `(ongoing since 2008-09)`, end-only → `(until 2010-01)`, and no dates →
+no trailing parenthetical ([`../mvp/life-archive.md`](../mvp/life-archive.md) §4).
+
+`--json` emits `{kind, key, display_name, created, start, end, span, fields}` — the
+era view drops the internal `status` placeholder (never surfaced for a chapter) and
+adds the `start`/`end` bounds and the rendered `span`. `injury` and `thread` keep
+the `{kind, key, display_name, status, created, fields}` shape.
 
 ```sh
 lucid era "the coast years" --start 2010 --end 2014
