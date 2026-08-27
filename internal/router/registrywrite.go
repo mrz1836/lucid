@@ -47,12 +47,18 @@ type InjuryWriteRequest struct {
 // §4): a named life chapter with an optional, backdate-aware start/end range
 // (either may be approximate; an open end is a still-running chapter). Stories
 // attach to an era via refs.era so the past becomes browsable by chapter.
+//
+// MustExist gates the amend path: when true (an `era amend`, or the bare
+// `era <name>` alias) the write hard-errors on a name that matches no existing
+// chapter and writes nothing — only `era create` (MustExist false) mints a new
+// era, so a fat-fingered subcommand or typo can never silently start a chapter.
 type EraWriteRequest struct {
-	Name  string
-	Start string
-	End   string
-	Note  string
-	Now   time.Time
+	Name      string
+	Start     string
+	End       string
+	Note      string
+	MustExist bool
+	Now       time.Time
 }
 
 // ThreadWriteRequest carries one `lucid thread` create/amend turn
@@ -143,7 +149,7 @@ func (r *Router) WriteInjury(req InjuryWriteRequest) (RegistryWriteResult, error
 	putField(fields, "uncertainty", req.Uncertainty)
 	putField(fields, "note", req.Note)
 
-	return r.writeRegistry(observations.RegistryInjury, name, req.Status, fields, now)
+	return r.writeRegistry(observations.RegistryInjury, name, req.Status, fields, now, false)
 }
 
 // WriteEra creates or amends an era registry record (life-archive.md §4): a
@@ -180,7 +186,10 @@ func (r *Router) WriteEra(req EraWriteRequest) (RegistryWriteResult, error) {
 
 	// Era carries no status flag — a first mention lands active and stays as-is
 	// on amend (life-archive.md §4: an era is a chapter, not a graded state).
-	return r.writeRegistry(observations.RegistryEra, name, "", fields, now)
+	// MustExist gates the amend path so only `era create` mints (life-archive.md
+	// §4, strict creation): a bare/amend turn on a non-matching name hard-errors
+	// before any write.
+	return r.writeRegistry(observations.RegistryEra, name, "", fields, now, req.MustExist)
 }
 
 // WriteThread creates or amends a thread registry record (life-archive.md §4):
@@ -209,7 +218,7 @@ func (r *Router) WriteThread(req ThreadWriteRequest) (RegistryWriteResult, error
 	putField(fields, "note", req.Note)
 	stripObliquityFields(fields) // the obliquity guard (life-archive.md §4)
 
-	return r.writeRegistry(observations.RegistryThread, name, req.Status, fields, now)
+	return r.writeRegistry(observations.RegistryThread, name, req.Status, fields, now, false)
 }
 
 // WritePet creates or amends a pet registry record (life-archive.md §8). It
@@ -255,7 +264,7 @@ func (r *Router) WritePet(req PetWriteRequest) (RegistryWriteResult, error) {
 	}
 	putField(fields, "note", req.Note)
 
-	return r.writeRegistry(observations.RegistryPet, name, req.Status, fields, now)
+	return r.writeRegistry(observations.RegistryPet, name, req.Status, fields, now, false)
 }
 
 // writeRegistry is the shared create/amend core the registry-write verbs
@@ -263,13 +272,27 @@ func (r *Router) WritePet(req PetWriteRequest) (RegistryWriteResult, error) {
 // and merge the patch through the append-only UpdateRegistry path. Created is
 // derived from the resulting status_history (exactly one entry ⇒ first mention),
 // so no second read is needed to tell create from amend.
-func (r *Router) writeRegistry(kind, name, status string, fields map[string]any, now time.Time) (RegistryWriteResult, error) {
+//
+// mustExist gates the amend path (only `era` uses it today): when true, a name
+// that resolves to no existing record hard-errors before any write — the scaffold
+// that ran above creates only the empty registry directory tree, never a record —
+// so a strict amend leaves the registry byte-unchanged (life-archive.md §4).
+func (r *Router) writeRegistry(kind, name, status string, fields map[string]any, now time.Time, mustExist bool) (RegistryWriteResult, error) {
 	if err := r.prepareObservations(); err != nil {
 		return RegistryWriteResult{}, err
 	}
 	key, err := r.store.ResolveRegistryKey(kind, name)
 	if err != nil {
 		return RegistryWriteResult{}, fmt.Errorf("could not resolve the %s key; nothing was saved: %w", kind, err)
+	}
+	if mustExist {
+		_, found, ferr := r.store.ReadRegistry(kind, key)
+		if ferr != nil {
+			return RegistryWriteResult{}, fmt.Errorf("could not read the %s; nothing was saved: %w", kind, ferr)
+		}
+		if !found {
+			return RegistryWriteResult{}, amendNotFoundErr(kind, name)
+		}
 	}
 	rec, err := r.store.UpdateRegistry(kind, key, observations.RegistryPatch{
 		DisplayName: name,
@@ -290,6 +313,19 @@ func (r *Router) writeRegistry(kind, name, status string, fields map[string]any,
 		Fields:      rec.Fields,
 		Ack:         registryAck(kind, rec, created),
 	}, nil
+}
+
+// amendNotFoundErr is the strict-amend rejection: an amend (`era amend`, or the
+// bare `era <name>` alias) named a chapter that does not exist. Creation is
+// exclusive to `era create`, so an amend that matches nothing hard-errors and
+// writes nothing, pointing at the one mint path (life-archive.md §4). The
+// message is byte-shaped to the plan's contract so the CLI regression can assert
+// it verbatim.
+func amendNotFoundErr(kind, name string) error {
+	return fmt.Errorf(
+		"no %s named %q; use 'lucid %s create %s' to start a new chapter; nothing was saved",
+		kind, name, kind, name,
+	)
 }
 
 // acceptedRegistryDateForms names the forms a registry date flag reads, for the

@@ -11,9 +11,15 @@ import (
 )
 
 // seedRegistry runs a registry-write verb with --json and returns the resolved
-// (salted) key — the browse tests need the real key the store minted.
+// (salted) key — the browse tests need the real key the store minted. Only
+// `era create` mints a chapter now (the bare `era <name>` form is an amend-only
+// alias), so an era seed is routed through the create subcommand
+// (life-archive.md §4); every other kind keeps its create-or-amend bare form.
 func seedRegistry(t *testing.T, args ...string) string {
 	t.Helper()
+	if len(args) > 0 && args[0] == "era" {
+		args = append([]string{"era", "create"}, args[1:]...)
+	}
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, append(args, "--json")...)
 	require.NoError(t, err)
 	var view registryWriteView

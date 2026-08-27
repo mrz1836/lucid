@@ -60,7 +60,7 @@ func TestExcavate_ThinInjuryJSON(t *testing.T) {
 func TestExcavate_StoryTrackText(t *testing.T) {
 	isolatedHome(t)
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "era", "wild summer", "--start", "2010-06-01")
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "era", "create", "wild summer", "--start", "2010-06-01")
 	require.NoError(t, err)
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "excavate")
@@ -78,7 +78,7 @@ func TestExcavate_ReadOnly(t *testing.T) {
 
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "injury", "left knee")
 	require.NoError(t, err)
-	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "era", "wild summer")
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "era", "create", "wild summer")
 	require.NoError(t, err)
 
 	before := countHomeFiles(t, home, "")
