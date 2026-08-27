@@ -8,8 +8,11 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"testing"
 
 	"github.com/mrz1836/lucid/internal/config"
 )
@@ -19,6 +22,13 @@ import (
 // isolated tree and never touch the real ~/.lucid/ (plan.md Approach
 // §"Isolated test home").
 const EnvHome = "LUCID_HOME"
+
+// EnvRefuseRealHome is the environment variable that, when set to a truthy
+// value (1/true), makes DefaultHome refuse to resolve the real ~/.lucid Ledger
+// and return an error instead of a path. The verification harness exports it so
+// any CLI-invoking verification step — not just Go tests — is structurally
+// prevented from writing the real Ledger while a suite runs.
+const EnvRefuseRealHome = "LUCID_REFUSE_REAL_HOME"
 
 // keepFile is the marker written into each scaffolded directory to
 // prove the path is writable and keep the (otherwise empty) directory
@@ -74,17 +84,72 @@ func Open() (*Adapter, error) {
 }
 
 // DefaultHome returns the Ledger home path: the LUCID_HOME override when
-// set, otherwise ~/.lucid/. It resolves the path only; it creates
-// nothing.
+// set, otherwise ~/.lucid/. It resolves the path only; it creates nothing.
+//
+// Two guards protect the real Ledger from synthetic or fat-fingered writes. If
+// the resolved home is the real ~/.lucid — whether reached via the default
+// fallback or an explicit LUCID_HOME that names that path — DefaultHome refuses
+// (returns an error) when LUCID_REFUSE_REAL_HOME is set, and panics under
+// `go test` so an unisolated test is caught the instant it would touch the real
+// Ledger. See [guardRealHome].
 func DefaultHome() (string, error) {
-	if h := os.Getenv(EnvHome); h != "" {
-		return h, nil
-	}
+	override := os.Getenv(EnvHome)
+
 	uh, err := os.UserHomeDir()
 	if err != nil {
+		// Without a resolvable user home there is no real ~/.lucid to guard
+		// against: honor an explicit override, otherwise surface the
+		// resolution error (the deliberate TestCovOpen_DefaultHomeError case).
+		if override != "" {
+			return override, nil
+		}
 		return "", err
 	}
-	return filepath.Join(uh, ".lucid"), nil
+
+	realHome := filepath.Join(uh, ".lucid")
+	resolved := realHome
+	if override != "" {
+		resolved = override
+	}
+
+	if guardErr := guardRealHome(resolved, realHome); guardErr != nil {
+		return "", guardErr
+	}
+	return resolved, nil
+}
+
+// guardRealHome protects the real ~/.lucid Ledger. When the selected home
+// resolves to the real Ledger it (a) refuses with a clean error if the
+// LUCID_REFUSE_REAL_HOME verification signal is set — checked first so the
+// refusal stays unit-testable — and (b) panics under `go test` so an unisolated
+// test is caught the instant it would touch the real Ledger. A home that is not
+// the real Ledger passes through untouched.
+func guardRealHome(resolved, realHome string) error {
+	if filepath.Clean(resolved) != filepath.Clean(realHome) {
+		return nil
+	}
+	if refuseRealHome() {
+		return fmt.Errorf(
+			"refusing to use the real Ledger at %s: %s is set; point %s at an isolated tree",
+			realHome, EnvRefuseRealHome, EnvHome,
+		)
+	}
+	if testing.Testing() {
+		panic("lucid: a test resolved the Ledger to the real ~/.lucid; set LUCID_HOME to an isolated t.TempDir()")
+	}
+	return nil
+}
+
+// refuseRealHome reports whether the LUCID_REFUSE_REAL_HOME verification signal
+// is set to a truthy value (1/true, case-insensitive, surrounding space
+// ignored).
+func refuseRealHome() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvRefuseRealHome))) {
+	case "1", "true":
+		return true
+	default:
+		return false
+	}
 }
 
 // Home returns the absolute Ledger root this adapter manages.
