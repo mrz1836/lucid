@@ -55,13 +55,14 @@ func readRetroEvents(t *testing.T, home string) []retro.Retro {
 // TestRetroCmd_HasAllSubcommands guards the retro command tree: a dropped
 // registration would ship a missing verb silently, since the group itself still
 // renders. The everyday surface is the five subcommands park/list/show/resolve/
-// defer (the hidden one-time import lands in a later build stage).
+// defer; the one-time migration `import` is registered too but carries
+// Hidden: true (asserted by TestRetro_CLI_ImportHidden).
 func TestRetroCmd_HasAllSubcommands(t *testing.T) {
 	got := map[string]bool{}
 	for _, c := range newRetroCmd().Commands() {
 		got[c.Name()] = true
 	}
-	for _, name := range []string{"park", "list", "show", "resolve", "defer"} {
+	for _, name := range []string{"park", "list", "show", "resolve", "defer", "import"} {
 		assert.Truef(t, got[name], "retro group missing %s", name)
 	}
 }
@@ -263,4 +264,80 @@ func TestRetro_CLI_ListEmpty(t *testing.T) {
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "list")
 	require.NoError(t, err)
 	assert.Contains(t, out, "No parked items yet")
+}
+
+// TestRetro_CLI_ImportHidden: the one-time `import` verb carries Hidden: true and
+// never appears in `lucid retro --help` (retro.md §6), mirroring the hidden
+// `pet migrate-self`.
+func TestRetro_CLI_ImportHidden(t *testing.T) {
+	child, _, err := newRetroCmd().Find([]string{"import"})
+	require.NoError(t, err)
+	require.NotNil(t, child)
+	assert.True(t, child.Hidden, "import is a hidden migration tool, not an everyday verb")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "--help")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "import", "the hidden import verb is absent from --help")
+}
+
+// TestRetro_CLI_ImportFromFile: `retro import --file <json>` reproduces a synthetic
+// queue from a folded-item JSON array — exact ids, dates, sources, statuses,
+// resolutions, and defer-reasons — and a subsequent everyday park continues at
+// imported-max+1, all end-to-end through the CLI (AC-12).
+func TestRetro_CLI_ImportFromFile(t *testing.T) {
+	home := isolatedHome(t)
+
+	fixture := `[
+	  {"id":"R-001","parked_date":"2026-07-10","source":"raw_2026_07_10_22_55","item":"Resolved sample item","status":"resolved","resolution":"adopted it","resolved_date":"2026-07-20"},
+	  {"id":"R-002","parked_date":"2026-07-12","source":"chat","item":"Deferred sample item","status":"deferred","defer_reason":"someday"},
+	  {"id":"R-003","parked_date":"2026-07-15","source":"retro","item":"Open sample item","status":"open"}
+	]`
+	path := writeTempFile(t, "retro-items.json", []byte(fixture))
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "import", "--file", path)
+	require.NoError(t, err)
+	assert.Contains(t, out, "Imported 3 parked item(s)")
+
+	// The migrated set matches the fixture exactly via list --all --json. The
+	// --all view groups open ∪ deferred (ascending) ahead of resolved, so R-001
+	// (resolved) sorts into the trailing resolved section — assert the full set
+	// regardless of that grouping.
+	assert.ElementsMatch(t, []string{"R-001", "R-002", "R-003"}, retroListItems(t, "--all", "--json"))
+
+	events := readRetroEvents(t, home)
+	require.Len(t, events, 5, "3 parks + 1 resolve + 1 defer")
+	byID := map[string][]retro.Retro{}
+	for _, ev := range events {
+		byID[ev.ID] = append(byID[ev.ID], ev)
+	}
+	// R-001: an open park followed by a resolve carrying the original resolution/date.
+	require.Len(t, byID["R-001"], 2)
+	var resolve *retro.Retro
+	for i := range byID["R-001"] {
+		if byID["R-001"][i].EventType == retro.EventResolve {
+			resolve = &byID["R-001"][i]
+		}
+	}
+	require.NotNil(t, resolve)
+	assert.Equal(t, "adopted it", resolve.Resolution)
+	assert.Equal(t, "2026-07-20", resolve.LogicalDate, "the resolve is attributed to the original resolved-date")
+
+	// A subsequent everyday park continues at imported-max+1 = R-004.
+	parkOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "park", "Parked after import")
+	require.NoError(t, err)
+	assert.Contains(t, parkOut, "Parked as R-004")
+}
+
+// TestRetro_CLI_ImportRequiresFile: `import` with no --file, or a path that does
+// not exist, is a clean error that imports nothing.
+func TestRetro_CLI_ImportRequiresFile(t *testing.T) {
+	home := isolatedHome(t)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "import")
+	require.Error(t, err, "--file is required")
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "import", "--file", filepath.Join(home, "nope.json"))
+	require.Error(t, err)
+	assert.Contains(t, errOut, "could not read the import file")
+	assert.Empty(t, readRetroEvents(t, home), "a missing import file writes nothing")
 }

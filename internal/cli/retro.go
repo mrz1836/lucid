@@ -1,21 +1,27 @@
 package cli
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/retro"
 	"github.com/mrz1836/lucid/internal/router"
 )
 
 // Retro verb flag names. --source sets the item's verbatim provenance; --all and
-// --resolved switch the list view; --day comes from the shared registerDayFlag,
-// --json from the persistent root flag.
+// --resolved switch the list view; --file points the hidden import at its JSON
+// array; --day comes from the shared registerDayFlag, --json from the persistent
+// root flag.
 const (
 	flagRetroSource   = "source"
 	flagRetroAll      = "all"
 	flagRetroResolved = "resolved"
+	flagRetroFile     = "file"
 )
 
 // newRetroCmd wires `lucid retro` (retro.md §3–§6): the R-NNN parking lot — the
@@ -35,8 +41,8 @@ const (
 // park appends one immutable item and prints its minted R-NNN plus the per-write
 // receipt (the echo contract, §0); list/show fold the stream into current items
 // (a pure read); resolve/defer append a transition that references an existing
-// item without consuming a new R-NNN. The hidden one-time `import` lands in a
-// later build stage.
+// item without consuming a new R-NNN. The hidden one-time `import` (retro.md §6)
+// reproduces a pre-existing queue exactly and never appears in `--help`.
 func newRetroCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "retro",
@@ -49,6 +55,7 @@ func newRetroCmd() *cobra.Command {
 		newRetroShowCmd(),
 		newRetroResolveCmd(),
 		newRetroDeferCmd(),
+		newRetroImportCmd(),
 	)
 	return cmd
 }
@@ -200,4 +207,60 @@ func newRetroDeferCmd() *cobra.Command {
 			return emit(cmd, res.View, []string{res.Ack})
 		},
 	}
+}
+
+// newRetroImportCmd wires the hidden one-time `lucid retro import --file <json>`
+// (retro.md §6): the migration cutover from a hand-maintained queue into the
+// Ledger. Modeled on the hidden `pet migrate-self`, it carries Hidden: true and
+// never appears in `lucid retro --help` — it is a migration tool, not one of the
+// five everyday subcommands. It reads a JSON array of folded items (the same shape
+// `retro list --all --json` emits) and reproduces each one exactly: the supplied
+// R-NNN, the backdated parked-date, the verbatim source and text, and any
+// resolve/defer transition. It is NOT idempotent — a second run duplicates ids —
+// so a failed run is recovered by restoring the pre-migration backup and
+// replaying, never by re-running on top.
+func newRetroImportCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "import",
+		Short:  "One-time migration: reproduce a pre-existing queue from a JSON file",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			path, _ := cmd.Flags().GetString(flagRetroFile)
+			items, err := readRetroImportFile(path)
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			res, err := r.ImportRetro(router.ImportRetroRequest{Items: items, Now: time.Now()})
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			return emit(cmd, res.View, []string{res.Ack})
+		},
+	}
+	cmd.Flags().String(flagRetroFile, "", "Path to the JSON array of items to import (required)")
+	_ = cmd.MarkFlagRequired(flagRetroFile)
+	return cmd
+}
+
+// readRetroImportFile reads and parses the import file — a JSON array of folded
+// [retro.Item] values. A missing path, an unreadable file, or a body that is not a
+// JSON array is a clean error that imports nothing.
+func readRetroImportFile(path string) ([]retro.Item, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("a --file path is required for retro import; nothing was imported")
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // operator-supplied migration file, read once at cutover
+	if err != nil {
+		return nil, fmt.Errorf("could not read the import file %s: %w", path, err)
+	}
+	var items []retro.Item
+	if err := json.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("could not parse %s as a JSON array of retro items: %w", path, err)
+	}
+	return items, nil
 }

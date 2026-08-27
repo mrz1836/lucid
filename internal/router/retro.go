@@ -323,6 +323,175 @@ func retroTransitionError(id string, err error) error {
 	return fmt.Errorf("could not update retro item %s; nothing was changed: %w", id, err)
 }
 
+// ImportRetroRequest is the one-time migration payload (retro.md §6): the folded
+// items to reproduce — each with its explicit R-NNN, original parked-date,
+// verbatim source and item text, final status, and (where they apply) a
+// defer-reason or a resolution + resolved-date — plus now (injected so the
+// generated events' recorded_at is deterministic in tests). Items use the folded
+// [retro.Item] shape, so a file produced by `retro list --all --json` round-trips
+// straight back through import.
+type ImportRetroRequest struct {
+	Items []retro.Item
+	Now   time.Time
+}
+
+// ImportRetroView is the `lucid retro import --json` payload: how many parked
+// items were reproduced and their ids in supplied order — the record of exactly
+// what the single migration pass landed.
+type ImportRetroView struct {
+	Imported int      `json:"imported"`
+	IDs      []string `json:"ids"`
+}
+
+// ImportRetroResult reports the completed import's structured view and its
+// acknowledgment.
+type ImportRetroResult struct {
+	View ImportRetroView
+	Ack  string
+}
+
+// ImportRetro reproduces a pre-existing queue in the Ledger exactly (retro.md
+// §6) — the hidden, one-time cutover the everyday `park` cannot do (it mints a
+// fresh id and files under today). For each item it appends a `park` carrying the
+// SUPPLIED R-NNN, the backdated parked-date, and the verbatim source + item text,
+// then — if the item's final status is resolved or deferred — the matching
+// transition (a resolve with the original resolution + resolved-date, or a defer
+// with the original reason) so the folded status and reason reproduce the source
+// exactly. Every generated event gets its own fresh receipt; only the supplied
+// park ids seed the R-NNN minter, so the next everyday `park` continues at
+// imported-max+1 regardless of how many transition events were written (§1).
+//
+// It validates every item BEFORE writing anything, so a malformed item aborts the
+// whole import rather than leaving a partial write behind. It is deterministic and
+// agent-free — no LLM in the path (architecture P9). Import is NOT idempotent
+// (re-running duplicates ids); a run that fails mid-write is recovered by
+// restoring the pre-migration `lucid backup` snapshot and replaying, never by
+// re-running on top of a partial store (retro.md §6).
+func (r *Router) ImportRetro(req ImportRetroRequest) (ImportRetroResult, error) {
+	if len(req.Items) == 0 {
+		return ImportRetroResult{}, fmt.Errorf("no retro items to import; nothing was written")
+	}
+	for i, it := range req.Items {
+		if err := validateImportItem(it); err != nil {
+			return ImportRetroResult{}, fmt.Errorf("retro import item %d (%q): %w", i+1, it.ID, err)
+		}
+	}
+	if err := r.prepareRetro(); err != nil {
+		return ImportRetroResult{}, err
+	}
+	now := whenOr(req.Now)
+	ids := make([]string, 0, len(req.Items))
+	for _, it := range req.Items {
+		if err := r.importOne(now, it); err != nil {
+			return ImportRetroResult{}, fmt.Errorf("could not import retro item %s; the store may be partially migrated — restore the pre-migration backup before replaying: %w", it.ID, err)
+		}
+		ids = append(ids, it.ID)
+	}
+	return ImportRetroResult{
+		View: ImportRetroView{Imported: len(ids), IDs: ids},
+		Ack:  fmt.Sprintf("Imported %d parked item(s): %s.", len(ids), strings.Join(ids, ", ")),
+	}, nil
+}
+
+// importOne appends one item's park (supplied id, backdated parked-date, verbatim
+// source and text) and, when its final status calls for it, the matching resolve
+// or defer transition — reproducing the folded status and reason from the source.
+// A resolve is attributed to its resolved-date (the fold reads resolved-date from
+// the resolve event's logical_date); a defer, which carries no date of its own in
+// the folded view, is attributed to the parked-date. An empty source defaults to
+// the `migration` provenance so an imported item is always distinguishable from a
+// hand-typed park.
+func (r *Router) importOne(now time.Time, it retro.Item) error {
+	source := it.Source
+	if source == "" {
+		source = retro.SourceMigration
+	}
+	if _, err := r.store.AppendRetroEvent(retro.Retro{
+		Schema:      retro.Schema,
+		EventType:   retro.EventPark,
+		ID:          it.ID, // supplied → the store keeps it, never auto-mints
+		Item:        it.Item,
+		Status:      retro.StatusOpen,
+		Source:      source,
+		RecordedAt:  now.Format(time.RFC3339),
+		LogicalDate: it.ParkedDate,
+	}); err != nil {
+		return err
+	}
+	switch it.Status {
+	case retro.StatusResolved:
+		_, err := r.store.AppendRetroEvent(retro.Retro{
+			Schema:       retro.Schema,
+			EventType:    retro.EventResolve,
+			ID:           it.ID,
+			Status:       retro.StatusResolved,
+			Source:       retro.SourceRetro,
+			Resolution:   it.Resolution,
+			ResolvedDate: it.ResolvedDate,
+			RecordedAt:   now.Format(time.RFC3339),
+			LogicalDate:  it.ResolvedDate,
+		})
+		return err
+	case retro.StatusDeferred:
+		_, err := r.store.AppendRetroEvent(retro.Retro{
+			Schema:      retro.Schema,
+			EventType:   retro.EventDefer,
+			ID:          it.ID,
+			Status:      retro.StatusDeferred,
+			Source:      retro.SourceRetro,
+			DeferReason: it.DeferReason,
+			RecordedAt:  now.Format(time.RFC3339),
+			LogicalDate: it.ParkedDate,
+		})
+		return err
+	}
+	return nil
+}
+
+// validateImportItem rejects an item the import cannot reproduce faithfully before
+// any write, so a bad row aborts the whole pass. It guards the fields the writer
+// cannot invent: a well-formed R-NNN, non-empty item text, a valid parked-date,
+// and — by final status — the transition fields (a resolved item needs a
+// resolved-date and a resolution; a deferred item needs a reason). An empty status
+// is treated as open (the default), matching the folded shape.
+func validateImportItem(it retro.Item) error {
+	if _, ok := retro.ParseSeq(it.ID); !ok {
+		return fmt.Errorf("id must be a well-formed R-NNN")
+	}
+	if strings.TrimSpace(it.Item) == "" {
+		return fmt.Errorf("item text is required")
+	}
+	if !validRetroDate(it.ParkedDate) {
+		return fmt.Errorf("parked_date must be YYYY-MM-DD, got %q", it.ParkedDate)
+	}
+	switch it.Status {
+	case "", retro.StatusOpen:
+		return nil
+	case retro.StatusResolved:
+		if !validRetroDate(it.ResolvedDate) {
+			return fmt.Errorf("a resolved item needs a resolved_date (YYYY-MM-DD), got %q", it.ResolvedDate)
+		}
+		if strings.TrimSpace(it.Resolution) == "" {
+			return fmt.Errorf("a resolved item needs a resolution")
+		}
+		return nil
+	case retro.StatusDeferred:
+		if strings.TrimSpace(it.DeferReason) == "" {
+			return fmt.Errorf("a deferred item needs a defer_reason")
+		}
+		return nil
+	default:
+		return fmt.Errorf("status must be %q, %q, or %q, got %q", retro.StatusOpen, retro.StatusResolved, retro.StatusDeferred, it.Status)
+	}
+}
+
+// validRetroDate reports whether s is a civil YYYY-MM-DD date, the logical-date
+// form every retro event carries.
+func validRetroDate(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
+}
+
 // selectRetroView partitions the ascending-R-NNN pool into the requested view
 // (retro.md §4): Resolved → the resolved items alone; All → open ∪ deferred then
 // resolved; default → open ∪ deferred. Resolved wins over All. Each partition

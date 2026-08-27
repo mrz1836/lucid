@@ -301,6 +301,141 @@ func TestRetroTransitionReceiptsAndAcknowledgments(t *testing.T) {
 	assert.Equal(t, "R-003", next.View.ID, "a transition never consumes an R-NNN slot")
 }
 
+// TestRetroImportExplicitIDs: the hidden one-time import reproduces a synthetic
+// set with explicit ids exactly — sources, statuses, defer-reasons, resolutions,
+// and dates all round-trip on `list --all` — gives every generated park/transition
+// event a unique internal receipt, and makes a subsequent `park` continue at the
+// next id after the imported item max (R-004), not after the raw event count
+// (AC-12, AC-3).
+func TestRetroImportExplicitIDs(t *testing.T) {
+	r, home := bootedRetroWithHome(t)
+
+	items := []retro.Item{
+		{
+			ID: "R-001", ParkedDate: "2026-07-10", Source: "raw_2026_07_10_22_55",
+			Item:   "Resolved sample\n\nwith a second paragraph kept verbatim",
+			Status: retro.StatusResolved, Resolution: "adopted it — the walk opens with deferred items", ResolvedDate: "2026-07-20",
+		},
+		{
+			ID: "R-002", ParkedDate: "2026-07-12", Source: "chat",
+			Item: "Deferred sample", Status: retro.StatusDeferred, DeferReason: "someday / after the quarter closes",
+		},
+		{
+			ID: "R-003", ParkedDate: "2026-07-15", Source: "retro",
+			Item: "Open sample", Status: retro.StatusOpen,
+		},
+	}
+
+	res, err := r.ImportRetro(ImportRetroRequest{Items: items, Now: day1()})
+	require.NoError(t, err)
+	assert.Equal(t, 3, res.View.Imported)
+	assert.Equal(t, []string{"R-001", "R-002", "R-003"}, res.View.IDs)
+	assert.Contains(t, res.Ack, "Imported 3 parked item(s)")
+
+	// list --all reproduces every field exactly, ascending R-NNN.
+	all, err := r.ListRetro(ListRetroRequest{All: true})
+	require.NoError(t, err)
+	require.Equal(t, 3, all.View.Count)
+	byID := map[string]retro.Item{}
+	for _, it := range all.View.Items {
+		byID[it.ID] = it
+	}
+
+	r1 := byID["R-001"]
+	assert.Equal(t, "2026-07-10", r1.ParkedDate)
+	assert.Equal(t, "raw_2026_07_10_22_55", r1.Source, "the original source is stored verbatim")
+	assert.Equal(t, "Resolved sample\n\nwith a second paragraph kept verbatim", r1.Item, "the multi-paragraph body is kept verbatim")
+	assert.Equal(t, retro.StatusResolved, r1.Status)
+	assert.Equal(t, "adopted it — the walk opens with deferred items", r1.Resolution)
+	assert.Equal(t, "2026-07-20", r1.ResolvedDate, "the original resolved-date is preserved, not set to today")
+
+	r2 := byID["R-002"]
+	assert.Equal(t, "2026-07-12", r2.ParkedDate)
+	assert.Equal(t, "chat", r2.Source)
+	assert.Equal(t, retro.StatusDeferred, r2.Status)
+	assert.Equal(t, "someday / after the quarter closes", r2.DeferReason)
+
+	r3 := byID["R-003"]
+	assert.Equal(t, retro.StatusOpen, r3.Status)
+	assert.Equal(t, "retro", r3.Source)
+	assert.Empty(t, r3.Resolution)
+	assert.Empty(t, r3.DeferReason)
+
+	// Every generated event (3 parks + 1 resolve + 1 defer = 5) carries a unique
+	// per-write receipt distinct from the R-NNN item id.
+	raw := readRetroRaw(t, home)
+	require.Len(t, raw, 5, "one park per item plus one transition each for the resolved and deferred items")
+	receipts := map[string]bool{}
+	for _, ev := range raw {
+		assert.Truef(t, strings.HasPrefix(ev.EventID, "retro_event_"), "receipt %q has the retro_event_ prefix", ev.EventID)
+		assert.Falsef(t, receipts[ev.EventID], "receipt %q is unique across the import", ev.EventID)
+		receipts[ev.EventID] = true
+	}
+
+	// The next everyday park continues at imported-max+1 = R-004, NOT after the
+	// number of raw events (which would be R-006).
+	next, err := r.ParkRetro(ParkRetroRequest{Item: "Parked after the import", Now: day1()})
+	require.NoError(t, err)
+	assert.Equal(t, "R-004", next.View.ID, "the next park continues after the imported item max, not the event count")
+}
+
+// TestRetroImport_ValidationAbortsBeforeWriting: a structurally-impossible item
+// (a resolved row with no resolution) aborts the whole import before any event is
+// written, and an empty item set is a clean error — so a bad file never leaves a
+// partial, non-idempotent store behind.
+func TestRetroImport_ValidationAbortsBeforeWriting(t *testing.T) {
+	r, home := bootedRetroWithHome(t)
+
+	_, err := r.ImportRetro(ImportRetroRequest{Items: nil, Now: day1()})
+	require.Error(t, err, "an empty import set is a clean error")
+
+	bad := []retro.Item{
+		{ID: "R-001", ParkedDate: "2026-07-10", Source: "chat", Item: "Good open item", Status: retro.StatusOpen},
+		{ID: "R-002", ParkedDate: "2026-07-11", Source: "chat", Item: "Resolved but no resolution", Status: retro.StatusResolved, ResolvedDate: "2026-07-20"},
+	}
+	_, err = r.ImportRetro(ImportRetroRequest{Items: bad, Now: day1()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "R-002")
+	assert.Empty(t, readRetroRaw(t, home), "a malformed item aborts the whole import — nothing is written")
+}
+
+// readRetroRaw walks the retro tree under home and returns every appended event,
+// so a router test can assert receipt uniqueness and the exact write count on disk.
+func readRetroRaw(t *testing.T, home string) []retro.Retro {
+	t.Helper()
+	var out []retro.Retro
+	root := filepath.Join(home, "retro")
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			if os.IsNotExist(werr) {
+				return filepath.SkipDir
+			}
+			return werr
+		}
+		if d.IsDir() || !strings.HasPrefix(d.Name(), "retro_") || !strings.HasSuffix(p, ".jsonl") {
+			return nil
+		}
+		data, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			ev, uerr := retro.UnmarshalLine([]byte(line))
+			require.NoError(t, uerr)
+			out = append(out, ev)
+		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil
+	}
+	require.NoError(t, err)
+	return out
+}
+
 // retroIDs projects the ids from a folded item slice, so a list assertion reads
 // as the expected ascending R-NNN order.
 func retroIDs(items []retro.Item) []string {
