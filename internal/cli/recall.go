@@ -32,12 +32,17 @@ type recallFieldView struct {
 }
 
 // recallReferentView is the --json projection of the browsed era/thread/injury/pet:
-// its identity, status, convention fields, and source context.
+// its identity, status, convention fields, and source context. An era is a
+// chapter, not a graded state (life-archive.md §4): it surfaces no status
+// (omitted) and carries its chapter span instead, so no era output presents
+// "active". Every other kind emits a (non-empty) status and omits span, leaving
+// its --json byte-for-byte unchanged.
 type recallReferentView struct {
 	Kind               string            `json:"kind"`
 	Key                string            `json:"key"`
 	DisplayName        string            `json:"display_name"`
-	Status             string            `json:"status"`
+	Status             string            `json:"status,omitempty"`
+	Span               string            `json:"span,omitempty"`
 	Fields             []recallFieldView `json:"fields"`
 	Source             string            `json:"source"`
 	SupportingEntryIDs []string          `json:"supporting_entry_ids"`
@@ -154,13 +159,30 @@ func renderRecall(cmd *cobra.Command, res router.RecallResult) error {
 }
 
 // renderRecallReferent prints the browsed era/thread/injury/pet: a heading, its
-// present convention fields as bullets, and its source-context citation.
+// present convention fields as bullets, and its source-context citation. An era's
+// heading carries its chapter span in place of a status word (life-archive.md §4);
+// a no-dates era (neither status nor span) drops the parenthetical entirely.
 func renderRecallReferent(out io.Writer, ref *router.RecallReferent) {
-	_, _ = fmt.Fprintf(out, "%s — %s (%s)\n", ref.DisplayName, ref.Kind, ref.Status)
+	if detail := referentHeaderDetail(ref); detail != "" {
+		_, _ = fmt.Fprintf(out, "%s — %s (%s)\n", ref.DisplayName, ref.Kind, detail)
+	} else {
+		_, _ = fmt.Fprintf(out, "%s — %s\n", ref.DisplayName, ref.Kind)
+	}
 	for _, f := range ref.Fields {
 		_, _ = fmt.Fprintf(out, "• %s: %s\n", f.Label, f.Value)
 	}
 	_, _ = fmt.Fprintf(out, "Cites: %s\n", recallCite(ref.SupportingEntryIDs, ref.Key, ref.Source))
+}
+
+// referentHeaderDetail returns the parenthetical detail for a referent heading:
+// an era renders its chapter span (a chapter, not a graded state — life-archive.md
+// §4), every other kind renders its status. Empty when an era has no dates, so the
+// heading drops the parenthetical rather than printing "()".
+func referentHeaderDetail(ref *router.RecallReferent) string {
+	if ref.Kind == router.RecallEra {
+		return ref.Span
+	}
+	return ref.Status
 }
 
 // renderRecallItem prints one surfaced item: a story (its words, its detail, its
@@ -210,6 +232,7 @@ func recallViewOf(res router.RecallResult) recallView {
 			Key:                res.Referent.Key,
 			DisplayName:        res.Referent.DisplayName,
 			Status:             res.Referent.Status,
+			Span:               res.Referent.Span,
 			Fields:             make([]recallFieldView, 0, len(res.Referent.Fields)),
 			Source:             res.Referent.Source,
 			SupportingEntryIDs: nonNil(res.Referent.SupportingEntryIDs),

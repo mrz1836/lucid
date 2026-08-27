@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/router"
 )
 
@@ -62,9 +63,16 @@ func registryWriteViewOf(res router.RegistryWriteResult) registryWriteView {
 }
 
 // renderRegistryWrite prints a registry-write result: the --json view, or the
-// inventory ack prose. The shared tail of the registry-write commands.
+// inventory ack prose. The shared tail of the registry-write commands. An era is
+// a chapter, not a graded state (life-archive.md §4), so its --json goes through
+// the dedicated eraWriteView (chapter span, no status word); injury/thread/pet
+// stay on the shared registryWriteView, byte-for-byte unchanged. The human ack
+// path already carries the span for eras (set at write time).
 func renderRegistryWrite(cmd *cobra.Command, res router.RegistryWriteResult) error {
 	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+		if res.Kind == observations.RegistryEra {
+			return writeJSON(cmd.OutOrStdout(), eraWriteViewOf(res))
+		}
 		return writeJSON(cmd.OutOrStdout(), registryWriteViewOf(res))
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)

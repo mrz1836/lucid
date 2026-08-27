@@ -192,6 +192,36 @@ func TestRecall_BadRequestErrors(t *testing.T) {
 	require.Error(t, err, "a dimension browse needs a key")
 }
 
+// TestEraSpan covers the shared chapter-span helper directly (life-archive.md
+// §4): both bounds render with the arrow separator, an open era reads "ongoing
+// since", an end-only era reads "until", and a dateless era yields "".
+func TestEraSpan(t *testing.T) {
+	for _, tc := range []struct {
+		name, start, end, want string
+	}{
+		{"both bounds", "2008-09", "2010-01", "2008-09 → 2010-01"},
+		{"start only is ongoing", "2008-09", "", "ongoing since 2008-09"},
+		{"end only is until", "", "2010-01", "until 2010-01"},
+		{"no dates yields empty", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, eraSpan(tc.start, tc.end))
+		})
+	}
+}
+
+// TestEraRange_DelegatesToEraSpan proves the bare-index range now renders the
+// arrow span through the shared helper (was a spaced en-dash), so the index and
+// the write ack cannot drift.
+func TestEraRange_DelegatesToEraSpan(t *testing.T) {
+	assert.Equal(t, "2008-09 → 2010-01", eraRange(map[string]any{"start": "2008-09", "end": "2010-01"}))
+	assert.Equal(t, "ongoing since 2004", eraRange(map[string]any{"start": "2004"}))
+	assert.Equal(t, "until 2010-01", eraRange(map[string]any{"end": "2010-01"}))
+	assert.Empty(t, eraRange(map[string]any{}))
+	assert.NotContains(t, eraRange(map[string]any{"start": "2008-09", "end": "2010-01"}), " – ",
+		"the spaced en-dash form is gone")
+}
+
 // TestRecall_ReadOnly proves the surface writes nothing: the Ledger file count
 // is identical before and after a keyed browse and an index over a warm store.
 func TestRecall_ReadOnly(t *testing.T) {
