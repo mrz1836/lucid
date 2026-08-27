@@ -81,7 +81,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid recall` | Read-only: browse the archive by era, thread, injury, or pet (never writes). |
 | `lucid gallery` | Read-only: browse stored media as a date-ordered timeline (before/after), filterable by an inclusive date window and/or one linked subject (never writes). |
 | `lucid memory` | Record a story from your past — backdated, linked, kept. |
-| `lucid era` | Record or amend a life chapter (era). |
+| `lucid era` | Manage life chapters (eras) through explicit subcommands: read-only `era list`, `era create <name>` (the only path that mints a chapter), and `era amend <name>` (append-only). Bare `era <name>` is an amend-only alias that hard-errors on a non-matching name, and reserved subcommand-shaped words (`list`, `ls`, `show`, `help`, names starting with `-`) can never become a chapter — so a fat-fingered subcommand cannot silently create an era. |
 | `lucid injury` | Record or amend an injury in your body history. |
 | `lucid thread` | Record or amend a thread you're working on. |
 | `lucid reframe` | Keep and rotate your self-talk reframes (a *catch → flip* pair) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`, where `surface` returns one reframe per logical day (least-recently-surfaced, idempotent within the day). Deterministic, no model in any path. |
