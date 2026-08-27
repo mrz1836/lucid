@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.23.0"
+min_lucid_version: "0.26.0"
 ---
 
 # Lucid
@@ -87,6 +87,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid reframe` | Keep and rotate your self-talk reframes (a *catch → flip* pair) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`, where `surface` returns one reframe per logical day (least-recently-surfaced, idempotent within the day). Deterministic, no model in any path. |
 | `lucid focus` | Keep and rotate your daily focus work-ons (a work-on plus an optional success criterion) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`/`retire`, where `surface` returns one active item per logical day (least-recently-surfaced, idempotent within the day) and `retire` deactivates without deleting (`list --all` is the audit view). Deterministic, no model in any path. |
 | `lucid gratitude` | Keep a running gratitude tally (the count of things you return to gratitude for) — an append-only **registry** kind reached by its CLI form: `add`/`list`/`merge`/`import`. `add "<thing>"` canonical-key-matches and bumps a live entry or creates one (`add --into <id>` bumps a specific entry when wording differs; `merge <src> <dst>` folds a duplicate; `import` seeds an existing count via explicit `--count`/`--first`/`--last`). Every write returns a receipt id, distinct from the stable entry id `list` shows. The verbatim nightly gratitude stays a separate, unchanged `lucid log` (`#gratitude`). Deterministic, no model in any path (automatic by-meaning matching is the future R-011). |
+| `lucid retro` | Keep the retro parking lot — the `R-NNN` queue of things parked to revisit at the weekly Retro or a Gate — an append-only inner-work record family reached by its CLI form: `park`/`list`/`show`/`resolve`/`defer`. `park "<item>"` mints the next global `R-NNN` and returns it plus a per-write receipt (the id an agent echoes back — `parked as R-012`); `list` defaults to open **and** deferred (`--all` adds resolved, `--resolved` shows only it), `show <R-NNN>` renders one item, `resolve <R-NNN> "<resolution>"` moves it to `resolved` **without deleting** (the append-only audit trail), and `defer <R-NNN> "<reason>"` sets the first-class `deferred` status while keeping it in the default `list`. Transitions reference the affected `R-NNN` without consuming a new id. Deterministic, no model in any path. |
 | `lucid pet` | Record or amend a companion in your pet registry — a first-class named referent with its own `active`/`rehomed`/`passed` lifecycle. |
 | `lucid link` | Point a stored media attachment at a subject it is about — a person, injury, day, anchor, or thread — through the append-only link ledger; a retroactive curation verb reached by its CLI form. |
 | `lucid unlink` | Retire a media↔subject association by appending an unlink event — nothing is destroyed, the pair just stops being live. |
