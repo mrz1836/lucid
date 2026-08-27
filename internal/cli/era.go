@@ -16,6 +16,57 @@ const (
 	flagEnd   = "end"
 )
 
+// eraWriteView is the machine-readable projection for `lucid era --json`. An era
+// is a chapter, not a graded state (life-archive.md §4), so — unlike the shared
+// registryWriteView that injury/thread/pet use — it surfaces no status word.
+// Instead it renders the chapter span plus its raw start/end bounds, so no era
+// output surface presents "active". This is output-only: the stored status
+// placeholder is untouched, merely never surfaced. Built CLI-side with stable
+// snake_case names so a harness branches on fields rather than parsing prose.
+type eraWriteView struct {
+	Kind        string         `json:"kind"`
+	Key         string         `json:"key"`
+	DisplayName string         `json:"display_name"`
+	Created     bool           `json:"created"`
+	Start       string         `json:"start,omitempty"`
+	End         string         `json:"end,omitempty"`
+	Span        string         `json:"span,omitempty"`
+	Fields      map[string]any `json:"fields"`
+}
+
+// eraWriteViewOf projects an era write result into the stable --json shape: the
+// chapter span (through the shared router.EraSpan helper, so the write ack,
+// recall, and this machine surface cannot drift) plus its raw start/end bounds,
+// and Fields as a (possibly empty) object rather than null so a harness can index
+// it unconditionally.
+func eraWriteViewOf(res router.RegistryWriteResult) eraWriteView {
+	fields := res.Fields
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	start := fieldString(fields["start"])
+	end := fieldString(fields["end"])
+	return eraWriteView{
+		Kind:        res.Kind,
+		Key:         res.Key,
+		DisplayName: res.DisplayName,
+		Created:     res.Created,
+		Start:       start,
+		End:         end,
+		Span:        router.EraSpan(start, end),
+		Fields:      fields,
+	}
+}
+
+// fieldString reads a string-valued registry Fields value (an era's start/end
+// bound is stored as a plain string), trimmed, or "" when absent or not a string.
+func fieldString(v any) string {
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
 // newEraCmd wires `lucid era <name> [--start …] [--end …] [--note …]`: the
 // registry-write verb for a life chapter (mvp/life-archive.md §4). Stories
 // attach to an era via refs.era so the past becomes browsable by chapter rather

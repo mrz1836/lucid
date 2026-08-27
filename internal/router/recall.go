@@ -78,12 +78,16 @@ type RecallField struct {
 // carries. It is
 // primary, owner-held registry data, so its Source is "registry" and its
 // SupportingEntryIDs are the story ids filed under it (empty when none) — the
-// referent is cited by those stories or, failing that, by its own key.
+// referent is cited by those stories or, failing that, by its own key. An era is
+// a chapter, not a graded state (§4), so it carries no surfaced Status and its
+// chapter Span is set instead; every other kind carries a Status and an empty
+// Span.
 type RecallReferent struct {
 	Kind               string
 	Key                string
 	DisplayName        string
 	Status             string
+	Span               string
 	Fields             []RecallField
 	Source             string
 	SupportingEntryIDs []string
@@ -234,9 +238,13 @@ func indexItem(dim string, rec observations.Registry) RecallItem {
 
 // buildReferent assembles the browsed referent: its identity, status, the
 // convention Fields in canonical order, and the story ids filed under it as its
-// supporting citation (empty for an injury, which is itself primary source).
+// supporting citation (empty for an injury, which is itself primary source). An
+// era surfaces its chapter span instead of a status word: its internal status
+// placeholder is suppressed (Status "") and Span carries the chapter range
+// (life-archive.md §4). This is output-only — the stored record is untouched;
+// every other kind keeps surfacing its meaningful status.
 func buildReferent(dim string, rec observations.Registry, supporting []string) RecallReferent {
-	return RecallReferent{
+	ref := RecallReferent{
 		Kind:               dim,
 		Key:                rec.Key,
 		DisplayName:        rec.DisplayName,
@@ -245,6 +253,11 @@ func buildReferent(dim string, rec observations.Registry, supporting []string) R
 		Source:             recallSourceRegistry,
 		SupportingEntryIDs: supporting,
 	}
+	if dim == RecallEra {
+		ref.Status = ""
+		ref.Span = eraSpan(fieldValue(rec.Fields["start"]), fieldValue(rec.Fields["end"]))
+	}
+	return ref
 }
 
 // referentFields renders a referent's present convention Fields in canonical
@@ -290,6 +303,14 @@ func eraSpan(start, end string) string {
 // (life-archive.md §4). An era with no dates yields "".
 func eraRange(fields map[string]any) string {
 	return eraSpan(fieldValue(fields["start"]), fieldValue(fields["end"]))
+}
+
+// EraSpan is the exported form of the shared chapter-span helper, so the CLI's
+// era write --json projection renders the span through the same single
+// implementation as the write ack and the recall index — they cannot drift
+// (life-archive.md §4).
+func EraSpan(start, end string) string {
+	return eraSpan(start, end)
 }
 
 // storyTitle returns a memory's own words as its title, or an honest fallback
