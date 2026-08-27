@@ -113,6 +113,22 @@ func (a *Adapter) AppendRetroEvent(ev retro.Retro) (retro.Retro, error) {
 	return ev, nil
 }
 
+// AppendRetroTransition appends a resolve or defer event that references an
+// existing parked item (retro.md §5). It guards the never-conjure rule: a
+// transition may only name an item a park already minted, so an id that folds to
+// nothing is a clean error and nothing is written. When the target exists it
+// delegates to [Adapter.AppendRetroEvent], which mints the fresh per-write
+// receipt and — because the event is not a park — never advances the R-NNN
+// counter. It returns the appended event (with its receipt filled).
+func (a *Adapter) AppendRetroTransition(ev retro.Retro) (retro.Retro, error) {
+	if _, found, err := a.ReadRetroByID(ev.ID); err != nil {
+		return retro.Retro{}, err
+	} else if !found {
+		return retro.Retro{}, fmt.Errorf("storage: no retro item %q to transition", ev.ID)
+	}
+	return a.AppendRetroEvent(ev)
+}
+
 // defaultRetroStatus maps an event type to the status it sets when the caller
 // left it empty: park → open, resolve → resolved, defer → deferred. The router
 // sets it explicitly; this is the storage-side safety net.

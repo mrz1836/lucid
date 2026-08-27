@@ -52,15 +52,18 @@ func readRetroEvents(t *testing.T, home string) []retro.Retro {
 	return out
 }
 
-// TestRetroCmd_HasParkSubcommand guards the retro command tree: a dropped
+// TestRetroCmd_HasAllSubcommands guards the retro command tree: a dropped
 // registration would ship a missing verb silently, since the group itself still
-// renders. Later build stages add list/show/resolve/defer.
-func TestRetroCmd_HasParkSubcommand(t *testing.T) {
+// renders. The everyday surface is the five subcommands park/list/show/resolve/
+// defer (the hidden one-time import lands in a later build stage).
+func TestRetroCmd_HasAllSubcommands(t *testing.T) {
 	got := map[string]bool{}
 	for _, c := range newRetroCmd().Commands() {
 		got[c.Name()] = true
 	}
-	assert.True(t, got["park"], "retro group missing park")
+	for _, name := range []string{"park", "list", "show", "resolve", "defer"} {
+		assert.Truef(t, got[name], "retro group missing %s", name)
+	}
 }
 
 // TestRetro_CLI_ParkReturnsBothIdentities: `retro park` prints the minted R-NNN
@@ -170,4 +173,94 @@ func TestRetro_CLI_DayStrictRejectWritesNothing(t *testing.T) {
 	assert.Empty(t, out)
 	assert.Contains(t, errOut, "could not read the day", "the reason reaches the user, not just the exit code")
 	assert.Empty(t, readRetroEvents(t, home), "a refused day writes nothing")
+}
+
+// retroListItems parses the `retro list --json` payload's item ids for an
+// end-to-end CLI assertion.
+func retroListItems(t *testing.T, args ...string) []string {
+	t.Helper()
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, append([]string{"retro", "list"}, args...)...)
+	require.NoError(t, err)
+	var payload struct {
+		Count int `json:"count"`
+		Items []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	require.Len(t, payload.Items, payload.Count)
+	ids := make([]string, 0, len(payload.Items))
+	for _, it := range payload.Items {
+		ids = append(ids, it.ID)
+	}
+	return ids
+}
+
+// TestRetro_CLI_ListShowResolveDefer exercises the whole read+lifecycle surface
+// end-to-end: default list is open ∪ deferred; resolve leaves it and returns under
+// --resolved/--all; defer stays; show renders a single item; the transition acks
+// name both identities.
+func TestRetro_CLI_ListShowResolveDefer(t *testing.T) {
+	isolatedHome(t)
+
+	for _, item := range []string{"Open item", "Defer me", "Resolve me"} {
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "park", item)
+		require.NoError(t, err)
+	}
+
+	// defer R-002, resolve R-003.
+	deferOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "defer", "R-002", "not", "now")
+	require.NoError(t, err)
+	assert.Contains(t, deferOut, "Deferred R-002")
+	assert.Contains(t, deferOut, "receipt retro_event_", "the defer ack names both identities")
+
+	resolveOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "resolve", "R-003", "did", "the", "thing")
+	require.NoError(t, err)
+	assert.Contains(t, resolveOut, "Resolved R-003")
+	assert.Contains(t, resolveOut, "receipt retro_event_")
+
+	// Default list: open + deferred; resolved excluded.
+	assert.Equal(t, []string{"R-001", "R-002"}, retroListItems(t, "--json"))
+	// --all: open/deferred then resolved.
+	assert.Equal(t, []string{"R-001", "R-002", "R-003"}, retroListItems(t, "--all", "--json"))
+	// --resolved: only R-003.
+	assert.Equal(t, []string{"R-003"}, retroListItems(t, "--resolved", "--json"))
+
+	// show R-002 renders the deferred item with its reason (--json exposes fields).
+	showOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "show", "R-002", "--json")
+	require.NoError(t, err)
+	var shown struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		DeferReason string `json:"defer_reason"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(showOut), &shown))
+	assert.Equal(t, "R-002", shown.ID)
+	assert.Equal(t, retro.StatusDeferred, shown.Status)
+	assert.Equal(t, "not now", shown.DeferReason)
+}
+
+// TestRetro_CLI_TransitionUnknownIDIsCleanError: resolving/deferring/showing an id
+// no park minted is a clean error on stderr with a non-zero exit and no write.
+func TestRetro_CLI_TransitionUnknownIDIsCleanError(t *testing.T) {
+	home := isolatedHome(t)
+
+	_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "resolve", "R-404", "nope")
+	require.Error(t, err)
+	assert.Contains(t, errOut, "R-404")
+	assert.Empty(t, readRetroEvents(t, home), "resolving an unknown id writes nothing")
+
+	_, errOut, err = runRoot(t, BuildInfo{Version: "dev"}, "retro", "show", "R-404")
+	require.Error(t, err)
+	assert.Contains(t, errOut, "R-404")
+}
+
+// TestRetro_CLI_ListEmpty: `list` on a cold home is a clean hint, not a crash.
+func TestRetro_CLI_ListEmpty(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "retro", "list")
+	require.NoError(t, err)
+	assert.Contains(t, out, "No parked items yet")
 }
