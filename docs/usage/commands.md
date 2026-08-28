@@ -757,6 +757,73 @@ lucid focus surface
 lucid focus retire focus_2026_08_20_001
 ```
 
+### retro
+
+```
+lucid retro park <item> [--source <value>] [--day <date>] [--json]
+lucid retro list [--all] [--resolved] [--json]
+lucid retro show <R-NNN> [--json]
+lucid retro resolve <R-NNN> <resolution> [--json]
+lucid retro defer <R-NNN> <reason> [--json]
+```
+
+Keep the **retro parking lot** — the `R-NNN` queue of things parked to revisit
+at the weekly Retro or a Gate ("park this for Sunday"). Deterministic, no LLM, an
+append-only record family under `~/.lucid/retro/`, modeled on `focus`. Its whole
+purpose is audit: `park` always returns a real id (or fails loudly) so an agent
+can echo it back, and nothing is ever deleted — items are `resolve`d or `defer`red
+by appending, and stay in the Ledger. Full layer spec (schema, the split between
+the `R-NNN` item id and the per-write `retro_event_…` receipt, the open/resolved/
+deferred fold, and the hidden import path): [`../retro.md`](../retro.md).
+
+- **`park <item>`** appends a `park` event, **mints the next global-monotonic
+  `R-NNN`**, and prints **both** the `R-NNN` and the write's receipt id
+  (`retro_event_<logical_date>_<seq>`) — the echo an agent quotes back
+  (`parked as R-012`). `item` is required and stored **verbatim**; an empty `item`
+  is a usage error and nothing is written. `--source <value>` sets the provenance
+  verbatim (default `retro`); it is never synthesized.
+- **`list`** folds the events into current items and prints them **ascending by
+  `R-NNN`**. The **default view shows open AND deferred** items (so the Sunday
+  walk never loses a deferred item); `--all` adds the resolved audit trail after
+  them, `--resolved` shows only the resolved trail. `--json` emits the structured
+  list, exposing each item's `id`.
+- **`show <R-NNN>`** displays a single item with **all** folded fields — `id`,
+  parked-date, source, item text, status, resolution, resolved-date, and
+  defer-reason. `--json` emits it as a structured object; an unknown id is a clean
+  error.
+- **`resolve <R-NNN> <resolution>`** appends a `resolve` event that records the
+  resolution + resolved-date and moves the item to `resolved` — **it never
+  deletes**; the original `park` line stays byte-identical and the item appears
+  under `list --resolved` / `list --all`. Both arguments are required.
+- **`defer <R-NNN> <reason>`** appends a `defer` event that moves the item to the
+  first-class **`deferred`** status with a `defer-reason` — and it **stays visible
+  in the default `list`**, a conscious not-now rather than a disappearance.
+
+Both transitions **reference** the affected `R-NNN` without consuming a new id
+(the parked-item counter never advances on a resolve/defer) and each mints its
+own fresh receipt, so the acknowledgment names the affected `R-NNN` alongside the
+write's `retro_event_…` receipt. State is a fold, never a mutation: nothing is
+rewritten or deleted, and resolving or deferring an unknown id is a clean error
+that appends nothing. (A hidden one-time `import` verb reproduces an existing
+queue with explicit ids and backdated dates for the initial cutover; it is not an
+everyday subcommand — see [`../retro.md`](../retro.md) §6.)
+
+`retro park` carries the `--day` flag ([Backdating with --day](#backdating-with---day)),
+the **strict** tier: `--day @yesterday` and `--day @YYYY-MM-DD` set the item's
+parked date (the event's `logical_date`); an unreadable token or a future day is a
+clean error and nothing is captured. `recorded_at` is always the real write time.
+
+```sh
+lucid retro park "Revisit whether the Sunday walk should open with the deferred items"
+lucid retro park "Try a shorter Gate cadence next quarter" --source chat
+lucid retro park "Experiment with a two-column layout for the weekly notes" --day @yesterday
+lucid retro list
+lucid retro list --all --json
+lucid retro show R-001
+lucid retro resolve R-001 "Adopted it — the Sunday walk now opens with deferred items"
+lucid retro defer R-014 "Someday — revisit after the quarter closes"
+```
+
 ### gratitude
 
 ```
