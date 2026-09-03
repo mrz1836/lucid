@@ -398,3 +398,81 @@ func TestCloseoutCLI_BootError(t *testing.T) {
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "dfx", "3/wrist", "the chain ran")
 	require.Error(t, err)
 }
+
+// TestCloseoutAmend is the AC-4 CLI surface: `closeout amend --day --journal-file`
+// corrects a sealed journal off the command line, both flags are required, and
+// the immutable boundary (a skip record has no journal to amend) is refused.
+func TestCloseoutAmend(t *testing.T) {
+	t.Run("happy path supersedes the sealed journal", func(t *testing.T) {
+		home := isolatedHome(t)
+		withClock(t, afternoon())
+
+		// Seal a real close-out on a prior day with a truncated stub.
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "--day", "2026-07-03", "dfx", "3/wrist", "tried another new thing today with r")
+		require.NoError(t, err)
+
+		// Amend it with the full narrative — carrying the ampersand that split the
+		// original invocation, now supplied off the command line.
+		jf := writeJournalFile(t, "tried another new thing today with r&b yoga\n")
+		out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--day", "2026-07-03", "--journal-file", jf)
+		require.NoError(t, err)
+		assert.Contains(t, out, "Amended")
+		assert.Contains(t, out, "2026-07-03")
+
+		// The corrected text reached raw/, and the original stub is still there.
+		bodies := rawEntryBodies(t, home)
+		assert.Contains(t, bodies, "tried another new thing today with r&b yoga")
+		assert.Contains(t, bodies, "tried another new thing today with r\n",
+			"the original truncated stub stays traceable in history")
+
+		// No new day record was created — the amend touched only the display.
+		assert.Equal(t, 1, engineDayCount(t, home))
+	})
+
+	t.Run("missing --day is a usage error", func(t *testing.T) {
+		isolatedHome(t)
+		jf := writeJournalFile(t, "corrected text")
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--journal-file", jf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both required")
+	})
+
+	t.Run("missing --journal-file is a usage error", func(t *testing.T) {
+		isolatedHome(t)
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--day", "2026-07-03")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both required")
+	})
+
+	t.Run("refuses to amend a skip record", func(t *testing.T) {
+		isolatedHome(t)
+		// After the evening bell, a bare skip lands on the base logical day
+		// (2026-07-05) rather than back-attributing to last night.
+		withClock(t, time.Date(2026, 7, 5, 22, 0, 0, 0, time.UTC))
+
+		// A recorded miss carries no journal, so there is nothing to supersede.
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "skip")
+		require.NoError(t, err)
+
+		jf := writeJournalFile(t, "should be refused")
+		_, errOut, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--day", "2026-07-05", "--journal-file", jf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "skip record")
+		assert.Contains(t, errOut, "skip record",
+			"the router's reason reaches the user, not just the exit code")
+	})
+
+	t.Run("refuses trailing positional words", func(t *testing.T) {
+		isolatedHome(t)
+		jf := writeJournalFile(t, "corrected text")
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "extra", "words", "--day", "2026-07-03", "--journal-file", jf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no positional words")
+	})
+}

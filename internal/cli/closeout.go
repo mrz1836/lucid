@@ -53,6 +53,7 @@ func bootedRouter(cmd *cobra.Command) (*router.Router, error) {
 //	lucid closeout skip                    record an honest miss
 //	lucid closeout backfill [yesterday|<YYYY-MM-DD>] dfx 3/tag <journal>
 //	lucid closeout --day @yesterday dfx 3/tag <journal>
+//	lucid closeout amend --day <grammar> --journal-file <path>   correct a sealed journal
 //
 // It scaffolds the Ledger on first use so capture never blocks on setup.
 //
@@ -62,7 +63,7 @@ func bootedRouter(cmd *cobra.Command) (*router.Router, error) {
 // positional form is untouched.
 func newCloseoutCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "closeout [today|skip|backfill] [compact form...]",
+		Use:   "closeout [today|skip|backfill|amend] [compact form...]",
 		Short: "Record the day's committed practice",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -96,6 +97,12 @@ func dispatchCloseout(cmd *cobra.Command, r *router.Router, args []string) error
 	journalOverride, hasJournalFile, err := closeoutJournalOverride(cmd)
 	if err != nil {
 		return err
+	}
+	// `amend` is detected before the --day branch and every other sub-word: it
+	// requires --day, so leaving it later would route the request into
+	// runFlagBackfill and the amend path would be unreachable.
+	if len(args) > 0 && args[0] == "amend" {
+		return runCloseoutAmend(cmd, r, args, now, journalOverride, hasJournalFile)
 	}
 	if hasJournalFile && len(args) > 0 && args[0] == "skip" {
 		return fmt.Errorf(
@@ -171,6 +178,42 @@ func runCloseout(cmd *cobra.Command, r *router.Router, req router.CloseoutReques
 	res, err := r.Closeout(req)
 	if err != nil {
 		return err
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+	return nil
+}
+
+// runCloseoutAmend backs `lucid closeout amend --day <grammar> --journal-file
+// <path>`: it supersedes a sealed day's displayed journal while every
+// Engine-critical field (link states, capacity, streak) stays immutable. Both
+// flags are required and there is nothing else to give — the corrected journal
+// arrives off the command line through the shared reader (so no shell
+// metacharacter can truncate it, the exact failure this surface closes), and the
+// day is named explicitly rather than inferred. journalOverride/hasJournalFile
+// are the --journal-file value already resolved once up in dispatchCloseout: a
+// "-" path drains stdin and cannot be read twice. Errors are emitted to stderr
+// because the root sets SilenceErrors, so the router's reason (missing day, skip
+// record, future date) reaches the user and not just the exit code.
+func runCloseoutAmend(cmd *cobra.Command, r *router.Router, args []string, now time.Time, journalOverride string, hasJournalFile bool) error {
+	dayArg, _ := cmd.Flags().GetString(flagDay)
+	if strings.TrimSpace(dayArg) == "" || !hasJournalFile {
+		return emitErr(cmd, fmt.Errorf(
+			"lucid closeout amend: --%s and --%s are both required", flagDay, flagJournalFile,
+		))
+	}
+	// The corrected journal comes from --journal-file; trailing words after
+	// `amend` are an unexpected second source, so refuse rather than ignore them.
+	if len(args) > 1 {
+		return emitErr(cmd, fmt.Errorf(
+			"lucid closeout amend: the corrected journal comes from --%s, so `amend` takes no positional words",
+			flagJournalFile,
+		))
+	}
+	res, err := r.AmendCloseout(router.AmendCloseoutRequest{
+		Now: now, DayArg: dayArg, Journal: journalOverride, Source: sourceCLI, Harness: sourceCLI,
+	})
+	if err != nil {
+		return emitErr(cmd, err)
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
 	return nil
