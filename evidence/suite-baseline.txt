@@ -1,0 +1,8 @@
+--- FAIL: TestValidateCLI_CleanRepo (1.41s)
+--- FAIL: TestValidateCLI_JSON (1.56s)
+--- FAIL: TestValidateCLI_JSONSchemaError (1.16s)
+--- FAIL: TestValidateCLI_SchemaError (1.37s)
+--- FAIL: TestValidateCLI_SweepsEveryRecordFamily (1.21s)
+FAIL
+FAIL
+FAIL	github.com/mrz1836/lucid/internal/cli	26.361s
