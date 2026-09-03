@@ -300,6 +300,96 @@ func TestResolveCloseoutDay(t *testing.T) {
 	assert.Contains(t, err.Error(), "could not read the day")
 }
 
+// rawEntryBodies concatenates every raw entry written under an isolated home —
+// the journal lines a close-out captures. A substring assertion against it
+// proves the file-supplied journal reached raw/ without going through the
+// shell.
+func rawEntryBodies(t *testing.T, home string) string {
+	t.Helper()
+	var b strings.Builder
+	_ = filepath.WalkDir(filepath.Join(home, "raw"), func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".md" {
+			content, rerr := os.ReadFile(path)
+			require.NoError(t, rerr)
+			b.Write(content)
+		}
+		return nil
+	})
+	return b.String()
+}
+
+// writeJournalFile writes journal text to a temp file and returns its path —
+// the off-command-line source under test.
+func writeJournalFile(t *testing.T, text string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "journal.txt")
+	require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
+	return path
+}
+
+// TestCloseoutCLI_JournalFileWrites: --journal-file supplies the journal off
+// the command line, and its exact text lands in the raw entry. The payload
+// carries an ampersand — the character that split the original invocation — to
+// prove it now survives as data.
+func TestCloseoutCLI_JournalFileWrites(t *testing.T) {
+	home := isolatedHome(t)
+	jf := writeJournalFile(t, "tried another new thing today with r&b yoga\n")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "dfx", "3/wrist", "--journal-file", jf)
+	require.NoError(t, err)
+	assert.Contains(t, out, "streak")
+	assert.Contains(t, rawEntryBodies(t, home), "tried another new thing today with r&b yoga")
+}
+
+// TestCloseoutCLI_JournalFileBackfill: the flag threads through the --day
+// backfill form too, not just a bare close-out.
+func TestCloseoutCLI_JournalFileBackfill(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	jf := writeJournalFile(t, "backfilled with a | pipe & an ampersand")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"closeout", "--day", "@yesterday", "dfx", "3", "--journal-file", jf)
+	require.NoError(t, err)
+	assert.Contains(t, out, "Backfilled")
+	assert.Contains(t, rawEntryBodies(t, home), "backfilled with a | pipe & an ampersand")
+}
+
+// TestCloseoutCLI_JournalFileConflictsWithPositional: a positional journal
+// alongside --journal-file is two sources for one field, so the CLI refuses
+// rather than silently picking one.
+func TestCloseoutCLI_JournalFileConflictsWithPositional(t *testing.T) {
+	isolatedHome(t)
+	jf := writeJournalFile(t, "from the file")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"closeout", "dfx", "3", "positional", "journal", "words", "--journal-file", jf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+}
+
+// TestCloseoutCLI_JournalFileRejectsSkip: a recorded miss carries no journal,
+// so pairing --journal-file with `skip` is a contradiction the CLI refuses.
+func TestCloseoutCLI_JournalFileRejectsSkip(t *testing.T) {
+	home := isolatedHome(t)
+	jf := writeJournalFile(t, "should never be written")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "skip", "--journal-file", jf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "skip")
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
+// TestCloseoutCLI_JournalFileMissing: an unreadable --journal-file path is a
+// clean error that writes nothing.
+func TestCloseoutCLI_JournalFileMissing(t *testing.T) {
+	home := isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"closeout", "dfx", "3", "--journal-file", filepath.Join(t.TempDir(), "nope.txt"))
+	require.Error(t, err)
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
 // TestCloseoutCLI_BootError proves closeout surfaces a boot failure (an
 // unscaffoldable home) before it would parse or write anything — mirrors the
 // other *_BootError guards on the spine.
