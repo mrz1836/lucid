@@ -205,3 +205,107 @@ func TestCloseout_ForceToday(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-06", res.LogicalDate)
 }
+
+// TestAmendCloseout is the AC-5/AC-6 core: amending a sealed close-out's
+// journal supersedes the displayed entry while the original stays traceable,
+// and touches no Engine-critical field. The refusal cases guard the immutable
+// boundary (skip record, missing day, empty journal, future date).
+func TestAmendCloseout(t *testing.T) {
+	t.Run("supersedes journal, preserves original and engine fields", func(t *testing.T) {
+		r, a, _ := newBootedRouter(t)
+
+		// Seal a full close-out to amend later.
+		seed, err := r.Closeout(CloseoutRequest{
+			Now: atUTC(2026, 7, 5, 22, 0), Links: compactLinks(), Capacity: 3, LimiterTag: "wrist",
+			Journal: "tried another new thing today with r",
+		})
+		require.NoError(t, err)
+		require.True(t, seed.Completed)
+		require.NotEmpty(t, seed.RawID)
+
+		res, err := r.AmendCloseout(AmendCloseoutRequest{
+			Now: atUTC(2026, 7, 6, 22, 0), DayArg: "2026-07-05",
+			Journal: "tried another new thing today with r&b yoga",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "day_2026_07_05", res.DayID)
+		assert.Equal(t, "2026-07-05", res.LogicalDate)
+		assert.Equal(t, seed.RawID, res.OldRawID)
+		assert.NotEmpty(t, res.NewRawID)
+		assert.NotEqual(t, seed.RawID, res.NewRawID)
+		assert.Equal(t, "Amended the journal for 2026-07-05.", res.Ack)
+
+		// Folded record now displays the corrected entry; Engine-critical fields
+		// (completed, capacity, limiter_tag, links) are untouched.
+		folded := readDay(t, a, "day_2026_07_05")
+		assert.Equal(t, res.NewRawID, folded.RawEntryID)
+		assert.True(t, folded.Completed)
+		assert.False(t, folded.Missed)
+		assert.Equal(t, 3, folded.Capacity)
+		assert.Equal(t, "wrist", folded.LimiterTag)
+		assert.Equal(t, compactLinks(), folded.Links)
+
+		// Base record is never rewritten: its raw_entry_id still points at the
+		// original stub, and exactly one raw_entry_id-only correction was appended.
+		base, found, err := a.ReadEngineDay("day_2026_07_05")
+		require.NoError(t, err)
+		require.True(t, found)
+		assert.Equal(t, seed.RawID, base.RawEntryID)
+		require.Len(t, base.Corrections, 1)
+		assert.Equal(t, res.NewRawID, base.Corrections[0].Fields["raw_entry_id"])
+		assert.Equal(t, "journal amended via closeout amend", base.Corrections[0].Reason)
+		assert.Len(t, base.Corrections[0].Fields, 1, "amend correction touches only raw_entry_id")
+
+		// The corrected text is a fresh entry stamped /closeout amend; the
+		// original raw entry is unchanged and still traceable.
+		newDoc, err := a.ReadRaw(res.NewRawID)
+		require.NoError(t, err)
+		assert.Contains(t, newDoc.Body, "tried another new thing today with r&b yoga")
+		assert.Equal(t, "/closeout amend", newDoc.Fields["command"])
+		origDoc, err := a.ReadRaw(seed.RawID)
+		require.NoError(t, err)
+		assert.Contains(t, origDoc.Body, "tried another new thing today with r")
+	})
+
+	t.Run("refuses a missing day", func(t *testing.T) {
+		r, _, _ := newBootedRouter(t)
+		_, err := r.AmendCloseout(AmendCloseoutRequest{
+			Now: atUTC(2026, 7, 6, 22, 0), DayArg: "2026-07-01", Journal: "x",
+		})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "no closeout record found for 2026-07-01")
+	})
+
+	t.Run("refuses a skip record", func(t *testing.T) {
+		r, _, _ := newBootedRouter(t)
+		_, err := r.Closeout(CloseoutRequest{Now: atUTC(2026, 7, 5, 22, 0), Skip: true})
+		require.NoError(t, err)
+
+		_, err = r.AmendCloseout(AmendCloseoutRequest{
+			Now: atUTC(2026, 7, 6, 22, 0), DayArg: "2026-07-05", Journal: "x",
+		})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "cannot amend a skip record")
+	})
+
+	t.Run("refuses an empty journal", func(t *testing.T) {
+		r, _, _ := newBootedRouter(t)
+		_, err := r.Closeout(CloseoutRequest{Now: atUTC(2026, 7, 5, 22, 0), Links: compactLinks(), Journal: "orig"})
+		require.NoError(t, err)
+
+		_, err = r.AmendCloseout(AmendCloseoutRequest{
+			Now: atUTC(2026, 7, 6, 22, 0), DayArg: "2026-07-05", Journal: "   ",
+		})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "journal text is required for amend")
+	})
+
+	t.Run("refuses a future date", func(t *testing.T) {
+		r, _, _ := newBootedRouter(t)
+		_, err := r.AmendCloseout(AmendCloseoutRequest{
+			Now: atUTC(2026, 7, 5, 12, 0), DayArg: "2026-07-10", Journal: "x",
+		})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "cannot amend a future date")
+	})
+}
