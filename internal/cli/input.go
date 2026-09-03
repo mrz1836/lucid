@@ -6,6 +6,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
 // stdinPath is the sentinel a free-text --*-file flag accepts to read its
@@ -14,10 +16,11 @@ import (
 // shell metacharacter can split or truncate the invocation.
 const stdinPath = "-"
 
-// flagBodyFile is the shared flag name for the primary free-text field of a
-// verb (the log body, the memory story, the thread name, and so on). Verbs
-// with a single dominant free-text field reuse this one name so the off-
-// command-line input path reads the same everywhere.
+// flagBodyFile is the flag name [readBodyFile] uses to label its own errors
+// (an empty or unreadable file). Each verb registers its file-input flags with
+// literal names at the call site — `--body-file`, `--note-file`, `--reason-file`,
+// and so on — so the off-command-line spelling reads plainly beside the field
+// it feeds; this constant is only the shared error label behind them.
 const flagBodyFile = "body-file"
 
 // readBodyFile is the one shared reader behind every free-text --*-file flag.
@@ -90,4 +93,85 @@ func ensureSingleStdin(named map[string]string) error {
 		)
 	}
 	return nil
+}
+
+// ensureSingleStdinFlags rejects routing more than one of a verb's --*-file
+// flags to stdin before any of them is read. It reads each flag's current value
+// off cmd, so a verb can list every string-valued file flag it resolves and let
+// this decide; only changed flags whose value is "-" are counted. Verbs with a
+// single file flag never need it — one field draining stdin is the intended
+// use; the multi-field verbs call this ahead of any [readBodyFile].
+func ensureSingleStdinFlags(cmd *cobra.Command, fileFlags ...string) error {
+	named := make(map[string]string, len(fileFlags))
+	for _, name := range fileFlags {
+		if cmd.Flags().Changed(name) {
+			v, _ := cmd.Flags().GetString(name)
+			named["--"+name] = v
+		}
+	}
+	return ensureSingleStdin(named)
+}
+
+// resolvePrimaryText resolves a verb's primary free-text field — the log body,
+// the memory story, the thread name, the value that would otherwise be trailing
+// positional words. inline is that positional text already joined; fileFlag is
+// the --*-file flag that can supply it off the command line instead.
+//
+// When the flag was not given, inline is returned unchanged so the caller's
+// existing emptiness rule still governs (a bare `lucid log` stays legal). When
+// the flag was given alongside non-empty positional text, that is two sources
+// for one field and a usage error — the silent-truncation class this surface
+// exists to close. Otherwise the file (or stdin) body flows through the shared
+// reader. verb labels the error.
+func resolvePrimaryText(cmd *cobra.Command, verb, fileFlag, inline string) (string, error) {
+	if !cmd.Flags().Changed(fileFlag) {
+		return inline, nil
+	}
+	if strings.TrimSpace(inline) != "" {
+		return "", fmt.Errorf("lucid %s: give the text via --%s or as positional words, not both", verb, fileFlag)
+	}
+	path, _ := cmd.Flags().GetString(fileFlag)
+	body, err := readBodyFile(path, cmd.InOrStdin())
+	if err != nil {
+		return "", fmt.Errorf("lucid %s: %w", verb, err)
+	}
+	return body, nil
+}
+
+// resolveOptionalText resolves an auxiliary free-text field that may be supplied
+// inline (--<inlineFlag>) or off the command line (--<fileFlag>), the two being
+// mutually exclusive. label names the field in errors. When neither is set the
+// inline value (empty) is returned, so the field stays optional exactly as
+// before the file form existed.
+func resolveOptionalText(cmd *cobra.Command, verb, label, inlineFlag, fileFlag string) (string, error) {
+	fileChanged := cmd.Flags().Changed(fileFlag)
+	if cmd.Flags().Changed(inlineFlag) && fileChanged {
+		return "", fmt.Errorf("lucid %s: give the %s via --%s or --%s, not both", verb, label, inlineFlag, fileFlag)
+	}
+	if !fileChanged {
+		v, _ := cmd.Flags().GetString(inlineFlag)
+		return v, nil
+	}
+	path, _ := cmd.Flags().GetString(fileFlag)
+	body, err := readBodyFile(path, cmd.InOrStdin())
+	if err != nil {
+		return "", fmt.Errorf("lucid %s: %w", verb, err)
+	}
+	return body, nil
+}
+
+// requireTextArgs builds a cobra positional validator that requires `without`
+// positionals normally but only `with` when one of the named primary --*-file
+// flags supplies the otherwise-required free text. It lets a file flag stand in
+// for a required positional (a bare `lucid focus add --body-file f`) without
+// permitting an actually empty write.
+func requireTextArgs(with, without int, fileFlags ...string) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		for _, name := range fileFlags {
+			if cmd.Flags().Changed(name) {
+				return cobra.MinimumNArgs(with)(cmd, args)
+			}
+		}
+		return cobra.MinimumNArgs(without)(cmd, args)
+	}
 }

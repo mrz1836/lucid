@@ -71,24 +71,54 @@ func newMemoryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "memory <text>",
 		Short: "Record a story from your past — backdated, linked, kept",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  requireTextArgs(0, 1, "body-file"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
 			}
+			// Reject two prose fields both reading stdin before any read drains it.
+			if err = ensureSingleStdinFlags(
+				cmd, "body-file", "tone-file", "why-file", "followup-file", "caption-file",
+			); err != nil {
+				return emitErr(cmd, err)
+			}
+			// The story text and every prose-metadata field can be supplied off
+			// the command line; each file form is mutually exclusive with its
+			// inline counterpart. The structured certainty/era/place/people/day/
+			// attach inputs are untouched.
+			text, err := resolvePrimaryText(cmd, "memory", "body-file", strings.Join(args, " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			tone, err := resolveOptionalText(cmd, "memory", "tone", flagTone, "tone-file")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			why, err := resolveOptionalText(cmd, "memory", "why-it-matters", flagWhy, "why-file")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			followup, err := resolveOptionalText(cmd, "memory", "follow-up", flagFollowup, "followup-file")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			caption, err := resolveOptionalText(cmd, "memory", "caption", flagCaption, "caption-file")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			f := cmd.Flags()
 			req := router.MemoryWriteRequest{
-				Text: strings.Join(args, " "),
+				Text: text,
 				Now:  clockNow(),
 			}
 			req.Certainty, _ = f.GetString(flagCertainty)
 			req.Era, _ = f.GetString(flagEra)
 			req.Place, _ = f.GetString(flagPlace)
 			req.People, _ = f.GetStringSlice(flagPeople)
-			req.Tone, _ = f.GetString(flagTone)
-			req.WhyItMatters, _ = f.GetString(flagWhy)
-			req.FollowUp, _ = f.GetString(flagFollowup)
+			req.Tone = tone
+			req.WhyItMatters = why
+			req.FollowUp = followup
 			req.Day, _ = f.GetString(flagDay)
 
 			// Optional media reuses `lucid attach`: attach first, then reference
@@ -98,7 +128,6 @@ func newMemoryCmd() *cobra.Command {
 				if err = r.Store().ScaffoldMedia(); err != nil {
 					return fmt.Errorf("lucid memory: %w", err)
 				}
-				caption, _ := f.GetString(flagCaption)
 				ares, aerr := r.Attach(router.AttachRequest{
 					Path:    path,
 					Caption: caption,
@@ -129,5 +158,10 @@ func newMemoryCmd() *cobra.Command {
 	f.String(flagDay, "", "When it happened: @yesterday, YYYY-MM-DD, or a partial date like 2014 or 2014-09")
 	f.String(flagAttach, "", "Optional photo/media file to attach and link to this story")
 	f.String(flagCaption, "", "Caption for the attached media")
+	registerBodyFileFlag(cmd, "body-file", "memory story text")
+	f.String("tone-file", "", "Read the tone from this file (or - for stdin) instead of --tone")
+	f.String("why-file", "", "Read why-it-matters from this file (or - for stdin) instead of --why")
+	f.String("followup-file", "", "Read the follow-up from this file (or - for stdin) instead of --followup")
+	f.String("caption-file", "", "Read the caption from this file (or - for stdin) instead of --caption")
 	return cmd
 }
