@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -475,4 +476,87 @@ func TestCloseoutAmend(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no positional words")
 	})
+}
+
+// soleRawJournal returns the journal body of the single raw entry written
+// under an isolated home, stripped of only the fixed Markdown framing — the
+// "# Entry" heading, its surrounding blank lines, and the one terminal
+// newline renderRawDoc frames the body with. It deliberately does not read
+// through storage.ReadRaw, whose TrimSpace would erase the leading and
+// trailing spaces the fidelity contract preserves and so hide a regression.
+func soleRawJournal(t *testing.T, home string) string {
+	t.Helper()
+	var paths []string
+	_ = filepath.WalkDir(filepath.Join(home, "raw"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".md" {
+			paths = append(paths, p)
+		}
+		return nil
+	})
+	require.Len(t, paths, 1, "expected exactly one raw entry under %s", home)
+
+	content, err := os.ReadFile(paths[0])
+	require.NoError(t, err)
+
+	// SplitFrontmatter returns the body verbatim (no TrimSpace), so the only
+	// thing to remove is the fixed heading framing renderRawDoc writes.
+	_, body, err := storage.SplitFrontmatter(content)
+	require.NoError(t, err)
+
+	const frame = "\n# Entry\n\n"
+	s := string(body)
+	require.Truef(t, strings.HasPrefix(s, frame), "raw body missing the fixed # Entry framing: %q", s)
+	return strings.TrimSuffix(strings.TrimPrefix(s, frame), "\n")
+}
+
+// TestCloseout_JournalFileVerbatim is the AC-2/AC-3 regression guard. A
+// journal carrying every shell metacharacter that could split or truncate a
+// command line — &, ;, |, `, $(...), a single and a double quote — plus
+// leading and trailing spaces is supplied off the command line through
+// --journal-file, and must reach the sealed raw entry byte-for-byte after
+// only readBodyFile's one-terminal-newline normalization. It reads the
+// serialized raw file directly (not via storage.ReadRaw, which TrimSpaces),
+// so a leading/trailing-space regression cannot hide. Both the bare close-out
+// and the --day backfill form are exercised, proving the flag on both write
+// paths and that no metacharacter produces a stray backgrounded process or a
+// `command not found` side effect — the original 2026-09-02 failure.
+func TestCloseout_JournalFileVerbatim(t *testing.T) {
+	// Begins and ends with two spaces; the ampersand is the exact character
+	// that split the original invocation.
+	const metaPayload = "  & ; | ` $(...) ' \" journal with metachars and edge spaces  "
+
+	tests := []struct {
+		name string
+		args []string
+		pin  bool // backfill grammar needs a pinned clock to resolve @yesterday
+	}{
+		{
+			name: "bare closeout",
+			args: []string{"closeout", "dfx", "3"},
+		},
+		{
+			name: "day backfill",
+			args: []string{"closeout", "--day", "@yesterday", "dfx", "3"},
+			pin:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := isolatedHome(t)
+			if tt.pin {
+				withClock(t, afternoon())
+			}
+			// The trailing newline is the single editor/heredoc newline the
+			// shared reader normalizes away; nothing else about the payload is.
+			jf := writeJournalFile(t, metaPayload+"\n")
+
+			args := append(append([]string{}, tt.args...), "--journal-file", jf)
+			_, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+			require.NoError(t, err)
+
+			assert.Equal(t, metaPayload, soleRawJournal(t, home),
+				"the journal must reach the sealed raw entry byte-for-byte after one-terminal-newline normalization")
+		})
+	}
 }
