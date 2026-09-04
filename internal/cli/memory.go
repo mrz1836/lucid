@@ -101,19 +101,19 @@ func newMemoryCmd() *cobra.Command {
 // certainty/era/place/people/day/attach inputs are untouched.
 func resolveMemoryText(cmd *cobra.Command, args []string) (text, tone, why, followup, caption string, err error) {
 	if text, err = resolvePrimaryText(cmd, "memory", "body-file", strings.Join(args, " ")); err != nil {
-		return
+		return text, tone, why, followup, caption, err
 	}
 	if tone, err = resolveOptionalText(cmd, "memory", "tone", flagTone, "tone-file"); err != nil {
-		return
+		return text, tone, why, followup, caption, err
 	}
 	if why, err = resolveOptionalText(cmd, "memory", "why-it-matters", flagWhy, "why-file"); err != nil {
-		return
+		return text, tone, why, followup, caption, err
 	}
 	if followup, err = resolveOptionalText(cmd, "memory", "follow-up", flagFollowup, "followup-file"); err != nil {
-		return
+		return text, tone, why, followup, caption, err
 	}
 	caption, err = resolveOptionalText(cmd, "memory", "caption", flagCaption, "caption-file")
-	return
+	return text, tone, why, followup, caption, err
 }
 
 // runMemory executes `lucid memory`: resolve every free-text field, assemble the
