@@ -64,8 +64,16 @@ func newLogCmd() *cobra.Command {
 
 			day, _ := cmd.Flags().GetString(flagDay)
 
+			// --body-file supplies the entry body off the command line, so free
+			// text carrying shell metacharacters never has to be quoted; the
+			// positional words are the fallback source.
+			text, err := resolvePrimaryText(cmd, "log", "body-file", strings.Join(args, " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+
 			res, err := r.Log(router.LogRequest{
-				Text:      strings.Join(args, " "),
+				Text:      text,
 				Now:       time.Now(),
 				DayArg:    day,
 				Source:    flagOrEnv(cmd, flagSource, envSource, sourceCLI),
@@ -85,7 +93,22 @@ func newLogCmd() *cobra.Command {
 	}
 	registerProvenanceFlags(cmd)
 	registerDayFlag(cmd)
+	registerBodyFileFlag(cmd, "log entry body")
 	return cmd
+}
+
+// registerBodyFileFlag declares a verb's primary free-text --body-file flag.
+// what names the field in the help string (the log body, the memory story, …)
+// so each verb's help reads naturally while the reader stays identical
+// everywhere. Callers pass the matching "body-file" literal to
+// [resolvePrimaryText], which keeps the flag name greppable in the verb's own
+// file.
+func registerBodyFileFlag(cmd *cobra.Command, what string) {
+	cmd.Flags().String(
+		"body-file", "",
+		"Read the "+what+" from this file (or - for stdin) instead of positional "+
+			"words, so shell metacharacters (& ; | ...) never reach the command line",
+	)
 }
 
 // registerDayFlag declares the shared logical-day selector on a capture

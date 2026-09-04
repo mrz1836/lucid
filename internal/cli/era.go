@@ -219,6 +219,7 @@ func registerEraWriteFlags(cmd *cobra.Command) {
 	f.String(flagStart, "", "When the chapter began: @yesterday, YYYY-MM-DD, or a partial date like 2014 or 2014-09")
 	f.String(flagEnd, "", "When it ended, same forms as --start (omit for a still-running chapter)")
 	f.String(flagNote, "", "A free-text note kept verbatim")
+	f.String("note-file", "", "Read the note from this file (or - for stdin) instead of --note")
 }
 
 // runEraWrite builds the shared RunE for the era write paths: create
@@ -244,7 +245,13 @@ func runEraWrite(mustExist bool) func(*cobra.Command, []string) error {
 		}
 		req.Start, _ = f.GetString(flagStart)
 		req.End, _ = f.GetString(flagEnd)
-		req.Note, _ = f.GetString(flagNote)
+		// --note-file supplies the note off the command line; it is mutually
+		// exclusive with the inline --note.
+		note, err := resolveOptionalText(cmd, "era", "note", flagNote, "note-file")
+		if err != nil {
+			return emitErr(cmd, err)
+		}
+		req.Note = note
 
 		res, err := r.WriteEra(req)
 		if err != nil {

@@ -228,7 +228,7 @@ names the earlier retirement.`,
 // active anchor holds is rejected with the fixed reason on stderr and a
 // non-zero exit, and nothing is appended.
 func newAnchorSunsetCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "sunset <label> [reason...]",
 		Short: "Retire an anchor from the counting surfaces (the record is kept)",
 		Long: `sunset retires a days-since milestone: it stops counting, and nothing is
@@ -257,9 +257,15 @@ recorded labels named, and nothing is appended.`,
 			if err != nil {
 				return err
 			}
+			// --reason-file supplies the retirement reason off the command line;
+			// the trailing positional words are the fallback source.
+			reason, err := resolvePrimaryText(cmd, "anchor sunset", "reason-file", strings.Join(args[1:], " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			res, err := r.AnchorSunset(router.AnchorSunsetRequest{
 				Label:  args[0],
-				Reason: strings.Join(args[1:], " "),
+				Reason: reason,
 				Now:    clockNow(),
 			})
 			if err != nil {
@@ -272,6 +278,11 @@ recorded labels named, and nothing is appended.`,
 			return nil
 		},
 	}
+	cmd.Flags().String(
+		"reason-file", "",
+		"Read the retirement reason from this file (or - for stdin) instead of positional words",
+	)
+	return cmd
 }
 
 // newAnchorRenameCmd builds the `rename` child: give an active milestone a

@@ -1,18 +1,24 @@
 package router
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // Engine command verbs stamped on the journal raw entry (engine-module.md
-// §Commands: `command: /closeout`, `command: /closeout backfill`).
+// §Commands: `command: /closeout`, `command: /closeout backfill`). The amend
+// verb writes a fresh raw entry carrying the corrected journal text, which a
+// correction then supersedes the sealed day's displayed entry with.
 const (
-	commandCloseout = "/closeout"
-	commandBackfill = "/closeout backfill"
+	commandCloseout      = "/closeout"
+	commandBackfill      = "/closeout backfill"
+	commandCloseoutAmend = "/closeout amend"
 )
 
 // User-facing copy that is fixed by the spec (engine-module.md §Error
@@ -298,4 +304,107 @@ func formatDeclared(t time.Time) string {
 		return ""
 	}
 	return t.Format(time.RFC3339)
+}
+
+// AmendCloseoutRequest carries the inputs for a journal amendment. DayArg is
+// the `--day` grammar naming an already-sealed day; Journal is the corrected
+// journal text (non-empty required). Source and Harness identify the caller,
+// exactly as on a close-out.
+type AmendCloseoutRequest struct {
+	Now     time.Time
+	DayArg  string // resolved via observations.ResolveDay
+	Journal string // the corrected journal text; non-empty required
+	Source  string
+	Harness string
+}
+
+// AmendCloseoutResult reports what the amendment wrote: the day it landed on,
+// the superseded (old) raw entry, and the freshly written (new) one.
+type AmendCloseoutResult struct {
+	DayID       string
+	LogicalDate string
+	OldRawID    string
+	NewRawID    string
+	Ack         string
+}
+
+// AmendCloseout appends a journal correction to an existing sealed closeout.
+// It writes a new raw entry with the corrected text, then appends a correction
+// setting only raw_entry_id to the new entry — the last-write-wins fold makes
+// the corrected text display while the original stays traceable in history (the
+// base record's raw_entry_id and the original raw file are never rewritten).
+// Engine-critical fields (links, capacity, completed, missed, streak) are never
+// touched: the correction carries a single foldable field and no status rebuild
+// runs, because the amend changes only which journal the day displays. It
+// refuses if the journal is empty, the day does not exist, the day is a skip
+// record (no journal was written), or DayArg resolves to a future date.
+func (r *Router) AmendCloseout(req AmendCloseoutRequest) (AmendCloseoutResult, error) {
+	now := whenOr(req.Now)
+	if strings.TrimSpace(req.Journal) == "" {
+		return AmendCloseoutResult{}, fmt.Errorf("journal text is required for amend")
+	}
+	if err := r.prepareEngine(); err != nil {
+		return AmendCloseoutResult{}, err
+	}
+
+	// The day is read through the shared strict grammar; a future day is
+	// refused before anything is written (error-states.md §B-2).
+	res, err := observations.ResolveDay(req.DayArg, now, observations.DayOptions{AllowPartial: true})
+	switch {
+	case errors.Is(err, observations.ErrDayFuture):
+		return AmendCloseoutResult{}, fmt.Errorf("cannot amend a future date")
+	case err != nil:
+		return AmendCloseoutResult{}, fmt.Errorf(
+			"could not read the day %q (want %s)", req.DayArg, observations.AcceptedDayForms,
+		)
+	}
+	target := engine.DateOf(res.OccurredAt)
+	dayID := engine.DayID(target)
+	logicalDate := engine.DateString(target)
+
+	// The record must already exist and carry a journal — a skip wrote none, so
+	// there is nothing to supersede. Folding resolves the currently-displayed
+	// raw entry, which may itself be a prior amendment.
+	existing, found, err := r.store.ReadEngineDayFolded(dayID)
+	if err != nil {
+		return AmendCloseoutResult{}, err
+	}
+	if !found {
+		return AmendCloseoutResult{}, fmt.Errorf("no closeout record found for %s", logicalDate)
+	}
+	if existing.RawEntryID == "" {
+		return AmendCloseoutResult{}, fmt.Errorf("cannot amend a skip record — no journal was written")
+	}
+
+	// The corrected journal is a fresh immutable raw entry recorded now, its
+	// occurred_at attributed to the amended day (approximate) — the same shape a
+	// backfill uses for a past day's journal.
+	occurred := target.Add(12 * time.Hour)
+	newRawID, err := r.writeJournal(CloseoutRequest{
+		Now: now, Journal: req.Journal, Source: req.Source, Harness: req.Harness,
+	}, commandCloseoutAmend, occurred, storage.PrecisionApproximate, nil)
+	if err != nil {
+		return AmendCloseoutResult{}, err
+	}
+
+	// A single-field correction supersedes only the displayed raw_entry_id;
+	// AppendEngineCorrection rejects any immutable field, so this cannot reach an
+	// Engine-critical value even if the map were widened by mistake.
+	corr := engine.Correction{
+		At:     now.Format(time.RFC3339),
+		Fields: map[string]any{"raw_entry_id": newRawID},
+		Reason: "journal amended via closeout amend",
+		Source: "user",
+	}
+	if err = r.store.AppendEngineCorrection(dayID, corr); err != nil {
+		return AmendCloseoutResult{}, err
+	}
+
+	return AmendCloseoutResult{
+		DayID:       dayID,
+		LogicalDate: logicalDate,
+		OldRawID:    existing.RawEntryID,
+		NewRawID:    newRawID,
+		Ack:         fmt.Sprintf("Amended the journal for %s.", logicalDate),
+	}, nil
 }

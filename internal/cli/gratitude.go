@@ -61,13 +61,18 @@ func newGratitudeAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <thing>",
 		Short: "Tally one thing you're grateful for",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  requireTextArgs(0, 1, "body-file"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
 			}
-			thing := strings.Join(args, " ")
+			// --body-file supplies the thing off the command line; the trailing
+			// positional words are the fallback source.
+			thing, err := resolvePrimaryText(cmd, "gratitude add", "body-file", strings.Join(args, " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			into, _ := cmd.Flags().GetString(gratitudeIntoFlag)
 
 			// `add --count …` is the documented alias for the one-time seed/import
@@ -105,6 +110,7 @@ func newGratitudeAddCmd() *cobra.Command {
 	registerDayFlag(cmd)
 	cmd.Flags().String(gratitudeIntoFlag, "", "Bump a specific entry by its stable id, regardless of wording")
 	registerGratitudeSeedFlags(cmd)
+	registerBodyFileFlag(cmd, "thing you're grateful for")
 	return cmd
 }
 

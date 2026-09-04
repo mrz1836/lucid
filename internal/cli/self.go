@@ -264,7 +264,7 @@ func selfKeyLeaf(key string) string {
 // model-free.
 func newSelfSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "set <key> <value...>",
+		Use:   "set <key> [value...]",
 		Short: "Record a durable fact about yourself",
 		Long: `set records one durable attribute: a namespaced key and a value. Trailing
 words join into the value with spaces, so quoting is optional —
@@ -290,7 +290,6 @@ because nothing derives a day count from a self fact.
 
 A value that changes on a schedule is an observation, not an attribute — record
 it with ` + "`lucid obs`" + ` instead.`,
-		Args: cobra.MinimumNArgs(2),
 		Example: `  # Record a fact (trailing words are joined into the value).
   lucid self set identity.generation elder millennial
 
@@ -305,10 +304,15 @@ it with ` + "`lucid obs`" + ` instead.`,
 
   # Machine-readable output for a harness.
   lucid self set body.handedness left --json`,
+		Args: requireTextArgs(1, 2, "value-file"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
+			}
+			// Reject two fields both reading stdin before any read drains it.
+			if err = ensureSingleStdinFlags(cmd, "value-file", "note-file"); err != nil {
+				return emitErr(cmd, err)
 			}
 			now := clockNow()
 			since, err := selfSinceFlag(cmd, now)
@@ -318,10 +322,20 @@ it with ` + "`lucid obs`" + ` instead.`,
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 				return errSelfNotRecorded
 			}
-			note, _ := cmd.Flags().GetString("note")
+			// --value-file supplies the value off the command line; --note-file
+			// does the same for the annotation. Each is mutually exclusive with
+			// its inline positional/flag form.
+			value, err := resolvePrimaryText(cmd, "self set", "value-file", strings.Join(args[1:], " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			note, err := resolveOptionalText(cmd, "self set", "note", "note", "note-file")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			res, err := r.SelfSet(router.SelfSetRequest{
 				Key:   args[0],
-				Value: strings.Join(args[1:], " "),
+				Value: value,
 				Since: since,
 				Note:  note,
 				Now:   now,
@@ -334,6 +348,8 @@ it with ` + "`lucid obs`" + ` instead.`,
 	}
 	cmd.Flags().String("since", "", "Optional origin for the fact (a partial YYYY or YYYY-MM is kept as typed)")
 	cmd.Flags().String("note", "", "Optional annotation stored with the record")
+	cmd.Flags().String("value-file", "", "Read the value from this file (or - for stdin) instead of positional words")
+	cmd.Flags().String("note-file", "", "Read the annotation from this file (or - for stdin) instead of --note")
 	return cmd
 }
 

@@ -14,6 +14,14 @@ import (
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
+// flagJournalFile names the off-command-line source for a close-out's journal
+// line. When set, the journal text is read from the given file (or stdin, when
+// the path is "-") instead of trailing positional words, so a journal
+// containing shell metacharacters never has to reach the command line. The
+// `amend` subcommand requires it; every other close-out form treats it as an
+// optional override of the positional journal.
+const flagJournalFile = "journal-file"
+
 // bootedRouter opens the Ledger, scaffolds it idempotently, and boots the
 // router so config clip warnings surface once — the shared setup every
 // stateful command runs before dispatch.
@@ -45,6 +53,7 @@ func bootedRouter(cmd *cobra.Command) (*router.Router, error) {
 //	lucid closeout skip                    record an honest miss
 //	lucid closeout backfill [yesterday|<YYYY-MM-DD>] dfx 3/tag <journal>
 //	lucid closeout --day @yesterday dfx 3/tag <journal>
+//	lucid closeout amend --day <grammar> --journal-file <path>   correct a sealed journal
 //
 // It scaffolds the Ledger on first use so capture never blocks on setup.
 //
@@ -54,7 +63,7 @@ func bootedRouter(cmd *cobra.Command) (*router.Router, error) {
 // positional form is untouched.
 func newCloseoutCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "closeout [today|skip|backfill] [compact form...]",
+		Use:   "closeout [today|skip|backfill|amend] [compact form...]",
 		Short: "Record the day's committed practice",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,6 +79,11 @@ func newCloseoutCmd() *cobra.Command {
 		"Backfill target day, e.g. @yesterday or YYYY-MM-DD "+
 			"(same window as `closeout backfill`; today and future days are rejected)",
 	)
+	cmd.Flags().String(
+		flagJournalFile, "",
+		"Read the journal line from this file (or - for stdin) instead of positional "+
+			"words, so shell metacharacters (& ; | ...) never reach the command line",
+	)
 	return cmd
 }
 
@@ -78,14 +92,32 @@ func newCloseoutCmd() *cobra.Command {
 // combining the two is a usage error rather than a silent pick between them.
 func dispatchCloseout(cmd *cobra.Command, r *router.Router, args []string) error {
 	now := clockNow()
+	// Read --journal-file once, up front: stdin can only be drained once, so
+	// every sub-form must share this single resolution rather than re-read it.
+	journalOverride, hasJournalFile, err := closeoutJournalOverride(cmd)
+	if err != nil {
+		return err
+	}
+	// `amend` is detected before the --day branch and every other sub-word: it
+	// requires --day, so leaving it later would route the request into
+	// runFlagBackfill and the amend path would be unreachable.
+	if len(args) > 0 && args[0] == "amend" {
+		return runCloseoutAmend(cmd, r, args, now, journalOverride, hasJournalFile)
+	}
+	if hasJournalFile && len(args) > 0 && args[0] == "skip" {
+		return fmt.Errorf(
+			"lucid closeout: --%s has no meaning with `skip` — a recorded miss carries no journal",
+			flagJournalFile,
+		)
+	}
 	if dayArg, _ := cmd.Flags().GetString(flagDay); strings.TrimSpace(dayArg) != "" {
-		return runFlagBackfill(cmd, r, args, dayArg, now)
+		return runFlagBackfill(cmd, r, args, dayArg, now, journalOverride, hasJournalFile)
 	}
 	if len(args) > 0 && args[0] == "skip" {
 		return runCloseout(cmd, r, router.CloseoutRequest{Now: now, Skip: true, Source: sourceCLI, Harness: sourceCLI})
 	}
 	if len(args) > 0 && args[0] == "backfill" {
-		return runPositionalBackfill(cmd, r, args[1:], now)
+		return runPositionalBackfill(cmd, r, args[1:], now, journalOverride, hasJournalFile)
 	}
 	forceToday := len(args) > 0 && args[0] == "today"
 	if forceToday {
@@ -95,10 +127,50 @@ func dispatchCloseout(cmd *cobra.Command, r *router.Router, args []string) error
 	if err != nil {
 		return err
 	}
+	journal, err = applyJournalOverride(journal, journalOverride, hasJournalFile)
+	if err != nil {
+		return err
+	}
 	return runCloseout(cmd, r, router.CloseoutRequest{
 		Now: now, Links: links, Capacity: capacity, LimiterTag: tag, Journal: journal,
 		ForceToday: forceToday, Source: sourceCLI, Harness: sourceCLI,
 	})
+}
+
+// closeoutJournalOverride reads --journal-file when the flag was given, routing
+// the value through the shared off-command-line reader. present is false when
+// the flag is absent (the positional journal stands); when true, journal is the
+// exact file body. Reading here, once, is deliberate: a "-" path drains stdin
+// and can only be read a single time.
+func closeoutJournalOverride(cmd *cobra.Command) (journal string, present bool, err error) {
+	if !cmd.Flags().Changed(flagJournalFile) {
+		return "", false, nil
+	}
+	path, _ := cmd.Flags().GetString(flagJournalFile)
+	body, err := readBodyFile(path, cmd.InOrStdin())
+	if err != nil {
+		return "", false, fmt.Errorf("lucid closeout: %w", err)
+	}
+	return body, true, nil
+}
+
+// applyJournalOverride reconciles the parsed positional journal with an
+// optional --journal-file override. When the flag is absent the positional
+// journal stands. When it is present the file is the single source, so a
+// positional journal alongside it is a conflict the CLI refuses rather than
+// silently choosing one — the exact silent-truncation class this surface
+// exists to close.
+func applyJournalOverride(parsed, override string, present bool) (string, error) {
+	if !present {
+		return parsed, nil
+	}
+	if strings.TrimSpace(parsed) != "" {
+		return "", fmt.Errorf(
+			"lucid closeout: give the journal via --%s or as positional text, not both",
+			flagJournalFile,
+		)
+	}
+	return override, nil
 }
 
 // runCloseout executes a close-out request and prints its ack.
@@ -111,9 +183,45 @@ func runCloseout(cmd *cobra.Command, r *router.Router, req router.CloseoutReques
 	return nil
 }
 
+// runCloseoutAmend backs `lucid closeout amend --day <grammar> --journal-file
+// <path>`: it supersedes a sealed day's displayed journal while every
+// Engine-critical field (link states, capacity, streak) stays immutable. Both
+// flags are required and there is nothing else to give — the corrected journal
+// arrives off the command line through the shared reader (so no shell
+// metacharacter can truncate it, the exact failure this surface closes), and the
+// day is named explicitly rather than inferred. journalOverride/hasJournalFile
+// are the --journal-file value already resolved once up in dispatchCloseout: a
+// "-" path drains stdin and cannot be read twice. Errors are emitted to stderr
+// because the root sets SilenceErrors, so the router's reason (missing day, skip
+// record, future date) reaches the user and not just the exit code.
+func runCloseoutAmend(cmd *cobra.Command, r *router.Router, args []string, now time.Time, journalOverride string, hasJournalFile bool) error {
+	dayArg, _ := cmd.Flags().GetString(flagDay)
+	if strings.TrimSpace(dayArg) == "" || !hasJournalFile {
+		return emitErr(cmd, fmt.Errorf(
+			"lucid closeout amend: --%s and --%s are both required", flagDay, flagJournalFile,
+		))
+	}
+	// The corrected journal comes from --journal-file; trailing words after
+	// `amend` are an unexpected second source, so refuse rather than ignore them.
+	if len(args) > 1 {
+		return emitErr(cmd, fmt.Errorf(
+			"lucid closeout amend: the corrected journal comes from --%s, so `amend` takes no positional words",
+			flagJournalFile,
+		))
+	}
+	res, err := r.AmendCloseout(router.AmendCloseoutRequest{
+		Now: now, DayArg: dayArg, Journal: journalOverride, Source: sourceCLI, Harness: sourceCLI,
+	})
+	if err != nil {
+		return emitErr(cmd, err)
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+	return nil
+}
+
 // runPositionalBackfill parses an optional leading target then executes the
 // backfill — the `closeout backfill [yesterday|<date>] …` form, unchanged.
-func runPositionalBackfill(cmd *cobra.Command, r *router.Router, args []string, now time.Time) error {
+func runPositionalBackfill(cmd *cobra.Command, r *router.Router, args []string, now time.Time, journalOverride string, hasJournalFile bool) error {
 	var target *time.Time
 	var yesterday bool
 	if len(args) > 0 {
@@ -132,7 +240,7 @@ func runPositionalBackfill(cmd *cobra.Command, r *router.Router, args []string, 
 			}
 		}
 	}
-	return runBackfill(cmd, r, args, target, yesterday, now)
+	return runBackfill(cmd, r, args, target, yesterday, now, journalOverride, hasJournalFile)
 }
 
 // runFlagBackfill executes the `--day` alias. It rejects every combination that
@@ -141,7 +249,7 @@ func runPositionalBackfill(cmd *cobra.Command, r *router.Router, args []string, 
 // rather than quietly preferring one of them. The bare `backfill` sub-word is
 // allowed through as redundant-but-consistent: it names the path the flag
 // already routes onto, without naming a day.
-func runFlagBackfill(cmd *cobra.Command, r *router.Router, args []string, dayArg string, now time.Time) error {
+func runFlagBackfill(cmd *cobra.Command, r *router.Router, args []string, dayArg string, now time.Time, journalOverride string, hasJournalFile bool) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "skip", "today":
@@ -165,7 +273,7 @@ func runFlagBackfill(cmd *cobra.Command, r *router.Router, args []string, dayArg
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 		return err
 	}
-	return runBackfill(cmd, r, args, target, yesterday, now)
+	return runBackfill(cmd, r, args, target, yesterday, now, journalOverride, hasJournalFile)
 }
 
 // positionalBackfillTarget reports whether tok is the target slot of the
@@ -218,9 +326,13 @@ func resolveCloseoutDay(dayArg string, now time.Time) (target *time.Time, yester
 // of the positional form and the `--day` alias, so the two cannot drift.
 func runBackfill(
 	cmd *cobra.Command, r *router.Router, args []string,
-	target *time.Time, yesterday bool, now time.Time,
+	target *time.Time, yesterday bool, now time.Time, journalOverride string, hasJournalFile bool,
 ) error {
 	links, capacity, tag, journal, err := parseCompactArgs(r, args)
+	if err != nil {
+		return err
+	}
+	journal, err = applyJournalOverride(journal, journalOverride, hasJournalFile)
 	if err != nil {
 		return err
 	}

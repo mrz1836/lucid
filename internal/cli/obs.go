@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,8 +44,28 @@ func newObsCmd() *cobra.Command {
 			}
 			day, _ := cmd.Flags().GetString(flagDay)
 
+			// --body-file supplies the whole observation expression (kind plus
+			// value) off the command line. It is split on whitespace into the
+			// same token list the shell would have produced, so it flows through
+			// the identical kind/value parser — metacharacters in the value stay
+			// data because no shell ever sees them.
+			tokens := args
+			if cmd.Flags().Changed("body-file") {
+				if len(args) > 0 {
+					return emitErr(cmd, fmt.Errorf(
+						"lucid obs: give the observation via --body-file or as positional words, not both",
+					))
+				}
+				path, _ := cmd.Flags().GetString("body-file")
+				body, rerr := readBodyFile(path, cmd.InOrStdin())
+				if rerr != nil {
+					return emitErr(cmd, fmt.Errorf("lucid obs: %w", rerr))
+				}
+				tokens = strings.Fields(body)
+			}
+
 			res, err := r.Capture(router.CaptureRequest{
-				Tokens:  args,
+				Tokens:  tokens,
 				Now:     time.Now(),
 				DayArg:  day,
 				Harness: obsHarness(cmd),
@@ -61,6 +82,7 @@ func newObsCmd() *cobra.Command {
 	}
 	registerProvenanceFlags(cmd)
 	registerDayFlag(cmd)
+	registerBodyFileFlag(cmd, "observation expression (kind and value)")
 	return cmd
 }
 

@@ -42,17 +42,29 @@ func newReframeAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <catch> <flip>",
 		Short: "Append a reframe (catch → flip)",
-		Args:  cobra.MinimumNArgs(2),
+		// The safe form supplies both catch and flip off the command line, so no
+		// catch/flip positional is required then; the positional form still
+		// requires both. resolveReframe enforces the both-together rule.
+		Args: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("catch-file") || cmd.Flags().Changed("flip-file") {
+				return nil
+			}
+			return cobra.MinimumNArgs(2)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
 			}
+			catch, flip, tags, err := resolveReframe(cmd, args)
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			day, _ := cmd.Flags().GetString(flagDay)
 			res, err := r.AddReframe(router.AddReframeRequest{
-				Catch:  args[0],
-				Flip:   args[1],
-				Tags:   reframeTags(args[2:]),
+				Catch:  catch,
+				Flip:   flip,
+				Tags:   tags,
 				DayArg: day,
 				Now:    time.Now(),
 			})
@@ -64,7 +76,42 @@ func newReframeAddCmd() *cobra.Command {
 		},
 	}
 	registerDayFlag(cmd)
+	cmd.Flags().String("catch-file", "", "Read the catch from this file (or - for stdin); requires --flip-file")
+	cmd.Flags().String("flip-file", "", "Read the flip from this file (or - for stdin); requires --catch-file")
 	return cmd
+}
+
+// resolveReframe resolves a reframe's catch and flip from either both file flags
+// or both positionals — the two required fields move together. The safe file
+// form reads --catch-file and --flip-file through the shared reader (so a self-
+// talk line carrying a shell metacharacter stays data) and treats every
+// positional as a trailing tag; the positional form is the original
+// catch/flip/tags layout, unchanged. Supplying only one file flag is a usage
+// error, since a reframe needs both halves.
+func resolveReframe(cmd *cobra.Command, args []string) (catch, flip string, tags []string, err error) {
+	catchFile := cmd.Flags().Changed("catch-file")
+	flipFile := cmd.Flags().Changed("flip-file")
+	switch {
+	case catchFile != flipFile:
+		return "", "", nil, fmt.Errorf(
+			"lucid reframe add: --catch-file and --flip-file must be given together; nothing was saved",
+		)
+	case catchFile && flipFile:
+		if err = ensureSingleStdinFlags(cmd, "catch-file", "flip-file"); err != nil {
+			return "", "", nil, err
+		}
+		catchPath, _ := cmd.Flags().GetString("catch-file")
+		if catch, err = readBodyFile(catchPath, cmd.InOrStdin()); err != nil {
+			return "", "", nil, fmt.Errorf("lucid reframe add: %w", err)
+		}
+		flipPath, _ := cmd.Flags().GetString("flip-file")
+		if flip, err = readBodyFile(flipPath, cmd.InOrStdin()); err != nil {
+			return "", "", nil, fmt.Errorf("lucid reframe add: %w", err)
+		}
+		return catch, flip, reframeTags(args), nil
+	default:
+		return args[0], args[1], reframeTags(args[2:]), nil
+	}
 }
 
 // newReframeListCmd wires `lucid reframe list [--json]`: the live pool

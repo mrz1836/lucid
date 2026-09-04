@@ -57,16 +57,30 @@ func newFocusAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <text>",
 		Short: "Append a focus item (a slow inner work-on)",
-		Args:  cobra.MinimumNArgs(1),
+		Args:  requireTextArgs(0, 1, "body-file"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
 			}
+			// Reject two fields both reading stdin before any read drains it.
+			if err = ensureSingleStdinFlags(cmd, "body-file", "success-file"); err != nil {
+				return emitErr(cmd, err)
+			}
+			// --body-file supplies the text and --success-file the criterion off
+			// the command line; the positional text and --success are the inline
+			// forms, each mutually exclusive with its file form.
+			text, err := resolvePrimaryText(cmd, "focus add", "body-file", strings.Join(args, " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			success, err := resolveOptionalText(cmd, "focus add", "success criterion", flagFocusSuccess, "success-file")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			day, _ := cmd.Flags().GetString(flagDay)
-			success, _ := cmd.Flags().GetString(flagFocusSuccess)
 			res, err := r.AddFocus(router.AddFocusRequest{
-				Text:             strings.Join(args, " "),
+				Text:             text,
 				SuccessCriterion: success,
 				DayArg:           day,
 				Now:              time.Now(),
@@ -79,7 +93,9 @@ func newFocusAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String(flagFocusSuccess, "", "Optional success criterion for the focus item")
+	cmd.Flags().String("success-file", "", "Read the success criterion from this file (or - for stdin) instead of --success")
 	registerDayFlag(cmd)
+	registerBodyFileFlag(cmd, "focus item text")
 	return cmd
 }
 

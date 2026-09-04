@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -300,6 +301,96 @@ func TestResolveCloseoutDay(t *testing.T) {
 	assert.Contains(t, err.Error(), "could not read the day")
 }
 
+// rawEntryBodies concatenates every raw entry written under an isolated home —
+// the journal lines a close-out captures. A substring assertion against it
+// proves the file-supplied journal reached raw/ without going through the
+// shell.
+func rawEntryBodies(t *testing.T, home string) string {
+	t.Helper()
+	var b strings.Builder
+	_ = filepath.WalkDir(filepath.Join(home, "raw"), func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".md" {
+			content, rerr := os.ReadFile(path)
+			require.NoError(t, rerr)
+			b.Write(content)
+		}
+		return nil
+	})
+	return b.String()
+}
+
+// writeJournalFile writes journal text to a temp file and returns its path —
+// the off-command-line source under test.
+func writeJournalFile(t *testing.T, text string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "journal.txt")
+	require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
+	return path
+}
+
+// TestCloseoutCLI_JournalFileWrites: --journal-file supplies the journal off
+// the command line, and its exact text lands in the raw entry. The payload
+// carries an ampersand — the character that split the original invocation — to
+// prove it now survives as data.
+func TestCloseoutCLI_JournalFileWrites(t *testing.T) {
+	home := isolatedHome(t)
+	jf := writeJournalFile(t, "tried another new thing today with r&b yoga\n")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "dfx", "3/wrist", "--journal-file", jf)
+	require.NoError(t, err)
+	assert.Contains(t, out, "streak")
+	assert.Contains(t, rawEntryBodies(t, home), "tried another new thing today with r&b yoga")
+}
+
+// TestCloseoutCLI_JournalFileBackfill: the flag threads through the --day
+// backfill form too, not just a bare close-out.
+func TestCloseoutCLI_JournalFileBackfill(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	jf := writeJournalFile(t, "backfilled with a | pipe & an ampersand")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"closeout", "--day", "@yesterday", "dfx", "3", "--journal-file", jf)
+	require.NoError(t, err)
+	assert.Contains(t, out, "Backfilled")
+	assert.Contains(t, rawEntryBodies(t, home), "backfilled with a | pipe & an ampersand")
+}
+
+// TestCloseoutCLI_JournalFileConflictsWithPositional: a positional journal
+// alongside --journal-file is two sources for one field, so the CLI refuses
+// rather than silently picking one.
+func TestCloseoutCLI_JournalFileConflictsWithPositional(t *testing.T) {
+	isolatedHome(t)
+	jf := writeJournalFile(t, "from the file")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"closeout", "dfx", "3", "positional", "journal", "words", "--journal-file", jf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+}
+
+// TestCloseoutCLI_JournalFileRejectsSkip: a recorded miss carries no journal,
+// so pairing --journal-file with `skip` is a contradiction the CLI refuses.
+func TestCloseoutCLI_JournalFileRejectsSkip(t *testing.T) {
+	home := isolatedHome(t)
+	jf := writeJournalFile(t, "should never be written")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "skip", "--journal-file", jf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "skip")
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
+// TestCloseoutCLI_JournalFileMissing: an unreadable --journal-file path is a
+// clean error that writes nothing.
+func TestCloseoutCLI_JournalFileMissing(t *testing.T) {
+	home := isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"closeout", "dfx", "3", "--journal-file", filepath.Join(t.TempDir(), "nope.txt"))
+	require.Error(t, err)
+	assert.Equal(t, 0, engineDayCount(t, home))
+}
+
 // TestCloseoutCLI_BootError proves closeout surfaces a boot failure (an
 // unscaffoldable home) before it would parse or write anything — mirrors the
 // other *_BootError guards on the spine.
@@ -307,4 +398,165 @@ func TestCloseoutCLI_BootError(t *testing.T) {
 	unscaffoldableHome(t)
 	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "dfx", "3/wrist", "the chain ran")
 	require.Error(t, err)
+}
+
+// TestCloseoutAmend is the AC-4 CLI surface: `closeout amend --day --journal-file`
+// corrects a sealed journal off the command line, both flags are required, and
+// the immutable boundary (a skip record has no journal to amend) is refused.
+func TestCloseoutAmend(t *testing.T) {
+	t.Run("happy path supersedes the sealed journal", func(t *testing.T) {
+		home := isolatedHome(t)
+		withClock(t, afternoon())
+
+		// Seal a real close-out on a prior day with a truncated stub.
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "--day", "2026-07-03", "dfx", "3/wrist", "tried another new thing today with r")
+		require.NoError(t, err)
+
+		// Amend it with the full narrative — carrying the ampersand that split the
+		// original invocation, now supplied off the command line.
+		jf := writeJournalFile(t, "tried another new thing today with r&b yoga\n")
+		out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--day", "2026-07-03", "--journal-file", jf)
+		require.NoError(t, err)
+		assert.Contains(t, out, "Amended")
+		assert.Contains(t, out, "2026-07-03")
+
+		// The corrected text reached raw/, and the original stub is still there.
+		bodies := rawEntryBodies(t, home)
+		assert.Contains(t, bodies, "tried another new thing today with r&b yoga")
+		assert.Contains(t, bodies, "tried another new thing today with r\n",
+			"the original truncated stub stays traceable in history")
+
+		// No new day record was created — the amend touched only the display.
+		assert.Equal(t, 1, engineDayCount(t, home))
+	})
+
+	t.Run("missing --day is a usage error", func(t *testing.T) {
+		isolatedHome(t)
+		jf := writeJournalFile(t, "corrected text")
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--journal-file", jf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both required")
+	})
+
+	t.Run("missing --journal-file is a usage error", func(t *testing.T) {
+		isolatedHome(t)
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--day", "2026-07-03")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "both required")
+	})
+
+	t.Run("refuses to amend a skip record", func(t *testing.T) {
+		isolatedHome(t)
+		// After the evening bell, a bare skip lands on the base logical day
+		// (2026-07-05) rather than back-attributing to last night.
+		withClock(t, time.Date(2026, 7, 5, 22, 0, 0, 0, time.UTC))
+
+		// A recorded miss carries no journal, so there is nothing to supersede.
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "closeout", "skip")
+		require.NoError(t, err)
+
+		jf := writeJournalFile(t, "should be refused")
+		_, errOut, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "--day", "2026-07-05", "--journal-file", jf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "skip record")
+		assert.Contains(t, errOut, "skip record",
+			"the router's reason reaches the user, not just the exit code")
+	})
+
+	t.Run("refuses trailing positional words", func(t *testing.T) {
+		isolatedHome(t)
+		jf := writeJournalFile(t, "corrected text")
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+			"closeout", "amend", "extra", "words", "--day", "2026-07-03", "--journal-file", jf)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no positional words")
+	})
+}
+
+// soleRawJournal returns the journal body of the single raw entry written
+// under an isolated home, stripped of only the fixed Markdown framing — the
+// "# Entry" heading, its surrounding blank lines, and the one terminal
+// newline renderRawDoc frames the body with. It deliberately does not read
+// through storage.ReadRaw, whose TrimSpace would erase the leading and
+// trailing spaces the fidelity contract preserves and so hide a regression.
+func soleRawJournal(t *testing.T, home string) string {
+	t.Helper()
+	var paths []string
+	_ = filepath.WalkDir(filepath.Join(home, "raw"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && filepath.Ext(d.Name()) == ".md" {
+			paths = append(paths, p)
+		}
+		return nil
+	})
+	require.Len(t, paths, 1, "expected exactly one raw entry under %s", home)
+
+	content, err := os.ReadFile(paths[0])
+	require.NoError(t, err)
+
+	// SplitFrontmatter returns the body verbatim (no TrimSpace), so the only
+	// thing to remove is the fixed heading framing renderRawDoc writes.
+	_, body, err := storage.SplitFrontmatter(content)
+	require.NoError(t, err)
+
+	const frame = "\n# Entry\n\n"
+	s := string(body)
+	require.Truef(t, strings.HasPrefix(s, frame), "raw body missing the fixed # Entry framing: %q", s)
+	return strings.TrimSuffix(strings.TrimPrefix(s, frame), "\n")
+}
+
+// TestCloseout_JournalFileVerbatim is the AC-2/AC-3 regression guard. A
+// journal carrying every shell metacharacter that could split or truncate a
+// command line — &, ;, |, `, $(...), a single and a double quote — plus
+// leading and trailing spaces is supplied off the command line through
+// --journal-file, and must reach the sealed raw entry byte-for-byte after
+// only readBodyFile's one-terminal-newline normalization. It reads the
+// serialized raw file directly (not via storage.ReadRaw, which TrimSpaces),
+// so a leading/trailing-space regression cannot hide. Both the bare close-out
+// and the --day backfill form are exercised, proving the flag on both write
+// paths and that no metacharacter produces a stray backgrounded process or a
+// `command not found` side effect — the original 2026-09-02 failure.
+func TestCloseout_JournalFileVerbatim(t *testing.T) {
+	// Begins and ends with two spaces; the ampersand is the exact character
+	// that split the original invocation.
+	const metaPayload = "  & ; | ` $(...) ' \" journal with metachars and edge spaces  "
+
+	tests := []struct {
+		name string
+		args []string
+		pin  bool // backfill grammar needs a pinned clock to resolve @yesterday
+	}{
+		{
+			name: "bare closeout",
+			args: []string{"closeout", "dfx", "3"},
+		},
+		{
+			name: "day backfill",
+			args: []string{"closeout", "--day", "@yesterday", "dfx", "3"},
+			pin:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := isolatedHome(t)
+			if tt.pin {
+				withClock(t, afternoon())
+			}
+			// The trailing newline is the single editor/heredoc newline the
+			// shared reader normalizes away; nothing else about the payload is.
+			jf := writeJournalFile(t, metaPayload+"\n")
+
+			args := append(append([]string{}, tt.args...), "--journal-file", jf)
+			_, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+			require.NoError(t, err)
+
+			assert.Equal(t, metaPayload, soleRawJournal(t, home),
+				"the journal must reach the sealed raw entry byte-for-byte after one-terminal-newline normalization")
+		})
+	}
 }
