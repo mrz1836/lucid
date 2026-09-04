@@ -110,7 +110,7 @@ func newGratitudeAddCmd() *cobra.Command {
 	registerDayFlag(cmd)
 	cmd.Flags().String(gratitudeIntoFlag, "", "Bump a specific entry by its stable id, regardless of wording")
 	registerGratitudeSeedFlags(cmd)
-	registerBodyFileFlag(cmd, "body-file", "thing you're grateful for")
+	registerBodyFileFlag(cmd, "thing you're grateful for")
 	return cmd
 }
 

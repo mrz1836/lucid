@@ -81,7 +81,7 @@ func newThreadCmd() *cobra.Command {
 	f.StringArray(flagDomain, nil, "A domain this thread touches (repeatable)")
 	f.String(flagStatus, "", "Status transition: active | managed | resolved")
 	f.String(flagNote, "", "A free-text note kept verbatim")
-	registerBodyFileFlag(cmd, "body-file", "thread name")
+	registerBodyFileFlag(cmd, "thread name")
 	f.String("intent-file", "", "Read the intent from this file (or - for stdin) instead of --intent")
 	f.StringArray("domain-file", nil, "Read a domain from this file (or - for stdin), one per flag (repeatable)")
 	f.String("note-file", "", "Read the note from this file (or - for stdin) instead of --note")

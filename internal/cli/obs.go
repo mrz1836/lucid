@@ -82,7 +82,7 @@ func newObsCmd() *cobra.Command {
 	}
 	registerProvenanceFlags(cmd)
 	registerDayFlag(cmd)
-	registerBodyFileFlag(cmd, "body-file", "observation expression (kind and value)")
+	registerBodyFileFlag(cmd, "observation expression (kind and value)")
 	return cmd
 }
 

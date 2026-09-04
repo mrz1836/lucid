@@ -95,7 +95,7 @@ func newFocusAddCmd() *cobra.Command {
 	cmd.Flags().String(flagFocusSuccess, "", "Optional success criterion for the focus item")
 	cmd.Flags().String("success-file", "", "Read the success criterion from this file (or - for stdin) instead of --success")
 	registerDayFlag(cmd)
-	registerBodyFileFlag(cmd, "body-file", "focus item text")
+	registerBodyFileFlag(cmd, "focus item text")
 	return cmd
 }
 
