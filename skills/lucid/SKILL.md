@@ -171,12 +171,23 @@ every guarantee holds exactly as it does on the command line:
 * **Every write goes through `lucid`.** The skill only assembles and runs the
   documented command; the agent-free core performs the write and acknowledges
   after it lands. The skill never writes state itself.
-* **Shell-quote free text.** When invoking `lucid` through a shell, wrap every
-  user-authored free-text argument (journal lines, captions, limiters with
-  punctuation, observation notes) so punctuation such as `;`, `&`, `|`, `!`,
-  parentheses, and quotes cannot be interpreted by the shell. Prefer a single
-  fully quoted command argument for closeout/log text, then verify the saved
-  raw id/day when the write is consequential.
+* **Keep free text off the command line.** When invoking `lucid` through a
+  shell, never let a user-authored free-text argument (journal lines, captions,
+  limiters with punctuation, observation notes) reach the command line raw —
+  punctuation such as `;`, `&`, `|`, `!`, parentheses, and quotes is otherwise
+  interpreted by the shell and can silently split or truncate the write.
+  **Preferred:** pass the text off the command line via the field's `--…-file
+  <path>` flag (write it to a temp file first, or `-` for stdin) —
+  `--journal-file` (closeout), `--body-file` (log/obs/memory/thread/gratitude/
+  focus), `--catch-file`/`--flip-file` (reframe), `--tone-file`/`--why-file`/
+  `--followup-file`/`--caption-file` (memory), `--intent-file`/`--domain-file`/
+  `--note-file` (thread/era/self), `--value-file` (self), `--reason-file`
+  (anchor sunset), `--success-file` (focus). **Fallback** for any shell-only
+  path: wrap the whole free-text argument in single quotes (or a quoted
+  heredoc). Then verify the saved raw id/day when the write is consequential. A
+  sealed closeout tagline that still ends up wrong is corrected with `lucid
+  closeout amend --day <grammar> --journal-file <path>` (supersedes the
+  displayed line; Engine-critical fields stay immutable).
 * **Mirror content is never scored.** A journal line or a capture is held, not
   graded; the voice-first layer adds no judgement to what is written.
 * **The Ledger is never hand-edited.** No agent touches the files under
