@@ -38,6 +38,24 @@ const (
 	backfillCap = 1
 )
 
+// jobDBDSN builds the hardened SQLite DSN for the disposable job DB: WAL
+// journaling (so the go-flywheel startup connection check passes instead of
+// failing on the default journal_mode=delete), a busy timeout to absorb the
+// brief claim lock, NORMAL synchronous, foreign keys on, and immediate
+// transactions for the serialized claim. Without these the node's WAL check
+// fails and the serialized claim deadlocks under SQLITE_BUSY, exiting the node
+// — which a supervisor then restart-loops. The pragmas use modernc/glebarez's
+// `_pragma=` query syntax (the pure-Go driver, so no CGO), mirroring
+// go-flywheel's own embedder DSN (cmd/flywheel/db.go).
+func jobDBDSN(path string) string {
+	return "file:" + path +
+		"?_pragma=journal_mode(WAL)" +
+		"&_pragma=busy_timeout(5000)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_txlock=immediate"
+}
+
 // ScaffoldStore is the single storage capability [Boot] needs: ensure the engine
 // tree exists before the periodics reconcile against it. *storage.Adapter
 // satisfies it. Kept this narrow so flynode depends on a capability, not on the
@@ -78,11 +96,21 @@ func Boot(ctx context.Context, cfg BootConfig) error {
 
 	// The disposable job DB is machinery, not truth: gorm's per-statement SQL
 	// logging (including the expected record-not-found on a first-boot upsert) is
-	// noise the daemon's flywheel slog does not need. Silence it.
-	db, err := gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{Logger: gormlogger.Discard})
+	// noise the daemon's flywheel slog does not need. Silence it. The DSN is
+	// hardened (WAL + busy_timeout + immediate txlock) so the flywheel startup
+	// connection check passes instead of failing on journal_mode=delete.
+	db, err := gorm.Open(sqlite.Open(jobDBDSN(cfg.DBPath)), &gorm.Config{Logger: gormlogger.Discard})
 	if err != nil {
 		return fmt.Errorf("%s: open job db %q: %w", cfg.Pkg, cfg.DBPath, err)
 	}
+	// SQLite is single-writer: pin one connection so the serialized flywheel
+	// claim never races a second writer, matching go-flywheel's own embedder
+	// contract (cmd/flywheel/db.go) and the enforced runner Concurrency 1.
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("%s: job db handle: %w", cfg.Pkg, err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err = MigrateJobStore(db); err != nil {
 		return fmt.Errorf("%s: migrate job db: %w", cfg.Pkg, err)
 	}
