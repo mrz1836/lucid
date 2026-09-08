@@ -1,11 +1,11 @@
 module github.com/mrz1836/lucid
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/mrz1836/go-flywheel v0.21.2
-	github.com/mrz1836/go-foundation v0.6.0
+	github.com/mrz1836/go-foundation v0.6.1
 	github.com/mrz1836/go-selfupdate v0.1.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -23,7 +23,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.10.0 // indirect
+	github.com/jackc/pgx/v5 v5.11.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
