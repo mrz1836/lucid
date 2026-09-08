@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	flywheel "github.com/mrz1836/go-flywheel"
 	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 // fixedNow is an arbitrary anchor for the boot tests' injected clock. Boot never
@@ -71,6 +73,52 @@ func TestBoot_ScaffoldsReconcilesAndDrains(t *testing.T) {
 	assert.True(t, store.scaffolded, "Boot scaffolds the engine before reconciling")
 	assert.NotNil(t, reconciledDB, "Boot invokes Reconcile with the opened job DB")
 	assert.FileExists(t, dbPath, "Boot opens and migrates the disposable job DB")
+}
+
+// TestBoot_OpensJobDBInWALMode proves the disposable job DB is opened in WAL
+// journal mode, so the go-flywheel startup connection check passes instead of
+// failing on the default journal_mode=delete (the defect that restart-looped the
+// scheduler). It boots a node against a temp DB (canceled ctx drains cleanly, as
+// the sibling tests do), then reopens that same file and asserts PRAGMA
+// journal_mode reports "wal" — the effective runtime mode, not merely the DSN
+// string. It fails if the DSN is reverted to the bare path.
+func TestBoot_OpensJobDBInWALMode(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "job.db")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // a stop that lands as the node would start draining
+
+	done := make(chan error, 1)
+	go func() {
+		done <- Boot(ctx, BootConfig{
+			Pkg:       "flynodetest",
+			Queue:     "flynode-test",
+			DBPath:    dbPath,
+			Clock:     models.NewFixedClock(fixedNow()),
+			Store:     &fakeScaffold{},
+			Registry:  flywheel.NewRegistry(),
+			Reconcile: func(context.Context, *gorm.DB) error { return nil },
+		})
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err, "a canceled node drains cleanly to nil")
+	case <-time.After(5 * time.Second):
+		t.Fatal("Boot did not return on a canceled context")
+	}
+
+	// Reopen the same file through a BARE DSN (no journal_mode pragma) and read
+	// the effective mode. WAL is persisted in the database header, so a bare
+	// reopen reports "wal" only if Boot's own DSN set it — this makes the test
+	// fail if Boot is reverted to the bare, pragma-less path (the original bug).
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: gormlogger.Discard})
+	require.NoError(t, err, "reopen the booted job DB")
+	var journalMode string
+	require.NoError(t, db.Raw("PRAGMA journal_mode").Scan(&journalMode).Error,
+		"read PRAGMA journal_mode from the booted job DB")
+	assert.Equal(t, "wal", strings.ToLower(journalMode),
+		"Boot opens the job DB in WAL mode so the flywheel startup check passes")
 }
 
 // TestBoot_ReconcileErrorAborts proves a Reconcile failure aborts the boot with
