@@ -204,3 +204,312 @@ func (r *Router) resolvePeopleKeys(names []string) ([]string, error) {
 	slices.Sort(keys)
 	return slices.Compact(keys), nil
 }
+
+// AmendMemoryRequest carries one `lucid memory amend <obs_id>` turn (Q4/Q5,
+// mvp/data-model.md). ObsID names the base memory being corrected. Each amendable
+// field pairs a value with a "changed" bool so an omitted flag (Changed=false)
+// leaves that field untouched, distinct from an explicit set: Body corrects the
+// story text (resolved from --body-file by the CLI — the router never reads a
+// path), Era re-files the story under an existing era key, Certainty resets the
+// recall enum, Followup sets the follow-up thread. ClearFollowup removes the
+// follow-up field — the explicit clear, distinct from an ambiguous empty set. A
+// zero Now defaults to the wall clock.
+type AmendMemoryRequest struct {
+	ObsID string
+
+	Body        string
+	BodyChanged bool
+
+	Era        string
+	EraChanged bool
+
+	Certainty        string
+	CertaintyChanged bool
+
+	Followup        string
+	FollowupChanged bool
+	ClearFollowup   bool
+
+	Now time.Time
+}
+
+// AmendMemoryResult reports what an amend appended: the amendment event's own id
+// (EventID, freshly assigned in the target's day), the base memory it corrects
+// (TargetID), the shared logical day both file under, the amendment's refs
+// (corrects/era/cleared), and the inventory ack.
+type AmendMemoryResult struct {
+	EventID     string
+	TargetID    string
+	LogicalDate string
+	Refs        map[string]any
+	Ack         string
+}
+
+// AmendMemory corrects or re-files a stored memory by appending a new KindMemory
+// event that carries refs.corrects plus only the changed fields — the frozen
+// envelope is never rewritten, so the base story's line stays byte-identical and
+// its prior values remain recoverable (mvp/data-model.md, append-only amendment).
+// Every input is validated before any write, so a rejected amend appends nothing
+// (error-states.md §St-1): the id must name an existing base memory (not an
+// unknown id, a non-memory event, or an amendment — a correction-event id is an
+// audit record, never an amendable base); at least one field must change; a
+// changed certainty must be in the closed enum; a changed era must already exist;
+// and --followup can be neither set-and-cleared at once nor set to an ambiguous
+// empty value. The amendment reuses the target's logical_date/occurred_at so it
+// files in the same day file (the per-day /day fold needs no cross-day scan) and
+// is sourced as excavation like the base story. It is deterministic and
+// agent-free.
+func (r *Router) AmendMemory(req AmendMemoryRequest) (AmendMemoryResult, error) {
+	now := whenOr(req.Now)
+	if err := r.prepareObservations(); err != nil {
+		return AmendMemoryResult{}, err
+	}
+
+	obsID := strings.TrimSpace(req.ObsID)
+	target, err := r.resolveAmendTarget(obsID)
+	if err != nil {
+		return AmendMemoryResult{}, err
+	}
+	if err = validateAmendFields(req); err != nil {
+		return AmendMemoryResult{}, err
+	}
+	eraKey, err := r.resolveAmendEra(req)
+	if err != nil {
+		return AmendMemoryResult{}, err
+	}
+
+	ev, err := r.store.AppendObservation(buildAmendment(req, target, obsID, eraKey, now))
+	if err != nil {
+		return AmendMemoryResult{}, fmt.Errorf("could not save the amendment; nothing was saved: %w", err)
+	}
+
+	return AmendMemoryResult{
+		EventID:     ev.ID,
+		TargetID:    obsID,
+		LogicalDate: ev.LogicalDate,
+		Refs:        ev.Refs,
+		Ack:         fmt.Sprintf("Amended memory `%s`; recorded as `%s`.", obsID, ev.ID),
+	}, nil
+}
+
+// resolveAmendTarget resolves an amend id to its base memory event, rejecting
+// before any write anything that is not an amendable base: an unparseable id, an
+// id that names no event or a non-memory event (all "not found"), or an id that
+// names a correction event (refs.corrects). A correction is an audit record
+// keyed to a base memory, never an amendable base itself — amending one would
+// append a correction-of-a-correction the field fold would never apply.
+func (r *Router) resolveAmendTarget(obsID string) (observations.Event, error) {
+	if _, ok := observations.EventDate(obsID); !ok {
+		return observations.Event{}, memoryNotFoundErr(obsID)
+	}
+
+	target, found, err := r.store.ReadObservationByID(obsID)
+	if err != nil {
+		return observations.Event{}, fmt.Errorf("could not read the memory; nothing was saved: %w", err)
+	}
+	if !found || target.Kind != observations.KindMemory {
+		return observations.Event{}, memoryNotFoundErr(obsID)
+	}
+	if _, isAmendment := target.Refs[observations.RefCorrects]; isAmendment {
+		return observations.Event{}, fmt.Errorf(
+			"%q is a memory amendment, not a base memory; amend the memory it corrects instead; nothing was saved", obsID,
+		)
+	}
+	return target, nil
+}
+
+// validateAmendFields rejects a contradictory, ambiguous, empty, or invalid
+// amend before any write (error-states.md §St-1). Setting and clearing a
+// follow-up at once has no defined precedence, and a bare empty --followup can
+// mean either "set to empty" or "clear" — the explicit --clear-followup is the
+// only way to remove it (Q4); at least one field must change; and a changed
+// certainty must be in the closed enum.
+func validateAmendFields(req AmendMemoryRequest) error {
+	if req.FollowupChanged && req.ClearFollowup {
+		return fmt.Errorf("give --followup or --clear-followup, not both; nothing was saved")
+	}
+	if req.FollowupChanged && strings.TrimSpace(req.Followup) == "" {
+		return fmt.Errorf(
+			"--followup was given an empty value; use --clear-followup to remove it, or pass the new text; nothing was saved",
+		)
+	}
+	if !req.BodyChanged && !req.EraChanged && !req.CertaintyChanged && !req.FollowupChanged && !req.ClearFollowup {
+		return fmt.Errorf("no fields to amend; nothing was saved")
+	}
+	if req.CertaintyChanged {
+		if c := strings.ToLower(strings.TrimSpace(req.Certainty)); !observations.IsMemoryCertainty(c) {
+			return fmt.Errorf(
+				"unknown certainty %q (want vivid, hazy, or reconstructed); nothing was saved", req.Certainty,
+			)
+		}
+	}
+	return nil
+}
+
+// resolveAmendEra validates a changed --era and returns the era key to stamp on
+// the amendment (empty when --era was not changed). The key must already resolve
+// to an existing era (Q5): amend re-files under an era authored via `lucid era`,
+// so a missing key is rejected with nothing written — stricter than create,
+// which stores the era key verbatim.
+func (r *Router) resolveAmendEra(req AmendMemoryRequest) (string, error) {
+	eraKey := strings.TrimSpace(req.Era)
+	if !req.EraChanged {
+		return "", nil
+	}
+	if eraKey == "" {
+		return "", fmt.Errorf("--era needs an era key; nothing was saved")
+	}
+	_, ok, rerr := r.store.ReadRegistry(observations.RegistryEra, eraKey)
+	if rerr != nil {
+		return "", fmt.Errorf("could not read the era; nothing was saved: %w", rerr)
+	}
+	if !ok {
+		return "", fmt.Errorf(
+			"era %q not found — file the memory under an existing era key (see `lucid era list`); nothing was saved", eraKey,
+		)
+	}
+	return eraKey, nil
+}
+
+// buildAmendment assembles the append-only amendment event: only the changed
+// payload fields, refs.corrects always keyed to the base, refs.era on a re-file,
+// and refs.cleared on a follow-up clear. It reuses the target's
+// logical_date/occurred_at (copying the occurrence end by value so the amendment
+// never aliases the target's pointer — a range memory keeps its span), so the
+// amendment files in the same day file; it is sourced as excavation like the
+// base story and stamped with the amendment's own recorded_at.
+func buildAmendment(req AmendMemoryRequest, target observations.Event, obsID, eraKey string, now time.Time) observations.Event {
+	payload := map[string]any{}
+	if req.BodyChanged {
+		payload[observations.MemoryFieldText] = strings.TrimSpace(req.Body)
+	}
+	if req.CertaintyChanged {
+		payload[observations.MemoryFieldCertainty] = strings.ToLower(strings.TrimSpace(req.Certainty))
+	}
+	if req.FollowupChanged {
+		payload[observations.MemoryFieldFollowUp] = strings.TrimSpace(req.Followup)
+	}
+
+	refs := map[string]any{observations.RefCorrects: obsID}
+	if req.EraChanged {
+		refs[observations.RefEra] = eraKey
+	}
+	if req.ClearFollowup {
+		refs[observations.RefCleared] = []string{observations.MemoryFieldFollowUp}
+	}
+
+	amendment := observations.Event{
+		Schema:              observations.Schema,
+		Kind:                observations.KindMemory,
+		RecordedAt:          now.Format(time.RFC3339),
+		OccurredAt:          target.OccurredAt,
+		OccurredAtPrecision: target.OccurredAtPrecision,
+		LogicalDate:         target.LogicalDate,
+		Source:              observations.SourceExcavation,
+		Payload:             payload,
+		Refs:                refs,
+	}
+	if target.OccurredAtEnd != nil {
+		end := *target.OccurredAtEnd
+		amendment.OccurredAtEnd = &end
+	}
+	return amendment
+}
+
+// memoryNotFoundErr is the shared rejection when an amend target does not name an
+// amendable base memory — an unparseable id, an id that names no event, or an
+// event of another kind. All three mean "there is no memory here to amend", so
+// they share one honest message and nothing is written.
+func memoryNotFoundErr(obsID string) error {
+	return fmt.Errorf("memory %q not found; nothing was saved", obsID)
+}
+
+// readFoldedMemories reads every memory event through the storage projection
+// seam and folds each story's amendments onto its base (fold-on-read everywhere,
+// Q2) — the single folded-memory read the browse/search surfaces (recall,
+// excavate) share, so amended values surface identically on both without either
+// re-implementing the fold. FoldMemoryAmendments is pure and drops amendment
+// events, so a caller sees only current base memories, sorted by id. The fold is
+// deliberately never pushed into storage.ReadObservationsKind, whose generic
+// per-kind read also feeds the export path (blast radius); it lives here at the
+// two read surfaces that must reflect amendments.
+func (r *Router) readFoldedMemories() ([]observations.Event, error) {
+	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
+	if err != nil {
+		return nil, err
+	}
+	return observations.FoldMemoryAmendments(memories), nil
+}
+
+// ShowMemoryResult is one folded story plus its amendment history — what
+// `lucid memory show` renders. Memory is the base memory with every amendment
+// folded on (its current values); History is the ordered per-field change trail
+// (nil when the story was never amended), each entry naming the field, its prior
+// value, the new value (or a clear), and the amendment's recorded_at.
+type ShowMemoryResult struct {
+	Memory  observations.Event
+	History []observations.MemoryFieldChange
+}
+
+// ShowMemory reads one story by its base id and returns its folded current
+// values plus the amendment history trail (fold-on-read, Q2). It loads the
+// complete memory event set — a single-id read cannot see the appended
+// amendments, which live as separate events — folds it, and returns the folded
+// base. The id must name a base memory: an unknown/unparseable id, or an id that
+// names a correction event (refs.corrects), is rejected, so `show` never renders
+// a bare amendment. It is read-only and agent-free.
+func (r *Router) ShowMemory(obsID string) (ShowMemoryResult, error) {
+	if err := r.prepareObservations(); err != nil {
+		return ShowMemoryResult{}, err
+	}
+	id := strings.TrimSpace(obsID)
+	if _, ok := observations.EventDate(id); !ok {
+		return ShowMemoryResult{}, memoryReadNotFoundErr(id)
+	}
+
+	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
+	if err != nil {
+		return ShowMemoryResult{}, fmt.Errorf("could not read the memory: %w", err)
+	}
+
+	// The id must name a base memory. A correction-event id (refs.corrects) is an
+	// audit record folded onto its base — never shown on its own, so reject it and
+	// point at the base it corrects.
+	for _, ev := range memories {
+		if ev.ID != id {
+			continue
+		}
+		if _, isAmendment := ev.Refs[observations.RefCorrects]; isAmendment {
+			return ShowMemoryResult{}, fmt.Errorf(
+				"%q is a memory amendment, not a base memory; show the memory it corrects instead", id,
+			)
+		}
+		break
+	}
+
+	var current observations.Event
+	found := false
+	for _, ev := range observations.FoldMemoryAmendments(memories) {
+		if ev.ID == id {
+			current = ev
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ShowMemoryResult{}, memoryReadNotFoundErr(id)
+	}
+
+	return ShowMemoryResult{
+		Memory:  current,
+		History: observations.FoldMemoryHistory(memories, id),
+	}, nil
+}
+
+// memoryReadNotFoundErr is the read-path (`memory show`) sibling of
+// memoryNotFoundErr: an unknown or unparseable id names no story to read. It
+// drops the "nothing was saved" clause the write path carries — a read saves
+// nothing regardless — while keeping the same "not found" wording.
+func memoryReadNotFoundErr(obsID string) error {
+	return fmt.Errorf("memory %q not found", obsID)
+}

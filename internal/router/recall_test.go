@@ -192,6 +192,59 @@ func TestRecall_BadRequestErrors(t *testing.T) {
 	require.Error(t, err, "a dimension browse needs a key")
 }
 
+// TestRecall_ReflectsAmendedValues proves a browse folds amendments — recall
+// shows the corrected story text and the amended certainty, not the pre-amend
+// values, and surfaces one story rather than the base plus its amendment
+// (AC-11, fold-on-read everywhere).
+func TestRecall_ReflectsAmendedValues(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	era, err := r.WriteEra(EraWriteRequest{Name: "wild summer", Start: "2010-06-01", Now: fixedNow()})
+	require.NoError(t, err)
+	mem, err := r.WriteMemory(MemoryWriteRequest{
+		Text: "old text", Era: era.Key, Certainty: "hazy", Now: fixedNow(),
+	})
+	require.NoError(t, err)
+
+	_, err = r.AmendMemory(AmendMemoryRequest{
+		ObsID: mem.EventID, Body: "corrected text", BodyChanged: true,
+		Certainty: "vivid", CertaintyChanged: true, Now: fixedNow(),
+	})
+	require.NoError(t, err)
+
+	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+	require.Len(t, res.Items, 1, "the amendment folds onto the base — one story, not two")
+	assert.Equal(t, mem.EventID, res.Items[0].Key, "the folded story keeps the stable base id")
+	assert.Equal(t, "corrected text", res.Items[0].Title, "recall shows the amended text")
+	assert.Contains(t, res.Items[0].Detail, "vivid", "recall shows the amended certainty")
+	assert.NotContains(t, res.Items[0].Detail, "hazy", "the pre-amend certainty does not surface")
+}
+
+// TestRecall_EraRefileSurfacesUnderLaterMintedEra proves the headline use case
+// end-to-end through recall: a story re-filed under a chapter minted *after* it
+// was created surfaces only once the amend files it there (AC-11, AC-12).
+func TestRecall_EraRefileSurfacesUnderLaterMintedEra(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	mem, err := r.WriteMemory(MemoryWriteRequest{Text: "sometime that autumn", Day: "2014-09-01", Now: fixedNow()})
+	require.NoError(t, err)
+
+	// The chapter is minted after the memory already exists.
+	era, err := r.WriteEra(EraWriteRequest{Name: "the Lisbon years", Start: "2014", Now: fixedNow()})
+	require.NoError(t, err)
+
+	before, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+	assert.Empty(t, before.Items, "the story is not yet filed under the later-minted era")
+
+	_, err = r.AmendMemory(AmendMemoryRequest{ObsID: mem.EventID, Era: era.Key, EraChanged: true, Now: fixedNow()})
+	require.NoError(t, err)
+
+	after, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+	require.Len(t, after.Items, 1, "the re-filed story now surfaces under the later-minted era")
+	assert.Equal(t, mem.EventID, after.Items[0].Key)
+}
+
 // TestEraSpan covers the shared chapter-span helper directly (life-archive.md
 // §4): both bounds render with the arrow separator, an open era reads "ongoing
 // since", an end-only era reads "until", and a dateless era yields "".

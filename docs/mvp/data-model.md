@@ -125,6 +125,65 @@ diverges from the injury/era/thread `Fields` model: instead of a
 (`occurrence` / `seed` / `merge` events) from which its Count/First/Last are
 folded at read time, so it never stores a derived number.
 
+### Memory amendments — append-only correction of a stored story
+
+A stored `memory` story is one `KindMemory` observation event
+(`obs_YYYY_MM_DD_<seq>`), and the envelope is **frozen** — "the envelope never
+changes" ([`observations-module.md`](observations-module.md)), and events are
+appended verbatim as one JSONL line under single-writer discipline. So a story's
+fields are **never mutated in place.** Correcting or re-filing one is a new
+*appended* event, exactly the append-only-correction convention the reframe and
+focus surfaces already use (a correction appends a new entry whose `refs.corrects`
+names the superseded id; history is never rewritten — Naming conventions below).
+
+**The amendment record.** A memory amendment is a **new appended `KindMemory`
+event** that carries:
+
+- `refs.corrects: <obs_id>` — the id of the base story it amends (the stable
+  `obs_…` id, never a re-mint). The target must be a base memory; an id whose own
+  event already carries `refs.corrects` is itself an amendment (an audit record),
+  not an amendable base.
+- **only the changed fields** — the changed payload keys (`text`, `certainty`,
+  `follow_up`) live in `payload`; a re-filed chapter is `refs.era`. Fields the
+  amendment does not carry are left untouched by the fold.
+- `refs.cleared` — an optional array naming fields to **remove** (for example
+  `["follow_up"]`), so "clear this field" is distinct from "leave it unchanged"
+  and from "set it to a new value."
+- `recorded_at` — the amendment's own timestamp (when the correction was written).
+  The amendment **reuses the target's `logical_date` / `occurred_at`** (derived
+  from the target id), so it files in the **same day file** as the story it
+  corrects — the per-day `/day` read folds it without a cross-day scan — and the
+  story's place in time is unchanged.
+
+The base event's line is **never rewritten**: it stays byte-identical and the
+prior field values remain recoverable in the log.
+
+**Fold-on-read (field-level, last-write-wins).** Current values are computed by a
+pure fold over the base event plus its amendments (ordered by id = chronological):
+each amendment **overlays only the fields it carries** onto the base, and each
+field named in `refs.cleared` is removed. The last amendment to touch a given
+field wins; fields no amendment touched keep their original value. This is
+**distinct from reframe whole-entry supersede**, which drops the superseded entry
+wholesale — a memory amendment merges *selected* fields and leaves the rest of the
+story intact. Amendment events are dropped from the folded story output (they are
+audit history, not separate stories), and an amendment whose target is absent from
+the read set is dropped rather than rendered on its own. The fold is applied on
+every memory read surface (`recall`, `excavate`, `/day`, and the dedicated
+single-story read); the original events on disk are never touched.
+
+Synthetic example — a story filed in a chapter minted later, then its
+`follow_up` cleared:
+
+```jsonl
+{"id":"obs_2010_07_15_001","kind":"memory","payload":{"text":"the night we drove to the coast","certainty":"hazy","follow_up":"ask about the boat"},"refs":{}}
+{"id":"obs_2010_07_15_002","kind":"memory","recorded_at":"2026-09-12T15:40:00-04:00","payload":{"certainty":"vivid"},"refs":{"corrects":"obs_2010_07_15_001","era":"wild-summer"}}
+{"id":"obs_2010_07_15_003","kind":"memory","recorded_at":"2026-09-12T15:41:00-04:00","payload":{},"refs":{"corrects":"obs_2010_07_15_001","cleared":["follow_up"]}}
+```
+
+Folded, the story reads as `text` unchanged, `certainty: vivid`, filed under
+`era: wild-summer`, with no `follow_up` — while all three lines remain on disk as
+the audit trail.
+
 ### Naming conventions
 
 | Kind | Convention | Example |

@@ -62,6 +62,41 @@ func TestDayView_Empty(t *testing.T) {
 	assert.True(t, AssembleDayView("2026-07-02", nil, nil, loc).Empty())
 }
 
+// TestAssembleDayView_FoldsMemoryAmendments proves `/day` folds a memory and its
+// in-day amendment into a single line carrying the amended values, not two
+// separate lines (AC-11, fold-on-read everywhere). The amendment reuses the
+// target's logical_date, so both land in the same day slice and fold correctly.
+func TestAssembleDayView_FoldsMemoryAmendments(t *testing.T) {
+	base := Event{
+		ID: "obs_2010_07_15_001", Schema: Schema, Kind: KindMemory,
+		OccurredAt: "2010-07-15T00:00:00Z", OccurredAtPrecision: PrecisionExact,
+		LogicalDate: "2010-07-15", Source: SourceExcavation,
+		Payload: map[string]any{MemoryFieldText: "the drive", MemoryFieldCertainty: "hazy"},
+	}
+	amend := Event{
+		ID: "obs_2010_07_15_002", Schema: Schema, Kind: KindMemory,
+		OccurredAt: "2010-07-15T00:00:00Z", OccurredAtPrecision: PrecisionExact,
+		LogicalDate: "2010-07-15", Source: SourceExcavation,
+		Payload: map[string]any{MemoryFieldCertainty: "vivid"},
+		Refs:    map[string]any{RefCorrects: "obs_2010_07_15_001"},
+	}
+
+	dv := AssembleDayView("2010-07-15", []Event{base, amend}, nil, loc)
+
+	require.Len(t, dv.Events, 1, "the amendment folds onto the base — one memory line, not two")
+	assert.Equal(t, "obs_2010_07_15_001", dv.Events[0].ID)
+	assert.Equal(t, "vivid", dv.Events[0].Payload[MemoryFieldCertainty], "the day view reflects the amended certainty")
+	assert.Equal(t, "the drive", dv.Events[0].Payload[MemoryFieldText], "an unamended field is intact")
+
+	line := strings.Join(dv.Lines(), "\n")
+	assert.Contains(t, line, "certainty=vivid")
+	assert.NotContains(t, line, "certainty=hazy", "the pre-amend value never renders after the fold")
+
+	// The input slice is never mutated — the base event still carries its original
+	// certainty (the fold works on a copy).
+	assert.Equal(t, "hazy", base.Payload[MemoryFieldCertainty], "AssembleDayView folds on a copy, leaving the input untouched")
+}
+
 // TestDayView_Lines_ByteStableAndInventoryOnly: the render is deterministic
 // (byte-stable across reruns) and free of evaluative language (§0).
 func TestDayView_Lines_ByteStableAndInventoryOnly(t *testing.T) {

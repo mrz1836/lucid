@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.26.0"
+min_lucid_version: "0.28.0"
 ---
 
 # Lucid
@@ -80,7 +80,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid anchor` | Record days-since milestones (anchors); a consequential lifecycle verb that is echoed and confirmed rather than chat-mapped. |
 | `lucid recall` | Read-only: browse the archive by era, thread, injury, or pet (never writes). |
 | `lucid gallery` | Read-only: browse stored media as a date-ordered timeline (before/after), filterable by an inclusive date window and/or one linked subject (never writes). |
-| `lucid memory` | Record a story from your past — backdated, linked, kept. |
+| `lucid memory` | Record a story from your past — backdated, linked, kept — through explicit subcommands: bare `memory <text>` creates; `memory amend <obs_id>` appends an **append-only** correction (change `--era`/`--certainty`/`--followup` or the body via `--body-file`; `--clear-followup` clears while a bare `--followup ""` is rejected as ambiguous; the `--era` **key** is validated to exist; no field flags is a no-op error; the stable `obs_id` is never re-minted and the original line never rewritten); `memory show <obs_id> [--history]` reads one story folded, with its amendment trail (`original → amended @ recorded_at`). `--caption` is **not** an amend flag (a caption lives on the linked media entry). Amended values fold on every read surface (`recall`/`excavate`/`day`). |
 | `lucid era` | Manage life chapters (eras) through explicit subcommands: read-only `era list`, `era create <name>` (the only path that mints a chapter), and `era amend <name>` (append-only). Bare `era <name>` is an amend-only alias that hard-errors on a non-matching name, and reserved subcommand-shaped words (`list`, `ls`, `show`, `help`, names starting with `-`) can never become a chapter — so a fat-fingered subcommand cannot silently create an era. |
 | `lucid injury` | Record or amend an injury in your body history. |
 | `lucid thread` | Record or amend a thread you're working on. |

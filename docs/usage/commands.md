@@ -2382,6 +2382,9 @@ lucid pet "Fixture Pet" --note "prefers the blue blanket" --json
 lucid memory <text> [--certainty vivid|hazy|reconstructed] [--era <key>] [--place <name>]
              [--people <name>,<name>]... [--tone <text>] [--why <text>] [--followup <text>]
              [--day <date>] [--attach <path> [--caption <text>]] [--json]
+lucid memory amend <obs_id> [--era <key>] [--certainty vivid|hazy|reconstructed]
+             [--followup <text> | --clear-followup] [--body-file <path>] [--json]
+lucid memory show  <obs_id> [--history] [--json]
 ```
 
 Record a story from your past as one `memory` observation, written at a backdated
@@ -2411,6 +2414,52 @@ rejected, refs}`.
 ```sh
 lucid memory "the night we drove to the coast" --era wild-summer --certainty vivid --day 2010-07
 lucid memory "the pier at 2am" --era wild-summer --attach ~/Pictures/pier.jpg --caption "the old boardwalk" --json
+```
+
+**`memory amend <obs_id>` — correct or re-file a stored story (append-only).** Bare
+`lucid memory <text>` still *creates*; `amend` and `show` are explicit subcommands,
+the same structural split as [`era`](#era) (so a story whose text is literally
+`amend` or `show` is written with `--body-file`). `amend` resolves an existing story
+by its `obs_…` id and **appends an amendment** — it never rewrites the original line,
+so the prior values stay recoverable in the audit trail (the append-only correction
+record is specified in [`../mvp/data-model.md`](../mvp/data-model.md)
+§"Memory amendments"). The amendable fields are `--era`, `--certainty`, `--followup`,
+and the body via `--body-file`. `--caption` is **not** an amend flag: a caption lives
+on the linked media entry (edited through [`attach`](#attach)/`annotate`), never on
+the story event.
+
+- **Clearing is explicit.** `--clear-followup` removes `follow_up`; a bare
+  `--followup ""` is **rejected as ambiguous**; omitting a flag leaves that field
+  unchanged. Passing `--followup` and `--clear-followup` together is contradictory
+  and rejected. Nothing is written on any rejection.
+- **No field flags is a no-op error** — amend refuses to write an empty amendment
+  and exits non-zero.
+- **`--era` takes the era key** (the same token [`memory --era`](#memory) stores) and
+  is **validated to exist** — a missing chapter is a hard error and nothing is
+  written. (Create still stores `--era` verbatim; only `amend` validates existence.)
+- **`--certainty`** reuses the closed enum `vivid | hazy | reconstructed`; an
+  out-of-enum value errors without writing.
+- **`--body-file`** must exist and be readable; the corrected body replaces the
+  story's text while the prior body survives in the audit trail.
+- **Re-filing into a later-minted era is the headline use.** Mint the chapter with
+  [`era create`](#era) *after* the story already exists, then
+  `memory amend <obs_id> --era <key>` files the story there — no duplicate record and
+  the stable `obs_id` intact.
+
+**`memory show <obs_id> [--history]` — read one story, folded.** Prints the story's
+**current (folded)** values. With `--history` it also prints the amendment trail —
+each amended field as `original → amended @ <recorded_at>` (a cleared field shows as
+`cleared`). `--json` emits the machine form. Amended values are folded on **every**
+read surface, not just `show`: [`recall`](#recall), [`excavate`](#excavate), and
+[`/day`](#day) all reflect them.
+
+```sh
+lucid memory show obs_2010_07_15_001
+lucid memory show obs_2010_07_15_001 --history
+lucid era create "wild summer" --start 2010-06-01          # mint the chapter after the fact
+lucid memory amend obs_2010_07_15_001 --era wild-summer --certainty vivid
+lucid memory amend obs_2010_07_15_001 --body-file ./corrected-story.txt
+lucid memory amend obs_2010_07_15_001 --clear-followup
 ```
 
 ### excavate

@@ -27,9 +27,17 @@ type DayView struct {
 // same-day range that already lives in the day file is not duplicated.
 func AssembleDayView(date string, dayEvents, rangeCandidates []Event, loc *time.Location) DayView {
 	dv := DayView{Date: date}
-	dv.Events = SortEventsByID(dayEvents)
+	// Fold memory amendments onto their base memories before assembly so `/day`
+	// reflects amended values on every rerun (mvp/data-model.md, fold-on-read
+	// everywhere). FoldMemoryAmendments only touches KindMemory events — it drops
+	// amendment events and passes every other kind through untouched — so no other
+	// surface changes. A memory amendment reuses its target's logical_date, so a
+	// base story and its amendments always land in the same day slice (and, for a
+	// range memory, in the same spanning-candidate set), and fold correctly with
+	// no cross-day read.
+	dv.Events = SortEventsByID(FoldMemoryAmendments(dayEvents))
 	var spanning []Event
-	for _, e := range rangeCandidates {
+	for _, e := range FoldMemoryAmendments(rangeCandidates) {
 		if IsRangeSpanning(e, date, loc) {
 			spanning = append(spanning, e)
 		}
