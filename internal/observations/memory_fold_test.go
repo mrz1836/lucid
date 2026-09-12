@@ -20,13 +20,15 @@ func memoryEvent(id, date string, payload, refs map[string]any) Event {
 }
 
 // memoryAmendment builds an amendment: a KindMemory event carrying
-// refs.corrects plus only the changed fields. recordedAt distinguishes it from
-// the base so history timestamps are meaningful.
-func memoryAmendment(id, date, target, recordedAt string, payload, refs map[string]any) Event {
+// refs.corrects plus only the changed fields. It reuses the shared test day
+// (an amendment files under its target's logical day). recordedAt distinguishes
+// it from the base so history timestamps are meaningful.
+func memoryAmendment(id, target, recordedAt string, payload, refs map[string]any) Event {
 	if refs == nil {
 		refs = map[string]any{}
 	}
 	refs[RefCorrects] = target
+	const date = "2026-07-02"
 	return Event{
 		ID: id, Schema: Schema, Kind: KindMemory,
 		RecordedAt: recordedAt, OccurredAt: date + "T12:00:00-04:00",
@@ -55,7 +57,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("single field amend", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "old", MemoryFieldCertainty: "hazy"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "new"}, nil),
 		}
 		folded := FoldMemoryAmendments(events)
@@ -68,7 +70,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("multiple fields in one amendment", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "old", MemoryFieldCertainty: "hazy"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "new", MemoryFieldFollowUp: "call mom"}, nil),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
@@ -80,9 +82,9 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("chain of two amendments is last-write-wins", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "v1"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "v2"}, nil),
-			memoryAmendment("obs_2026_07_02_003", "2026-07-02", base, "2026-07-02T14:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_003", base, "2026-07-02T14:00:00-04:00",
 				map[string]any{MemoryFieldText: "v3"}, nil),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
@@ -92,10 +94,10 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("chain folds in id order regardless of input order", func(t *testing.T) {
 		// Amendments supplied out of order must still fold chronologically by id.
 		events := []Event{
-			memoryAmendment("obs_2026_07_02_003", "2026-07-02", base, "2026-07-02T14:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_003", base, "2026-07-02T14:00:00-04:00",
 				map[string]any{MemoryFieldText: "v3"}, nil),
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "v1"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "v2"}, nil),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
@@ -105,7 +107,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("clear via refs.cleared (in-memory []string)", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "keep", MemoryFieldFollowUp: "drop me"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				nil, map[string]any{RefCleared: []string{MemoryFieldFollowUp}}),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
@@ -115,7 +117,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	})
 
 	t.Run("clear survives a JSON round trip ([]any)", func(t *testing.T) {
-		amend := memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+		amend := memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 			nil, map[string]any{RefCleared: []string{MemoryFieldFollowUp}})
 		// Marshal/unmarshal so refs.cleared decodes as the persisted []any shape,
 		// not the in-memory []string — the form a disk read always carries.
@@ -138,7 +140,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("era overlay", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "t"}, map[string]any{RefEra: "era_old"}),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				nil, map[string]any{RefEra: "era_new"}),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
@@ -148,7 +150,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	t.Run("amendment events are dropped from output", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "old"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "new"}, nil),
 		}
 		folded := FoldMemoryAmendments(events)
@@ -164,7 +166,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 			Payload: map[string]any{"intensity": 6},
 		}
 		mem := memoryEvent("obs_2026_07_02_002", "2026-07-02", map[string]any{MemoryFieldText: "old"}, nil)
-		amend := memoryAmendment("obs_2026_07_02_003", "2026-07-02", mem.ID, "2026-07-02T13:00:00-04:00",
+		amend := memoryAmendment("obs_2026_07_02_003", mem.ID, "2026-07-02T13:00:00-04:00",
 			map[string]any{MemoryFieldText: "new"}, nil)
 		folded := FoldMemoryAmendments([]Event{pain, mem, amend})
 		require.Len(t, folded, 2, "pain + folded memory; amendment dropped")
@@ -178,7 +180,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 		baseEvent := memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "old", MemoryFieldFollowUp: "keep"}, map[string]any{RefEra: "era_old"})
 		events := []Event{
 			baseEvent,
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "new"}, map[string]any{RefEra: "era_new", RefCleared: []string{MemoryFieldFollowUp}}),
 		}
 		_ = FoldMemoryAmendments(events)
@@ -189,7 +191,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 
 	t.Run("bare amendment with an absent target is dropped", func(t *testing.T) {
 		events := []Event{
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", "obs_2026_07_02_001", "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", "obs_2026_07_02_001", "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "orphan"}, nil),
 		}
 		assert.Empty(t, FoldMemoryAmendments(events), "an amendment whose base is absent never renders")
@@ -214,10 +216,10 @@ func TestFoldMemoryHistory(t *testing.T) {
 				map[string]any{MemoryFieldText: "v1", MemoryFieldCertainty: "hazy", MemoryFieldFollowUp: "x"},
 				map[string]any{RefEra: "era_old"}),
 			// amend1: change text only.
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "v2"}, nil),
 			// amend2: bump certainty, clear follow_up, re-file era.
-			memoryAmendment("obs_2026_07_02_003", "2026-07-02", base, "2026-07-02T14:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_003", base, "2026-07-02T14:00:00-04:00",
 				map[string]any{MemoryFieldCertainty: "vivid"},
 				map[string]any{RefEra: "era_new", RefCleared: []string{MemoryFieldFollowUp}}),
 		}
@@ -255,7 +257,7 @@ func TestFoldMemoryHistory(t *testing.T) {
 	t.Run("a field set for the first time has no prior", func(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "v1"}, nil),
-			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment("obs_2026_07_02_002", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldFollowUp: "new note"}, nil),
 		}
 		trail := FoldMemoryHistory(events, base)
@@ -280,7 +282,7 @@ func TestFoldMemoryHistory(t *testing.T) {
 		amendID := "obs_2026_07_02_002"
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "v1"}, nil),
-			memoryAmendment(amendID, "2026-07-02", base, "2026-07-02T13:00:00-04:00",
+			memoryAmendment(amendID, base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "v2"}, nil),
 		}
 		assert.Nil(t, FoldMemoryHistory(events, amendID), "a correction-event id has no history of its own")
