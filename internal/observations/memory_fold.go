@@ -14,14 +14,17 @@ import (
 // these refs — the same append-only-correction convention the storage layer
 // documents for every kind (observations_test.go, "a correction is a new
 // appended event carrying refs={corrects: orig.ID}; the original line stays
-// byte-identical"). refsCorrects names the base memory being amended; refsEra
-// overlays the era key; refsCleared names payload fields the amendment removes.
+// byte-identical"). RefCorrects names the base memory being amended; RefEra
+// overlays the era key; RefCleared names payload fields the amendment removes.
 // They are refs, not new envelope fields — the envelope stays frozen at schema
-// 1 (observations.md §2).
+// 1 (observations.md §2). They are exported so the amend write path
+// (internal/router) builds the very refs this fold reads — one source of truth
+// for the wire-format keys. RefEra is the observation refs key and is distinct
+// from RegistryEra (the era registry-kind name), though both carry "era".
 const (
-	refsCorrects = "corrects"
-	refsEra      = "era"
-	refsCleared  = "cleared"
+	RefCorrects = "corrects"
+	RefEra      = "era"
+	RefCleared  = "cleared"
 )
 
 // MemoryFieldChange is one field's transition recorded by a single amendment,
@@ -106,9 +109,9 @@ func FoldMemoryHistory(events []Event, targetID string) []MemoryFieldChange {
 		present[k] = true
 	}
 	if base.Refs != nil {
-		if v, ok := base.Refs[refsEra]; ok {
-			current[refsEra] = renderFieldValue(v)
-			present[refsEra] = true
+		if v, ok := base.Refs[RefEra]; ok {
+			current[RefEra] = renderFieldValue(v)
+			present[RefEra] = true
 		}
 	}
 
@@ -191,7 +194,7 @@ func memoryCorrects(e Event) (string, bool) {
 	if e.Kind != KindMemory || e.Refs == nil {
 		return "", false
 	}
-	v, ok := e.Refs[refsCorrects]
+	v, ok := e.Refs[RefCorrects]
 	if !ok {
 		return "", false
 	}
@@ -218,11 +221,11 @@ func applyMemoryAmendment(base *Event, amend Event) {
 		}
 	}
 	if amend.Refs != nil {
-		if era, ok := amend.Refs[refsEra]; ok {
+		if era, ok := amend.Refs[RefEra]; ok {
 			if base.Refs == nil {
 				base.Refs = map[string]any{}
 			}
-			base.Refs[refsEra] = era
+			base.Refs[RefEra] = era
 		}
 	}
 	for _, field := range clearedFields(amend.Refs) {
@@ -246,8 +249,8 @@ func touchedFields(a Event) []string {
 		add(k)
 	}
 	if a.Refs != nil {
-		if _, ok := a.Refs[refsEra]; ok {
-			add(refsEra)
+		if _, ok := a.Refs[RefEra]; ok {
+			add(RefEra)
 		}
 	}
 	for _, f := range clearedFields(a.Refs) {
@@ -260,9 +263,9 @@ func touchedFields(a Event) []string {
 // amendFieldValue returns the value an amendment sets for field f — era from its
 // refs, every other field from its payload.
 func amendFieldValue(a Event, f string) any {
-	if f == refsEra {
+	if f == RefEra {
 		if a.Refs != nil {
-			return a.Refs[refsEra]
+			return a.Refs[RefEra]
 		}
 		return nil
 	}
@@ -283,7 +286,7 @@ func clearedFields(refs map[string]any) []string {
 	if refs == nil {
 		return nil
 	}
-	raw, ok := refs[refsCleared]
+	raw, ok := refs[RefCleared]
 	if !ok {
 		return nil
 	}

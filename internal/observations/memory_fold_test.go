@@ -26,7 +26,7 @@ func memoryAmendment(id, date, target, recordedAt string, payload, refs map[stri
 	if refs == nil {
 		refs = map[string]any{}
 	}
-	refs[refsCorrects] = target
+	refs[RefCorrects] = target
 	return Event{
 		ID: id, Schema: Schema, Kind: KindMemory,
 		RecordedAt: recordedAt, OccurredAt: date + "T12:00:00-04:00",
@@ -106,7 +106,7 @@ func TestFoldMemoryAmendments(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "keep", MemoryFieldFollowUp: "drop me"}, nil),
 			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
-				nil, map[string]any{refsCleared: []string{MemoryFieldFollowUp}}),
+				nil, map[string]any{RefCleared: []string{MemoryFieldFollowUp}}),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
 		_, present := got.Payload[MemoryFieldFollowUp]
@@ -116,14 +116,14 @@ func TestFoldMemoryAmendments(t *testing.T) {
 
 	t.Run("clear survives a JSON round trip ([]any)", func(t *testing.T) {
 		amend := memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
-			nil, map[string]any{refsCleared: []string{MemoryFieldFollowUp}})
+			nil, map[string]any{RefCleared: []string{MemoryFieldFollowUp}})
 		// Marshal/unmarshal so refs.cleared decodes as the persisted []any shape,
 		// not the in-memory []string — the form a disk read always carries.
 		raw, err := json.Marshal(amend)
 		require.NoError(t, err)
 		var decoded Event
 		require.NoError(t, json.Unmarshal(raw, &decoded))
-		_, isAnySlice := decoded.Refs[refsCleared].([]any)
+		_, isAnySlice := decoded.Refs[RefCleared].([]any)
 		require.True(t, isAnySlice, "a decoded refs.cleared is []any, proving the test exercises the persisted shape")
 
 		events := []Event{
@@ -137,12 +137,12 @@ func TestFoldMemoryAmendments(t *testing.T) {
 
 	t.Run("era overlay", func(t *testing.T) {
 		events := []Event{
-			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "t"}, map[string]any{refsEra: "era_old"}),
+			memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "t"}, map[string]any{RefEra: "era_old"}),
 			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
-				nil, map[string]any{refsEra: "era_new"}),
+				nil, map[string]any{RefEra: "era_new"}),
 		}
 		got := findEvent(t, FoldMemoryAmendments(events), base)
-		assert.Equal(t, "era_new", got.Refs[refsEra], "era ref is re-filed")
+		assert.Equal(t, "era_new", got.Refs[RefEra], "era ref is re-filed")
 	})
 
 	t.Run("amendment events are dropped from output", func(t *testing.T) {
@@ -175,16 +175,16 @@ func TestFoldMemoryAmendments(t *testing.T) {
 	})
 
 	t.Run("original base event is not mutated (folded copy)", func(t *testing.T) {
-		baseEvent := memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "old", MemoryFieldFollowUp: "keep"}, map[string]any{refsEra: "era_old"})
+		baseEvent := memoryEvent(base, "2026-07-02", map[string]any{MemoryFieldText: "old", MemoryFieldFollowUp: "keep"}, map[string]any{RefEra: "era_old"})
 		events := []Event{
 			baseEvent,
 			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
-				map[string]any{MemoryFieldText: "new"}, map[string]any{refsEra: "era_new", refsCleared: []string{MemoryFieldFollowUp}}),
+				map[string]any{MemoryFieldText: "new"}, map[string]any{RefEra: "era_new", RefCleared: []string{MemoryFieldFollowUp}}),
 		}
 		_ = FoldMemoryAmendments(events)
 		assert.Equal(t, "old", baseEvent.Payload[MemoryFieldText], "fold must not mutate the caller's payload")
 		assert.Equal(t, "keep", baseEvent.Payload[MemoryFieldFollowUp], "a cleared field is untouched on the original")
-		assert.Equal(t, "era_old", baseEvent.Refs[refsEra], "fold must not mutate the caller's refs")
+		assert.Equal(t, "era_old", baseEvent.Refs[RefEra], "fold must not mutate the caller's refs")
 	})
 
 	t.Run("bare amendment with an absent target is dropped", func(t *testing.T) {
@@ -212,14 +212,14 @@ func TestFoldMemoryHistory(t *testing.T) {
 		events := []Event{
 			memoryEvent(base, "2026-07-02",
 				map[string]any{MemoryFieldText: "v1", MemoryFieldCertainty: "hazy", MemoryFieldFollowUp: "x"},
-				map[string]any{refsEra: "era_old"}),
+				map[string]any{RefEra: "era_old"}),
 			// amend1: change text only.
 			memoryAmendment("obs_2026_07_02_002", "2026-07-02", base, "2026-07-02T13:00:00-04:00",
 				map[string]any{MemoryFieldText: "v2"}, nil),
 			// amend2: bump certainty, clear follow_up, re-file era.
 			memoryAmendment("obs_2026_07_02_003", "2026-07-02", base, "2026-07-02T14:00:00-04:00",
 				map[string]any{MemoryFieldCertainty: "vivid"},
-				map[string]any{refsEra: "era_new", refsCleared: []string{MemoryFieldFollowUp}}),
+				map[string]any{RefEra: "era_new", RefCleared: []string{MemoryFieldFollowUp}}),
 		}
 
 		trail := FoldMemoryHistory(events, base)
@@ -239,7 +239,7 @@ func TestFoldMemoryHistory(t *testing.T) {
 		assert.Equal(t, "vivid", trail[1].New)
 		assert.Equal(t, "2026-07-02T14:00:00-04:00", trail[1].RecordedAt)
 
-		assert.Equal(t, refsEra, trail[2].Field)
+		assert.Equal(t, RefEra, trail[2].Field)
 		assert.Equal(t, "era_old", trail[2].Prior)
 		assert.Equal(t, "era_new", trail[2].New)
 		assert.Equal(t, "2026-07-02T14:00:00-04:00", trail[2].RecordedAt)

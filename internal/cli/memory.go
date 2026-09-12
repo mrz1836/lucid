@@ -22,6 +22,12 @@ const (
 	flagWhy       = "why"
 	flagFollowup  = "followup"
 	flagAttach    = "attach"
+
+	// flagClearFollowup is the explicit follow-up clear on `memory amend` (Q4):
+	// setting --followup replaces the thread, --clear-followup removes it, and a
+	// bare empty --followup is rejected as ambiguous — so "clear" is never
+	// something a script triggers by accident.
+	flagClearFollowup = "clear-followup"
 )
 
 // memoryWriteView is the machine-readable projection of a `lucid memory --json`
@@ -92,6 +98,10 @@ func newMemoryCmd() *cobra.Command {
 	f.String("why-file", "", "Read why-it-matters from this file (or - for stdin) instead of --why")
 	f.String("followup-file", "", "Read the follow-up from this file (or - for stdin) instead of --followup")
 	f.String("caption-file", "", "Read the caption from this file (or - for stdin) instead of --caption")
+	// amend and show are subcommands of memory (the era parent pattern): a bare
+	// `memory <text>` still creates, while `memory amend <obs_id>` corrects a
+	// stored story in place. show is added in a later phase.
+	cmd.AddCommand(newMemoryAmendCmd())
 	return cmd
 }
 
@@ -171,4 +181,135 @@ func runMemory(cmd *cobra.Command, args []string) error {
 		return emitRefusedDay(cmd, err)
 	}
 	return renderMemoryWrite(cmd, res)
+}
+
+// memoryAmendView is the machine-readable projection of a `lucid memory amend
+// --json` turn: the appended amendment event id, the base story it corrects, the
+// shared logical day, and the amendment's refs (corrects/era/cleared). Built
+// CLI-side with stable snake_case names so a harness branches on fields, not
+// prose.
+type memoryAmendView struct {
+	EventID     string         `json:"event_id"`
+	TargetID    string         `json:"target_id"`
+	LogicalDate string         `json:"logical_date"`
+	Refs        map[string]any `json:"refs"`
+}
+
+// renderMemoryAmend prints an amend result: the --json view (refs always a
+// non-nil object so a harness can index it), or the inventory ack prose.
+func renderMemoryAmend(cmd *cobra.Command, res router.AmendMemoryResult) error {
+	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+		refs := res.Refs
+		if refs == nil {
+			refs = map[string]any{}
+		}
+		return writeJSON(cmd.OutOrStdout(), memoryAmendView{
+			EventID:     res.EventID,
+			TargetID:    res.TargetID,
+			LogicalDate: res.LogicalDate,
+			Refs:        refs,
+		})
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+	return nil
+}
+
+// newMemoryAmendCmd wires `lucid memory amend <obs_id> [flags]`: the append-only
+// correction of a stored story (mvp/data-model.md). It never rewrites the base
+// event — it appends a new KindMemory event carrying only the changed fields
+// (refs.corrects keyed to the target), so the original line stays byte-identical
+// and its prior values remain recoverable. The stable `obs_…` id is kept, so any
+// reference to the memory survives the amend. Body correction comes only via
+// --body-file (no positional body, no --caption — a caption lives on the linked
+// media entry, not the memory event). It is dispatch-only over
+// [router.AmendMemory] — deterministic and agent-free.
+func newMemoryAmendCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "amend <obs_id>",
+		Short: "Correct or re-file a stored memory in place (append-only; the id is kept)",
+		Long: `amend corrects or re-files a stored memory without losing its id. A memory is
+one append-only event on a frozen envelope, so amend never edits the original
+line — it appends a new event carrying only the fields you change, and every read
+surface folds the current values on top of the original. The prior values stay on
+disk as the audit trail.
+
+Amend the story text (--body-file), how you recall it (--certainty:
+vivid | hazy | reconstructed), the follow-up thread (--followup, or
+--clear-followup to remove it), and the era it sits in (--era <key>, which must
+already exist — mint it with 'lucid era create' first). Filing a memory under a
+chapter minted after it was created is the point: re-file it any time.
+
+A flag left unset leaves that field unchanged. Clearing is explicit: a bare
+--followup "" is rejected as ambiguous — use --clear-followup. Running amend with
+no field flags is a no-op error, and an unknown id changes nothing.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  lucid memory amend obs_2010_07_15_001 --certainty vivid
+  lucid memory amend obs_2010_07_15_001 --era era_wild-summer
+  lucid memory amend obs_2010_07_15_001 --clear-followup --json`,
+		RunE: runMemoryAmend,
+	}
+	f := cmd.Flags()
+	f.String(flagEra, "", "Re-file the story under this era key (the chapter must already exist)")
+	f.String(flagCertainty, "", "Correct how you recall it: vivid | hazy | reconstructed")
+	f.String(flagFollowup, "", "Set the follow-up thread (use --clear-followup to remove it)")
+	f.Bool(flagClearFollowup, false, "Clear the follow-up thread")
+	registerBodyFileFlag(cmd, "corrected memory story text")
+	return cmd
+}
+
+// runMemoryAmend executes `lucid memory amend`: gate each changed flag into the
+// request (cobra Flags().Changed distinguishes omitted from set), resolve the
+// sole body input off --body-file, then dispatch to the append-only amend. Every
+// validation lives in the router so a rejected amend writes nothing; the CLI adds
+// only the fast, friendly set-and-clear guard before booting.
+func runMemoryAmend(cmd *cobra.Command, args []string) error {
+	f := cmd.Flags()
+	// Reject setting and clearing the follow-up in one call before touching the
+	// ledger — the router rejects it too, but catching it here keeps the message
+	// close to the flags the user typed.
+	if f.Changed(flagFollowup) && f.Changed(flagClearFollowup) {
+		return emitErr(cmd, fmt.Errorf("give --followup or --clear-followup, not both; nothing was saved"))
+	}
+
+	r, err := bootedRouter(cmd)
+	if err != nil {
+		return err
+	}
+
+	req := router.AmendMemoryRequest{
+		ObsID: args[0],
+		Now:   clockNow(),
+	}
+	if f.Changed(flagEra) {
+		req.Era, _ = f.GetString(flagEra)
+		req.EraChanged = true
+	}
+	if f.Changed(flagCertainty) {
+		req.Certainty, _ = f.GetString(flagCertainty)
+		req.CertaintyChanged = true
+	}
+	if f.Changed(flagFollowup) {
+		req.Followup, _ = f.GetString(flagFollowup)
+		req.FollowupChanged = true
+	}
+	if f.Changed(flagClearFollowup) {
+		req.ClearFollowup, _ = f.GetBool(flagClearFollowup)
+	}
+	// The corrected body arrives only via --body-file (one file flag, so
+	// ensureSingleStdinFlags is unnecessary); an omitted flag leaves the body
+	// unchanged.
+	if f.Changed("body-file") {
+		body, berr := resolvePrimaryText(cmd, "memory amend", "body-file", "")
+		if berr != nil {
+			return emitErr(cmd, berr)
+		}
+		req.Body = body
+		req.BodyChanged = true
+	}
+
+	res, err := r.AmendMemory(req)
+	if err != nil {
+		return emitErr(cmd, err)
+	}
+	return renderMemoryAmend(cmd, res)
 }
