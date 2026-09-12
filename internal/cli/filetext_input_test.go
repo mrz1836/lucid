@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -339,4 +343,159 @@ func TestEra_CLI_NoteFileConflictsWithInline(t *testing.T) {
 		"era", "create", "the road years", "--note", "inline", "--note-file", nf)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not both")
+}
+
+// runPersonSetStdin executes the cobra tree with the given stdin payload,
+// building the root directly so a --*-file "-" flag reads from it. runRoot has
+// no stdin parameter, so the file-input stdin path needs this variant — the
+// same SetIn pattern reflect week apply uses.
+func runPersonSetStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	root.SetIn(strings.NewReader(stdin))
+	root.SetArgs(args)
+	err = root.ExecuteContext(context.Background())
+	return out.String(), errBuf.String(), err
+}
+
+// TestPersonSet_CLI_FileInputFields: --note-file and --relationship-file supply
+// both durable free-text fields off the command line, and the payload — shell
+// metacharacters, multiple lines, and UTF-8 — lands on the --json record
+// byte-for-byte: no split, no truncation, no escaping.
+func TestPersonSet_CLI_FileInputFields(t *testing.T) {
+	home := isolatedHome(t)
+	writePersonRecord(t, home, "person_a-alex", "Alex", []string{"Alex"}, []string{"raw_1"}, personSeed())
+
+	noteContent := metaPayload + "\nline one\nrésumé & café\nline two"
+	relContent := "peer & mentor\nrésumé reviewer — café"
+	nf := writeTemp(t, noteContent)
+	rf := writeTemp(t, relContent)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--note-file", nf, "--relationship-file", rf, "--json")
+	require.NoError(t, err)
+
+	var view personWriteView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	require.NotNil(t, view.Notes)
+	assert.Equal(t, noteContent, *view.Notes)
+	require.NotNil(t, view.Relationship)
+	assert.Equal(t, relContent, *view.Relationship)
+}
+
+// TestPersonSet_CLI_NoteFileFromStdin: --note-file - reads the note from stdin,
+// landing verbatim on the record without ever touching the command line.
+func TestPersonSet_CLI_NoteFileFromStdin(t *testing.T) {
+	home := isolatedHome(t)
+	writePersonRecord(t, home, "person_a-alex", "Alex", []string{"Alex"}, []string{"raw_1"}, personSeed())
+
+	out, _, err := runPersonSetStdin(t, metaPayload,
+		"person", "set", "person_a-alex", "--note-file", "-", "--json")
+	require.NoError(t, err)
+
+	var view personWriteView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	require.NotNil(t, view.Notes)
+	assert.Equal(t, metaPayload, *view.Notes)
+}
+
+// TestPersonSet_CLI_RelationshipFileFromStdin: --relationship-file - reads the
+// relationship label from stdin, landing verbatim.
+func TestPersonSet_CLI_RelationshipFileFromStdin(t *testing.T) {
+	home := isolatedHome(t)
+	writePersonRecord(t, home, "person_a-alex", "Alex", []string{"Alex"}, []string{"raw_1"}, personSeed())
+
+	out, _, err := runPersonSetStdin(t, metaPayload,
+		"person", "set", "person_a-alex", "--relationship-file", "-", "--json")
+	require.NoError(t, err)
+
+	var view personWriteView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	require.NotNil(t, view.Relationship)
+	assert.Equal(t, metaPayload, *view.Relationship)
+}
+
+// TestPersonSet_CLI_NoteFileConflictsWithInline: --note and --note-file for the
+// same field is two sources for one value, refused rather than silently picked.
+func TestPersonSet_CLI_NoteFileConflictsWithInline(t *testing.T) {
+	isolatedHome(t)
+	nf := writeTemp(t, "from the file")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--note", "inline", "--note-file", nf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+}
+
+// TestPersonSet_CLI_RelationshipFileConflictsWithInline: --relationship and
+// --relationship-file for the same field is refused.
+func TestPersonSet_CLI_RelationshipFileConflictsWithInline(t *testing.T) {
+	isolatedHome(t)
+	rf := writeTemp(t, "from the file")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--relationship", "inline", "--relationship-file", rf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+}
+
+// TestPersonSet_CLI_NoteFileMissing: an unreadable --note-file path exits
+// non-zero and names the real flag and the offending path — not the generic
+// --body-file the shared reader used before the label was threaded through.
+func TestPersonSet_CLI_NoteFileMissing(t *testing.T) {
+	isolatedHome(t)
+	missing := filepath.Join(t.TempDir(), "nope.txt")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--note-file", missing)
+	require.Error(t, err)
+	assert.NotEqual(t, ExitOK, exitCodeForError(err))
+	assert.Contains(t, err.Error(), "--note-file")
+	assert.Contains(t, err.Error(), missing)
+	assert.NotContains(t, err.Error(), "--body-file")
+}
+
+// TestPersonSet_CLI_RelationshipFileMissing: an unreadable --relationship-file
+// path exits non-zero and names the real flag and path, not --body-file.
+func TestPersonSet_CLI_RelationshipFileMissing(t *testing.T) {
+	isolatedHome(t)
+	missing := filepath.Join(t.TempDir(), "nope.txt")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--relationship-file", missing)
+	require.Error(t, err)
+	assert.NotEqual(t, ExitOK, exitCodeForError(err))
+	assert.Contains(t, err.Error(), "--relationship-file")
+	assert.Contains(t, err.Error(), missing)
+	assert.NotContains(t, err.Error(), "--body-file")
+}
+
+// TestPersonSet_CLI_NoteFileEmpty: an empty --note-file (after the one-newline
+// strip) is rejected — a file flag that supplies nothing is a mistake, and
+// clearing a field stays the job of the inline --note "".
+func TestPersonSet_CLI_NoteFileEmpty(t *testing.T) {
+	isolatedHome(t)
+	ef := writeTemp(t, "")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--note-file", ef)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is empty")
+	assert.Contains(t, err.Error(), "--note-file")
+}
+
+// TestPersonSet_CLI_RelationshipFileEmpty: an empty --relationship-file is
+// likewise rejected.
+func TestPersonSet_CLI_RelationshipFileEmpty(t *testing.T) {
+	isolatedHome(t)
+	ef := writeTemp(t, "")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "set", "person_a-alex", "--relationship-file", ef)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is empty")
+	assert.Contains(t, err.Error(), "--relationship-file")
 }
