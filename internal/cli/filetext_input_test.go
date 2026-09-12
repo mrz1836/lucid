@@ -349,7 +349,7 @@ func TestEra_CLI_NoteFileConflictsWithInline(t *testing.T) {
 // building the root directly so a --*-file "-" flag reads from it. runRoot has
 // no stdin parameter, so the file-input stdin path needs this variant — the
 // same SetIn pattern reflect week apply uses.
-func runPersonSetStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
+func runPersonSetStdin(t *testing.T, stdin string, args ...string) (stdout string, err error) {
 	t.Helper()
 	root := newRootCmd(BuildInfo{Version: "dev"})
 	var out, errBuf bytes.Buffer
@@ -358,7 +358,7 @@ func runPersonSetStdin(t *testing.T, stdin string, args ...string) (stdout, stde
 	root.SetIn(strings.NewReader(stdin))
 	root.SetArgs(args)
 	err = root.ExecuteContext(context.Background())
-	return out.String(), errBuf.String(), err
+	return out.String(), err
 }
 
 // TestPersonSet_CLI_FileInputFields: --note-file and --relationship-file supply
@@ -392,7 +392,7 @@ func TestPersonSet_CLI_NoteFileFromStdin(t *testing.T) {
 	home := isolatedHome(t)
 	writePersonRecord(t, home, "person_a-alex", "Alex", []string{"Alex"}, []string{"raw_1"}, personSeed())
 
-	out, _, err := runPersonSetStdin(t, metaPayload,
+	out, err := runPersonSetStdin(t, metaPayload,
 		"person", "set", "person_a-alex", "--note-file", "-", "--json")
 	require.NoError(t, err)
 
@@ -408,7 +408,7 @@ func TestPersonSet_CLI_RelationshipFileFromStdin(t *testing.T) {
 	home := isolatedHome(t)
 	writePersonRecord(t, home, "person_a-alex", "Alex", []string{"Alex"}, []string{"raw_1"}, personSeed())
 
-	out, _, err := runPersonSetStdin(t, metaPayload,
+	out, err := runPersonSetStdin(t, metaPayload,
 		"person", "set", "person_a-alex", "--relationship-file", "-", "--json")
 	require.NoError(t, err)
 
