@@ -16,18 +16,17 @@ import (
 // shell metacharacter can split or truncate the invocation.
 const stdinPath = "-"
 
-// flagBodyFile is the flag name [readBodyFile] uses to label its own errors
-// (an empty or unreadable file). Each verb registers its file-input flags with
-// literal names at the call site — `--body-file`, `--note-file`, `--reason-file`,
-// and so on — so the off-command-line spelling reads plainly beside the field
-// it feeds; this constant is only the shared error label behind them.
-const flagBodyFile = "body-file"
-
 // readBodyFile is the one shared reader behind every free-text --*-file flag.
 // It delivers human-authored prose to a verb off the command line so shell
 // metacharacters (&, ;, |, `, $, single/double quotes) stay data instead of
 // being parsed by the shell that launched lucid — the whole point of the
 // file-input surface.
+//
+// flag is the flag's user-facing name without the `--` prefix (e.g.
+// "note-file", "body-file", "catch-file"); it labels every error this reader
+// raises so a missing, unreadable, or empty file names the flag the operator
+// actually passed rather than a generic stand-in. Each verb threads the literal
+// name it registered at the call site.
 //
 // A path of "-" reads all of cmdIn (cobra's InOrStdin()); any other path is
 // read from disk. The only normalization is stripping one trailing newline —
@@ -35,8 +34,8 @@ const flagBodyFile = "body-file"
 // returned byte-for-byte, its leading and trailing spaces intact. An empty
 // result after that strip is an error: a --*-file flag that supplies nothing
 // is a mistake, not a request to write emptiness.
-func readBodyFile(path string, cmdIn io.Reader) (string, error) {
-	data, err := readRawInput(path, cmdIn)
+func readBodyFile(flag, path string, cmdIn io.Reader) (string, error) {
+	data, err := readRawInput(flag, path, cmdIn)
 	if err != nil {
 		return "", err
 	}
@@ -45,28 +44,29 @@ func readBodyFile(path string, cmdIn io.Reader) (string, error) {
 	// framing.
 	body := strings.TrimSuffix(string(data), "\n")
 	if body == "" {
-		return "", fmt.Errorf("--%s: file is empty", flagBodyFile)
+		return "", fmt.Errorf("--%s: file is empty", flag)
 	}
 	return body, nil
 }
 
 // readRawInput returns the unnormalized bytes behind a --*-file flag: the whole
 // of stdin for a "-" path, or the file's contents otherwise. Splitting the read
-// out keeps readBodyFile's normalization free of the source branch.
-func readRawInput(path string, cmdIn io.Reader) ([]byte, error) {
+// out keeps readBodyFile's normalization free of the source branch. flag labels
+// every error it raises with the caller's real flag name.
+func readRawInput(flag, path string, cmdIn io.Reader) ([]byte, error) {
 	if path != stdinPath {
 		data, err := os.ReadFile(path) //nolint:gosec // operator-supplied free-text input path, read once per invocation
 		if err != nil {
-			return nil, fmt.Errorf("--%s: %w", flagBodyFile, err)
+			return nil, fmt.Errorf("--%s: %w", flag, err)
 		}
 		return data, nil
 	}
 	if cmdIn == nil {
-		return nil, fmt.Errorf("--%s: no stdin available to read", flagBodyFile)
+		return nil, fmt.Errorf("--%s: no stdin available to read", flag)
 	}
 	data, err := io.ReadAll(cmdIn)
 	if err != nil {
-		return nil, fmt.Errorf("--%s: read stdin: %w", flagBodyFile, err)
+		return nil, fmt.Errorf("--%s: read stdin: %w", flag, err)
 	}
 	return data, nil
 }
@@ -131,7 +131,7 @@ func resolvePrimaryText(cmd *cobra.Command, verb, fileFlag, inline string) (stri
 		return "", fmt.Errorf("lucid %s: give the text via --%s or as positional words, not both", verb, fileFlag)
 	}
 	path, _ := cmd.Flags().GetString(fileFlag)
-	body, err := readBodyFile(path, cmd.InOrStdin())
+	body, err := readBodyFile(fileFlag, path, cmd.InOrStdin())
 	if err != nil {
 		return "", fmt.Errorf("lucid %s: %w", verb, err)
 	}
@@ -153,7 +153,7 @@ func resolveOptionalText(cmd *cobra.Command, verb, label, inlineFlag, fileFlag s
 		return v, nil
 	}
 	path, _ := cmd.Flags().GetString(fileFlag)
-	body, err := readBodyFile(path, cmd.InOrStdin())
+	body, err := readBodyFile(fileFlag, path, cmd.InOrStdin())
 	if err != nil {
 		return "", fmt.Errorf("lucid %s: %w", verb, err)
 	}

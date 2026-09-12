@@ -147,7 +147,7 @@ func closeoutJournalOverride(cmd *cobra.Command) (journal string, present bool, 
 		return "", false, nil
 	}
 	path, _ := cmd.Flags().GetString(flagJournalFile)
-	body, err := readBodyFile(path, cmd.InOrStdin())
+	body, err := readBodyFile(flagJournalFile, path, cmd.InOrStdin())
 	if err != nil {
 		return "", false, fmt.Errorf("lucid closeout: %w", err)
 	}

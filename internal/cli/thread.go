@@ -126,7 +126,7 @@ func resolveThreadDomains(cmd *cobra.Command) ([]string, error) {
 	paths, _ := cmd.Flags().GetStringArray("domain-file")
 	domains := make([]string, 0, len(paths))
 	for _, p := range paths {
-		body, err := readBodyFile(p, cmd.InOrStdin())
+		body, err := readBodyFile("domain-file", p, cmd.InOrStdin())
 		if err != nil {
 			return nil, fmt.Errorf("lucid thread: %w", err)
 		}

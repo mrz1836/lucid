@@ -1709,7 +1709,7 @@ lucid person <name> [--json]
 lucid person merge <source> <target> [--json]
 lucid person alias <subject> <form> [--json]
 lucid person rename <subject> <new-name...> [--json]
-lucid person set <subject> [--dob <YYYY-MM-DD>] [--relationship <text>] [--note <text>] [--json]
+lucid person set <subject> [--dob <YYYY-MM-DD>] [--relationship <text>] [--relationship-file <path>] [--note <text>] [--note-file <path>] [--json]
 lucid person off-limits <subject> [--restore] [--json]
 lucid person reconcile [--json]
 ```
@@ -1795,6 +1795,14 @@ merge — and they are the one carve-out to the people record's extractive-only
 boundary: they exist only because you typed them, and no agent ever infers them.
 A `--dob` that is not a civil date is rejected (§P-9). Setting a field again
 overwrites it; passing no flag leaves that field unchanged.
+
+`--relationship` and `--note` each have a `--…-file` sibling —
+`--relationship-file <path>` and `--note-file <path>` — that reads the field's
+value from a file path, or from `-` (stdin). This keeps shell metacharacters and
+multiline content off the command line (where quoting can truncate or mangle
+them), consistent with the other free-text write verbs. An inline flag and its
+file sibling are mutually exclusive for the same field, and an empty file is
+rejected — clear a field with the inline `--relationship ""` / `--note ""`.
 
 #### `person off-limits`
 

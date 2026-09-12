@@ -57,7 +57,7 @@ func newObsCmd() *cobra.Command {
 					))
 				}
 				path, _ := cmd.Flags().GetString("body-file")
-				body, rerr := readBodyFile(path, cmd.InOrStdin())
+				body, rerr := readBodyFile("body-file", path, cmd.InOrStdin())
 				if rerr != nil {
 					return emitErr(cmd, fmt.Errorf("lucid obs: %w", rerr))
 				}

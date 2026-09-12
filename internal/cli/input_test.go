@@ -57,7 +57,7 @@ func TestReadBodyFile_Verbatim(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := readBodyFile(writeTemp(t, tt.content), nil)
+			got, err := readBodyFile("body-file", writeTemp(t, tt.content), nil)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -67,26 +67,39 @@ func TestReadBodyFile_Verbatim(t *testing.T) {
 // TestReadBodyFile_Stdin covers the "-" path: the reader drains cmdIn and
 // applies the same one-terminal-newline normalization as a file read.
 func TestReadBodyFile_Stdin(t *testing.T) {
-	got, err := readBodyFile("-", bytes.NewBufferString("  streamed & piped in  \n"))
+	got, err := readBodyFile("body-file", "-", bytes.NewBufferString("  streamed & piped in  \n"))
 	require.NoError(t, err)
 	assert.Equal(t, "  streamed & piped in  ", got)
 
-	_, err = readBodyFile("-", nil)
+	_, err = readBodyFile("body-file", "-", nil)
 	require.Error(t, err, "a - path with no stdin is a clean error, not a panic")
 }
 
 // TestReadBodyFile_MissingFile: an unreadable path is a clean error, never a
 // silent empty write.
 func TestReadBodyFile_MissingFile(t *testing.T) {
-	_, err := readBodyFile(filepath.Join(t.TempDir(), "does-not-exist.txt"), nil)
+	_, err := readBodyFile("body-file", filepath.Join(t.TempDir(), "does-not-exist.txt"), nil)
 	require.Error(t, err)
+}
+
+// TestReadBodyFile_MissingFileNamesFlag proves the cross-cutting label thread at
+// the helper level: a missing file surfaces the flag the caller passed, not a
+// generic stand-in, so every verb's --*-file error names its own flag.
+func TestReadBodyFile_MissingFileNamesFlag(t *testing.T) {
+	_, err := readBodyFile("note-file", filepath.Join(t.TempDir(), "nope.txt"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--note-file")
+
+	_, err = readBodyFile("relationship-file", filepath.Join(t.TempDir(), "nope.txt"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--relationship-file")
 }
 
 // TestReadBodyFile_EmptyFile: a file that is empty (or only the terminal
 // newline) supplies nothing, which is a mistake rather than an empty write.
 func TestReadBodyFile_EmptyFile(t *testing.T) {
 	for _, content := range []string{"", "\n"} {
-		_, err := readBodyFile(writeTemp(t, content), nil)
+		_, err := readBodyFile("body-file", writeTemp(t, content), nil)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "is empty")
 	}
