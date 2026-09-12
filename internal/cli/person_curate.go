@@ -13,10 +13,12 @@ import (
 
 // Flag names for the person curation verbs.
 const (
-	personDobFlag          = "dob"
-	personRelationshipFlag = "relationship"
-	personNoteFlag         = "note"
-	personRestoreFlag      = "restore"
+	personDobFlag              = "dob"
+	personRelationshipFlag     = "relationship"
+	personRelationshipFileFlag = "relationship-file"
+	personNoteFlag             = "note"
+	personNoteFileFlag         = "note-file"
+	personRestoreFlag          = "restore"
 )
 
 // errPersonNotRecorded maps a deterministically rejected person-curation verb to
@@ -197,26 +199,50 @@ YYYY-MM-DD), --relationship (a free-text label), and --note (free text). These
 never touch identity — no key, no aka, no merge — and are the one carve-out to
 the extractive-only people record: they exist only because you typed them, and
 no agent infers them. A flag left unset leaves that field unchanged; an empty
-value clears it. A dob that is not a civil date is rejected.`,
+value clears it. A dob that is not a civil date is rejected.
+
+--relationship and --note each have a --…-file sibling — --relationship-file and
+--note-file — that reads the value from a file path or - (stdin) instead of the
+command line, so long or multiline text and shell metacharacters (&, ;, |, ` + "`" + `, $,
+quotes) stay data rather than being parsed by the shell. The inline flag and its
+file form are mutually exclusive, and an empty file is rejected — clearing a
+field stays the job of the inline --relationship "" / --note "".`,
 		Args: cobra.MinimumNArgs(1),
 		Example: `  lucid person set person_s-river --relationship colleague --dob 1990-04-12
-  lucid person set "Sam Rivera" --note "met at the co-op" --json`,
+  lucid person set "Sam Rivera" --note "met at the co-op" --json
+
+  # Read a long or multiline note off the command line (or - for stdin).
+  lucid person set "Sam Rivera" --note-file ./note.txt`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
+			}
+			// Reject two fields both reading stdin before any read drains it.
+			if err = ensureSingleStdinFlags(cmd, personNoteFileFlag, personRelationshipFileFlag); err != nil {
+				return emitErr(cmd, err)
 			}
 			req := router.PersonSetRequest{Subject: strings.Join(args, " ")}
 			if cmd.Flags().Changed(personDobFlag) {
 				v, _ := cmd.Flags().GetString(personDobFlag)
 				req.Dob = &v
 			}
-			if cmd.Flags().Changed(personRelationshipFlag) {
-				v, _ := cmd.Flags().GetString(personRelationshipFlag)
+			// --relationship-file / --note-file supply the value off the command
+			// line; each is mutually exclusive with its inline flag. The pointer is
+			// gated on either flag being changed so a bare invocation still leaves
+			// the field unchanged (unset→unchanged / empty→clear semantics intact).
+			if cmd.Flags().Changed(personRelationshipFlag) || cmd.Flags().Changed(personRelationshipFileFlag) {
+				v, rerr := resolveOptionalText(cmd, "person set", "relationship", personRelationshipFlag, personRelationshipFileFlag)
+				if rerr != nil {
+					return emitErr(cmd, rerr)
+				}
 				req.Relationship = &v
 			}
-			if cmd.Flags().Changed(personNoteFlag) {
-				v, _ := cmd.Flags().GetString(personNoteFlag)
+			if cmd.Flags().Changed(personNoteFlag) || cmd.Flags().Changed(personNoteFileFlag) {
+				v, rerr := resolveOptionalText(cmd, "person set", "note", personNoteFlag, personNoteFileFlag)
+				if rerr != nil {
+					return emitErr(cmd, rerr)
+				}
 				req.Note = &v
 			}
 			res, err := r.PersonSet(req)
@@ -228,7 +254,9 @@ value clears it. A dob that is not a civil date is rejected.`,
 	}
 	cmd.Flags().String(personDobFlag, "", "User-authored date of birth (YYYY-MM-DD)")
 	cmd.Flags().String(personRelationshipFlag, "", "User-authored relationship label (e.g. colleague)")
+	cmd.Flags().String(personRelationshipFileFlag, "", "Read the relationship label from this file (or - for stdin) instead of --relationship")
 	cmd.Flags().String(personNoteFlag, "", "User-authored free-text note")
+	cmd.Flags().String(personNoteFileFlag, "", "Read the note from this file (or - for stdin) instead of --note")
 	return cmd
 }
 
