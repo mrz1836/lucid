@@ -101,11 +101,11 @@ func resolveReframe(cmd *cobra.Command, args []string) (catch, flip string, tags
 			return "", "", nil, err
 		}
 		catchPath, _ := cmd.Flags().GetString("catch-file")
-		if catch, err = readBodyFile(catchPath, cmd.InOrStdin()); err != nil {
+		if catch, err = readBodyFile("catch-file", catchPath, cmd.InOrStdin()); err != nil {
 			return "", "", nil, fmt.Errorf("lucid reframe add: %w", err)
 		}
 		flipPath, _ := cmd.Flags().GetString("flip-file")
-		if flip, err = readBodyFile(flipPath, cmd.InOrStdin()); err != nil {
+		if flip, err = readBodyFile("flip-file", flipPath, cmd.InOrStdin()); err != nil {
 			return "", "", nil, fmt.Errorf("lucid reframe add: %w", err)
 		}
 		return catch, flip, reframeTags(args), nil
