@@ -387,3 +387,93 @@ func (r *Router) AmendMemory(req AmendMemoryRequest) (AmendMemoryResult, error) 
 func memoryNotFoundErr(obsID string) error {
 	return fmt.Errorf("memory %q not found; nothing was saved", obsID)
 }
+
+// readFoldedMemories reads every memory event through the storage projection
+// seam and folds each story's amendments onto its base (fold-on-read everywhere,
+// Q2) — the single folded-memory read the browse/search surfaces (recall,
+// excavate) share, so amended values surface identically on both without either
+// re-implementing the fold. FoldMemoryAmendments is pure and drops amendment
+// events, so a caller sees only current base memories, sorted by id. The fold is
+// deliberately never pushed into storage.ReadObservationsKind, whose generic
+// per-kind read also feeds the export path (blast radius); it lives here at the
+// two read surfaces that must reflect amendments.
+func (r *Router) readFoldedMemories() ([]observations.Event, error) {
+	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
+	if err != nil {
+		return nil, err
+	}
+	return observations.FoldMemoryAmendments(memories), nil
+}
+
+// ShowMemoryResult is one folded story plus its amendment history — what
+// `lucid memory show` renders. Memory is the base memory with every amendment
+// folded on (its current values); History is the ordered per-field change trail
+// (nil when the story was never amended), each entry naming the field, its prior
+// value, the new value (or a clear), and the amendment's recorded_at.
+type ShowMemoryResult struct {
+	Memory  observations.Event
+	History []observations.MemoryFieldChange
+}
+
+// ShowMemory reads one story by its base id and returns its folded current
+// values plus the amendment history trail (fold-on-read, Q2). It loads the
+// complete memory event set — a single-id read cannot see the appended
+// amendments, which live as separate events — folds it, and returns the folded
+// base. The id must name a base memory: an unknown/unparseable id, or an id that
+// names a correction event (refs.corrects), is rejected, so `show` never renders
+// a bare amendment. It is read-only and agent-free.
+func (r *Router) ShowMemory(obsID string) (ShowMemoryResult, error) {
+	if err := r.prepareObservations(); err != nil {
+		return ShowMemoryResult{}, err
+	}
+	id := strings.TrimSpace(obsID)
+	if _, ok := observations.EventDate(id); !ok {
+		return ShowMemoryResult{}, memoryReadNotFoundErr(id)
+	}
+
+	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
+	if err != nil {
+		return ShowMemoryResult{}, fmt.Errorf("could not read the memory: %w", err)
+	}
+
+	// The id must name a base memory. A correction-event id (refs.corrects) is an
+	// audit record folded onto its base — never shown on its own, so reject it and
+	// point at the base it corrects.
+	for _, ev := range memories {
+		if ev.ID != id {
+			continue
+		}
+		if _, isAmendment := ev.Refs[observations.RefCorrects]; isAmendment {
+			return ShowMemoryResult{}, fmt.Errorf(
+				"%q is a memory amendment, not a base memory; show the memory it corrects instead", id,
+			)
+		}
+		break
+	}
+
+	var current observations.Event
+	found := false
+	for _, ev := range observations.FoldMemoryAmendments(memories) {
+		if ev.ID == id {
+			current = ev
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ShowMemoryResult{}, memoryReadNotFoundErr(id)
+	}
+
+	return ShowMemoryResult{
+		Memory:  current,
+		History: observations.FoldMemoryHistory(memories, id),
+	}, nil
+}
+
+// memoryReadNotFoundErr is the read-path (`memory show`) sibling of
+// memoryNotFoundErr: an unknown or unparseable id names no story to read. It
+// drops the "nothing was saved" clause the write path carries — a read saves
+// nothing regardless — while keeping the same "not found" wording.
+func memoryReadNotFoundErr(obsID string) error {
+	return fmt.Errorf("memory %q not found", obsID)
+}

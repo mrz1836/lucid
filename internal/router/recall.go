@@ -182,13 +182,16 @@ func (r *Router) recallIndex() (RecallResult, error) {
 }
 
 // recallStories returns the memory stories filed under a referent — the memory
-// events whose refs.<dimension> resolves to the key. Only an era link is
-// written by v1's story-capture path (resolveMemoryRefs); thread, injury, and pet
-// links are read the same way so the browse is forward-compatible with future
-// linkers, degrading to an honest empty list until then. Order
-// follows ReadObservationsKind's id sort, so it is byte-stable.
+// events whose refs.<dimension> resolves to the key. It reads through
+// readFoldedMemories, so amended values (a re-filed era, corrected text, a
+// cleared follow-up) surface here, not the original pre-amend values (Q2,
+// fold-on-read everywhere). Only an era link is written by v1's story-capture
+// path (resolveMemoryRefs); thread, injury, and pet links are read the same way
+// so the browse is forward-compatible with future linkers, degrading to an
+// honest empty list until then. The fold preserves the id sort
+// ReadObservationsKind returns, so the order stays byte-stable.
 func (r *Router) recallStories(dim, key string) ([]RecallItem, error) {
-	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
+	memories, err := r.readFoldedMemories()
 	if err != nil {
 		return nil, fmt.Errorf("recall: read memories: %w", err)
 	}

@@ -44,9 +44,11 @@ type ExcavateResult struct {
 }
 
 // BuildExcavationBundle assembles the projection-only excavation bundle for the
-// cluster-selection engine. It reads the injury and era registries and the
-// memory events through the storage adapter's projection seams (ReadRegistryKind
-// / ReadObservationsKind), never the raw sanctuary trees — the same
+// cluster-selection engine. It reads the injury and era registries through the
+// storage adapter's projection seam (ReadRegistryKind) and the memory events
+// through readFoldedMemories — so the selection engine sees amended stories
+// (re-filed eras, corrected text) rather than pre-amend values (Q2,
+// fold-on-read everywhere) — never the raw sanctuary trees, the same
 // sanctuary-safe discipline BuildWeekBundle uses. Nothing is written beyond the
 // idempotent observations scaffold.
 func (r *Router) BuildExcavationBundle() (ExcavationBundle, error) {
@@ -61,7 +63,7 @@ func (r *Router) BuildExcavationBundle() (ExcavationBundle, error) {
 	if err != nil {
 		return ExcavationBundle{}, fmt.Errorf("excavate: read eras: %w", err)
 	}
-	memories, err := r.store.ReadObservationsKind(observations.KindMemory)
+	memories, err := r.readFoldedMemories()
 	if err != nil {
 		return ExcavationBundle{}, fmt.Errorf("excavate: read memories: %w", err)
 	}

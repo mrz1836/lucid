@@ -86,3 +86,25 @@ func TestBuildExcavationBundle_ReadsProjectionSeams(t *testing.T) {
 	assert.Equal(t, observations.KindMemory, bundle.Memories[0].Kind)
 	assert.Equal(t, era.Key, bundle.Memories[0].Refs["era"])
 }
+
+// TestExcavate_BundleReflectsAmendedValues proves the excavation bundle the
+// deterministic cluster-selection engine reads carries folded memories — an
+// amended story's current values, not its pre-amend ones, and one folded memory
+// rather than the base plus its amendment (AC-11, fold-on-read everywhere).
+func TestExcavate_BundleReflectsAmendedValues(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	era, err := r.WriteEra(EraWriteRequest{Name: "wild summer", Now: fixedNow()})
+	require.NoError(t, err)
+	mem, err := r.WriteMemory(MemoryWriteRequest{Text: "old text", Era: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+
+	_, err = r.AmendMemory(AmendMemoryRequest{ObsID: mem.EventID, Body: "corrected text", BodyChanged: true, Now: fixedNow()})
+	require.NoError(t, err)
+
+	bundle, err := r.BuildExcavationBundle()
+	require.NoError(t, err)
+	require.Len(t, bundle.Memories, 1, "the amendment folds onto the base — one memory in the bundle")
+	assert.Equal(t, mem.EventID, bundle.Memories[0].ID, "the folded memory keeps the stable base id")
+	assert.Equal(t, "corrected text", bundle.Memories[0].Payload[observations.MemoryFieldText],
+		"the bundle carries the amended text — SelectCluster reads folded memories through the bundle")
+}
