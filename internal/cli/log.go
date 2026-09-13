@@ -87,8 +87,7 @@ func newLogCmd() *cobra.Command {
 				return emitRefusedDay(cmd, err)
 			}
 
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-			return nil
+			return emitReceipt(cmd, res.RawID, res.Day, res.Ack)
 		},
 	}
 	registerProvenanceFlags(cmd)

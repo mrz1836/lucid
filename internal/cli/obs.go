@@ -76,8 +76,7 @@ func newObsCmd() *cobra.Command {
 			if err != nil {
 				return emitRefusedDay(cmd, err)
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-			return nil
+			return emitReceipt(cmd, res.EventID, res.LogicalDate, res.Ack)
 		},
 	}
 	registerProvenanceFlags(cmd)
