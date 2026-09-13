@@ -166,6 +166,101 @@ func TestPersonCLI_Reconcile_NoArgs(t *testing.T) {
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
 }
 
+// TestPersonCreateCmd_NameOnly proves a bare create joins the trailing words
+// into one display name, mints a fresh record, and exits 0 with a "Recorded"
+// prose ack (no enrichment flags).
+func TestPersonCreateCmd_NameOnly(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "create", "Sam", "Rivera")
+	require.NoError(t, err)
+	assert.Equal(t, ExitOK, exitCodeForError(err))
+	assert.Contains(t, out, `Recorded "Sam Rivera"`)
+
+	// The minted record is now readable by its joined display name.
+	look, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "Sam", "Rivera")
+	require.NoError(t, err)
+	assert.Contains(t, look, "Sam Rivera")
+	assert.Contains(t, look, "Mentioned in 0 entries")
+}
+
+// TestPersonCreateCmd_CreatesThenEnriches records the durable fields on the
+// fresh record in one call and checks the --json projection shape (the
+// deliberately-created record: aka[display_name], empty entry_refs, the
+// enriched fields, and a "Recorded" ack).
+func TestPersonCreateCmd_CreatesThenEnriches(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"person", "create", "Sam Rivera",
+		"--dob", "1990-04-12", "--relationship", "colleague", "--note", "met at the co-op", "--json")
+	require.NoError(t, err)
+	assert.Equal(t, ExitOK, exitCodeForError(err))
+
+	var view personWriteView
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.Equal(t, "Sam Rivera", view.DisplayName)
+	assert.Contains(t, view.Aka, "Sam Rivera")
+	assert.NotNil(t, view.EntryRefs)
+	assert.Empty(t, view.EntryRefs, "a never-mentioned record carries no entry_refs")
+	require.NotNil(t, view.Dob)
+	assert.Equal(t, "1990-04-12", *view.Dob)
+	require.NotNil(t, view.Relationship)
+	assert.Equal(t, "colleague", *view.Relationship)
+	require.NotNil(t, view.Notes)
+	assert.Equal(t, "met at the co-op", *view.Notes)
+	assert.Contains(t, view.Ack, "Recorded")
+	assert.Equal(t, view.FirstSeenAt, view.LastSeenAt, "seen-window is a single creation instant")
+}
+
+// TestPersonCreateCmd_IdempotentNoOp proves a repeat create of the same name
+// exits 0 with the "already recorded" ack — never a rejection, never a fork.
+func TestPersonCreateCmd_IdempotentNoOp(t *testing.T) {
+	isolatedHome(t)
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "create", "Sam Rivera")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "create", "Sam Rivera")
+	require.NoError(t, err)
+	assert.Equal(t, ExitOK, exitCodeForError(err))
+	assert.Contains(t, out, "already recorded")
+
+	// The no-op is visible under --json as created=false-equivalent: the ack, not
+	// a second record. Re-reading still resolves to one record.
+	look, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "Sam Rivera")
+	require.NoError(t, err)
+	assert.NotContains(t, look, "more than one person")
+}
+
+// TestPersonCreateCmd_BadDob_ExitErr proves the §P-9 dob rejection: a non-civil
+// --dob prints the fixed reason on stderr, maps to a non-zero exit, and writes
+// nothing.
+func TestPersonCreateCmd_BadDob_ExitErr(t *testing.T) {
+	isolatedHome(t)
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "create", "Sam Rivera", "--dob", "04/12/1990")
+	require.Error(t, err)
+	assert.Equal(t, ExitErr, exitCodeForError(err))
+	assert.Empty(t, out, "a rejected create prints nothing on stdout")
+	assert.Contains(t, errOut, "date of birth")
+	assert.Contains(t, errOut, "nothing was saved")
+
+	// Nothing was written: the name does not resolve to a record.
+	look, _, lerr := runRoot(t, BuildInfo{Version: "dev"}, "person", "Sam Rivera")
+	require.NoError(t, lerr)
+	assert.Contains(t, look, "No one by that name yet")
+}
+
+// TestPersonCreateCmd_NoArgUsage: a bare `lucid person create` with no name is a
+// cobra usage error (exit 2), distinct from the §P-9 rejection path.
+func TestPersonCreateCmd_NoArgUsage(t *testing.T) {
+	isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "create")
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+}
+
 // TestPersonCLI_ReadContractIntact re-confirms the read leaf is unchanged now
 // that write children hang beneath it: a bare `person` still exits usage, and a
 // name lookup still works.

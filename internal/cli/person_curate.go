@@ -260,6 +260,96 @@ field stays the job of the inline --relationship "" / --note "".`,
 	return cmd
 }
 
+// newPersonCreateCmd builds the `create` child: deliberately mint a person
+// record without a model pass. It is the model-free counterpart to extraction's
+// people mint — the one way to record a known contact on purpose rather than
+// waiting for `lucid structure` to surface them from a mention. It mints
+// identity (unlike `set`, which never does) and optionally enriches the fresh
+// record with the same durable-field flags in one call.
+func newPersonCreateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create <name...>",
+		Short: "Deliberately record a person with no model pass (optionally enrich)",
+		Long: `create deliberately records a person without a model pass — the model-free
+counterpart to how extraction mints people from a mention. People are otherwise
+extractive-only: a record appears only as a side effect of lucid structure
+recognizing someone in a log. create is the bounded carve-out for the deliberate
+case — importing a known contact, backfilling people ahead of time, seeding the
+registry — so you can record someone without writing a throwaway log and paying
+for an LLM pass to birth the record.
+
+The key is derived with the same function extraction uses, so a later real
+mention of the same name folds into this record rather than forking a duplicate.
+Trailing words join into the name. Creating a name whose key already exists is an
+idempotent no-op: it exits 0 with an "already recorded" ack, never forks a second
+record, and never rewrites the existing durable fields — enriching an
+already-recorded person stays the job of lucid person set.
+
+create also accepts the same durable-field flags as set — --dob (a civil
+YYYY-MM-DD), --relationship (a free-text label), and --note (free text) — so a
+contact can be minted and enriched in a single invocation; name-only creation is
+valid when none are passed. --relationship and --note each have a --…-file
+sibling — --relationship-file and --note-file — that reads the value from a file
+path or - (stdin) instead of the command line, so long or multiline text and
+shell metacharacters (&, ;, |, ` + "`" + `, $, quotes) stay data. The inline flag and its
+file form are mutually exclusive, and an empty file is rejected. A dob that is
+not a civil date is rejected.`,
+		Args: cobra.MinimumNArgs(1),
+		Example: `  lucid person create "Sam Rivera"
+  lucid person create "Sam Rivera" --relationship colleague --dob 1990-04-12 --json
+
+  # Read a long or multiline note off the command line (or - for stdin).
+  lucid person create "Sam Rivera" --note-file ./note.txt`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			// Reject two fields both reading stdin before any read drains it.
+			if err = ensureSingleStdinFlags(cmd, personNoteFileFlag, personRelationshipFileFlag); err != nil {
+				return emitErr(cmd, err)
+			}
+			// Name is the only positional; join trailing words (the rename
+			// precedent) so a multi-word display name need not be quoted. Now is
+			// left zero so the router stamps the wall clock into the seen-window.
+			req := router.PersonCreateRequest{Name: strings.Join(args, " ")}
+			if cmd.Flags().Changed(personDobFlag) {
+				v, _ := cmd.Flags().GetString(personDobFlag)
+				req.Dob = &v
+			}
+			// --relationship-file / --note-file supply the value off the command
+			// line; each is mutually exclusive with its inline flag. The pointer is
+			// gated on either flag being changed so a name-only create still leaves
+			// the field off entirely (matching set's unset→unchanged semantics).
+			if cmd.Flags().Changed(personRelationshipFlag) || cmd.Flags().Changed(personRelationshipFileFlag) {
+				v, rerr := resolveOptionalText(cmd, "person create", "relationship", personRelationshipFlag, personRelationshipFileFlag)
+				if rerr != nil {
+					return emitErr(cmd, rerr)
+				}
+				req.Relationship = &v
+			}
+			if cmd.Flags().Changed(personNoteFlag) || cmd.Flags().Changed(personNoteFileFlag) {
+				v, rerr := resolveOptionalText(cmd, "person create", "note", personNoteFlag, personNoteFileFlag)
+				if rerr != nil {
+					return emitErr(cmd, rerr)
+				}
+				req.Note = &v
+			}
+			res, err := r.PersonCreate(req)
+			if err != nil {
+				return personRejection(cmd, err)
+			}
+			return emitPersonWrite(cmd, res.Record, res.Ack, nil)
+		},
+	}
+	cmd.Flags().String(personDobFlag, "", "User-authored date of birth (YYYY-MM-DD)")
+	cmd.Flags().String(personRelationshipFlag, "", "User-authored relationship label (e.g. colleague)")
+	cmd.Flags().String(personRelationshipFileFlag, "", "Read the relationship label from this file (or - for stdin) instead of --relationship")
+	cmd.Flags().String(personNoteFlag, "", "User-authored free-text note")
+	cmd.Flags().String(personNoteFileFlag, "", "Read the note from this file (or - for stdin) instead of --note")
+	return cmd
+}
+
 // reconcileCandidateView is one row of the reconcile --json output: the pair,
 // why they were flagged, and the exact merge to run.
 type reconcileCandidateView struct {
