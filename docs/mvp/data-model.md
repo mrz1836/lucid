@@ -1105,6 +1105,99 @@ is valid. Those fields stay user-authored — never inferred — so the
 no-inference invariant (agent-contracts.md §People) holds exactly as it does for
 `person set`.
 
+### Alias-aware person resolution
+
+Extraction keys identity on the *exact* normalized `display_name`
+(§"`person_key` derivation"), so a full name, a nickname, and a diminutive of one
+person derive three different slugs and mint three separate records — "alias
+shards". A canonical record may already carry those forms in `aka[]`, but `aka[]`
+is **never scanned** for resolution (§"Merge & redirect"), so a bare later
+mention of a known nickname still forks. Two additions close this gap without
+weakening the collision oracle: a curated nickname map, and a capture-time
+discovery pass that folds a recognized alias into the existing record through the
+same tombstone mechanism a merge already uses. All name examples below are
+synthetic.
+
+#### The curated nickname↔canonical map
+
+A new **embedded data asset**, `data/person_nicknames.txt`, ships the
+bidirectional nickname/canonical relationships a pure prefix rule cannot know
+("mike" is not a prefix of "michael"). It mirrors the wordlist
+(§"`person_key` derivation"): a committed, reviewable, read-only text file
+`//go:embed`-ed into the binary and parsed fresh on each read, so no caller
+mutates shared state.
+
+- **Format.** One cluster per line, comma-separated **normalized** forms
+  (lowercase, punctuation/whitespace stripped — the same normalization the People
+  routine applies), every form in a line mutually linked. Blank lines and
+  surrounding whitespace are ignored. Example clusters: `michael,mike,mikey,mick`;
+  `robert,bob,bobby,rob`; `elizabeth,liz,beth,eliza`.
+- **Curation policy — unambiguous clusters only.** A nickname that maps to more
+  than one canonical root (e.g. "alex" → Alexander *or* Alexandra) is
+  **deliberately excluded**; a form absent from the map simply never links (a safe
+  false-negative). The map grows by curation, never by inference — no model writes
+  it.
+- **Shared lookup rule.** Both consumers (capture-time routing and reconcile)
+  reduce a raw `display_name`/`aka` to a single lookup form by normalizing its
+  **first whitespace-delimited component** only. So "Michael Torres" → `michael`
+  and a bare "Mike" → `mike`, letting the two link without ever inspecting the
+  surname. A single-component name is unchanged after normalization. Titles
+  ("Dr. …") and family-name-first forms therefore do not link — accepted, safe
+  false-negatives, consistent with the conservative bias below (a missed link
+  beats a wrong one).
+
+#### Capture-time routing — a pre-mint discovery pass
+
+Resolution itself is unchanged: `update_person` still derives the slug, follows
+`redirect_to`, and **never scans `aka[]`** — the collision oracle stays sound.
+Alias awareness is a **separate discovery pass** that runs *only* when a mention
+would otherwise mint a brand-new record (its derived slug holds no live record):
+
+1. Reduce the mention to its lookup form and gather that form's **direct** cluster
+   neighbours from the map (no transitive expansion).
+2. Scan live canonical records; a record is a **candidate** when its
+   `display_name` or any `aka[]` form reduces (by the same first-component rule)
+   to a neighbour of the mention's form. This read is exactly what reconcile and
+   `/person` name-matching already do — it is *discovery*, not the resolution
+   path, so the "aka is never scanned for resolution" invariant is untouched.
+3. **Route only on exactly one live candidate.** Plant/reuse a redirect tombstone
+   at the mention's derived slug pointing at that candidate (the same
+   append-and-redirect shape `person merge` writes), then resolve through it so
+   the mention folds into the canonical record and its form joins `aka[]`. The
+   planted tombstone's frozen `display_name` remains the collision-oracle witness
+   for its slug, so soundness is preserved by construction.
+4. **Zero or ≥2 candidates → mint a new record** exactly as today, and let
+   reconcile suggest the merge. This is the conservative bias: at capture it is
+   safer to leave a possible duplicate separate than to fuse two distinct people.
+
+The pass is deterministic and local-first — a pure function of the map and the
+existing records, with **no LLM** — so a re-run of the same mention sequence
+yields byte-identical records (the second pass sees the planted tombstone and
+takes the ordinary resolve path). An alias/aka conflict never fails capture; it
+falls back to minting.
+
+#### Reconcile precision — a corroborating signal is always required
+
+`person reconcile` previously paired short names on a bare edit-distance
+(Levenshtein) proximity, which conflated unrelated given names ("Braden" vs
+"Brandon", "Dana" vs "Dania"). That path is **removed**. A suggestion now fires
+**only** on a corroborating signal:
+
+- a **shared normalized form** between two records' names/akas,
+- a **nickname-map link** between their lookup forms (so "Mike" and "Michael
+  Torres" are still flagged, via the first-component rule), or
+- an **explicit diminutive link** (the existing strict-prefix rule, e.g.
+  "sam" ⊂ "sammy").
+
+**Entry co-occurrence is explicitly not a signal** — spouses and coworkers
+co-occur constantly and would reintroduce false positives. The result is
+near-zero false positives on unrelated short names, while real duplicates
+(full-name/aka overlap, nickname-map hit, diminutive link) are still caught.
+
+`person reconcile` stays a **read-only suggestion surface**: it changes nothing
+and is byte-stable across runs. Nothing is auto-merged — merges remain
+user-driven through `lucid person merge`.
+
 ## Sessions and channel memory — `~/.lucid/sessions/`
 
 **Format:** JSON for sessions, Markdown for the per-channel memory file.
