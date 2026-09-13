@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -285,6 +286,183 @@ func TestUpdatePerson_AkaEqualToDisplayIsNoop(t *testing.T) {
 	rec, _, err := a.ReadPerson(res.PersonKey)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Sam"}, rec.Aka)
+}
+
+// TestCreatePerson_RecordShapeRoundTrips proves a bare deliberate create yields
+// the Q4 record shape — entry_refs: [], first_seen_at == last_seen_at (the passed
+// now), aka == [display_name], redirect_to absent — and round-trips through
+// encode/decode byte-stably.
+func TestCreatePerson_RecordShapeRoundTrips(t *testing.T) {
+	a := newPeopleAdapter(t)
+	now := personAt(5)
+
+	rec, created, err := a.CreatePerson("Sam Rivera", now, PersonPatch{})
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.Equal(t, []string{"Sam Rivera"}, rec.Aka)
+	assert.Equal(t, []string{}, rec.EntryRefs)
+	assert.Equal(t, now, rec.FirstSeenAt)
+	assert.Equal(t, now, rec.LastSeenAt)
+	assert.Equal(t, rec.FirstSeenAt, rec.LastSeenAt)
+	assert.Empty(t, rec.RedirectTo)
+	assert.False(t, rec.IsTombstone())
+	assert.Nil(t, rec.Dob)
+	assert.Nil(t, rec.Relationship)
+	assert.Nil(t, rec.Notes)
+
+	// The record round-trips through encode/decode unchanged.
+	got, found, err := a.ReadPerson(rec.PersonKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, rec, got)
+
+	// Re-encoding the decoded record leaves the file byte-identical.
+	before := readFileBytes(t, a, rec.PersonKey)
+	require.NoError(t, a.writePerson(got))
+	assert.Equal(t, before, readFileBytes(t, a, rec.PersonKey))
+
+	// On disk, aka/entry_refs render as arrays, notes as null, and a canonical
+	// record carries no redirect_to.
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(before, &m))
+	assert.JSONEq(t, `["Sam Rivera"]`, string(m["aka"]))
+	assert.JSONEq(t, `[]`, string(m["entry_refs"]))
+	assert.Equal(t, "null", string(m["notes"]))
+	_, hasRedirect := m["redirect_to"]
+	assert.False(t, hasRedirect, "redirect_to is omitempty and absent on a canonical record")
+}
+
+// TestCreatePerson_KeyParityWithExtractor proves create derives the same key the
+// People routine uses, so a later real mention of the same name folds into the
+// deliberately-created record instead of forking a duplicate.
+func TestCreatePerson_KeyParityWithExtractor(t *testing.T) {
+	a := newPeopleAdapter(t)
+	const name = "Jordan Blake"
+
+	rec, created, err := a.CreatePerson(name, personAt(5), PersonPatch{})
+	require.NoError(t, err)
+	require.True(t, created)
+
+	want, err := ResolvePersonKey(name, data.Wordlist(), a.personKeyOwner)
+	require.NoError(t, err)
+	assert.Equal(t, want, rec.PersonKey, "create derives the extractor's key")
+
+	// A later real mention of the same name folds into the created record.
+	res, err := a.UpdatePerson(PersonMention{DisplayName: name, RawEntryID: "raw_2026_05_09_20_10", At: personAt(9)})
+	require.NoError(t, err)
+	assert.Equal(t, rec.PersonKey, res.PersonKey, "the mention matches the created record")
+
+	folded, found, err := a.ReadPerson(rec.PersonKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, []string{"raw_2026_05_09_20_10"}, folded.EntryRefs, "the mention ref is appended")
+	assert.Equal(t, personAt(5), folded.FirstSeenAt, "the earlier creation date is preserved")
+	assert.Equal(t, personAt(9), folded.LastSeenAt, "the mention widens the seen-window")
+
+	keys, err := a.ListPeopleKeys()
+	require.NoError(t, err)
+	assert.Equal(t, []string{rec.PersonKey}, keys, "no duplicate record was forked")
+}
+
+// TestCreatePerson_IdempotentNoOp proves a repeat create of an existing name —
+// and of a merged-away form that resolves through a redirect tombstone — returns
+// created=false, writes nothing, never enriches, and forks no second record (Q2).
+func TestCreatePerson_IdempotentNoOp(t *testing.T) {
+	a := newPeopleAdapter(t)
+
+	first, created, err := a.CreatePerson("Alex", personAt(1), PersonPatch{})
+	require.NoError(t, err)
+	require.True(t, created)
+	before := readFileBytes(t, a, first.PersonKey)
+
+	// A repeat create of the same name is a pure no-op ack — it does not enrich.
+	again, created2, err := a.CreatePerson("Alex", personAt(2), PersonPatch{Relationship: strptr("colleague")})
+	require.NoError(t, err)
+	assert.False(t, created2, "an existing key is not re-created")
+	assert.Equal(t, first.PersonKey, again.PersonKey)
+	assert.Nil(t, again.Relationship, "a no-op create never enriches — that stays person set")
+	assert.Equal(t, before, readFileBytes(t, a, first.PersonKey), "the record is byte-identical")
+
+	keys, err := a.ListPeopleKeys()
+	require.NoError(t, err)
+	assert.Len(t, keys, 1, "no second record was forked")
+
+	// A form that resolves through a redirect tombstone folds onto its canonical,
+	// not a new record: merge a second person into Alex, then re-create that form.
+	keyAndy := seedPersonStore(t, a, "Andy", "raw_2026_05_03_10_00", personAt(3))
+	_, err = a.MergePersons(keyAndy, first.PersonKey) // Andy → Alex; Andy's slug is now a tombstone
+	require.NoError(t, err)
+
+	res, createdAndy, err := a.CreatePerson("Andy", personAt(4), PersonPatch{})
+	require.NoError(t, err)
+	assert.False(t, createdAndy, "a merged-away form folds onto its canonical")
+	assert.Equal(t, first.PersonKey, res.PersonKey)
+
+	keys, err = a.ListPeopleKeys()
+	require.NoError(t, err)
+	assert.Len(t, keys, 2, "Alex + the Andy tombstone only — no third record")
+}
+
+// TestCreatePerson_CreatesThenEnriches proves the durable-field flags mint and
+// enrich a fresh record in one call (Q3), and that a bad dob is rejected before
+// any write.
+func TestCreatePerson_CreatesThenEnriches(t *testing.T) {
+	a := newPeopleAdapter(t)
+	dob, rel, note := "1990-04-12", "colleague", "met at the co-op"
+
+	rec, created, err := a.CreatePerson("Sam Rivera", personAt(5), PersonPatch{Dob: &dob, Relationship: &rel, Notes: &note})
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotNil(t, rec.Dob)
+	assert.Equal(t, "1990-04-12", *rec.Dob)
+	require.NotNil(t, rec.Relationship)
+	assert.Equal(t, "colleague", *rec.Relationship)
+	require.NotNil(t, rec.Notes)
+	assert.Equal(t, "met at the co-op", *rec.Notes)
+
+	// The durable fields persist to disk.
+	got, found, err := a.ReadPerson(rec.PersonKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, rec, got)
+
+	// A bad dob is rejected before any write — no record is created.
+	bad, created2, err := a.CreatePerson("Robin Vale", personAt(6), PersonPatch{Dob: strptr("04/12/1990")})
+	require.Error(t, err)
+	assert.False(t, created2)
+	assert.Empty(t, bad.PersonKey)
+
+	keyRobin, err := ResolvePersonKey("Robin Vale", data.Wordlist(), a.personKeyOwner)
+	require.NoError(t, err)
+	_, found, err = a.ReadPerson(keyRobin)
+	require.NoError(t, err)
+	assert.False(t, found, "a rejected create writes nothing")
+}
+
+// TestCreatePerson_AppendOnly proves creating a person never rewrites or reorders
+// any pre-existing record — the only write is the new key's file.
+func TestCreatePerson_AppendOnly(t *testing.T) {
+	a := newPeopleAdapter(t)
+	keyAlex := seedPersonStore(t, a, "Alex", "raw_2026_05_01_09_00", personAt(1))
+	before := readFileBytes(t, a, keyAlex)
+
+	rec, created, err := a.CreatePerson("Sam Rivera", personAt(5), PersonPatch{})
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotEqual(t, keyAlex, rec.PersonKey)
+
+	// The pre-existing record's on-disk bytes are unchanged.
+	assert.Equal(t, before, readFileBytes(t, a, keyAlex), "create never rewrites another record")
+
+	// Both files exist.
+	_, statErr := os.Stat(filepath.Join(a.peopleDir(), keyAlex+".json"))
+	require.NoError(t, statErr)
+	_, statErr = os.Stat(filepath.Join(a.peopleDir(), rec.PersonKey+".json"))
+	require.NoError(t, statErr)
+
+	keys, err := a.ListPeopleKeys()
+	require.NoError(t, err)
+	assert.Len(t, keys, 2)
 }
 
 // readFileBytes reads the raw on-disk bytes of a person record.
