@@ -955,10 +955,11 @@ small so it can be regenerated from the proposal text alone.
 **Mutability:** Mutable. Every write goes through `internal/storage`;
 `~/.lucid/people/` is never hand-edited. The deterministic People routine
 (`storage.update_person`) folds each new mention into a record, and is no
-longer the *only* writer: the curation verbs — `person merge`, `person
-alias`, `person rename`, `person set`, and `person off-limits` — also write
-here. All of them are deterministic and model-free; none infers anything
-(see the user-authored carve-out below).
+longer the *only* writer: the curation verbs — `person create`, `person
+merge`, `person alias`, `person rename`, `person set`, and `person
+off-limits` — also write here. All of them are deterministic and model-free;
+none infers anything (see the user-authored carve-out below and §"Deliberate
+creation").
 
 ### Schema
 
@@ -1062,6 +1063,47 @@ mirroring `anchor`/`self` (stable id, mutable address):
 
 People records remain **one mutable file per key**; the tombstone is a shape of
 that same family, not a new record type.
+
+### Deliberate creation — `person create`
+
+Extraction stays the **default** way a person appears: the People routine mints
+a record as a side effect of `lucid structure` folding a model-extracted mention
+into `update_person`. Alongside it, a canonical record may also be minted **on
+purpose** with `lucid person create <name>` — a deterministic, model-free write
+(no LLM) for deliberately registering a known contact ahead of any mention
+(import/backfill, setup seeding). It is a **bounded exception** to the
+extractive-only boundary, not a move away from it; extraction remains primary.
+
+The write reuses the same primitives as extraction, so it can never fork a
+duplicate:
+
+- **Key parity.** `create` derives the `person_key` with the *same* unsalted
+  hash of the normalized display name that the People routine uses, then follows
+  any `redirect_to` tombstone. A later bare mention of the same name in `lucid
+  structure` therefore derives to the *same* key and **folds into** the record
+  `create` wrote (widening the seen window and appending the `entry_refs` id via
+  the ordinary `update_person` path) rather than forking a second record — and
+  `person reconcile` finds nothing to flag.
+- **Append-only + idempotent.** The only write is the new key's own file; no
+  other record is read-modified. Creating a name whose derived key already names
+  a live record (or resolves forward through a tombstone) is an idempotent no-op
+  ack ("already recorded"), never a second record and never a rewrite of the
+  existing record's fields — enriching an existing person stays `person set`'s
+  job.
+- **Record shape.** A deliberately-created, never-mentioned person is a
+  well-formed canonical record with `entry_refs: []`, `first_seen_at =
+  last_seen_at =` the creation date, and `aka: [display_name]`. There is no
+  zero-time edge case: it round-trips through encode/decode, passes `lucid
+  validate` (schema + redirect graph), and renders sanely under `lucid person
+  <name>` ("Mentioned in 0 entries …"). The first real mention widens the
+  seen-window through the ordinary fold.
+
+`create` may also carry the same **user-authored durable-field** flags as
+`person set` (`--dob`, `--relationship`, `--note`, plus their `--…-file`
+siblings), minting and enriching a fresh record in one call; name-only creation
+is valid. Those fields stay user-authored — never inferred — so the
+no-inference invariant (agent-contracts.md §People) holds exactly as it does for
+`person set`.
 
 ## Sessions and channel memory — `~/.lucid/sessions/`
 

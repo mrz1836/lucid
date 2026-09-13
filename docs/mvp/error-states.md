@@ -111,18 +111,22 @@ The cross-cutting principles below bind all three tables.
 
 ### Person (write verbs) — the curation verbs (deterministic, agent-free)
 
-The `/person` rows above cover a *read*. These cover the five **curation
-writes** — `person merge | alias | rename | set | off-limits` (scope.md §4;
-[`data-model.md`](data-model.md) §"Merge & redirect") — which repair a
-nickname/full-name split, record another written form, fix a display name, add
-the user-authored `dob`/`relationship`/`notes`, or toggle P-3 redaction. All
-are on the **strict tier**: the rejection is decided from the store *before*
-any write, the copy is fixed and model-free, the exit is non-zero, every row
-ends with the nothing-was-saved clause, and no record is deleted (a merge
-leaves a redirect tombstone). Subjects are resolved the way `/person` matches:
-an exact `person_key` wins, else a unique `display_name`/`aka[]` match — more
-than one live match is refused, never guessed. Tombstones are skipped in
-matching, so a merged-away form resolves to its one canonical record.
+The `/person` rows above cover a *read*. These cover the six **curation
+writes** — `person create | merge | alias | rename | set | off-limits`
+(scope.md §4; [`data-model.md`](data-model.md) §"Merge & redirect" and
+§"Deliberate creation") — which deliberately mint a person (no model call),
+repair a nickname/full-name split, record another written form, fix a display
+name, add the user-authored `dob`/`relationship`/`notes`, or toggle P-3
+redaction. All are on the **strict tier**: the rejection is decided from the
+store *before* any write, the copy is fixed and model-free, the exit is
+non-zero, every row ends with the nothing-was-saved clause, and no record is
+deleted (a merge leaves a redirect tombstone). Subjects are resolved the way
+`/person` matches: an exact `person_key` wins, else a unique
+`display_name`/`aka[]` match — more than one live match is refused, never
+guessed. Tombstones are skipped in matching, so a merged-away form resolves to
+its one canonical record. `create` is the exception: it does not *resolve* an
+existing subject, it **derives** a key and mints identity (see the note after
+the table), so P-4/P-5 do not apply to it.
 
 | # | Trigger | System behavior | User-visible message | Disk side effect |
 |---|---------|-----------------|----------------------|------------------|
@@ -131,13 +135,27 @@ matching, so a merged-away form resolves to its one canonical record.
 | P-6 | `person merge` whose source and target resolve to the **same** canonical record | Reject — there is nothing to merge (the store's `MergePersons` is a no-op for this too, so a retry is harmless). | `"alex" is already that person; nothing was saved.` | None |
 | P-7 | `person alias` whose new form already resolves to a **different** live record | Reject — an alias never hijacks another person's slug (merge them instead if they are the same). | `the form "ali" already belongs to another person — use lucid person merge if they are the same; nothing was saved.` | None |
 | P-8 | `person rename` onto a name that already **uniquely identifies a different** live record | Reject — a rename never creates a duplicate identity; steer to merge. Two people who *coincidentally* share a name from capture stay as they are (the intentional §P-2 state); only the explicit rename that would add a collision is refused. | `"alex" already identifies another person — use lucid person merge if they are the same; nothing was saved.` | None |
-| P-9 | Blank or malformed input — an empty subject/value, or a `person set --dob` that is not a civil `YYYY-MM-DD` | Reject before any write. | `a person name is required; nothing was saved.` / `could not read the date of birth "04/12/1990" (want YYYY-MM-DD); nothing was saved.` | None |
+| P-9 | Blank or malformed input — an empty subject/value, or a `person set`/`person create --dob` that is not a civil `YYYY-MM-DD` | Reject before any write. | `a person name is required; nothing was saved.` / `could not read the date of birth "04/12/1990" (want YYYY-MM-DD); nothing was saved.` | None |
 
-`person off-limits` and `person set` cannot raise P-6/P-7/P-8 (they do not
-merge, alias, or rename); every verb can raise P-4, P-5, and P-9. `off-limits`
-is idempotent (adding a person already off-limits, or `--restore` on one who is
-not, is a no-op ack, not a rejection), matching how the registry already
-behaves.
+`person create`, `person off-limits`, and `person set` cannot raise P-6/P-7/P-8
+(they do not merge, alias, or rename). Every verb **except `create`** can raise
+P-4 and P-5 (they resolve an existing subject); every verb can raise P-9.
+`off-limits` is idempotent (adding a person already off-limits, or `--restore`
+on one who is not, is a no-op ack, not a rejection), matching how the registry
+already behaves.
+
+`person create` mints identity rather than resolving a subject: it derives the
+key with the *same* unsalted-hash function the People routine uses and writes a
+fresh canonical record deterministically, with **no model call**
+([`data-model.md`](data-model.md) §"Deliberate creation"). Because it does not
+require — or resolve — an existing subject, **P-4 and P-5 never apply**. Like
+`off-limits` it is **idempotent**: creating a name whose derived key already
+names a live record (or resolves forward through a redirect tombstone) is a
+no-op ack (`exit 0`, `"<name>" is already recorded — nothing to create.`), not
+a rejection, and never forks a second record; on that path the durable-field
+flags are ignored (enriching an existing person stays `person set`'s job). It
+can still raise **P-9** — a blank name, or a `--dob` that is not a civil
+`YYYY-MM-DD` — rejected before any write like the rest of the tier.
 
 `person reconcile` is a **read**, not a write, so none of P-4..P-9 applies: it
 takes no subject, never fails on the state of the data, and — like `/person` —

@@ -324,6 +324,7 @@ gate, `2` usage / flag-parse error.
 | `self [<key-or-prefix>]` | `--history` | Read the durable self-profile — atemporal facts under `identity.` `body.` `constraint.` `pref.` `misc.` |
 | `self set <key> <value…>` | `--note` `--since` | Record one durable fact. Append-only: a correction is just another `set`. |
 | `self move <key> <new-key>`<br>`self retire <key> [reason…]` | — | Re-categorize a fact, or retire one that stopped being true. History carries forward; nothing is ever deleted. |
+| `person create <name…>` | `--dob` `--relationship` `--note` (+ `-file` siblings) | Deliberately record a known person with **no** model call — the deterministic import/backfill path (people otherwise appear only as `structure` extracts a mention). Idempotent: an already-recorded name is an "already recorded" no-op. Accepts the `person set` durable-field flags to create-and-enrich in one call. |
 | `person merge <source> <target>`<br>`person alias <subject> <form>`<br>`person rename <subject> <new-name…>` | — | Reconcile the people records: fold a duplicate onto a canonical record (append-only redirect, never a delete), record another written form, or change a display name (the `person_key` is stable). |
 | `person set <subject>` | `--dob` `--relationship` `--note` | Record the user-authored durable fields on a person — never inferred. |
 | `person off-limits <subject>` | `--restore` | Mark a person off-limits to inference (the P-3 redaction); `--restore` clears it. |

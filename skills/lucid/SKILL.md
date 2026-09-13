@@ -95,6 +95,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid workout` | Recommend, log, and review your training (config-gated). |
 | `lucid structure` | Structure a raw entry you did not just capture, or a window of them. |
 | `lucid self` | Read and record durable facts about yourself. |
+| `lucid person create` | Deliberately record a known person with **no** model call — the deterministic import/backfill primitive (people otherwise appear only as `lucid structure` extracts a mention). Idempotent on an already-recorded name (an "already recorded" no-op, never a fork); accepts the `person set` durable-field flags (`--dob`/`--relationship`/`--note`, plus `-file` siblings) to create-and-enrich in one call. Reached by its CLI form, not chat-mapped — `/person <name>` above stays a read. |
 | `lucid backup` | Write the must-keep Ledger trees to a single `.tar.gz` archive; a data-safety operation rather than a conversation. |
 | `lucid restore` | Rebuild a Ledger from a backup archive; destructive-adjacent and deliberately CLI-only. |
 | `lucid secret` | Maintain a names-only catalog of hush secret handles (`add`/`list`/`note`/`remove`) — a handle and an optional note, never a value; `note` amends a live handle's note in place (or removes it with `--clear`), keeping its creation time, and the catalog has no reveal, fetch, or storage path. An operational/config verb reached by its CLI form. |
