@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mrz1836/lucid/data"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -14,17 +15,13 @@ import (
 // a deterministic, no-LLM detector (P9).
 const reconcileNoCandidates = "No likely-duplicate people found."
 
-// reconcile proximity thresholds (data-model.md §"Merge & redirect"; scope.md §4).
-const (
-	// reconcileMaxEditDistance bounds the Levenshtein signal.
-	reconcileMaxEditDistance = 2
-	// reconcileMinEditLen is the shortest form the edit-distance signal accepts,
-	// so short names are not paired on coincidence.
-	reconcileMinEditLen = 4
-	// reconcileMinPrefixLen is the shortest diminutive prefix accepted (so "sam"
-	// ⊂ "sammy" fires but a one- or two-letter prefix never does).
-	reconcileMinPrefixLen = 3
-)
+// reconcileMinPrefixLen is the shortest diminutive prefix accepted (so "sam" ⊂
+// "sammy" fires but a one- or two-letter prefix never does). The bare
+// edit-distance signal was removed — it paired unrelated short names like
+// "Braden"/"Brandon" and "Dana"/"Dania" — so every suggestion now needs a
+// corroborating signal: a shared written form, a curated nickname link, or this
+// diminutive prefix (data-model.md §"Alias-aware person resolution"; scope.md §4).
+const reconcileMinPrefixLen = 3
 
 // ReconcileCandidate is one suggested duplicate pair: the source (fold away) and
 // target (canonical) records, why they were paired, and the exact merge that
@@ -52,6 +49,7 @@ type reconcilePerson struct {
 	key       string
 	display   string
 	forms     []string // sorted, unique normalized display + aka forms
+	nickForms []string // sorted, unique nickname lookup forms (data.NicknameForm of display + aka)
 	refs      int
 	firstSeen string // RFC3339, for the deterministic tie-break
 }
@@ -68,10 +66,14 @@ func (r *Router) PersonReconcile() (PersonReconcileResult, error) {
 		return PersonReconcileResult{}, err
 	}
 
+	// The curated nickname map is the same for every pair, so parse it once for
+	// the whole scan and thread it through reconcileSignal.
+	links := data.NicknameLinks()
+
 	var cands []ReconcileCandidate
 	for i := range people {
 		for j := i + 1; j < len(people); j++ {
-			if reason, ok := reconcileSignal(people[i], people[j]); ok {
+			if reason, ok := reconcileSignal(people[i], people[j], links); ok {
 				cands = append(cands, buildCandidate(people[i], people[j], reason))
 			}
 		}
@@ -115,6 +117,7 @@ func (r *Router) liveReconcilePeople() ([]reconcilePerson, error) {
 			key:       rec.PersonKey,
 			display:   rec.DisplayName,
 			forms:     normalizedForms(rec),
+			nickForms: nicknameForms(rec),
 			refs:      len(rec.EntryRefs),
 			firstSeen: rec.FirstSeenAt.Format(personDateLayout),
 		})
@@ -141,13 +144,41 @@ func normalizedForms(rec storage.PersonRecord) []string {
 	return forms
 }
 
-// reconcileSignal reports whether two people are a likely duplicate and why. A
-// shared normalized form is checked first (the strongest, cheapest signal), then
-// name proximity. The reason names the specific forms that fired so the output
-// is self-explanatory and deterministic.
-func reconcileSignal(a, b reconcilePerson) (string, bool) {
+// nicknameForms returns the sorted, unique nickname lookup forms of a record:
+// data.NicknameForm applied to its display name and every aka. These are the
+// forms the curated nickname map is compared across — the normalized first
+// whitespace-delimited component of each raw name — so "Michael Torres" reduces to
+// "michael" and links to a bare "Mike", while a surname is never treated as a
+// given name. The same helper feeds capture-time routing, keeping the two
+// consumers in lockstep.
+func nicknameForms(rec storage.PersonRecord) []string {
+	seen := map[string]bool{}
+	var forms []string
+	for _, raw := range append([]string{rec.DisplayName}, rec.Aka...) {
+		n := data.NicknameForm(raw)
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		forms = append(forms, n)
+	}
+	slices.Sort(forms)
+	return forms
+}
+
+// reconcileSignal reports whether two people are a likely duplicate and why.
+// Every suggestion needs a corroborating signal, checked strongest-first: a
+// shared normalized written form, a curated nickname link (Mike ~ Michael), or a
+// diminutive prefix (sam ⊂ sammy). The bare edit-distance path was removed, so
+// unrelated short names ("Braden"/"Brandon") are never paired, and entry
+// co-occurrence is deliberately not a signal. The reason names the specific forms
+// that fired so the output is self-explanatory and deterministic.
+func reconcileSignal(a, b reconcilePerson, links map[string][]string) (string, bool) {
 	if shared := firstShared(a.forms, b.forms); shared != "" {
 		return fmt.Sprintf("share the written form %q", shared), true
+	}
+	if fa, fb := linkedNicknames(a.nickForms, b.nickForms, links); fa != "" {
+		return fmt.Sprintf("linked nicknames (%q ~ %q)", fa, fb), true
 	}
 	for _, fa := range a.forms {
 		for _, fb := range b.forms {
@@ -174,22 +205,36 @@ func firstShared(a, b []string) string {
 	return ""
 }
 
+// linkedNicknames returns the first pair of nickname lookup forms — one from each
+// person — that the curated map links, or "","" when none are linked. Both slices
+// are sorted, so the chosen pair (and thus the reason string) is deterministic.
+// The map is symmetric and carries no self-links, so scanning a's neighbors for
+// each of b's forms is sufficient and never pairs two identical forms (that is the
+// shared-form signal, handled earlier).
+func linkedNicknames(a, b []string, links map[string][]string) (string, string) {
+	for _, fa := range a {
+		neighbors := links[fa]
+		if len(neighbors) == 0 {
+			continue
+		}
+		for _, fb := range b {
+			if slices.Contains(neighbors, fb) {
+				return fa, fb
+			}
+		}
+	}
+	return "", ""
+}
+
 // proximateForms reports whether two distinct normalized forms are close enough
-// to suggest the same person: a short diminutive prefix (sam ⊂ sammy), or a
-// bounded edit distance between two forms both long enough to trust it.
+// to suggest the same person via the diminutive-prefix rule (sam ⊂ sammy). The
+// bare edit-distance signal was removed — it paired unrelated short names — so a
+// strict, long-enough prefix is now the only proximity signal it fires on.
 func proximateForms(a, b string) bool {
 	if a == b {
 		return false // an exact match is the shared-form signal, not proximity
 	}
-	if isDiminutive(a, b) || isDiminutive(b, a) {
-		return true
-	}
-	if utf8.RuneCountInString(a) >= reconcileMinEditLen &&
-		utf8.RuneCountInString(b) >= reconcileMinEditLen &&
-		levenshtein(a, b) <= reconcileMaxEditDistance {
-		return true
-	}
-	return false
+	return isDiminutive(a, b) || isDiminutive(b, a)
 }
 
 // isDiminutive reports whether short is a strict, long-enough prefix of long —
@@ -197,37 +242,6 @@ func proximateForms(a, b string) bool {
 func isDiminutive(short, long string) bool {
 	sl := utf8.RuneCountInString(short)
 	return sl >= reconcileMinPrefixLen && sl < utf8.RuneCountInString(long) && strings.HasPrefix(long, short)
-}
-
-// levenshtein returns the rune-level edit distance between a and b — a small,
-// pure helper (no dependency exists). It is used only for the bounded proximity
-// signal, so its cost is fine at the short lengths of normalized names.
-func levenshtein(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-	if la == 0 {
-		return lb
-	}
-	if lb == 0 {
-		return la
-	}
-	prev := make([]int, lb+1)
-	for j := 0; j <= lb; j++ {
-		prev[j] = j
-	}
-	for i := 1; i <= la; i++ {
-		cur := make([]int, lb+1)
-		cur[0] = i
-		for j := 1; j <= lb; j++ {
-			cost := 1
-			if ra[i-1] == rb[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev = cur
-	}
-	return prev[lb]
 }
 
 // buildCandidate orients a pair into a source→target suggestion: the record with

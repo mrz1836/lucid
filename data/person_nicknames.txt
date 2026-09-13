@@ -1,0 +1,36 @@
+# Curated bidirectional nickname <-> canonical clusters for person entity resolution.
+# One cluster per line: comma-separated normalized (lowercase) name forms, all
+# mutually linked. Only unambiguous clusters ship here; a nickname that maps to two
+# different canonical names (for example "alex" -> Alexander / Alexandra) is
+# deliberately excluded so it never fuses two distinct people. Titles and
+# family-name-first forms are conservative false-negatives handled by the callers.
+# Blank lines and lines starting with "#" are ignored. Every form must appear in at
+# most one cluster; a form shared across clusters would silently link two canonicals.
+michael,mike,mikey,mick,mickey
+robert,bob,bobby,rob,robbie
+william,will,bill,billy,liam,willy
+samuel,sam,sammy
+elizabeth,liz,beth,eliza,lizzie
+james,jim,jimmy,jimmie
+richard,rick,ricky,rich,richie,dick
+charles,charlie,chuck
+thomas,tom,tommy
+joseph,joe,joey
+daniel,dan,danny
+matthew,matt,matty
+anthony,tony
+nicholas,nick,nicky
+benjamin,ben,benny,benji
+katherine,kate,katie,kathy,kat
+margaret,maggie,meg,peggy,marge
+edward,ed,eddie
+jennifer,jen,jenny,jenna
+deborah,deb,debbie
+rebecca,becca,becky
+stephen,steve,stevie
+andrew,andy,drew
+joshua,josh
+david,dave,davey
+jonathan,jon,jonny
+timothy,tim,timmy
+gregory,greg,gregg
