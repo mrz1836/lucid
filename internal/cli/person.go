@@ -96,6 +96,7 @@ func newPersonCmd() *cobra.Command {
 	}
 	// The read stays the parent's own RunE (so `lucid person <name>` and the
 	// bare-arg exit-2 contract are unchanged); the curation verbs hang beneath.
+	cmd.AddCommand(newPersonCreateCmd())
 	cmd.AddCommand(newPersonMergeCmd())
 	cmd.AddCommand(newPersonAliasCmd())
 	cmd.AddCommand(newPersonRenameCmd())

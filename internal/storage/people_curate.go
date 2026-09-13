@@ -306,6 +306,73 @@ func (a *Adapter) SetPerson(key string, patch PersonPatch) (PersonRecord, error)
 	return rec, nil
 }
 
+// CreatePerson deliberately mints a canonical person record without a model
+// pass — the deterministic, model-free counterpart to extraction's
+// [Adapter.UpdatePerson] (data-model.md §"People references"). It derives the
+// key with the same unsalted-hash function the People routine uses
+// ([ResolvePersonKey], the correctness hinge) and follows a redirect tombstone
+// to its canonical, so a later bare mention of the same name folds into this
+// record instead of forking a duplicate.
+//
+// Creating a name whose derived (or redirect-resolved) key already names a live
+// record is an idempotent no-op: it returns the existing record with
+// created=false, writes nothing, and leaves its durable fields untouched —
+// enriching an already-recorded person stays [Adapter.SetPerson]'s job. A fresh
+// record carries entry_refs: [], first_seen_at = last_seen_at = now, and
+// aka: [display_name]; the optional patch (dob/relationship/notes, with dob
+// validated as a civil YYYY-MM-DD like SetPerson) is applied in the same call so
+// a contact can be minted and enriched at once. The only write is the new key's
+// file — no other record is touched, so the registry stays append-only.
+func (a *Adapter) CreatePerson(displayName string, now time.Time, patch PersonPatch) (PersonRecord, bool, error) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return PersonRecord{}, false, errors.New("storage: create_person: empty display_name")
+	}
+	if patch.Dob != nil && *patch.Dob != "" && !ValidCivilDate(*patch.Dob) {
+		return PersonRecord{}, false, fmt.Errorf("storage: create_person: dob %q is not %s", *patch.Dob, civilDateLayout)
+	}
+
+	key, err := ResolvePersonKey(displayName, data.Wordlist(), a.personKeyOwner)
+	if err != nil {
+		return PersonRecord{}, false, fmt.Errorf("storage: create_person: resolve key: %w", err)
+	}
+	// Follow a redirect: a name whose derived slug is a merged-away or aliased
+	// tombstone folds onto the canonical it points to, so create never forks a
+	// duplicate of an absorbed form (data-model.md §"Merge & redirect").
+	key, err = a.ResolvePersonRedirect(key)
+	if err != nil {
+		return PersonRecord{}, false, err
+	}
+
+	existing, found, err := a.ReadPerson(key)
+	if err != nil {
+		return PersonRecord{}, false, err
+	}
+	if found && !existing.IsTombstone() {
+		// The person is already recorded — return it untouched, write nothing,
+		// and leave any patch for `person set` (idempotent no-op; A1).
+		return existing, false, nil
+	}
+
+	// A fresh canonical record: the not-found shape mergePerson would build,
+	// minus the mention (no entry_ref), with the seen-window stamped to now.
+	rec := PersonRecord{
+		PersonKey:   key,
+		DisplayName: displayName,
+		Aka:         []string{displayName},
+		FirstSeenAt: now,
+		LastSeenAt:  now,
+		EntryRefs:   []string{},
+	}
+	applyPatchField(&rec.Dob, patch.Dob)
+	applyPatchField(&rec.Relationship, patch.Relationship)
+	applyPatchField(&rec.Notes, patch.Notes)
+	if err = a.writePerson(rec); err != nil {
+		return PersonRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
 // applyPatchField applies one optional patch field: nil leaves the current
 // value, "" clears it to nil (so the field is omitted on disk), any other value
 // sets it.

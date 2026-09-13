@@ -1732,6 +1732,7 @@ lucid profile default --json
 
 ```
 lucid person <name> [--json]
+lucid person create <name...> [--dob <YYYY-MM-DD>] [--relationship <text>] [--relationship-file <path>] [--note <text>] [--note-file <path>] [--json]
 lucid person merge <source> <target> [--json]
 lucid person alias <subject> <form> [--json]
 lucid person rename <subject> <new-name...> [--json]
@@ -1782,6 +1783,50 @@ wins; otherwise the name is matched against `display_name`/`aka[]` exactly as
 `lucid person <name>` does, with redirect tombstones skipped. No live match is
 rejected (§P-4); more than one live match is rejected and the candidate keys are
 named (§P-5) — the verb never guesses which person you meant.
+
+#### `person create`
+
+Deliberately record a known person — the one path that **mints** a people
+record without waiting for a mention. People are otherwise **capture-first**:
+a record appears only as a side effect of `lucid structure` extracting a
+mention (a model call). `person create <name>` is the deterministic,
+**model-free** alternative for registering a contact on purpose — importing a
+known list, backfilling ahead of time, or seeding the registry at setup — with
+**no LLM call** and no synthetic seed entry. Trailing words join into the name,
+as with `rename`. This is a bounded carve-out to the extractive-only boundary
+([`../mvp/data-model.md`](../mvp/data-model.md) §"Deliberate creation");
+extraction stays the default way people appear.
+
+Unlike the verbs below, `create` does **not** resolve an existing subject — it
+**derives** the `person_key` with the same unsalted-hash function the People
+routine uses, so a later bare mention of the same name in `lucid structure`
+folds into the record you created rather than forking a duplicate, and
+`person reconcile` finds nothing to flag. A deliberately-created,
+never-mentioned person is a well-formed record — `entry_refs: []`,
+`first_seen_at = last_seen_at =` the creation date, `aka: [<name>]` — that
+passes `lucid validate` and renders as "Mentioned in 0 entries …"; the first
+real mention widens the seen window.
+
+Creating a name whose derived key already names a live record (or resolves
+forward through a redirect tombstone) is an **idempotent no-op**: it exits `0`
+with an "already recorded" ack, forks no second record, and never rewrites the
+existing record's fields — so re-running an import is safe. (To enrich an
+existing person, use `person set`.)
+
+`create` accepts the same **user-authored durable-field** flags as
+[`person set`](#person-set) — `--dob` (a civil `YYYY-MM-DD`), `--relationship`,
+`--note`, plus the `--relationship-file`/`--note-file` siblings — so a contact
+can be minted and enriched in one call; name-only creation is valid when no
+flags are passed. Those fields apply only when a **new** record is minted (see
+the idempotent no-op above), never on an already-recorded name. A `--dob` that
+is not a civil date is rejected (§P-9), and the file/inline flag rules match
+`person set` exactly.
+
+```sh
+lucid person create "Sam Rivera"
+lucid person create "Sam Rivera" --relationship colleague --dob 1990-04-12
+lucid person create "Sam Rivera"   # again → exit 0, "already recorded"
+```
 
 #### `person merge`
 
@@ -1854,7 +1899,12 @@ Each write verb prints a fixed reason, exits `1`, and writes nothing:
 - **`merge` of a person into themselves** (§P-6).
 - **`alias` onto a form that already belongs to another person** (§P-7).
 - **`rename` onto a name that already identifies another person** (§P-8).
-- **Blank input, or a `set --dob` that is not `YYYY-MM-DD`** (§P-9).
+- **Blank input, or a `set`/`create --dob` that is not `YYYY-MM-DD`** (§P-9).
+
+`create` mints identity rather than resolving a subject, so it never raises
+§P-4/§P-5 (nor §P-6/§P-7/§P-8): creating an already-recorded name exits `0` as
+an idempotent "already recorded" ack, not an error (§P-9 is the only rejection
+it can raise).
 
 #### `person reconcile`
 
@@ -1880,7 +1930,7 @@ lucid person reconcile --json
 
 #### A subcommand shadows a literal name
 
-`merge`, `alias`, `rename`, `set`, `off-limits`, and `reconcile` are
+`create`, `merge`, `alias`, `rename`, `set`, `off-limits`, and `reconcile` are
 subcommands, so `lucid person merge …` always runs the merge verb — a person you
 literally mentioned as "merge" cannot be looked up by `lucid person merge`. This mirrors
 every other verb group in the CLI and is the accepted trade for a clean curate
