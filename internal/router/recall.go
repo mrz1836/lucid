@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -107,18 +108,32 @@ type RecallItem struct {
 	SupportingEntryIDs []string
 }
 
+// RecallCandidate is one row of an ambiguous-name disambiguation: a matching
+// record's opaque key and its display name, so the read path can list the
+// candidates and ask which was meant (mirroring the `lucid person <name>` §P-2
+// list) rather than silently picking one.
+type RecallCandidate struct {
+	Key         string
+	DisplayName string
+}
+
 // RecallResult is the read-only browse result (mvp/life-archive.md §7). For a
 // keyed dimension it carries the Referent and the Items (stories) filed under
 // it; for the bare index it carries only the Items (one per
 // era/thread/injury/pet, Referent nil). Found is false for a keyed browse whose
 // referent does not
 // resolve, or an empty index — an honest empty result, no model spent over it.
+// Ambiguous is set only when a name matched more than one record: Found is false,
+// nothing is browsed, and Candidates lists the matches (key-sorted) so the caller
+// can disambiguate. Ordinary found/not-found/index results leave both zero.
 type RecallResult struct {
-	Dimension string
-	Key       string
-	Found     bool
-	Referent  *RecallReferent
-	Items     []RecallItem
+	Dimension  string
+	Key        string
+	Found      bool
+	Referent   *RecallReferent
+	Items      []RecallItem
+	Ambiguous  bool
+	Candidates []RecallCandidate
 }
 
 // Recall browses the archive by dimension (mvp/life-archive.md §7). With no
@@ -145,20 +160,77 @@ func (r *Router) Recall(req RecallRequest) (RecallResult, error) {
 		return RecallResult{}, fmt.Errorf("recall: %s browse needs a key; nothing to browse", dim)
 	}
 
-	rec, found, err := r.store.ReadRegistry(kind, key)
-	if err != nil {
-		return RecallResult{}, fmt.Errorf("recall: read %s %q: %w", dim, key, err)
-	}
-	if !found {
-		return RecallResult{Dimension: dim, Key: key, Found: false}, nil
-	}
-
-	stories, err := r.recallStories(dim, key)
+	matches, err := r.resolveRecallReferent(kind, dim, key)
 	if err != nil {
 		return RecallResult{}, err
 	}
-	ref := buildReferent(dim, rec, storyIDs(stories))
-	return RecallResult{Dimension: dim, Key: key, Found: true, Referent: &ref, Items: stories}, nil
+	switch len(matches) {
+	case 0:
+		return RecallResult{Dimension: dim, Key: key, Found: false}, nil
+	case 1:
+		rec := matches[0]
+		stories, err := r.recallStories(dim, rec.Key)
+		if err != nil {
+			return RecallResult{}, err
+		}
+		ref := buildReferent(dim, rec, storyIDs(stories))
+		// Key is the *resolved* opaque key, so a name-input browse renders
+		// byte-identically to the same record browsed by its key.
+		return RecallResult{Dimension: dim, Key: rec.Key, Found: true, Referent: &ref, Items: stories}, nil
+	default:
+		cands := make([]RecallCandidate, 0, len(matches))
+		for _, rec := range matches {
+			cands = append(cands, RecallCandidate{Key: rec.Key, DisplayName: rec.DisplayName})
+		}
+		return RecallResult{Dimension: dim, Key: key, Found: false, Ambiguous: true, Candidates: cands}, nil
+	}
+}
+
+// resolveRecallReferent resolves a recall reference value to the matching
+// registry records, mirroring the `lucid person <name>` read path
+// (resolvePersonSubject + recordMatchesName): the value is tried as an exact
+// opaque key first, and only a clean not-found falls through to a
+// case-insensitive name/aka match over the kind's records. A genuine read/parse
+// error on the exact-key attempt surfaces as before (wrapped "recall: read …"),
+// never silently name-matched, so a corrupt record is still reported rather than
+// masked. It returns zero matches (an honest not-found), one match (a unique
+// resolve), or several (an ambiguous name) — reading only through the projection
+// seams (ReadRegistry / ReadRegistryKind) and writing nothing.
+func (r *Router) resolveRecallReferent(kind, dim, value string) ([]observations.Registry, error) {
+	rec, found, err := r.store.ReadRegistry(kind, value)
+	if err != nil {
+		return nil, fmt.Errorf("recall: read %s %q: %w", dim, value, err)
+	}
+	if found {
+		return []observations.Registry{rec}, nil
+	}
+	recs, err := r.store.ReadRegistryKind(kind)
+	if err != nil {
+		return nil, fmt.Errorf("recall: resolve %s %q: %w", dim, value, err)
+	}
+	// ReadRegistryKind is key-sorted, so the match order — and any
+	// disambiguation built from it — is deterministic.
+	var matches []observations.Registry
+	for _, rec := range recs {
+		if registryMatchesName(rec, value) {
+			matches = append(matches, rec)
+		}
+	}
+	return matches, nil
+}
+
+// registryMatchesName reports whether the queried name equals the record's
+// display_name or any of its aka spellings, case-insensitively — the registry
+// analog of recordMatchesName, so a recall browse resolves a name the same way
+// `lucid person <name>` does. No prefix or fuzzy matching: an exact, fold-cased
+// equality only.
+func registryMatchesName(rec observations.Registry, query string) bool {
+	if strings.EqualFold(strings.TrimSpace(rec.DisplayName), query) {
+		return true
+	}
+	return slices.ContainsFunc(rec.Aka, func(aka string) bool {
+		return strings.EqualFold(strings.TrimSpace(aka), query)
+	})
 }
 
 // recallIndex reads every era, thread, injury, and pet registry through the

@@ -300,13 +300,16 @@ lucid excavate --json
 ## `lucid recall`
 
 ```
-lucid recall [--era <key> | --thread <key> | --injury <key>] [--json]
+lucid recall [--era <name|key> | --thread <name|key> | --injury <name|key>] [--json]
 ```
 
 **Read-only.** Browse the archive. With one of the mutually-exclusive dimension
 flags it opens that referent and the stories filed under it; with no flag it
-prints the **archive index** over every era, thread, and injury. Nothing is
-written and no model runs, mirroring `lucid excavate`.
+prints the **archive index** over every era, thread, and injury. Each dimension
+flag takes a **name or key** — a human name (case-insensitive, and matched against
+the referent's rename-history spellings too) or the opaque registry key — so you
+can browse a chapter by the name you remember instead of its `era_…` key. Nothing
+is written and no model runs, mirroring `lucid excavate`.
 
 Every surfaced item carries its **source context** — the supporting raw /
 observation ids behind it and its provenance — so nothing in a recall is uncited:
@@ -317,12 +320,17 @@ path.
 
 `--json` emits `{dimension, key, found, referent, items}`, each item carrying
 `{kind, key, title, detail, source, supporting_entry_ids}`; the human form prints
-bullets with a `Cites:` line per item (no tables). A dimension key that does not
-resolve, and an empty archive, each print an honest fallback rather than erroring.
+bullets with a `Cites:` line per item (no tables). A **name or key** that resolves
+nothing prints a guided fallback pointing you at how to list the referents by name
+and key (rather than a bare not-found); an empty archive prints an honest fallback;
+and a name that matches **more than one** referent lists the candidates with their
+keys and browses none (an ambiguous `--json` result adds `ambiguous: true` and a
+`candidates` list) — none of these errors.
 
 ```sh
 lucid recall                          # the whole index
-lucid recall --era wild-summer        # a chapter and its stories
+lucid recall --era wild-summer        # a chapter, by its key
+lucid recall --era "College Years"    # the same chapter, by its name
 lucid recall --injury left-knee --json
 ```
 

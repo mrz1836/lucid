@@ -2513,25 +2513,36 @@ lucid excavate --json
 ### recall
 
 ```
-lucid recall [--era <key> | --thread <key> | --injury <key> | --pet <key>] [--json]
+lucid recall [--era <name|key> | --thread <name|key> | --injury <name|key> | --pet <name|key>] [--json]
 ```
 
 **Read-only.** Browse the archive by era, thread, injury, or pet
 (mutually-exclusive dimension flags); with no flag, print the archive index
 over all four
 ([`life-archive.md`](life-archive.md); [`../mvp/life-archive.md`](../mvp/life-archive.md) §7).
-Every surfaced item carries its **source context** — the supporting
-raw/observation ids and its provenance — so nothing is uncited (a story cites its
-observation id; a referent cites its registry record). Nothing is written and no
-model runs, mirroring `excavate`; the same projection-only reads back the
-[weekly reflection](weekly-reflection.md). A key that does not resolve, and an
-empty archive, each print an honest fallback. `--json` emits `{dimension, key,
-found, referent, items}`; the human form prints bullets with a `Cites:` line per
-item (no tables).
+Each dimension flag accepts a **name or key**: a human name (case-insensitive,
+and matched against the referent's rename-history spellings too) or the opaque
+registry key (`era_…`, `injury_…`, …). So `lucid recall --era "College Years"`
+resolves the same chapter as its `era_…` key. Every surfaced item carries its
+**source context** — the supporting raw/observation ids and its provenance — so
+nothing is uncited (a story cites its observation id; a referent cites its
+registry record). Nothing is written and no model runs, mirroring `excavate`; the
+same projection-only reads back the [weekly reflection](weekly-reflection.md).
+A **name or key that matches nothing** prints a guided fallback that points you at
+how to list the archived referents by name and key (`lucid era list` for eras;
+`lucid recall` for the others), rather than a bare not-found; an **empty archive**
+prints an honest fallback. When a name matches **more than one** referent (only a
+shared rename-history spelling can do this), recall lists the matching referents
+with their keys and browses none, so you can re-run with the exact key you meant.
+`--json` emits `{dimension, key, found, referent, items}`; an ambiguous match adds
+`ambiguous: true` and a `candidates` list of the matching referents' keys and
+display names. The human form prints bullets with a `Cites:` line per item (no
+tables).
 
 ```sh
 lucid recall
 lucid recall --era wild-summer
+lucid recall --era "College Years"
 lucid recall --injury left-knee --json
 lucid recall --pet pet_a-cedar --json
 ```

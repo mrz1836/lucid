@@ -150,11 +150,13 @@ func TestLifeArchive_Integration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, out, "Nothing archived")
 
-		// A browse for a key that does not resolve is an honest not-found, not an
-		// error — the archive says what it does not hold.
+		// A browse for a name or key that does not resolve is an honest not-found,
+		// not an error — the archive says what it does not hold and guides the user
+		// to how to list the chapters it does.
 		out, _, err = runRoot(t, bi, "recall", "--era", "era_nope")
 		require.NoError(t, err)
-		assert.Contains(t, out, "No era found")
+		assert.Contains(t, out, "by name or key")
+		assert.Contains(t, out, "lucid era list")
 	})
 }
 
