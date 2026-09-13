@@ -105,7 +105,7 @@ The cross-cutting principles below bind all three tables.
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
 |---|---------|-----------------|----------------------|------------------|----------|
-| P-1 | `/person <name>` matches no `people/` record (by `display_name` or `aka[]`) | Return the empty state; never guess. | "No one by that name yet — people appear here as you mention them." | None (read-only). | User checks spelling or mentions the person in an entry. |
+| P-1 | `/person <name-or-key>` matches no live `people/` record — the query is **neither an exact `person_key`** (a tombstone key resolves forward to its canonical record) **nor** a `display_name`/`aka[]` form. Key resolution is tried first, then name/aka — the same subject resolution the write verbs use, so read and write accept the same identifiers. | Return the empty state; never guess. | "No one by that name yet — people appear here as you mention them." | None (read-only). | User checks spelling, supplies the `person_key`, or mentions the person in an entry. |
 | P-2 | `<name>` matches more than one person record | List the candidates by display name and first-seen date; render nothing else. | "That matches more than one person — which did you mean: <list>?" | None. | User re-runs with a disambiguated name. |
 | P-3 | The matched person is named in the off-limits registry | Render the view with a standing header note; inference-derived material is absent by construction (the person was redacted from every agent slice, so no insight or proposal references them). | "<name> is off-limits to inference — what follows is your raw record only: mentions and dates, nothing derived." | None. | (none — this is designed behavior, not a failure) |
 
