@@ -350,3 +350,126 @@ func TestPerson_OffLimits_NoLinkedMediaLine(t *testing.T) {
 	assert.True(t, res.OffLimits)
 	assert.NotContains(t, res.Text, "Media linked to them", "an off-limits person surfaces nothing derived")
 }
+
+// TestPerson_ByPersonKey proves the read path (/person) accepts an exact
+// person_key as an identifier, key-first, mirroring the write path's
+// resolvePersonSubject: a canonical key renders the full view byte-identically
+// to a name lookup (S-22), a tombstone key resolves forward to its canonical, an
+// off-limits key still gets the §P-3 redacted view, an unknown key falls through
+// to the §P-1 empty state, and genuine display_name/aka lookups are unchanged.
+func TestPerson_ByPersonKey(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "canonical key renders full view",
+			run: func(t *testing.T) {
+				r, a, _ := newBootedRouter(t)
+				rawID := "raw_2026_05_05_19_42"
+				key := seedPerson(t, a, "M.", rawID, personSeedTime())
+				// An accepted insight citing rawID gives the full view derived content.
+				seedInsight(t, a, personSeedTime(), "I go quiet when M. is in the room.")
+
+				byKey, err := r.Person(PersonRequest{Name: key})
+				require.NoError(t, err)
+				require.True(t, byKey.Matched, "an exact person_key resolves to the record")
+				assert.Equal(t, key, byKey.PersonKey)
+				assert.Contains(t, byKey.Text, "Referenced by accepted insights", "the key path renders the full derived join")
+
+				byName, err := r.Person(PersonRequest{Name: "M."})
+				require.NoError(t, err)
+				require.True(t, byName.Matched)
+				// S-22: resolving by key renders the exact same bytes as by name.
+				assert.Equal(t, byName.Text, byKey.Text, "key lookup is byte-identical to name lookup")
+			},
+		},
+		{
+			name: "tombstone key resolves forward",
+			run: func(t *testing.T) {
+				r, a, home := newBootedRouter(t)
+				keyAlex := seedPerson(t, a, "Alex", "raw_2026_05_05_19_42", personSeedTime())
+				keyAndy := seedPerson(t, a, "Andy", "raw_2026_05_06_08_10", personSeedTime().Add(24*time.Hour))
+				require.NotEqual(t, keyAlex, keyAndy)
+
+				// Merge Andy → Alex: the canonical absorbs the form; Andy's slug is a
+				// redirect tombstone forwarding to the canonical.
+				writePersonFile(t, home, keyAlex, "Alex", []string{"Alex", "Andy"}, personSeedTime())
+				writeTombstone(t, home, keyAndy, "Andy", keyAlex, personSeedTime().Add(24*time.Hour))
+
+				res, err := r.Person(PersonRequest{Name: keyAndy})
+				require.NoError(t, err)
+				assert.True(t, res.Matched, "the tombstone key resolves forward to the canonical")
+				assert.Equal(t, keyAlex, res.PersonKey, "read follows the redirect just as the write path does")
+			},
+		},
+		{
+			name: "off-limits key renders redacted view",
+			run: func(t *testing.T) {
+				r, a, _ := newBootedRouter(t)
+				rawID := "raw_2026_05_05_19_42"
+				key := seedPerson(t, a, "M.", rawID, personSeedTime())
+				seedArtifactMentioning(t, a, rawID, "M.", key, personSeedTime())
+				seedInsight(t, a, personSeedTime(), "I go quiet when M. is in the room.")
+				require.NoError(t, a.WriteOffLimitsPersonKeys([]string{key}))
+
+				res, err := r.Person(PersonRequest{Name: key})
+				require.NoError(t, err)
+				require.True(t, res.Matched)
+				assert.True(t, res.OffLimits, "a key-resolved off-limits person still gets the §P-3 gate")
+				assert.Contains(t, res.Text, "off-limits to inference")
+				// No derived material leaks through the redaction.
+				assert.NotContains(t, res.Text, "accepted insights")
+				assert.NotContains(t, res.Text, "worth a look")
+			},
+		},
+		{
+			name: "unknown key returns empty state",
+			run: func(t *testing.T) {
+				r, _, _ := newBootedRouter(t)
+				// A key-shaped string that names no record falls through to the name
+				// match and yields the §P-1 empty state.
+				res, err := r.Person(PersonRequest{Name: "person_z-nobody"})
+				require.NoError(t, err)
+				assert.False(t, res.Matched)
+				assert.Equal(t, personNoMatch, res.Text)
+			},
+		},
+		{
+			name: "name lookup unchanged",
+			run: func(t *testing.T) {
+				r, _, home := newBootedRouter(t)
+				writePersonFile(t, home, "person_n-nadia", "Nadia", []string{"Nadia", "Nad"}, personSeedTime())
+
+				byName, err := r.Person(PersonRequest{Name: "Nadia"})
+				require.NoError(t, err)
+				assert.True(t, byName.Matched, "display_name lookup still matches")
+
+				byAka, err := r.Person(PersonRequest{Name: "Nad"})
+				require.NoError(t, err)
+				assert.True(t, byAka.Matched, "aka lookup still matches")
+			},
+		},
+		{
+			name: "key wins over a key-shaped display name",
+			run: func(t *testing.T) {
+				r, a, home := newBootedRouter(t)
+				// A real person; their person_key is the identifier we resolve.
+				key := seedPerson(t, a, "M.", "raw_2026_05_05_19_42", personSeedTime())
+				// A second, unrelated record whose display_name literally equals that key.
+				writePersonFile(t, home, "person_d-decoy", key, []string{key}, personSeedTime())
+
+				res, err := r.Person(PersonRequest{Name: key})
+				require.NoError(t, err)
+				require.True(t, res.Matched)
+				// Key-first precedence: the exact person_key wins over the decoy whose
+				// display_name equals that string (mirrors resolvePersonSubject).
+				assert.Equal(t, key, res.PersonKey)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, tc.run)
+	}
+}

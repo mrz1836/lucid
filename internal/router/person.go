@@ -45,16 +45,29 @@ type PersonRequest struct {
 	Name string
 }
 
-// Person executes /person <name>: a deterministic, no-LLM join over the people
-// record, its mention counts, the accepted insights that cite entries
+// Person executes /person <name-or-key>: a deterministic, no-LLM join over the
+// people record, its mention counts, the accepted insights that cite entries
 // mentioning them, and its dominance share (agent-contracts.md §"How contracts
-// compose"; scope.md §4). It never calls a model and never writes. No match
-// returns the empty state (§P-1); several matches list the candidates (§P-2); a
-// match named in the off-limits registry renders the raw record only, behind
-// the standing header, with nothing derived (§P-3). The output is byte-stable
-// across repeated runs on the same store (S-22).
+// compose"; scope.md §4). It never calls a model and never writes. Resolution is
+// key-first: an exact person_key wins (a tombstone key resolves forward to its
+// canonical), mirroring resolvePersonSubject so the read and write paths accept
+// the same identifiers; otherwise the query is matched against display_name /
+// aka[]. No match returns the empty state (§P-1); several name matches list the
+// candidates (§P-2); a match named in the off-limits registry renders the raw
+// record only, behind the standing header, with nothing derived (§P-3). The
+// output is byte-stable across repeated runs on the same store (S-22).
 func (r *Router) Person(req PersonRequest) (PersonResult, error) {
 	query := strings.TrimSpace(req.Name)
+
+	// Key-first: an exact person_key wins (a tombstone resolves forward to its
+	// canonical), mirroring resolvePersonSubject so read and write accept the same
+	// identifiers. A non-key query falls through to display_name/aka matching.
+	if rec, ok, err := r.exactKeySubject(query); err != nil {
+		return PersonResult{}, err
+	} else if ok {
+		return r.renderPerson(query, rec)
+	}
+
 	matches, err := r.matchPeople(query)
 	if err != nil {
 		return PersonResult{}, err

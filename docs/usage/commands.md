@@ -1746,7 +1746,12 @@ lucid person reconcile [--json]
 the accepted insights citing entries that mention them, and a dominance line. Pure
 **read** — it never calls a model and never writes, and the output is byte-stable
 across repeated runs on the same store (S-22). Names may contain spaces (trailing
-arguments are joined). It **always exits `0`**: a no-match (§P-1), several matches
+arguments are joined). An exact `person_key` is **also a valid lookup identifier** —
+resolved before `display_name`/`aka[]` (a tombstone key resolving forward to its
+canonical record), so `lucid person <person_key>` prints that person's view rather
+than the §P-1 empty state. This is the same subject resolution the write verbs use
+([§"Resolving a subject"](#resolving-a-subject)), so read and write accept the same
+identifiers. It **always exits `0`**: a no-match (§P-1), several matches
 (§P-2, candidates listed), a single match, and an off-limits person (§P-3, raw record
 only — mentions and dates, nothing derived) are all read outcomes carried in the
 result, never errors. `--json` emits `{query, matched, multiple_matches,
