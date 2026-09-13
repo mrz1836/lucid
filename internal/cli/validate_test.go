@@ -163,3 +163,33 @@ func TestValidateCLI_SweepsEveryRecordFamily(t *testing.T) {
 	assert.Contains(t, out, "validate: clean")
 	assert.NotContains(t, out, "skipped: schema check", "the schema sweep ran over the seeded records")
 }
+
+// TestValidateCLI_AfterPersonCreate is the end-to-end gate for the deliberate,
+// model-free person-creation path: `person create` mints a canonical record
+// through the command tree, and `validate` then sweeps it clean. Unlike
+// TestValidateCLI_SweepsEveryRecordFamily (which seeds via the extractive
+// UpdatePerson path), this exercises the deliberate-creation command itself, so
+// a never-mentioned record — empty entry_refs, a single creation-instant
+// seen-window, aka:[display_name] — is proven schema-valid at the CLI boundary.
+func TestValidateCLI_AfterPersonCreate(t *testing.T) {
+	isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "init")
+	require.NoError(t, err)
+
+	// Mint a person deliberately, create-then-enrich in one call, no model.
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"},
+		"person", "create", "Sam Rivera", "--relationship", "colleague", "--dob", "1990-04-12")
+	require.NoError(t, err)
+
+	// The schema sweep reads the deliberately-created record and finds it valid.
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate")
+	require.NoError(t, err)
+	assert.Contains(t, out, "validate: clean")
+	assert.NotContains(t, out, "skipped: schema check", "the schema sweep ran over the created record")
+
+	// The record is readable back by its display name, rendered with no zero-time.
+	look, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "Sam Rivera")
+	require.NoError(t, err)
+	assert.Contains(t, look, "Sam Rivera")
+	assert.Contains(t, look, "Mentioned in 0 entries")
+}
