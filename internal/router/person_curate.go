@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -319,6 +320,84 @@ func valueOrCleared(v string) string {
 		return "cleared"
 	}
 	return v
+}
+
+// PersonCreateRequest is one `lucid person create` intent: deliberately mint a
+// person record without a model pass. Name is the display name to record; the
+// optional durable fields mirror `set` (a nil field was not given and is left
+// off; a non-nil pointer to "" clears it) so a contact can be minted and
+// enriched in one call. Now is the creation instant stamped into the seen-window
+// (a zero time falls back to the wall clock).
+type PersonCreateRequest struct {
+	Name         string
+	Dob          *string
+	Relationship *string
+	Note         *string
+	Now          time.Time
+}
+
+// PersonCreateResult reports the minted (or already-recorded) canonical record,
+// whether this call created it, and the inventory-only ack.
+type PersonCreateResult struct {
+	Record  storage.PersonRecord
+	Created bool
+	Ack     string
+}
+
+// PersonCreate executes `lucid person create <name> [--dob --relationship
+// --note]`: deliberately mint a canonical person without an LLM pass — the
+// model-free counterpart to extraction's people mint (data-model.md §"People
+// references"). Unlike `set`, it mints identity, so it never resolves an
+// existing subject: a blank name is a §P-9 input rejection and a dob that is not
+// a civil YYYY-MM-DD is rejected before any write. Creating a name whose derived
+// (or redirect-resolved) key already names a live record is an idempotent no-op —
+// exit 0, an "already recorded" ack, Created=false — and the durable fields are
+// left untouched (enriching an already-recorded person stays `set`'s job; A1).
+// It takes no [provider.Provider] argument: the create path never reaches
+// internal/provider, so it is model-free by construction (P9).
+func (r *Router) PersonCreate(req PersonCreateRequest) (PersonCreateResult, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return PersonCreateResult{}, rejectPerson(ErrPersonRejected,
+			"a person name is required; nothing was saved.")
+	}
+	if req.Dob != nil && *req.Dob != "" && !storage.ValidCivilDate(*req.Dob) {
+		return PersonCreateResult{}, rejectPerson(ErrPersonRejected,
+			"could not read the date of birth %q (want YYYY-MM-DD); nothing was saved.", *req.Dob)
+	}
+	rec, created, err := r.store.CreatePerson(name, whenOr(req.Now), storage.PersonPatch{
+		Dob:          req.Dob,
+		Relationship: req.Relationship,
+		Notes:        req.Note,
+	})
+	if err != nil {
+		return PersonCreateResult{}, fmt.Errorf("person: create: %w", err)
+	}
+	return PersonCreateResult{Record: rec, Created: created, Ack: personCreateAck(rec, req, created)}, nil
+}
+
+// personCreateAck builds the inventory ack for a create: a plain "Recorded" line
+// when a fresh record is minted (listing the durable fields, in a fixed order,
+// when any were given), or an "already recorded" no-op ack when the name was
+// already on file — the ack is how a caller distinguishes the two outcomes.
+func personCreateAck(rec storage.PersonRecord, req PersonCreateRequest, created bool) string {
+	if !created {
+		return fmt.Sprintf("%q is already recorded — nothing to create.", rec.DisplayName)
+	}
+	parts := make([]string, 0, 3)
+	if req.Dob != nil {
+		parts = append(parts, "dob "+valueOrCleared(*req.Dob))
+	}
+	if req.Relationship != nil {
+		parts = append(parts, "relationship "+valueOrCleared(*req.Relationship))
+	}
+	if req.Note != nil {
+		parts = append(parts, "note "+valueOrCleared(*req.Note))
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("Recorded %q.", rec.DisplayName)
+	}
+	return fmt.Sprintf("Recorded %q: %s.", rec.DisplayName, strings.Join(parts, ", "))
 }
 
 // PersonOffLimitsRequest is one `lucid person off-limits` intent: toggle P-3
