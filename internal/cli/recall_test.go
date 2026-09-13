@@ -228,8 +228,10 @@ func TestRecall_AmbiguousNamePrompt(t *testing.T) {
 
 	a := storage.New(home)
 	for _, step := range []struct{ key, name string }{
-		{keyA, "wild summer"}, {keyA, "summer of 2009"},
-		{keyB, "wild summer"}, {keyB, "summer of 2011"},
+		{keyA, "wild summer"},
+		{keyA, "summer of 2009"},
+		{keyB, "wild summer"},
+		{keyB, "summer of 2011"},
 	} {
 		_, err := a.UpdateRegistry(observations.RegistryEra, step.key,
 			observations.RegistryPatch{DisplayName: step.name, At: "2026-01-02T15:04:05Z"})

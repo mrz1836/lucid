@@ -277,14 +277,14 @@ func TestEraRange_DelegatesToEraSpan(t *testing.T) {
 		"the spaced en-dash form is gone")
 }
 
-// renameRegistry patches a registry record's display name in place through the
+// renameRegistry patches an era record's display name in place through the
 // UpdateRegistry seam, folding the prior name into aka[]. The public write verbs
 // derive the key from the name, so they cannot rename a record to a new display
 // name at a stable key — this seam is the only way to construct the
 // rename-history aka[] fixtures the resolver's aka/ambiguity paths need.
-func renameRegistry(t *testing.T, a *storage.Adapter, kind, key, newName string) {
+func renameRegistry(t *testing.T, a *storage.Adapter, key, newName string) {
 	t.Helper()
-	_, err := a.UpdateRegistry(kind, key, observations.RegistryPatch{
+	_, err := a.UpdateRegistry(observations.RegistryEra, key, observations.RegistryPatch{
 		DisplayName: newName,
 		At:          fixedNow().Format(time.RFC3339),
 	})
@@ -339,7 +339,7 @@ func TestRecall_ResolvesByAka(t *testing.T) {
 	r, a, _ := bootedMemoryRouter(t)
 	era, err := r.WriteEra(EraWriteRequest{Name: "wild summer", Now: fixedNow()})
 	require.NoError(t, err)
-	renameRegistry(t, a, observations.RegistryEra, era.Key, "high summer")
+	renameRegistry(t, a, era.Key, "high summer")
 
 	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: "wild summer", Now: fixedNow()})
 	require.NoError(t, err)
@@ -397,10 +397,10 @@ func TestRecall_AmbiguousName(t *testing.T) {
 	// distinct current name, so both records retain "wild summer" in aka[] — the
 	// only way two eras can collide (a rename-history overlap; same-name eras
 	// share a derived key and so cannot coexist).
-	renameRegistry(t, a, observations.RegistryEra, eraA.Key, "wild summer")
-	renameRegistry(t, a, observations.RegistryEra, eraA.Key, "summer of 2009")
-	renameRegistry(t, a, observations.RegistryEra, eraB.Key, "wild summer")
-	renameRegistry(t, a, observations.RegistryEra, eraB.Key, "summer of 2011")
+	renameRegistry(t, a, eraA.Key, "wild summer")
+	renameRegistry(t, a, eraA.Key, "summer of 2009")
+	renameRegistry(t, a, eraB.Key, "wild summer")
+	renameRegistry(t, a, eraB.Key, "summer of 2011")
 
 	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: "wild summer", Now: fixedNow()})
 	require.NoError(t, err)
