@@ -149,3 +149,100 @@ func assertReceiptJSON(t *testing.T, out, prose, ridPrefix string) {
 			"stdout under --json must not carry the human ack marker %q", prose)
 	}
 }
+
+// TestWriteVerbsJSON_Inner is the reframe/focus half of the write-verb --json
+// contract (AC-10, AC-11, AC-13). Each inner-work write verb routes through the
+// same emitReceipt choke point, so under --json it emits the bare
+// {receipt_id, logical_date} object with no prose ack; the focus retire row
+// proves the retirement event's own id + day is the receipt.
+func TestWriteVerbsJSON_Inner(t *testing.T) {
+	cases := []writeVerbJSONCase{
+		{
+			name:      "reframe add",
+			prose:     "Added reframe",
+			ridPrefix: "reframe_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				return []string{"reframe", "add", "catch", "flip"}
+			},
+		},
+		{
+			name:      "focus add",
+			prose:     "Added focus",
+			ridPrefix: "focus_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				return []string{"focus", "add", "work-on"}
+			},
+		},
+		{
+			name:      "focus retire",
+			prose:     "Retired",
+			ridPrefix: "focus_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "focus", "add", "work-on")
+				require.NoError(t, err)
+				return []string{"focus", "retire", resolveFocusID(t)}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(tc.setup(t), "--json")
+			out, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+			require.NoError(t, err)
+
+			assertReceiptJSON(t, out, tc.prose, tc.ridPrefix)
+		})
+	}
+}
+
+// resolveFocusID reads back the single seeded focus item's id from
+// `focus list --json`, the same way focus_test.go resolves a retire target.
+func resolveFocusID(t *testing.T) string {
+	t.Helper()
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "focus", "list", "--json")
+	require.NoError(t, err)
+	var listed struct {
+		Focus []struct {
+			ID string `json:"id"`
+		} `json:"focus"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &listed))
+	require.NotEmpty(t, listed.Focus, "expected a seeded focus item to retire")
+	return listed.Focus[0].ID
+}
+
+// TestModeJSON_EmitsModeShape pins mode's minimal --json shape (AC-12, AC-13):
+// mode mints no receipt, so --json emits the bare {mode: …} object with no
+// receipt_id, and the human prose never leaks onto stdout.
+func TestModeJSON_EmitsModeShape(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "yellow", "--json")
+	require.NoError(t, err)
+	require.True(t, json.Valid([]byte(out)), "stdout must be valid JSON under --json, got: %q", out)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.Equal(t, "yellow", payload["mode"])
+	assert.NotContains(t, payload, "receipt_id", "mode mints no receipt")
+	assert.NotContains(t, out, "Mode set to")
+}
+
+// TestModeJSON_RejectExitParity proves a rejected write under --json keeps the
+// same non-zero exit and writes nothing to stdout — diagnostics stay on stderr
+// (AC-15). An invalid mode name (purple) is the parity case: --json must never
+// turn a rejection into an empty-but-successful JSON object.
+func TestModeJSON_RejectExitParity(t *testing.T) {
+	isolatedHome(t)
+
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "purple", "--json")
+	require.ErrorIs(t, err, errModeNotAccepted)
+	assert.Equal(t, ExitErr, exitCodeForError(err))
+	assert.Empty(t, out, "a rejected write writes nothing to stdout under --json")
+	assert.Contains(t, errOut, "Mode must be one of green, yellow, or red.")
+}
