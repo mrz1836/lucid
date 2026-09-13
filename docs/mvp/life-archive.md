@@ -285,8 +285,17 @@ surfaced item carrying its **source context**:
 `RecallRequest{dimension: "era" | "thread" | "injury" | "pet" | "", key}` →
 items that each carry `SupportingEntryIDs` (the raw/observation ids
 behind them) and `source` provenance. A bare request (no dimension)
-returns an index of eras, threads, injuries, and pets. Like §6 it reads
-only through router projection seams and writes nothing, and it
+returns an index of eras, threads, injuries, and pets. The `key` field
+resolves by **name or key**: a human name (case-insensitive, matched
+against the referent's `DisplayName` and its rename-history `Aka`
+spellings) or the opaque registry key — the same "refer to it the human
+way" contract `lucid person <name>` already offers, so the four
+registry-backed dimensions all resolve consistently. A name that
+resolves nothing returns a guided not-found (pointing at the relevant
+discovery command); a name that matches **more than one** referent
+returns a disambiguation that lists the candidates with their keys and
+browses none, mirroring the `lucid person <name>` read path. Like §6 it
+reads only through router projection seams and writes nothing, and it
 degrades to an honest empty result on a thin or missing store. **No
 surfaced item is uncited** — the source-context ids are the browse's
 contract, so the same projection-only reads are consumable by the

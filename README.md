@@ -300,7 +300,7 @@ gate, `2` usage / flag-parse error.
 | `reflect [gate]` | — | Recall your validated insights; never proposes a new pattern. |
 | `reflect week` | `--days` `--since` `--week` | Read-only weekly deep-dive since your last reflection. `reflect week apply` persists a candidate through the resonance gate (JSON on stdin); `reflect week close` stamps the cursor. |
 | `ask <question…>` | — | Grounded, cited Q&A across your validated insights and reflections. |
-| `recall` | `--era` `--injury` `--thread` `--pet` | Browse the archive by era, thread, injury, or pet (never writes). |
+| `recall` | `--era` `--injury` `--thread` `--pet` | Browse the archive by era, thread, injury, or pet — each flag takes a **name or key** (case-insensitive, alias-aware) (never writes). |
 | `gallery` | `--since` `--until` `--to` | Browse stored media as a date-ordered timeline for before/after comparison — filterable by an inclusive date window and/or one linked subject (never writes). |
 | `excavate` | — | Select the next memory cluster to excavate (never writes). |
 | `person <name>` | — | Look up a person you've mentioned. |
