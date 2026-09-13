@@ -17,9 +17,20 @@ this reference stays the precise baseline.
 ## Global conventions
 
 - **`--json`** is a persistent flag on every command: *"Emit machine-readable
-  JSON output where supported."* Commands that have a JSON shape emit it; the
-  purely human-first ones (`mode`, `log`, `closeout`, `obs`) ignore it and print
-  prose.
+  JSON output."* Read verbs emit their structured shape, and the **write verbs
+  emit a receipt**. The write verbs `log`, `closeout` (plus its `amend` /
+  `backfill` sub-forms), `obs`, `reframe add`, `focus add`, and `focus retire`
+  emit a bare snake_case object on stdout carrying two string fields:
+  `receipt_id` (the write's id) and `logical_date` (the day it belongs to, in
+  `YYYY-MM-DD` form). For `closeout skip` and an idempotent `closeout` — which
+  write no new raw entry — `receipt_id` carries the returned day-record id, so
+  it is always populated. `mode` is the one exception: it produces no receipt,
+  so it emits the minimal, string-valued shape `{"mode": "<green|yellow|red>"}`
+  (no `receipt_id`, no `logical_date`). The verbs that already emitted JSON
+  (`memory`, `attach`, `injury` / `thread` / `era` / `pet`, `gratitude`,
+  `retro park`) keep their own existing keys unchanged. In every case stdout
+  carries JSON only — diagnostics stay on stderr — so a `--json` stream is
+  always parseable.
 - **Exit codes** (stable, so scripts and supervised ops can branch on them):
 
   | Code | Meaning |
@@ -159,7 +170,9 @@ lucid log [text] [--day <date>]
 
 Capture `text` as one immutable raw entry under `~/.lucid/raw/`, with a
 sub-second acknowledgement. Capture-only: nothing is written under `processed/`
-or `insights/`. Scaffolds on first use.
+or `insights/`. Scaffolds on first use. Under `--json`, `log` emits the
+`{receipt_id, logical_date}` receipt instead of the prose ack (`receipt_id` is
+the raw entry's id).
 
 | Flag | Effect |
 |------|--------|
@@ -319,9 +332,12 @@ is something else.
 lucid closeout [today|skip|backfill] [compact form...] [--day <date>]
 ```
 
-Record the day's committed practice. Deterministic, agent-free, prose output.
-This one command writes both the Engine day record (`engine/days/…`) and the
-Mirror journal line (`raw/…`), then rebuilds `engine/status.json`. Sub-forms:
+Record the day's committed practice. Deterministic, agent-free. Prints a prose
+ack by default; under `--json` it emits the `{receipt_id, logical_date}` receipt
+(for `skip` and an idempotent close-out, which write no new raw entry,
+`receipt_id` is the returned day-record id). This one command writes both the
+Engine day record (`engine/days/…`) and the Mirror journal line (`raw/…`), then
+rebuilds `engine/status.json`. Sub-forms:
 
 | Form | Meaning |
 |------|---------|
@@ -363,7 +379,10 @@ lucid mode <green|yellow|red> [--day <date>]
 Declare today's Engine mode: `green` (full), `yellow` (reduced), `red`
 (floor-only). Fixed at the bell — a declaration *after* today's bell time, or an
 invalid name, is rejected (prints the fixed copy, exits `1`). First declaration
-of the day wins. Human-first prose; ignores `--json`.
+of the day wins. Prints a prose ack by default; under `--json` it emits the
+minimal `{"mode": "<green|yellow|red>"}` shape (no receipt id or logical day,
+since a mode declaration produces no receipt). A rejected declaration is
+unchanged — the fixed copy goes to stderr, exit `1`, and stdout stays empty.
 
 | Flag | Effect |
 |------|--------|
@@ -645,6 +664,9 @@ so an unrecognized token is left in the note as text and the observation is
 written regardless. A colon-less four-digit token in prose is still a clock time
 (`lucid obs ate eggs @2014` → today at 20:14), while `--day 2014` is the year.
 
+Under `--json`, `obs` emits the `{receipt_id, logical_date}` receipt instead of
+the prose ack (`receipt_id` is the observation's event id).
+
 ```sh
 lucid obs pain 6 knee aching after the run
 lucid obs bm 4
@@ -674,8 +696,8 @@ surface-state rotation): [`../reframes.md`](../reframes.md).
 - **`add <catch> <flip>`** appends one immutable entry and prints its
   receipt id (`reframe_<logical_date>_<seq>`). Both arguments are required
   and stored verbatim; an empty `catch` or `flip` is a usage error and
-  nothing is written. Human-first — `add` ignores `--json` like `log` and
-  `obs`.
+  nothing is written. `add` prints its receipt id as prose by default; under
+  `--json` it emits the `{receipt_id, logical_date}` receipt.
 - **`list`** reads the stored reframes (corrections folded, superseded
   entries omitted) and prints them; `--json` emits the structured list.
 - **`surface`** returns **exactly one** reframe for the logical day and
@@ -720,8 +742,9 @@ retirement event, and the surface-state rotation):
 - **`add <text>`** appends one immutable **active** entry and prints its receipt
   id (`focus_<logical_date>_<seq>`). `text` is required and stored verbatim; an
   empty `text` is a usage error and nothing is written. `--success <criterion>`
-  is optional and stored verbatim — it is never synthesized. Human-first —
-  `add` ignores `--json` like `log`, `obs`, and `reframe`.
+  is optional and stored verbatim — it is never synthesized. `add` prints its
+  receipt id as prose by default; under `--json` it emits the
+  `{receipt_id, logical_date}` receipt.
 - **`list`** reads the stored focus items (retirement events folded, retired
   entries omitted) and prints the **active** items; `--all` (alias
   `--include-retired`) adds the retired ones as an audit view; `--json` emits
@@ -736,7 +759,9 @@ retirement event, and the surface-state rotation):
   leaves `surface` and the default `list`, but stays in `list --all`. Retiring
   an unknown or already-retired id is a clean error and appends nothing. This is
   the audit-preserving deactivation a weekly KEEP/SWAP/ADD pass uses (a SWAP is
-  a `retire` of the old + an `add` of the new), never a delete.
+  a `retire` of the old + an `add` of the new), never a delete. Under `--json`,
+  `retire` emits the `{receipt_id, logical_date}` receipt (the retirement
+  event's id and day).
 
 State is a fold, never a mutation: nothing is deleted or rewritten. To bring a
 work-on back, `add` it again as a fresh active item; the retired original stays
@@ -850,7 +875,8 @@ canonical-key seam): [`../gratitude.md`](../gratitude.md).
   canonical-key only: two phrasings that normalize equal land on the same entry;
   differing wordings land on different entries (matching "my house" to a stored
   "a roof over my head" is **R-011**, not this — see `../gratitude.md` §7).
-  Human-first — `add` ignores `--json` like `log` and `obs`.
+  Unlike the write verbs fixed alongside this, `gratitude add` **already emits JSON**
+  under `--json` — its own `receipt` / `id` / `count` keys, unchanged.
 - **`add <thing> --into <id>`** bumps a **specific** entry by its stable id
   (`gratitude_<slug>`, shown by `list`) regardless of tonight's wording — the
   interim by-meaning path the agent drives until R-011. The new wording is

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,15 +83,20 @@ func TestModeCLI_BootError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestModeCLI_IgnoresJSON: mode is not a script-facing surface, so --json is
-// ignored — the human prose is still what prints.
-func TestModeCLI_IgnoresJSON(t *testing.T) {
+// TestModeCLI_JSON: mode honors --json with its minimal {mode} shape — no
+// receipt id / logical day, since mode mints no receipt — and the human prose
+// no longer leaks onto stdout.
+func TestModeCLI_JSON(t *testing.T) {
 	isolatedHome(t)
 	withClock(t, afternoon())
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "mode", "yellow", "--json")
 	require.NoError(t, err)
-	assert.Contains(t, out, "Mode set to yellow")
-	assert.NotContains(t, out, "{")
+	require.True(t, json.Valid([]byte(out)), "stdout must be valid JSON under --json, got: %q", out)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.Equal(t, "yellow", payload["mode"])
+	assert.NotContains(t, out, "Mode set to")
 }
 
 // TestModeCLI_GapFillsPastDay: `--day` fills a mode on a past day that carries

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -51,8 +50,9 @@ func newFocusCmd() *cobra.Command {
 // so an unquoted work-on works alongside a quoted one); --success carries an
 // optional criterion, stored verbatim and never synthesized. --day is the strict
 // backdating tier — a bad token or a future day is a clean refusal that writes
-// nothing, printed to stderr like the observation micro-log's --day. It ignores
-// --json (a write verb, same as `log`/`reframe`).
+// nothing, printed to stderr like the observation micro-log's --day. Under
+// --json it emits the shared {receipt_id, logical_date} receipt through
+// emitReceipt (a write verb, same as `log`/`reframe`).
 func newFocusAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <text>",
@@ -88,8 +88,7 @@ func newFocusAddCmd() *cobra.Command {
 			if err != nil {
 				return emitRefusedDay(cmd, err)
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-			return nil
+			return emitReceipt(cmd, res.Focus.ID, res.Focus.LogicalDate, res.Ack)
 		},
 	}
 	cmd.Flags().String(flagFocusSuccess, "", "Optional success criterion for the focus item")
@@ -170,8 +169,7 @@ func newFocusRetireCmd() *cobra.Command {
 			if err != nil {
 				return emitErr(cmd, err)
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-			return nil
+			return emitReceipt(cmd, res.Focus.ID, res.Focus.LogicalDate, res.Ack)
 		},
 	}
 }

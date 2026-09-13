@@ -173,14 +173,20 @@ func applyJournalOverride(parsed, override string, present bool) (string, error)
 	return override, nil
 }
 
-// runCloseout executes a close-out request and prints its ack.
+// runCloseout executes a close-out request and renders its receipt.
 func runCloseout(cmd *cobra.Command, r *router.Router, req router.CloseoutRequest) error {
 	res, err := r.Closeout(req)
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-	return nil
+	// A `skip` (and an already-recorded idempotent close-out) writes no journal
+	// raw entry, so RawID is empty; the day-record id is the stable receipt in
+	// that case, so --json never emits an empty receipt_id.
+	id := res.RawID
+	if id == "" {
+		id = res.DayID
+	}
+	return emitReceipt(cmd, id, res.LogicalDate, res.Ack)
 }
 
 // runCloseoutAmend backs `lucid closeout amend --day <grammar> --journal-file
@@ -215,8 +221,7 @@ func runCloseoutAmend(cmd *cobra.Command, r *router.Router, args []string, now t
 	if err != nil {
 		return emitErr(cmd, err)
 	}
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-	return nil
+	return emitReceipt(cmd, res.NewRawID, res.LogicalDate, res.Ack)
 }
 
 // runPositionalBackfill parses an optional leading target then executes the
@@ -343,8 +348,7 @@ func runBackfill(
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-	return nil
+	return emitReceipt(cmd, res.RawID, res.LogicalDate, res.Ack)
 }
 
 // parseBackfillDate resolves an explicit YYYY-MM-DD backfill target in the

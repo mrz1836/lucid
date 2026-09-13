@@ -12,10 +12,12 @@ import (
 	"github.com/mrz1836/lucid/internal/router"
 )
 
-// jsonFlag is the persistent flag name that switches supported
-// commands (status, day, export, validate, version) into
-// machine-readable output. Human-first prose is the default so
-// automation never scrapes formatted text (ADR-0007).
+// jsonFlag is the persistent flag name that switches supported commands into
+// machine-readable output: the read models (status, day, export, validate,
+// version) emit their view, and the write verbs (log, closeout, obs, reframe,
+// focus) emit a {receipt_id, logical_date} receipt through emitReceipt.
+// Human-first prose is the default so automation never scrapes formatted text
+// (ADR-0007).
 const jsonFlag = "json"
 
 // writeJSON marshals v as indented JSON to w with a trailing newline.
@@ -75,5 +77,28 @@ func emit(cmd *cobra.Command, jsonPayload any, lines []string) error {
 	for _, line := range lines {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), line)
 	}
+	return nil
+}
+
+// writeReceiptView is the machine shape a write verb returns under --json: the
+// receipt id and the logical day it landed on, a bare snake_case object with no
+// {ok,data} envelope (ADR-0007). It is the newly-conformant write verbs' common
+// contract (log, closeout, obs, reframe, focus); the verbs that already emitted
+// JSON keep their own keys untouched.
+type writeReceiptView struct {
+	ReceiptID   string `json:"receipt_id"`
+	LogicalDate string `json:"logical_date"`
+}
+
+// emitReceipt renders a write verb's result: the {receipt_id, logical_date}
+// JSON view on stdout under --json, else the human ack unchanged. It is the
+// shared tail of the write verbs so the --json branch lives in one place and a
+// future write verb inherits conformance for free, the same way emit does for
+// the read models.
+func emitReceipt(cmd *cobra.Command, receiptID, logicalDate, ack string) error {
+	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+		return writeJSON(cmd.OutOrStdout(), writeReceiptView{ReceiptID: receiptID, LogicalDate: logicalDate})
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), ack)
 	return nil
 }

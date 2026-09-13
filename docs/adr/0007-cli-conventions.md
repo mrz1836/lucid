@@ -59,8 +59,11 @@ this build is explicitly meant to mature.
   Every diagnostic a graded `status` reports should name the command that
   fixes it. These verbs sit beside the ADR-0003 spine, recorded here.
 * **Output discipline:** human-first output by default; a
-  machine-readable mode on the commands scripts need (`status`,
-  `day`, `export`, `validate`), so automation never scrapes prose.
+  machine-readable `--json` mode wherever automation reads or writes —
+  the inspection surfaces (`status`, `day`, `export`, `validate`) and
+  the write verbs, which emit a bare `{receipt_id, logical_date}`
+  receipt (`mode`, minting no receipt, emits `{mode}`) — so automation
+  never scrapes prose, from a read model or a write receipt.
 * Improvements made here flow back: shared patterns mature in the
   shared tools (`mage-x`, `go-foundation`), not in Lucid-local forks.
 

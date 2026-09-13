@@ -268,11 +268,12 @@ Every `lucid` command and flag, grouped by what you're doing. The daily loop is
 deterministic — no model, no network — so capture and the close-out never wait
 on a provider (P9).
 
-**Everywhere:** `--json` is persistent on every command (commands with a
-structured shape emit it; the human-first ones — `log`, `obs`, `mode`,
-`closeout` — print prose), and `-h` / `--help` works at every level. Exit codes
-are stable: `0` success, `1` runtime error or breached gate, `2` usage /
-flag-parse error.
+**Everywhere:** `--json` is persistent on every command — read verbs emit their
+structured shape and write verbs emit a receipt (`log`, `closeout`, `obs`,
+`reframe add`, and `focus add` / `retire` emit a bare `{receipt_id,
+logical_date}` object; `mode` emits `{mode}`) — and `-h` / `--help` works at
+every level. Exit codes are stable: `0` success, `1` runtime error or breached
+gate, `2` usage / flag-parse error.
 
 <br/>
 

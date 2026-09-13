@@ -231,6 +231,12 @@ are corrected afterward from the CLI, never conversationally: `lucid link` point
 an existing media at more subjects, `lucid unlink` retires a pair, and `lucid
 annotate` notes one — all append-only, and the stored binary is never touched.
 
+Under `--json` the write verbs emit a receipt, not prose: `log`, `closeout`
+(and its `amend` / `backfill`), `obs`, `reframe add`, and `focus add` / `retire`
+emit a bare `{receipt_id, logical_date}` JSON object on stdout, while `mode`
+emits the minimal `{mode}` shape. Diagnostics stay on stderr, so the `--json`
+stdout is always parseable.
+
 ## Verbatim passthrough on Engine verbs
 
 `closeout`, `mode`, and `status` are deterministic and agent-free. Relay their

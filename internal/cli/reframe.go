@@ -37,7 +37,8 @@ func newReframeCmd() *cobra.Command {
 // tokens are copied into the entry's tags (obs-parity, optional). `--day` is the
 // strict backdating tier — a bad token or a future day is a clean refusal that
 // writes nothing, printed to stderr like the observation micro-log's `--day`.
-// It ignores `--json` (a write verb, same as `log`/`obs`).
+// Under `--json` it emits the shared {receipt_id, logical_date} receipt through
+// emitReceipt (a write verb, same as `log`/`obs`).
 func newReframeAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <catch> <flip>",
@@ -71,8 +72,7 @@ func newReframeAddCmd() *cobra.Command {
 			if err != nil {
 				return emitRefusedDay(cmd, err)
 			}
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
-			return nil
+			return emitReceipt(cmd, res.Reframe.ID, res.Reframe.LogicalDate, res.Ack)
 		},
 	}
 	registerDayFlag(cmd)
