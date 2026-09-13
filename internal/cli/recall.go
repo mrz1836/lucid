@@ -66,11 +66,23 @@ type recallItemView struct {
 // so there is no id or wrote flag. `found` is false and `items` is empty on a
 // thin/missing store; `referent` is null for the bare index.
 type recallView struct {
-	Dimension string              `json:"dimension"`
-	Key       string              `json:"key"`
-	Found     bool                `json:"found"`
-	Referent  *recallReferentView `json:"referent"`
-	Items     []recallItemView    `json:"items"`
+	Dimension  string                `json:"dimension"`
+	Key        string                `json:"key"`
+	Found      bool                  `json:"found"`
+	Referent   *recallReferentView   `json:"referent"`
+	Items      []recallItemView      `json:"items"`
+	Ambiguous  bool                  `json:"ambiguous,omitempty"`
+	Candidates []recallCandidateView `json:"candidates,omitempty"`
+}
+
+// recallCandidateView is one row of an ambiguous-name disambiguation under
+// --json: the matching referent's opaque key and its display name, so a harness
+// can list the candidates and re-run with the exact key. It is emitted only on
+// the ambiguous outcome (candidates is omitted otherwise), keeping the ordinary
+// found/not-found/index JSON byte-stable for existing callers.
+type recallCandidateView struct {
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
 }
 
 // newRecallCmd wires `lucid recall`: the read-only recall/browse surface
@@ -102,10 +114,10 @@ func newRecallCmd() *cobra.Command {
 			return renderRecall(cmd, res)
 		},
 	}
-	cmd.Flags().StringVar(&era, recallFlagEra, "", "Browse the stories filed under an era, by its key")
-	cmd.Flags().StringVar(&thread, recallFlagThread, "", "Browse a thread, by its key")
-	cmd.Flags().StringVar(&injury, recallFlagInjury, "", "Browse an injury's record, by its key")
-	cmd.Flags().StringVar(&pet, recallFlagPet, "", "Browse a pet's record, by its key")
+	cmd.Flags().StringVar(&era, recallFlagEra, "", "Browse the stories filed under an era by name or key (name match is case-insensitive)")
+	cmd.Flags().StringVar(&thread, recallFlagThread, "", "Browse a thread by name or key (name match is case-insensitive)")
+	cmd.Flags().StringVar(&injury, recallFlagInjury, "", "Browse an injury's record by name or key (name match is case-insensitive)")
+	cmd.Flags().StringVar(&pet, recallFlagPet, "", "Browse a pet's record by name or key (name match is case-insensitive)")
 	cmd.MarkFlagsMutuallyExclusive(recallFlagEra, recallFlagThread, recallFlagInjury, recallFlagPet)
 	return cmd
 }
@@ -139,8 +151,11 @@ func renderRecall(cmd *cobra.Command, res router.RecallResult) error {
 
 	out := cmd.OutOrStdout()
 	switch {
+	case res.Ambiguous:
+		renderRecallAmbiguous(out, res)
+		return nil
 	case res.Dimension != "" && !res.Found:
-		_, _ = fmt.Fprintf(out, "No %s found for %q.\n", res.Dimension, res.Key)
+		_, _ = fmt.Fprintln(out, recallNotFound(res.Dimension, res.Key))
 		return nil
 	case res.Dimension == "" && !res.Found:
 		_, _ = fmt.Fprintln(out, recallEmpty)
@@ -156,6 +171,49 @@ func renderRecall(cmd *cobra.Command, res router.RecallResult) error {
 		renderRecallItem(out, it)
 	}
 	return nil
+}
+
+// renderRecallAmbiguous prints the disambiguation prompt for a name that matched
+// more than one referent — the candidates listed by display name and opaque key,
+// browsing none, mirroring the `lucid person <name>` read path so the user can
+// re-run with the exact key they meant. It is a read outcome, not an error, so
+// the command still exits 0.
+func renderRecallAmbiguous(out io.Writer, res router.RecallResult) {
+	options := make([]string, 0, len(res.Candidates))
+	for _, c := range res.Candidates {
+		options = append(options, fmt.Sprintf("%s (%s)", c.DisplayName, c.Key))
+	}
+	_, _ = fmt.Fprintf(out, "That matches more than one %s — which did you mean: %s?\n",
+		res.Dimension, strings.Join(options, "; "))
+}
+
+// recallNotFound builds the guided not-found line for a name or key that matched
+// nothing: instead of a dead-end, it points the user at the command that lists
+// the dimension's archived referents by name and key (recallDiscoveryHint), so a
+// user who knows only the human name can discover the valid names.
+func recallNotFound(dim, key string) string {
+	return fmt.Sprintf("No %s matches %q by name or key — run '%s' to see the archived %s by name and key.",
+		dim, key, recallDiscoveryHint(dim), recallDimensionPlural(dim))
+}
+
+// recallDiscoveryHint returns the command that lists a dimension's archived
+// referents by name and key, so a not-found browse can guide the user to the
+// valid names rather than dead-ending. Only era has a dedicated `list`
+// subcommand; thread/injury/pet are surfaced by the bare `lucid recall` index.
+func recallDiscoveryHint(dim string) string {
+	if dim == router.RecallEra {
+		return "lucid era list"
+	}
+	return "lucid recall"
+}
+
+// recallDimensionPlural returns the plural of a browse dimension for prose, so
+// the guided not-found reads naturally ("injuries", not "injurys").
+func recallDimensionPlural(dim string) string {
+	if dim == router.RecallInjury {
+		return "injuries"
+	}
+	return dim + "s"
 }
 
 // renderRecallReferent prints the browsed era/thread/injury/pet: a heading, its
@@ -251,6 +309,19 @@ func recallViewOf(res router.RecallResult) recallView {
 			Source:             it.Source,
 			SupportingEntryIDs: nonNil(it.SupportingEntryIDs),
 		})
+	}
+	// Emit the ambiguity fields only on the ambiguous outcome so ordinary
+	// found/not-found/index JSON stays byte-stable (absent candidates are omitted,
+	// never normalized to []).
+	if res.Ambiguous {
+		view.Ambiguous = true
+		view.Candidates = make([]recallCandidateView, 0, len(res.Candidates))
+		for _, c := range res.Candidates {
+			view.Candidates = append(view.Candidates, recallCandidateView{
+				Key:         c.Key,
+				DisplayName: c.DisplayName,
+			})
+		}
 	}
 	return view
 }

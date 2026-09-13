@@ -7,7 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/router"
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // seedRegistry runs a registry-write verb with --json and returns the resolved
@@ -46,6 +48,7 @@ func TestRecall_Registered(t *testing.T) {
 	assert.Contains(t, out, "--thread")
 	assert.Contains(t, out, "--injury")
 	assert.Contains(t, out, "--pet")
+	assert.Contains(t, out, "name or key", "the flag help states each reference flag takes a name or key")
 }
 
 // TestRecall_EmptyIndex prints the calm fallback when nothing is archived yet.
@@ -174,14 +177,112 @@ func TestRecall_ByInjuryText(t *testing.T) {
 	assert.NotContains(t, out, "|", "no markdown table in Discord output")
 }
 
-// TestRecall_MissingReferent prints an honest not-found line for a key that does
-// not resolve.
+// TestRecall_MissingReferent prints the guided not-found line for a key that does
+// not resolve — no longer the bare dead-end, but a message that names the accepted
+// input forms and points at the discovery command.
 func TestRecall_MissingReferent(t *testing.T) {
 	isolatedHome(t)
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", "era_nope")
 	require.NoError(t, err)
-	assert.Contains(t, out, "No era found")
+	assert.NotContains(t, out, "No era found", "the bare not-found copy is replaced")
+	assert.Contains(t, out, "by name or key", "the guided not-found names the accepted input forms")
+	assert.Contains(t, out, "lucid era list", "the guided not-found points at the discovery command")
+}
+
+// TestRecall_ByEraName proves a browse by the human name resolves the record and
+// renders byte-identically to browsing it by its opaque key — the reported bug
+// (a name dead-ending) is fixed, and name-input agrees with key-input (AC-1).
+func TestRecall_ByEraName(t *testing.T) {
+	isolatedHome(t)
+
+	eraKey := seedRegistry(t, "era", "wild summer", "--start", "2010-06-01")
+
+	byName, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", "wild summer", "--json")
+	require.NoError(t, err)
+	byKey, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", eraKey, "--json")
+	require.NoError(t, err)
+
+	assert.Equal(t, byKey, byName, "browsing by name renders identically to browsing by key")
+
+	var view recallView
+	require.NoError(t, json.Unmarshal([]byte(byName), &view))
+	assert.True(t, view.Found)
+	require.NotNil(t, view.Referent)
+	assert.Equal(t, eraKey, view.Referent.Key, "the name resolves to the record's opaque key")
+	assert.Equal(t, "wild summer", view.Referent.DisplayName)
+}
+
+// TestRecall_AmbiguousNamePrompt proves a name matching more than one referent
+// lists the candidates with their keys and browses none, mirroring the
+// `lucid person <name>` read path — a read outcome (exit 0), not an error (AC-5).
+// The only way two eras can collide is an overlapping rename-history aka[], so the
+// fixture routes each stable key through a shared historic name via the storage
+// UpdateRegistry seam (the public write verbs derive the key from the name and so
+// cannot rename to a new display name at a stable key).
+func TestRecall_AmbiguousNamePrompt(t *testing.T) {
+	home := isolatedHome(t)
+
+	keyA := seedRegistry(t, "era", "summer of 2009")
+	keyB := seedRegistry(t, "era", "summer of 2011")
+
+	a := storage.New(home)
+	for _, step := range []struct{ key, name string }{
+		{keyA, "wild summer"}, {keyA, "summer of 2009"},
+		{keyB, "wild summer"}, {keyB, "summer of 2011"},
+	} {
+		_, err := a.UpdateRegistry(observations.RegistryEra, step.key,
+			observations.RegistryPatch{DisplayName: step.name, At: "2026-01-02T15:04:05Z"})
+		require.NoError(t, err)
+	}
+
+	human, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", "wild summer")
+	require.NoError(t, err, "an ambiguous name is a read outcome, not an error")
+	assert.Contains(t, human, "matches more than one")
+	assert.Contains(t, human, keyA, "the prompt lists the first candidate's key")
+	assert.Contains(t, human, keyB, "the prompt lists the second candidate's key")
+
+	jsonOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", "wild summer", "--json")
+	require.NoError(t, err)
+	var view recallView
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &view))
+	assert.True(t, view.Ambiguous, "an ambiguous browse flags ambiguous")
+	assert.False(t, view.Found, "an ambiguous browse resolves nothing")
+	require.Len(t, view.Candidates, 2)
+	gotKeys := map[string]bool{view.Candidates[0].Key: true, view.Candidates[1].Key: true}
+	assert.True(t, gotKeys[keyA] && gotKeys[keyB], "both matches are listed as candidates")
+}
+
+// TestRecall_KeyJSONShapeStable proves the additive ambiguity projection does not
+// alter an ordinary key browse: the raw --json object omits `ambiguous` and
+// `candidates`, so existing key-based callers see a byte-stable shape (AC-3).
+func TestRecall_KeyJSONShapeStable(t *testing.T) {
+	isolatedHome(t)
+
+	eraKey := seedRegistry(t, "era", "wild summer", "--start", "2010-06-01")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", eraKey, "--json")
+	require.NoError(t, err)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &raw))
+	_, hasAmbiguous := raw["ambiguous"]
+	_, hasCandidates := raw["candidates"]
+	assert.False(t, hasAmbiguous, "a key browse omits the ambiguity flag")
+	assert.False(t, hasCandidates, "a key browse omits the candidates list")
+}
+
+// TestRecall_NotFoundGuides proves a name (or key) that matches nothing fails with
+// a guided message — naming the accepted input forms and pointing at the discovery
+// command — never the bare dead-end, and stays a read outcome (exit 0) (AC-6).
+func TestRecall_NotFoundGuides(t *testing.T) {
+	isolatedHome(t)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "recall", "--era", "college years")
+	require.NoError(t, err, "a not-found browse is a read outcome, not an error")
+	assert.NotContains(t, out, "No era found", "the bare dead-end copy is gone")
+	assert.Contains(t, out, "name or key", "the guidance names the accepted input forms")
+	assert.Contains(t, out, "lucid era list", "the guidance points at the era discovery command")
 }
 
 // TestRecall_DimensionsMutuallyExclusive proves two dimension flags at once is a
