@@ -508,6 +508,159 @@ func FuzzPersonRecordRoundTrip(f *testing.F) {
 	})
 }
 
+// liveCanonicalPeople returns every live (non-tombstone) person record in the
+// store keyed by person_key, so an alias-routing test can assert exactly how many
+// canonical people the People routine minted and what forms they carry.
+func liveCanonicalPeople(t *testing.T, a *Adapter) map[string]PersonRecord {
+	t.Helper()
+	keys, err := a.ListPeopleKeys()
+	require.NoError(t, err)
+	out := make(map[string]PersonRecord, len(keys))
+	for _, key := range keys {
+		rec, found, rerr := a.ReadPerson(key)
+		require.NoError(t, rerr)
+		require.True(t, found)
+		if rec.IsTombstone() {
+			continue
+		}
+		out[key] = rec
+	}
+	return out
+}
+
+// snapshotPeople reads every people/<key>.json into a filename→bytes map so a
+// test can assert two stores are byte-identical. Person keys and contents are
+// path-independent, so two independent temp stores built from the same mention
+// sequence snapshot equal.
+func snapshotPeople(t *testing.T, a *Adapter) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(a.peopleDir())
+	require.NoError(t, err)
+	out := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		b, rerr := os.ReadFile(filepath.Join(a.peopleDir(), e.Name()))
+		require.NoError(t, rerr)
+		out[e.Name()] = string(b)
+	}
+	return out
+}
+
+// TestUpdatePersonAliasRoute proves the headline capture-time behavior: after a
+// person is recorded under their full name, a later bare nickname — and a
+// diminutive — fold into that one record via a planted resolver tombstone instead
+// of minting alias shards (AC-4, AC-10). All names are synthetic.
+func TestUpdatePersonAliasRoute(t *testing.T) {
+	a := newPeopleAdapter(t)
+
+	// A known person exists under their full name.
+	full, err := a.UpdatePerson(PersonMention{DisplayName: "Michael Torres", RawEntryID: "raw_2026_05_01_09_00", At: personAt(1)})
+	require.NoError(t, err)
+
+	// A later bare nickname ("Mike") folds into Michael's record.
+	nick, err := a.UpdatePerson(PersonMention{DisplayName: "Mike", RawEntryID: "raw_2026_05_05_19_42", At: personAt(5)})
+	require.NoError(t, err)
+	assert.Equal(t, full.PersonKey, nick.PersonKey, "the bare nickname folds into the existing canonical record")
+
+	// A diminutive ("Mikey") folds into the same record.
+	dim, err := a.UpdatePerson(PersonMention{DisplayName: "Mikey", RawEntryID: "raw_2026_05_09_20_10", At: personAt(9)})
+	require.NoError(t, err)
+	assert.Equal(t, full.PersonKey, dim.PersonKey, "the diminutive folds into the same canonical record")
+
+	// Exactly one canonical record survives; both alias forms are recorded on it.
+	canon := liveCanonicalPeople(t, a)
+	require.Len(t, canon, 1, "nickname + diminutive fold into one person, not three shards")
+	rec := canon[full.PersonKey]
+	assert.Contains(t, rec.Aka, "Michael Torres")
+	assert.Contains(t, rec.Aka, "Mike")
+	assert.Contains(t, rec.Aka, "Mikey")
+	assert.Contains(t, rec.EntryRefs, "raw_2026_05_05_19_42", "the canonical absorbs the nickname's entry ref")
+
+	// A redirect tombstone is planted at the nickname's own slug, forwarding to the
+	// canonical — resolution folds through the tombstone graph (aka is never scanned
+	// in the oracle).
+	mikeSlug, err := DerivePersonKey("Mike", data.Wordlist())
+	require.NoError(t, err)
+	require.NotEqual(t, full.PersonKey, mikeSlug, "the nickname derives its own distinct slug")
+	tomb, found, err := a.ReadPerson(mikeSlug)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.True(t, tomb.IsTombstone(), "the nickname slug is a redirect tombstone, not a shard")
+	assert.Equal(t, full.PersonKey, tomb.RedirectTo)
+}
+
+// TestUpdatePersonAliasRouteAmbiguous proves the conservative rule: a nickname
+// that could belong to two live people is left ambiguous and mints a NEW record,
+// and a genuinely new, unlinked name always mints a new record (AC-5, AC-10).
+func TestUpdatePersonAliasRouteAmbiguous(t *testing.T) {
+	a := newPeopleAdapter(t)
+
+	// Two live people share the first-component form "michael".
+	torres, err := a.UpdatePerson(PersonMention{DisplayName: "Michael Torres", RawEntryID: "raw_a", At: personAt(1)})
+	require.NoError(t, err)
+	chen, err := a.UpdatePerson(PersonMention{DisplayName: "Michael Chen", RawEntryID: "raw_b", At: personAt(2)})
+	require.NoError(t, err)
+	require.NotEqual(t, torres.PersonKey, chen.PersonKey, "the fixture needs two distinct people")
+
+	// A bare "Mike" is ambiguous (>=2 candidates) → it mints its OWN record rather
+	// than risk fusing two distinct people (prefer a false-negative at capture).
+	nick, err := a.UpdatePerson(PersonMention{DisplayName: "Mike", RawEntryID: "raw_c", At: personAt(3)})
+	require.NoError(t, err)
+	assert.NotEqual(t, torres.PersonKey, nick.PersonKey)
+	assert.NotEqual(t, chen.PersonKey, nick.PersonKey)
+	nickRec, found, err := a.ReadPerson(nick.PersonKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.False(t, nickRec.IsTombstone(), "the ambiguous mention mints its own canonical record")
+	assert.Equal(t, "Mike", nickRec.DisplayName)
+
+	// A genuinely new, unlinked name always mints a new record.
+	zeph, err := a.UpdatePerson(PersonMention{DisplayName: "Zephyr", RawEntryID: "raw_d", At: personAt(4)})
+	require.NoError(t, err)
+	assert.NotEqual(t, torres.PersonKey, zeph.PersonKey)
+	assert.NotEqual(t, chen.PersonKey, zeph.PersonKey)
+	assert.NotEqual(t, nick.PersonKey, zeph.PersonKey)
+	zephRec, found, err := a.ReadPerson(zeph.PersonKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "Zephyr", zephRec.DisplayName)
+}
+
+// TestUpdatePersonAliasRouteDeterministic proves the routing path is deterministic
+// and local-first with no LLM dependency (AC-6): the same mention sequence yields
+// byte-identical stores across independent runs, and a repeated pass over the same
+// store (now folding through the planted tombstones) is idempotent.
+func TestUpdatePersonAliasRouteDeterministic(t *testing.T) {
+	seq := []PersonMention{
+		{DisplayName: "Michael Torres", RawEntryID: "raw_2026_05_01_09_00", At: personAt(1)},
+		{DisplayName: "Mike", RawEntryID: "raw_2026_05_05_19_42", At: personAt(5)},
+		{DisplayName: "Mikey", RawEntryID: "raw_2026_05_09_20_10", At: personAt(9)},
+	}
+	replay := func(a *Adapter) {
+		for _, m := range seq {
+			_, err := a.UpdatePerson(m)
+			require.NoError(t, err)
+		}
+	}
+
+	// Two independent stores built from the same sequence are byte-identical.
+	first := newPeopleAdapter(t)
+	replay(first)
+	second := newPeopleAdapter(t)
+	replay(second)
+	assert.Equal(t, snapshotPeople(t, first), snapshotPeople(t, second),
+		"the same mention sequence is byte-identical across independent runs (deterministic, no LLM)")
+
+	// Replaying the sequence on the same store is a no-op — the second pass folds
+	// through the tombstones planted by the first and changes nothing.
+	before := snapshotPeople(t, first)
+	replay(first)
+	assert.Equal(t, before, snapshotPeople(t, first),
+		"a repeated mention sequence leaves the store byte-identical (idempotent)")
+}
+
 // seedPersonStore records one mention via update_person and returns the
 // resolved key — the storage-package analog of the router test's seedPerson.
 func seedPersonStore(t *testing.T, a *Adapter, display, rawID string, at time.Time) string {

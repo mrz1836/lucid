@@ -208,6 +208,18 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 		return PersonResult{}, err
 	}
 
+	// Alias-aware routing (data-model.md §"Alias-aware person resolution"): when a
+	// bare mention would otherwise mint a NEW record, a curated nickname/diminutive
+	// of a *single* known person folds into that person's record instead of forking
+	// an alias shard. Routing plants a resolver tombstone through the existing
+	// mechanism, so resolution still runs only through the tombstone graph — the
+	// "aka is never scanned" collision-oracle invariant stays intact (Q2=B). Zero or
+	// >=2 candidates deliberately mint a new record and defer to `person reconcile`.
+	key, existing, found, err = a.resolveMintCandidate(key, existing, found, m.DisplayName)
+	if err != nil {
+		return PersonResult{}, err
+	}
+
 	rec := mergePerson(existing, found, key, m)
 	// Fold any explicit akas ("X, aka Y" phrasing) into the record before the
 	// write, so the merged-away form matches this person immediately.
@@ -241,6 +253,124 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	// kept sorted, so the earliest is the first element.
 	firstMention := len(rec.EntryRefs) > 0 && rec.EntryRefs[0] == m.RawEntryID
 	return PersonResult{PersonKey: key, FirstMention: firstMention}, nil
+}
+
+// resolveMintCandidate applies alias-aware routing when a mention would otherwise
+// mint a new record. If the resolved slug already holds a live record it is a
+// no-op (the mention merges normally). Otherwise it runs the alias discovery pass:
+// when that folds the mention into a single known person, it returns that
+// canonical key and the freshly-read record (found=true); when it does not route,
+// it returns the inputs unchanged so UpdatePerson mints as before.
+func (a *Adapter) resolveMintCandidate(key string, existing PersonRecord, found bool, displayName string) (string, PersonRecord, bool, error) {
+	if found {
+		return key, existing, found, nil
+	}
+	routed, err := a.routeAliasMention(displayName)
+	if err != nil {
+		return "", PersonRecord{}, false, err
+	}
+	if routed == "" {
+		return key, existing, found, nil
+	}
+	rec, rfound, err := a.ReadPerson(routed)
+	if err != nil {
+		return "", PersonRecord{}, false, err
+	}
+	return routed, rec, rfound, nil
+}
+
+// routeAliasMention is the pre-mint alias discovery pass (data-model.md
+// §"Alias-aware person resolution"). [Adapter.UpdatePerson] calls it only in the
+// mint branch — when a mention's resolved slug holds no live record — to fold a
+// bare nickname/diminutive of a known person into that person's record instead of
+// forking an alias shard. It returns the canonical key the mention now folds into,
+// or "" when nothing should change (mint proceeds unchanged).
+//
+// Discovery reads live records' display_name/aka and the curated nickname map, but
+// it never touches the collision oracle ([ResolvePersonKey]/[personKeyOwner]/
+// [ResolvePersonRedirect]) — the "aka is never scanned" resolution invariant stays
+// intact (Q2=B). It routes conservatively: only when the nickname map resolves the
+// mention to *exactly one* live person. Zero or two-or-more candidates return "" so
+// UpdatePerson mints a fresh record and `person reconcile` can suggest the merge,
+// rather than risk fusing two distinct people at capture. It is pure and
+// deterministic (no model calls) — every step is a sorted scan over the store.
+func (a *Adapter) routeAliasMention(displayName string) (string, error) {
+	// The mention's lookup form is the normalized first whitespace-delimited
+	// component; direct cluster neighbors only (no transitive expansion) keep the
+	// link conservative. A form with no curated cluster never routes.
+	form := data.NicknameForm(displayName)
+	if form == "" {
+		return "", nil
+	}
+	related := data.NicknameLinks()[form]
+	if len(related) == 0 {
+		return "", nil
+	}
+	relatedSet := make(map[string]bool, len(related))
+	for _, r := range related {
+		relatedSet[r] = true
+	}
+
+	keys, err := a.ListPeopleKeys()
+	if err != nil {
+		return "", err
+	}
+	var (
+		candidateKey string
+		candidateRec PersonRecord
+		matches      int
+	)
+	for _, key := range keys { // ListPeopleKeys is sorted → deterministic scan
+		rec, found, rerr := a.ReadPerson(key)
+		if rerr != nil {
+			return "", rerr
+		}
+		if !found || rec.IsTombstone() {
+			continue // only live canonical records are alias candidates
+		}
+		if !aliasFormsMatch(rec, relatedSet) {
+			continue
+		}
+		matches++
+		if matches == 1 {
+			candidateKey, candidateRec = key, rec
+			continue
+		}
+		return "", nil // >=2 live candidates → ambiguous, defer to reconcile
+	}
+	if matches != 1 {
+		return "", nil // zero candidates → mint a new record
+	}
+
+	// Exactly one live candidate: plant/reuse a resolver tombstone so this bare
+	// mention (and every later one of the same form) folds into that record through
+	// the same tombstone path an explicit "X, aka Y" alias already uses. A form
+	// whose slug is owned by a *different* live person yields ErrPersonAkaConflict —
+	// treat that as "do not route" and fall back to mint; never fail capture on it.
+	if err = a.plantAliasResolver(candidateKey, displayName, candidateRec); err != nil {
+		if errors.Is(err, ErrPersonAkaConflict) {
+			return "", nil
+		}
+		return "", err
+	}
+	return candidateKey, nil
+}
+
+// aliasFormsMatch reports whether a candidate record's raw display_name or any of
+// its aka forms reduces — through the shared [data.NicknameForm] helper — to a
+// lookup form in the mention's related-forms set. Running both sides through the
+// same first-component helper is what lets a bare "Mike" find "Michael Torres"
+// while a surname is never mistaken for a given name.
+func aliasFormsMatch(rec PersonRecord, relatedSet map[string]bool) bool {
+	if relatedSet[data.NicknameForm(rec.DisplayName)] {
+		return true
+	}
+	for _, aka := range rec.Aka {
+		if relatedSet[data.NicknameForm(aka)] {
+			return true
+		}
+	}
+	return false
 }
 
 // writePerson marshals a person record and writes it to people/<key>.json,
@@ -297,7 +427,15 @@ func mergePerson(existing PersonRecord, found bool, key string, m PersonMention)
 
 	rec := existing
 	rec.PersonKey = key
-	rec.DisplayName = m.DisplayName // latest spelling wins
+	// "Latest spelling wins" only among forms that share this record's normalized
+	// identity. A differently-normalized form that folds in through a redirect
+	// tombstone — an explicit alias, a merge, or a routed nickname/diminutive —
+	// enriches aka[] but never renames the canonical, so the record's display_name
+	// stays a valid collision-oracle witness for its derived slug and a later
+	// mention of the canonical name still resolves here instead of forking a shard.
+	if NormalizeName(m.DisplayName) == NormalizeName(existing.DisplayName) {
+		rec.DisplayName = m.DisplayName
+	}
 	rec.Aka = addUnique(rec.Aka, m.DisplayName)
 	slices.Sort(rec.Aka)
 	if !m.At.IsZero() && (rec.FirstSeenAt.IsZero() || m.At.Before(rec.FirstSeenAt)) {
