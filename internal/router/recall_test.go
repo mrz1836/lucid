@@ -3,11 +3,13 @@ package router
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // labelIndex returns the position of a field label in a referent's ordered
@@ -273,6 +275,178 @@ func TestEraRange_DelegatesToEraSpan(t *testing.T) {
 	assert.Empty(t, eraRange(map[string]any{}))
 	assert.NotContains(t, eraRange(map[string]any{"start": "2008-09", "end": "2010-01"}), " – ",
 		"the spaced en-dash form is gone")
+}
+
+// renameRegistry patches a registry record's display name in place through the
+// UpdateRegistry seam, folding the prior name into aka[]. The public write verbs
+// derive the key from the name, so they cannot rename a record to a new display
+// name at a stable key — this seam is the only way to construct the
+// rename-history aka[] fixtures the resolver's aka/ambiguity paths need.
+func renameRegistry(t *testing.T, a *storage.Adapter, kind, key, newName string) {
+	t.Helper()
+	_, err := a.UpdateRegistry(kind, key, observations.RegistryPatch{
+		DisplayName: newName,
+		At:          fixedNow().Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+}
+
+// TestRecall_ResolvesByName proves a browse by a human name resolves the record
+// and renders identically to browsing it by its opaque key — the reported bug
+// (name input dead-ending) is fixed, and name-input and key-input agree
+// byte-for-byte (AC-1).
+func TestRecall_ResolvesByName(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	era, err := r.WriteEra(EraWriteRequest{Name: "Wild Summer", Start: "2010-06-01", Now: fixedNow()})
+	require.NoError(t, err)
+	_, err = r.WriteMemory(MemoryWriteRequest{Text: "a night we drove to the coast", Era: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+
+	byName, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: "Wild Summer", Now: fixedNow()})
+	require.NoError(t, err)
+	byKey, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+
+	assert.True(t, byName.Found)
+	require.NotNil(t, byName.Referent)
+	assert.Equal(t, era.Key, byName.Referent.Key, "name-input resolves to the record's opaque key")
+	assert.Equal(t, byKey.Key, byName.Key, "the resolved Key matches the key-based browse")
+	assert.Equal(t, byKey.Referent, byName.Referent, "same referent as the key browse")
+	assert.Equal(t, byKey.Items, byName.Items, "same stories as the key browse")
+	assert.False(t, byName.Ambiguous)
+}
+
+// TestRecall_ResolvesCaseInsensitive proves name matching folds case: every
+// spelling of the same name resolves to the same record (AC-2).
+func TestRecall_ResolvesCaseInsensitive(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	era, err := r.WriteEra(EraWriteRequest{Name: "Wild Summer", Now: fixedNow()})
+	require.NoError(t, err)
+
+	for _, q := range []string{"wild summer", "WILD SUMMER", "Wild Summer"} {
+		res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: q, Now: fixedNow()})
+		require.NoError(t, err, "query %q", q)
+		require.True(t, res.Found, "query %q resolves", q)
+		require.NotNil(t, res.Referent)
+		assert.Equal(t, era.Key, res.Referent.Key, "query %q resolves to the same record", q)
+	}
+}
+
+// TestRecall_ResolvesByAka proves a renamed record still resolves by an old
+// spelling kept in aka[] — mirroring person alias lookup — while the current
+// display name is what surfaces (AC-2).
+func TestRecall_ResolvesByAka(t *testing.T) {
+	r, a, _ := bootedMemoryRouter(t)
+	era, err := r.WriteEra(EraWriteRequest{Name: "wild summer", Now: fixedNow()})
+	require.NoError(t, err)
+	renameRegistry(t, a, observations.RegistryEra, era.Key, "high summer")
+
+	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: "wild summer", Now: fixedNow()})
+	require.NoError(t, err)
+	require.True(t, res.Found, "an old spelling resolves via aka[]")
+	require.NotNil(t, res.Referent)
+	assert.Equal(t, era.Key, res.Referent.Key)
+	assert.Equal(t, "high summer", res.Referent.DisplayName, "the current display name is surfaced")
+	assert.False(t, res.Ambiguous)
+}
+
+// TestRecall_ResolvesByKeyStillWorks proves the opaque-key form resolves exactly
+// as before — no regression for key-based callers (AC-3).
+func TestRecall_ResolvesByKeyStillWorks(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	era, err := r.WriteEra(EraWriteRequest{Name: "wild summer", Start: "2010-06-01", Now: fixedNow()})
+	require.NoError(t, err)
+
+	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: era.Key, Now: fixedNow()})
+	require.NoError(t, err)
+	require.True(t, res.Found)
+	require.NotNil(t, res.Referent)
+	assert.Equal(t, era.Key, res.Key, "the opaque key resolves to itself")
+	assert.Equal(t, era.Key, res.Referent.Key)
+	assert.False(t, res.Ambiguous)
+}
+
+// TestRecall_UnknownNameHonestEmpty proves an unknown name is an honest empty
+// result — not found, no referent, no items, and not flagged ambiguous (AC-1,
+// AC-7).
+func TestRecall_UnknownNameHonestEmpty(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	_, err := r.WriteEra(EraWriteRequest{Name: "wild summer", Now: fixedNow()})
+	require.NoError(t, err)
+
+	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: "college years", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.False(t, res.Found)
+	assert.Nil(t, res.Referent)
+	assert.Empty(t, res.Items)
+	assert.False(t, res.Ambiguous)
+	assert.Empty(t, res.Candidates)
+}
+
+// TestRecall_AmbiguousName proves a name matching more than one record (via an
+// overlapping rename-history aka[]) browses nothing and lists the matches,
+// key-sorted, mirroring the person read path (AC-5).
+func TestRecall_AmbiguousName(t *testing.T) {
+	r, a, _ := bootedMemoryRouter(t)
+	eraA, err := r.WriteEra(EraWriteRequest{Name: "summer of 2009", Now: fixedNow()})
+	require.NoError(t, err)
+	eraB, err := r.WriteEra(EraWriteRequest{Name: "summer of 2011", Now: fixedNow()})
+	require.NoError(t, err)
+
+	// Route each stable key through a shared historic name and back to its
+	// distinct current name, so both records retain "wild summer" in aka[] — the
+	// only way two eras can collide (a rename-history overlap; same-name eras
+	// share a derived key and so cannot coexist).
+	renameRegistry(t, a, observations.RegistryEra, eraA.Key, "wild summer")
+	renameRegistry(t, a, observations.RegistryEra, eraA.Key, "summer of 2009")
+	renameRegistry(t, a, observations.RegistryEra, eraB.Key, "wild summer")
+	renameRegistry(t, a, observations.RegistryEra, eraB.Key, "summer of 2011")
+
+	res, err := r.Recall(RecallRequest{Dimension: RecallEra, Key: "wild summer", Now: fixedNow()})
+	require.NoError(t, err)
+	assert.False(t, res.Found, "an ambiguous name browses nothing")
+	assert.Nil(t, res.Referent)
+	assert.True(t, res.Ambiguous)
+	require.Len(t, res.Candidates, 2)
+
+	keys := []string{res.Candidates[0].Key, res.Candidates[1].Key}
+	assert.True(t, slices.IsSorted(keys), "candidates are key-sorted for determinism")
+	names := map[string]string{}
+	for _, c := range res.Candidates {
+		names[c.Key] = c.DisplayName
+	}
+	assert.Equal(t, "summer of 2009", names[eraA.Key], "each candidate carries its current display name")
+	assert.Equal(t, "summer of 2011", names[eraB.Key])
+}
+
+// TestRecall_ResolvesNameAcrossKinds proves the resolver is generic across every
+// registry-backed dimension: a name resolves for injury, pet, and thread the same
+// way it does for era — one resolver, not a per-flag mechanism (AC-4, AC-7).
+func TestRecall_ResolvesNameAcrossKinds(t *testing.T) {
+	r, _, _ := bootedMemoryRouter(t)
+	inj, err := r.WriteInjury(InjuryWriteRequest{Name: "left knee", Now: fixedNow()})
+	require.NoError(t, err)
+	pet, err := r.WritePet(PetWriteRequest{Name: "Rex", Species: "dog", Now: fixedNow()})
+	require.NoError(t, err)
+	th, err := r.WriteThread(ThreadWriteRequest{Name: "learning piano", Intent: "play for fun", Now: fixedNow()})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name, dim, query, wantKey string
+	}{
+		{"injury", RecallInjury, "LEFT KNEE", inj.Key},
+		{"pet", RecallPet, "rex", pet.Key},
+		{"thread", RecallThread, "Learning Piano", th.Key},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := r.Recall(RecallRequest{Dimension: tc.dim, Key: tc.query, Now: fixedNow()})
+			require.NoError(t, err)
+			require.True(t, res.Found, "a name resolves for %s", tc.dim)
+			require.NotNil(t, res.Referent)
+			assert.Equal(t, tc.wantKey, res.Referent.Key)
+			assert.False(t, res.Ambiguous)
+		})
+	}
 }
 
 // TestRecall_ReadOnly proves the surface writes nothing: the Ledger file count
