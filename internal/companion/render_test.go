@@ -1,6 +1,7 @@
 package companion
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -159,7 +160,7 @@ func TestBuildStatusPanel_CompactDecidedDay(t *testing.T) {
 	gate := 4
 	st := engine.Status{DaysToNextGate: &gate, StormState: engine.StormNone}
 
-	panel := buildStatusPanel(m, st)
+	panel := buildStatusPanel(m, st, "", 0, fixedDate())
 	require.LessOrEqual(t, len(panel), 4, "the panel is compact — at most four lines")
 	require.Len(t, panel, 2, "a clean decided day is exactly the streak + budget pair")
 
@@ -180,7 +181,7 @@ func TestBuildStatusPanel_EarlyRampBuilds(t *testing.T) {
 		Adherence:   engine.Window{Length: 30, Completed: 2, Decided: 0, DaysAccounted: 3},
 		ErrorBudget: engine.ErrorBudget{Budget: 3, Remaining: 3},
 	}
-	panel := buildStatusPanel(m, engine.Status{})
+	panel := buildStatusPanel(m, engine.Status{}, "", 0, fixedDate())
 	joined := strings.Join(panel, "\n")
 	assert.Contains(t, joined, "Building · 2 completed of 3 accounted — no decided day yet")
 	assert.NotContains(t, joined, "0% adherence", "no hollow percentage before a decided day")
@@ -198,7 +199,7 @@ func TestBuildStatusPanel_AmbientOnlyWhenHold(t *testing.T) {
 	}
 	st := engine.Status{ConsecutiveMisses: 2, StormState: engine.StormStandingState}
 
-	panel := buildStatusPanel(m, st)
+	panel := buildStatusPanel(m, st, "", 0, fixedDate())
 	require.Len(t, panel, 4, "streak+adherence, budget, misses, storm — all four hold")
 	require.LessOrEqual(t, len(panel), 4, "still capped at four lines when everything holds")
 
@@ -208,10 +209,71 @@ func TestBuildStatusPanel_AmbientOnlyWhenHold(t *testing.T) {
 	assert.Contains(t, joined, "(over — gates hold)")
 
 	// A clean day drops all three ambient signals.
-	clean := buildStatusPanel(m, engine.Status{StormState: engine.StormNone})
+	clean := buildStatusPanel(m, engine.Status{StormState: engine.StormNone}, "", 0, fixedDate())
 	cleanJoined := strings.Join(clean, "\n")
 	assert.NotContains(t, cleanJoined, "Consecutive misses")
 	assert.NotContains(t, cleanJoined, "Storm standing")
+}
+
+// TestBuildStatusPanel_LifeWeeksLine covers the optional config-sourced
+// life-weeks line: present and after the budget line when a birthdate is set,
+// absent otherwise.
+func TestBuildStatusPanel_LifeWeeksLine(t *testing.T) {
+	m := engine.Metrics{
+		CurrentStreak: 5,
+		Adherence:     engine.Window{Length: 30, Adherence: 0.83, Completed: 20, Decided: 24, DaysAccounted: 26},
+		ErrorBudget:   engine.ErrorBudget{Budget: 3, Remaining: 2},
+	}
+
+	// Birthdate set → a third line rides after streak+budget, before any ambient.
+	withLife := buildStatusPanel(m, engine.Status{StormState: engine.StormNone}, "1990-06-15", 90, fixedDate())
+	require.Len(t, withLife, 3, "streak, budget, then the life-weeks line")
+	assert.Contains(t, withLife[2], "weeks lived")
+	assert.Contains(t, withLife[2], "until 90")
+
+	// Empty birthdate → the panel is unchanged (line omitted).
+	without := buildStatusPanel(m, engine.Status{StormState: engine.StormNone}, "", 0, fixedDate())
+	require.Len(t, without, 2, "no birthdate, no life-weeks line")
+	assert.NotContains(t, strings.Join(without, "\n"), "weeks lived")
+}
+
+// TestPanelLifeWeeksLine exercises the line's math, the horizon default, and
+// every degrade path directly.
+func TestPanelLifeWeeksLine(t *testing.T) {
+	now := fixedDate() // 2026-07-20 UTC
+
+	// Known oracle: 2000-01-01 → 2020-01-01 is exactly 7305 civil days (five
+	// leap days: 2000/04/08/12/16), so 7305/7 = 1043 whole weeks lived.
+	oracle := panelLifeWeeksLine("2000-01-01", 90, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+	assert.Contains(t, oracle, "1043 weeks lived")
+	assert.Contains(t, oracle, "until 90")
+
+	// Format mirrors the production formula for a real birthdate.
+	birth := "1990-06-15"
+	b, err := time.Parse(logicalDateFmt, birth)
+	require.NoError(t, err)
+	lived := civilDaysBetween(b, now) / 7
+	horizon := time.Date(b.Year()+90, b.Month(), b.Day(), 0, 0, 0, 0, time.UTC)
+	remaining := civilDaysBetween(now, horizon) / 7
+	assert.Equal(t, fmt.Sprintf("⏳ %d weeks lived · %d until 90", lived, remaining),
+		panelLifeWeeksLine(birth, 90, now))
+
+	// horizonAge ≤ 0 falls back to the documented default (90).
+	assert.Equal(t, panelLifeWeeksLine(birth, 90, now), panelLifeWeeksLine(birth, 0, now),
+		"a zero horizon age defaults to 90")
+
+	// A custom horizon age is honored in both the math and the label.
+	assert.Contains(t, panelLifeWeeksLine(birth, 80, now), "until 80")
+
+	// Past the horizon birthday → the remaining clause is dropped, not shown ≤ 0.
+	past := panelLifeWeeksLine("1900-01-01", 90, now)
+	assert.Contains(t, past, "weeks lived")
+	assert.NotContains(t, past, "until", "no countdown once the horizon age is behind you")
+
+	// Degrade paths return "" (the panel omits the line entirely).
+	assert.Empty(t, panelLifeWeeksLine("", 90, now), "unset birthdate")
+	assert.Empty(t, panelLifeWeeksLine("not-a-date", 90, now), "unparseable birthdate")
+	assert.Empty(t, panelLifeWeeksLine("3000-01-01", 90, now), "birthdate in the future")
 }
 
 // TestFreshnessStamp covers the "as logged <date>" format, the stale flag past

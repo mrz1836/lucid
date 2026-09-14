@@ -53,6 +53,8 @@ prompt files:
   "system_prompt": "/home/you/lucid-prompts/system.md",
   "morning_routine": "/home/you/lucid-prompts/morning-routine.md",
   "night_routine": "/home/you/lucid-prompts/night-routine.md",
+  "birthdate": "1990-01-31",
+  "life_horizon_age": 90,
   "model": ""
 }
 ```
@@ -65,6 +67,8 @@ prompt files:
 | `system_prompt` | path | The system prompt, passed to the model as the `System` role on every compose. |
 | `morning_routine` | path | **Optional.** An opaque file holding your intended morning routine. When set, its contents are read and injected as **context** for the morning message so the companion never invents your routine. Absent/empty → the routine grounding is simply omitted. |
 | `night_routine` | path | **Optional.** Same, for the night window's intended routine. |
+| `birthdate` | string | **Optional.** Your date of birth as `YYYY-MM-DD`. When set, the status panel adds a life-weeks line (weeks lived, and weeks remaining to `life_horizon_age`). Unset/empty → the line is simply omitted. A set-but-unparseable value is rejected at load. |
+| `life_horizon_age` | int | **Optional.** The age the weeks-remaining count counts down to. Defaults to `90` when unset or `≤ 0`. Only meaningful when `birthdate` is set. |
 | `model` | string | Optional. Overrides `provider.model` for the companion's compose call; empty inherits the provider default. |
 
 When `enabled` is `true`, the three **prompt** paths (`morning_template`,
@@ -138,7 +142,11 @@ interpretation, and action are always in distinct, scannable regions:
   chain's live numbers — streak + adherence, the error budget, and, only when
   they hold, days-to-gate, consecutive misses, a standing storm. This is the raw
   streak/adherence/gate data, kept as a small meaningful panel rather than the
-  overwhelming metric list it replaces.
+  overwhelming metric list it replaces. When a `birthdate` is configured, one
+  extra **life-weeks** line rides here — weeks lived (counting up) and weeks
+  remaining to the horizon age (counting down, default 90) — the one panel line
+  sourced from config rather than the chain. It is omitted whenever `birthdate`
+  is unset or unparseable, so the panel never guesses.
 - **Context sections** — `{emoji} **{Label}** · {meta}` headers with `•` bullet
   lines, one section per available signal group (body & state, change &
   withdrawal, commitments, routine anchor). A section with no data is omitted

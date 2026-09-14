@@ -301,6 +301,8 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "system_prompt": "",
     "morning_routine": "",
     "night_routine": "",
+    "birthdate": "",
+    "life_horizon_age": 0,
     "model": ""
   },
   "workout": {
@@ -373,7 +375,17 @@ The single global config file. Tiny, hand-editable, agent-readable.
   each day; lucid never walks the directory holding them. They are **not**
   required when `enabled` is true — an absent or empty routine key simply omits
   the routine grounding (feature off for that window), so they never widen the
-  enabled-config requirement beyond the three prompt paths. `model` optionally
+  enabled-config requirement beyond the three prompt paths. `birthdate` and
+  `life_horizon_age` are two **optional** keys that add the status panel's
+  life-weeks line: `birthdate` is the operator's date of birth (`YYYY-MM-DD`),
+  and `life_horizon_age` is the age the weeks-remaining figure counts down to
+  (default `90` when unset or `≤ 0`). When `birthdate` is set the panel renders
+  weeks lived (up) and weeks to the horizon (down); when it is empty the line is
+  omitted, so — like the routine paths — these never widen the enabled-config
+  requirement. A **non-empty** `birthdate` that does not parse as `YYYY-MM-DD` is
+  rejected at load (a typo shouldn't silently drop the frame). Both are plain
+  dates/counts, not a Ledger record — the birthdate lives here in config, not in
+  `engine/self.json`, so the panel needs no Sanctuary read. `model` optionally
   overrides `provider.model` for the companion's compose call (empty inherits the
   provider default). Fire
   **times are not companion keys** — the companion inherits the `chain.json`

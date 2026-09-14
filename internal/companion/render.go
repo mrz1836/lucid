@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/internal/composekit"
+	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
 )
@@ -216,16 +217,22 @@ func nextHeader(mode Mode) string {
 
 // buildStatusPanel renders the compact status panel from the engine
 // projections — the small, meaningful hero block that replaces the old
-// wall-of-numbers dump. It is at most four lines: the streak+adherence line and
-// the error-budget line always, then the consecutive-miss and standing-storm
-// ambient lines only when they hold. Every number is copied from the projection;
-// the days-to-gate co-number rides the budget line. The longer gate rollups and
-// the per-anchor days-since lines the full metrics surface carries are
-// deliberately left out — the panel is a status glance, not the metrics dump.
-func buildStatusPanel(m engine.Metrics, st engine.Status) []string {
+// wall-of-numbers dump. The two always-on lines are the streak+adherence line
+// and the error-budget line; the optional life-weeks line rides after them when
+// a birthdate is configured; then the consecutive-miss and standing-storm
+// ambient lines only when they hold. Every chain number is copied from the
+// projection; the days-to-gate co-number rides the budget line. The longer gate
+// rollups and the per-anchor days-since lines the full metrics surface carries
+// are deliberately left out — the panel is a status glance, not the metrics dump.
+// birthdate/horizonAge come from config (not the Ledger): an empty or unparseable
+// birthdate omits the life-weeks line entirely.
+func buildStatusPanel(m engine.Metrics, st engine.Status, birthdate string, horizonAge int, now time.Time) []string {
 	lines := []string{
 		panelChainLine(m),
 		panelBudgetLine(m.ErrorBudget, st.DaysToNextGate),
+	}
+	if life := panelLifeWeeksLine(birthdate, horizonAge, now); life != "" {
+		lines = append(lines, life)
 	}
 	if st.ConsecutiveMisses > 0 {
 		lines = append(lines, fmt.Sprintf("⚠️ Consecutive misses · %d", st.ConsecutiveMisses))
@@ -234,6 +241,37 @@ func buildStatusPanel(m engine.Metrics, st engine.Status) []string {
 		lines = append(lines, "🌩️ Storm standing — the stake is stayed")
 	}
 	return lines
+}
+
+// panelLifeWeeksLine renders the optional life-weeks frame — weeks lived counting
+// up from the operator's birthdate, and weeks remaining counting down to a horizon
+// age. It is the one panel line sourced from config rather than the engine
+// projection, so it degrades to "" (no line, panel omits the frame) whenever the
+// birthdate is unset, unparseable, or in the future — the panel never guesses.
+// horizonAge ≤ 0 falls back to config.DefaultLifeHorizonAge. Weeks are whole civil
+// weeks (civilDaysBetween/7), immune to DST drift like every other duration here;
+// once now is past the horizon birthday the remaining clause is dropped rather
+// than shown as zero or negative.
+func panelLifeWeeksLine(birthdate string, horizonAge int, now time.Time) string {
+	if birthdate == "" {
+		return ""
+	}
+	b, err := time.Parse(logicalDateFmt, birthdate)
+	if err != nil {
+		return ""
+	}
+	lived := civilDaysBetween(b, now) / 7
+	if lived < 0 {
+		return ""
+	}
+	if horizonAge <= 0 {
+		horizonAge = config.DefaultLifeHorizonAge
+	}
+	horizon := time.Date(b.Year()+horizonAge, b.Month(), b.Day(), 0, 0, 0, 0, time.UTC)
+	if remaining := civilDaysBetween(now, horizon) / 7; remaining > 0 {
+		return fmt.Sprintf("⏳ %d weeks lived · %d until %d", lived, remaining, horizonAge)
+	}
+	return fmt.Sprintf("⏳ %d weeks lived", lived)
 }
 
 // panelChainLine renders the streak+adherence hero line. During the early ramp

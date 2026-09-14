@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
 )
@@ -94,9 +95,15 @@ type ProviderConfig struct {
 // routine docs — that the compose worker reads for routine-grounded context;
 // they share the template seam's firewall shape (opaque path, no dir-walk) and
 // are optional: absent/empty means the routine section is gracefully omitted,
-// so they are never part of the enabled-companion required-path set. Model
-// optionally overrides provider.model for the companion's compose call; empty
-// inherits the provider default. Fire times are deliberately not companion
+// so they are never part of the enabled-companion required-path set. Birthdate
+// (an optional YYYY-MM-DD date of birth) and LifeHorizonAge (the age the
+// weeks-remaining figure counts down to, default DefaultLifeHorizonAge) add the
+// status panel's optional life-weeks line; they carry no path and no Ledger
+// record — the birthdate lives here in config, never in engine/self.json, so the
+// panel needs no Sanctuary read — and an empty Birthdate simply omits the line,
+// so like the routine paths they never widen the enabled-config required set.
+// Model optionally overrides provider.model for the companion's compose call;
+// empty inherits the provider default. Fire times are deliberately not companion
 // keys — they are inherited from the chain.json bell/tripwire marks so the
 // companion can never drift from the deterministic pair (data-model.md
 // §"lucid.json").
@@ -107,8 +114,18 @@ type CompanionConfig struct {
 	SystemPrompt    string `json:"system_prompt"`
 	MorningRoutine  string `json:"morning_routine"`
 	NightRoutine    string `json:"night_routine"`
+	Birthdate       string `json:"birthdate"`
+	LifeHorizonAge  int    `json:"life_horizon_age"`
 	Model           string `json:"model"`
 }
+
+// DefaultLifeHorizonAge is the age the companion status panel's weeks-remaining
+// figure counts down to when CompanionConfig.LifeHorizonAge is unset or ≤ 0.
+const DefaultLifeHorizonAge = 90
+
+// birthdateLayout is the required on-disk form of CompanionConfig.Birthdate — a
+// bare civil date, the same YYYY-MM-DD shape the Ledger's logical dates use.
+const birthdateLayout = "2006-01-02"
 
 // WorkoutConfig configures the optional workout companion — the config-gated,
 // off-by-default Mirror-side surface that recommends today's workout, records
@@ -466,8 +483,15 @@ func (p ProviderConfig) validate() error {
 // simply omits the routine section. The optional model override is
 // unconstrained here: an unknown model surfaces at compose time from the
 // provider, exactly as provider.model does. There is no clip rule — no
-// companion bound is documented as coercible.
+// companion bound is documented as coercible. One check runs regardless of
+// Enabled: a non-empty birthdate must parse as YYYY-MM-DD, so a typo is rejected
+// at load rather than silently dropping the panel's life-weeks line.
 func (c CompanionConfig) validate() error {
+	if c.Birthdate != "" {
+		if _, err := time.Parse(birthdateLayout, c.Birthdate); err != nil {
+			return fmt.Errorf("config: companion.birthdate %q must be a YYYY-MM-DD date", c.Birthdate)
+		}
+	}
 	if !c.Enabled {
 		return nil
 	}

@@ -302,7 +302,7 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 	if err != nil {
 		return Result{}, err
 	}
-	panel := buildStatusPanel(metrics, status)
+	panel := buildStatusPanel(metrics, status, c.companion.Birthdate, c.companion.LifeHorizonAge, now)
 
 	res := Result{Mode: mode, MissDay: missDay}
 

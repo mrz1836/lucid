@@ -190,6 +190,8 @@ func TestDefault_CompanionBlock(t *testing.T) {
 	assert.Empty(t, c.SystemPrompt)
 	assert.Empty(t, c.MorningRoutine, "routine paths ship empty → feature off")
 	assert.Empty(t, c.NightRoutine, "routine paths ship empty → feature off")
+	assert.Empty(t, c.Birthdate, "birthdate ships empty → life-weeks line off")
+	assert.Zero(t, c.LifeHorizonAge, "horizon age ships 0 → defaults to 90 at render")
 	assert.Empty(t, c.Model, "model override empty → inherits provider.model")
 }
 
@@ -228,6 +230,9 @@ func TestCompanion_MarshalsDocumentedShape(t *testing.T) {
 	// operator can see the seam to point at their own routine docs.
 	assert.Contains(t, s, `"morning_routine":`)
 	assert.Contains(t, s, `"night_routine":`)
+	// The optional life-weeks keys render too, so the seam is discoverable.
+	assert.Contains(t, s, `"birthdate":`)
+	assert.Contains(t, s, `"life_horizon_age":`)
 	// No token or channel id ever lands in the config.
 	assert.NotContains(t, s, "harness_token")
 	assert.NotContains(t, s, "channel_id")
@@ -338,6 +343,34 @@ func TestValidate_CompanionDisabledIgnoresPaths(t *testing.T) {
 	c := Default()
 	c.Companion = CompanionConfig{Enabled: false} // all paths empty
 	assert.NoError(t, c.Validate())
+}
+
+// TestValidate_CompanionBirthdate proves the one companion check that runs
+// regardless of Enabled: an empty birthdate is fine, a well-formed YYYY-MM-DD
+// validates, and a malformed one is a hard error even on a disabled block — a
+// typo shouldn't silently drop the panel's life-weeks line. The horizon age is
+// unconstrained (0 defaults to 90 at render), so it never fails validation.
+func TestValidate_CompanionBirthdate(t *testing.T) {
+	t.Run("empty birthdate validates", func(t *testing.T) {
+		c := Default()
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("valid date validates while disabled", func(t *testing.T) {
+		c := Default()
+		c.Companion.Birthdate = "1990-06-15"
+		c.Companion.LifeHorizonAge = 0 // 0 is legal → defaults to 90 at render
+		assert.NoError(t, c.Validate())
+	})
+	t.Run("malformed date errors even while disabled", func(t *testing.T) {
+		c := Default()
+		c.Companion.Birthdate = "06/15/1990"
+		assert.Error(t, c.Validate())
+	})
+	t.Run("a bare month is not a full date", func(t *testing.T) {
+		c := Default()
+		c.Companion.Birthdate = "1990-06"
+		assert.Error(t, c.Validate())
+	})
 }
 
 // TestDefault_WorkoutBlock pins the shipped workout default: the feature is off
