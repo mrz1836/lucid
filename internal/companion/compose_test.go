@@ -555,7 +555,9 @@ func TestCompose_Sections_RenderWithFreshness(t *testing.T) {
 	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Read.", "Act.")}}}
 	c := newComposerWithObs(t, obs, p)
 
-	res, err := c.Compose(context.Background(), ModeMorning, now)
+	// Context sections render in the night close-out (the day's read-back);
+	// the morning window omits them from the delivered message.
+	res, err := c.Compose(context.Background(), ModeNight, now)
 	require.NoError(t, err)
 
 	// Body & state: newest event is 2026-07-19 (two days back → fresh, no flag).
@@ -581,11 +583,35 @@ func TestCompose_AbsentKinds_OmitSections(t *testing.T) {
 	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("ok", "go")}}}
 	c := newComposerWithObs(t, obs, p)
 
-	res, err := c.Compose(context.Background(), ModeMorning, now)
+	// Sections render in the night read-back; assert there.
+	res, err := c.Compose(context.Background(), ModeNight, now)
 	require.NoError(t, err)
 	assert.Contains(t, res.Text, "🫀 **Body & state**")
 	assert.NotContains(t, res.Text, "Change & withdrawal", "an absent change signal leaves no stray section")
 	assert.NotContains(t, res.Text, "Commitments", "an absent commitment leaves no stray section")
+}
+
+// TestCompose_Morning_OmitsRenderedSections confirms the morning message never
+// recites the recent-observation body/state block, while the slice is still read
+// and available as model context — the "B" contract: keep feeding the model, but
+// do not greet the user with a list of aches.
+func TestCompose_Morning_OmitsRenderedSections(t *testing.T) {
+	now := time.Date(2026, 7, 20, 6, 0, 0, 0, time.UTC)
+	obs := &fakeObservations{events: []observations.Event{
+		{ID: "obs_2026_07_19_001", Kind: observations.KindPain, LogicalDate: "2026-07-19", Payload: map[string]any{"level": 3, "site": "right knee"}},
+		{ID: "obs_2026_07_19_002", Kind: observations.KindMood, LogicalDate: "2026-07-19", Payload: map[string]any{"level": 7, "word": "steady"}},
+	}}
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Read.", "Act.")}}}
+	c := newComposerWithObs(t, obs, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, now)
+	require.NoError(t, err)
+
+	// The delivered morning message carries no rendered context sections.
+	assert.NotContains(t, res.Text, "🫀 **Body & state**", "morning must not recite the body-state block")
+	assert.NotContains(t, res.Text, "Change & withdrawal")
+	// But the slice was still read and is available to the model as context.
+	assert.NotEmpty(t, res.Recent, "recent observations are still read and fed to the model")
 }
 
 // TestCompose_RecentReadError_DegradesNonFatally confirms an enrichment read

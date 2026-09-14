@@ -87,7 +87,10 @@ type Briefing struct {
 // no model slots still reads cleanly (no dangling structural chrome).
 //
 // The region order differs by window. Morning is forward-looking — the status
-// panel is the hero, then the day's context, then the read.
+// panel is the hero, then the read; the recent-observation context sections are
+// deliberately omitted from the morning message (they are still read and fed to
+// the model as context) so the morning stays positive and never greets the user
+// with a recited list of aches or a symptom they did not raise that day.
 // Night is a close-out ritual — the day's read-back (the context sections)
 // leads, then the numbers, then the single close-out action. Night deliberately
 // suppresses the interpretation slot so it does not read
@@ -118,9 +121,13 @@ func Render(b Briefing) string {
 		// interpretation slot is intentionally not rendered at night.
 		order = []string{header, sections, panel, next, verdict}
 	} else {
-		// Forward-looking ordering: the status panel is the hero. Morning renders actions only as a routine cue, never as a generic
+		// Forward-looking ordering: the status panel is the hero, then the read.
+		// The recent-observation context sections are deliberately omitted from
+		// the morning message (still fed to the model as context) so the morning
+		// stays positive and never recites the user's body state back at them.
+		// Morning renders actions only as a routine cue, never as a generic
 		// invented Next section.
-		order = []string{header, panel, sections, interp, next, verdict}
+		order = []string{header, panel, interp, next, verdict}
 	}
 
 	groups := make([]string, 0, len(order))

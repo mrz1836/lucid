@@ -54,10 +54,6 @@ func TestRender_MorningGolden(t *testing.T) {
 		"⛓️ 5-day streak · 83% adherence (20/24 decided)",
 		"📊 Error budget · 2/3 isolated misses left · 4d to gate",
 		"",
-		"🫀 **Body & state** · as logged 2026-07-19",
-		"• mood 7 — steady",
-		"• sleep 6.5h",
-		"",
 		"🧭 **The read**",
 		"Steady week. The streak holds; adherence is comfortably above floor.",
 		"",
@@ -97,18 +93,20 @@ func TestRender_NightOrdering(t *testing.T) {
 	require.Positive(t, panelIdx)
 	assert.Less(t, sectionIdx, panelIdx, "night leads with the day read-back, then the panel")
 
-	// The morning of the same briefing puts the panel first — proving the
-	// ordering genuinely differs by window.
+	// The same briefing rendered as morning omits the context read-back
+	// entirely: the morning message never recites the body-state sections (they
+	// are fed to the model as context, not rendered to the user). That is the
+	// window difference — night reads the day back, morning does not.
 	morning := Render(sampleMorningBriefing())
-	mSection := strings.Index(morning, "🫀 **Body & state**")
-	mPanel := strings.Index(morning, "⛓️ 5-day streak")
-	assert.Less(t, mPanel, mSection, "morning leads with the panel, then the context")
+	assert.NotContains(t, morning, "🫀 **Body & state**", "morning omits the context sections from the delivered message")
+	assert.Contains(t, morning, "⛓️ 5-day streak", "morning still renders the status panel")
 }
 
 // TestRender_OmitsEmptySections drops a section with no bullet lines and leaves
 // no dangling structural chrome when a whole region is empty.
 func TestRender_OmitsEmptySections(t *testing.T) {
 	b := sampleMorningBriefing()
+	b.Mode = ModeNight // sections render only in the night close-out now
 	b.Sections = []Section{
 		{Emoji: "🫀", Label: "Body & state", Meta: "as logged 2026-07-19", Lines: []string{"mood 7"}},
 		{Emoji: "📌", Label: "Commitments", Meta: "as logged 2026-07-10", Lines: nil}, // empty → omitted

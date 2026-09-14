@@ -150,7 +150,13 @@ interpretation, and action are always in distinct, scannable regions:
 - **Context sections** — `{emoji} **{Label}** · {meta}` headers with `•` bullet
   lines, one section per available signal group (body & state, change &
   withdrawal, commitments, routine anchor). A section with no data is omitted
-  entirely.
+  entirely. **These render only in the night close-out, as the day's read-back.
+  The morning window does *not* render them:** the recent-observation slice is
+  still read and fed to the model as context (step 4), but the morning message
+  deliberately omits the raw body/state bullets so it stays forward-looking and
+  positive — it never greets the user with a list of aches, and never surfaces a
+  symptom they did not raise that morning. The synthesized **read** carries
+  anything genuinely relevant, and the user logs what they choose to.
 - **Interpretation** — what matters, what changed, what needs attention — a few
   sentences. Morning displays this as **The read**; night suppresses the
   separate interpretation slot so close-out stays compact.
