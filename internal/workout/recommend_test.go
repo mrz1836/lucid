@@ -268,6 +268,82 @@ func TestRecommendActiveInjuryHardStop(t *testing.T) {
 	assert.Equal(t, "legs", resolved.Primary.ID)
 }
 
+// --- Distinct-Easier guarantee (rule 7). ---
+
+// recoveryOnlyProgram schedules a recovery-style card every day with no distinct
+// easier variant — the case that previously rendered Recommended and Easier
+// word-for-word identically, so the recommender must synthesize a lighter door.
+func recoveryOnlyProgram() Program {
+	return Program{
+		Version:   ProgramSchema,
+		ProgramID: "recovery_only",
+		Cards: []Card{
+			{ID: "recovery", Name: "Recovery + mobility", Load: LoadNone, Movements: []string{"gentle mobility", "easy walk"}},
+		},
+		Rotation: []RotationEntry{{Weekday: "mon", Card: "recovery"}},
+	}
+}
+
+// TestRecommendSynthesizesLighterEasier proves rule 7's fallback: when today's
+// card carries no distinct easier variant, the recommender synthesizes a
+// genuinely lighter Easier so Fallback is never identical to Primary.
+func TestRecommendSynthesizesLighterEasier(t *testing.T) {
+	t.Parallel()
+
+	prog := recoveryOnlyProgram()
+	require.NoError(t, prog.Validate())
+
+	got := Recommend(RecommendInput{Program: prog, Now: mustTime(t, mondayNoon), Loc: time.UTC})
+
+	assert.Equal(t, "recovery", got.Primary.ID, "today's card is the recovery card")
+	assert.NotEqual(t, got.Primary, got.Fallback, "no config easier → a synthesized, distinct Easier")
+	assert.NotEqual(t, cardOffering(got.Primary), cardOffering(got.Fallback),
+		"the synthesized Easier never renders identically to Recommended")
+	assert.Less(t, len(got.Fallback.Movements), len(got.Primary.Movements),
+		"the synthesized Easier trims movement volume")
+}
+
+// TestSynthesizeEasier covers the deterministic downshift rule directly: a named,
+// multi-movement card is trimmed and prefixed, and a bare one-movement recovery
+// card still yields a distinct, genuinely lighter door.
+func TestSynthesizeEasier(t *testing.T) {
+	t.Parallel()
+
+	full := Card{
+		ID: "legs", Name: "Legs + hips", Focus: []string{"legs"}, Load: LoadHard, Minutes: 40,
+		Movements: []string{"squat", "hinge", "lunge", "carry"},
+		Easier:    &Card{Name: "Easy legs", Load: LoadLight},
+	}
+	e := synthesizeEasier(full)
+	assert.Equal(t, "Short Legs + hips", e.Name, "a named card is prefixed with Short ")
+	assert.Equal(t, LoadModerate, e.Load, "load drops one tier")
+	assert.Equal(t, 20, e.Minutes, "positive minutes are halved")
+	assert.Equal(t, []string{"squat", "hinge"}, e.Movements, "at most the first half of the movements survive")
+	assert.Nil(t, e.Easier, "the nested easier is cleared")
+	assert.NotEqual(t, cardOffering(full), cardOffering(e))
+
+	// A one-movement, load-none, unnamed card becomes movement-free with a
+	// synthesized name and a floored minute count — still distinct from its source.
+	bare := Card{Load: LoadNone, Minutes: 1, Movements: []string{"walk"}}
+	be := synthesizeEasier(bare)
+	assert.Equal(t, "Short recovery", be.Name, "a blank name falls back to Short recovery")
+	assert.Equal(t, LoadNone, be.Load, "none is the load floor")
+	assert.Equal(t, 1, be.Minutes, "minutes floor at one")
+	assert.Empty(t, be.Movements, "a one-movement card becomes movement-free")
+	assert.NotEqual(t, cardOffering(bare), cardOffering(be))
+}
+
+// TestLowerLoad proves the ordinal load ladder and its floor.
+func TestLowerLoad(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, LoadModerate, lowerLoad(LoadHard))
+	assert.Equal(t, LoadLight, lowerLoad(LoadModerate))
+	assert.Equal(t, LoadNone, lowerLoad(LoadLight))
+	assert.Equal(t, LoadNone, lowerLoad(LoadNone), "none is the floor")
+	assert.Equal(t, LoadNone, lowerLoad(""), "an unset load is treated as the floor")
+}
+
 // --- Purity / determinism. ---
 
 // TestRecommendIsDeterministic proves the core is pure: the same input yields a

@@ -189,6 +189,32 @@ func TestRenderPainHardStopBecomesBackOffDoor(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(got, workoutBullet+" **"), "still exactly three offering doors with a hard stop")
 }
 
+// TestRenderRecoveryCardEasierDiffersFromRecommended proves the distinct-Easier
+// guarantee end to end: a recovery-style card with no config easier variant still
+// renders an Easier door whose text is distinct from Recommended and genuinely
+// lighter, with exactly three offering doors preserved.
+func TestRenderRecoveryCardEasierDiffersFromRecommended(t *testing.T) {
+	t.Parallel()
+
+	prog := recoveryOnlyProgram()
+	require.NoError(t, prog.Validate())
+
+	rec := Recommend(RecommendInput{Program: prog, Now: renderNow(), Loc: time.UTC})
+	require.Equal(t, "recovery", rec.Primary.ID, "today resolves the recovery card")
+
+	got := Render(rec, sampleTrend(), sampleAnchor(), renderNow())
+
+	recommended := cardOffering(rec.Primary)
+	easier := cardOffering(rec.Fallback)
+	assert.NotEqual(t, recommended, easier, "Easier must never render identically to Recommended")
+	assert.Contains(t, got, "**"+labelRecommended+"**")
+	assert.Contains(t, got, "**"+labelEasier+"**")
+	assert.Contains(t, got, "**"+labelBackOff+"**")
+	assert.Equal(t, 3, strings.Count(got, workoutBullet+" **"), "still exactly three offering doors")
+	assert.Less(t, len(rec.Fallback.Movements), len(rec.Primary.Movements),
+		"the synthesized Easier is genuinely lighter than Recommended")
+}
+
 // TestRenderEmptyTrendAndAnchor proves the honest empty message: a program with
 // no anchor items drops the whole anchor region (no dangling label), the streak
 // frames the build, the body line is absent, and no horizontal divider chrome

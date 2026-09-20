@@ -466,11 +466,25 @@ func restCard() Card {
 	}
 }
 
-// fallbackFor builds the always-present easier door for a primary card: its
-// easier variant when it has one (and that variant clears the guardrails), the
-// card itself when it is already a light/recovery session, else a downshift to
-// recovery.
+// fallbackFor builds the always-present easier door for a primary card, and
+// centralizes the distinct-Easier guarantee: it selects the normal easier door
+// (§"Distinct-Easier guarantee"), then — if that door would render identically to
+// the primary (a recovery-style card with no distinct easier is the common case) —
+// deterministically synthesizes a genuinely lighter Easier instead, so Recommended
+// and Easier can never collapse to the same text on any path.
 func fallbackFor(prog Program, primary Card) Card {
+	fb := normalFallback(prog, primary)
+	if cardOffering(fb) == cardOffering(primary) {
+		return synthesizeEasier(primary)
+	}
+	return fb
+}
+
+// normalFallback is the pre-guard easier door for a primary card: its easier
+// variant when it has one (and that variant clears the guardrails), the card
+// itself when it is already a light/recovery session, else a downshift to
+// recovery.
+func normalFallback(prog Program, primary Card) Card {
 	if primary.Easier != nil {
 		fb := easierAsCard(primary)
 		if _, blocked := guardrailBlock(prog, fb); !blocked {
@@ -481,6 +495,51 @@ func fallbackFor(prog Program, primary Card) Card {
 		return primary
 	}
 	return downshiftCard(prog)
+}
+
+// synthesizeEasier deterministically downshifts a card into a genuinely lighter
+// Easier door for the case the normal fallback would render identically to the
+// primary (a recovery-style card carrying no distinct easier variant is the common
+// one — the case that previously made Recommended and Easier render word-for-word
+// identically). It lowers the load one tier (none is the floor), halves any
+// positive session minutes with a floor of one, keeps at most the first half of the
+// movements (a one-movement card becomes movement-free), clears any nested easier,
+// and prefixes the name with "Short ". The name change alone guarantees
+// cardOffering(synthesizeEasier(c)) differs from cardOffering(c) even for an
+// already-load-none card with no movements, so the two doors can never collapse.
+func synthesizeEasier(c Card) Card {
+	e := c
+	e.Easier = nil
+	e.Load = lowerLoad(c.Load)
+	if c.Minutes > 0 {
+		if e.Minutes = c.Minutes / 2; e.Minutes < 1 {
+			e.Minutes = 1
+		}
+	}
+	if len(c.Movements) > 0 {
+		e.Movements = append([]string(nil), c.Movements[:len(c.Movements)/2]...)
+	}
+	if strings.TrimSpace(c.Name) == "" {
+		e.Name = "Short recovery"
+	} else {
+		e.Name = "Short " + c.Name
+	}
+	return e
+}
+
+// lowerLoad returns the load one tier below the given one, with none as the
+// floor; an unset or unrecognized load is treated as already at the floor.
+func lowerLoad(load string) string {
+	switch load {
+	case LoadHard:
+		return LoadModerate
+	case LoadModerate:
+		return LoadLight
+	case LoadLight:
+		return LoadNone
+	default:
+		return LoadNone
+	}
 }
 
 // easierAsCard promotes a card's easier variant into a full Card, inheriting the
