@@ -123,6 +123,24 @@ func TestProgramValidateRejects(t *testing.T) {
 		}},
 		{"bad start date", func(p *Program) { p.StartDate = "not-a-date" }},
 		{"pain threshold out of range", func(p *Program) { p.PainFlagThreshold = 42 }},
+		{"checkpoint blank subject", func(p *Program) {
+			p.Checkpoints = &CheckpointConfig{Label: "L", Copy: "C", OffsetHours: []int{0, 12, 24}}
+		}},
+		{"checkpoint blank label", func(p *Program) {
+			p.Checkpoints = &CheckpointConfig{Subject: "S", Copy: "C", OffsetHours: []int{0, 12, 24}}
+		}},
+		{"checkpoint blank copy", func(p *Program) {
+			p.Checkpoints = &CheckpointConfig{Subject: "S", Label: "L", OffsetHours: []int{0, 12, 24}}
+		}},
+		{"checkpoint too few offsets", func(p *Program) {
+			p.Checkpoints = &CheckpointConfig{Subject: "S", Label: "L", Copy: "C", OffsetHours: []int{0, 12}}
+		}},
+		{"checkpoint non-ascending offsets", func(p *Program) {
+			p.Checkpoints = &CheckpointConfig{Subject: "S", Label: "L", Copy: "C", OffsetHours: []int{0, 24, 12}}
+		}},
+		{"checkpoint negative offset", func(p *Program) {
+			p.Checkpoints = &CheckpointConfig{Subject: "S", Label: "L", Copy: "C", OffsetHours: []int{-1, 12, 24}}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +160,24 @@ func TestProgramValidateAcceptsCalendarOverride(t *testing.T) {
 	p := ExampleProgram()
 	p.Calendar = []CalendarEntry{{Date: "2026-07-20", Card: "recovery"}}
 	require.NoError(t, p.Validate())
+}
+
+// TestProgramValidateAcceptsCheckpoints confirms a complete checkpoint block (a
+// non-blank subject/label/copy and three ascending, non-negative offsets) passes
+// validation, and that an absent block is always valid — the scaffold is opt-in.
+func TestProgramValidateAcceptsCheckpoints(t *testing.T) {
+	t.Parallel()
+
+	p := ExampleProgram()
+	require.NoError(t, p.Validate(), "an absent checkpoint block is valid")
+
+	p.Checkpoints = &CheckpointConfig{
+		Subject:     "the loaded area",
+		Label:       "Post-workout check-in",
+		Copy:        "note how it feels",
+		OffsetHours: []int{0, 12, 24},
+	}
+	require.NoError(t, p.Validate(), "a complete checkpoint block is valid")
 }
 
 // mustCard fetches a card by id or fails the test — a small helper so a fixture

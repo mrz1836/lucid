@@ -171,6 +171,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 		Loc:            loc,
 	})
 	tr := BuildTrend(TrendInput{
+		Program:   prog,
 		Workouts:  workouts,
 		BodyState: bodyState,
 		Metrics:   metrics,
@@ -334,12 +335,17 @@ func anchorDigest(a Anchor) string {
 }
 
 // progressDigest renders the trend as compact model-facing phrases, reusing the
-// render helpers so the digest numbers match the rendered panel exactly.
+// same panel helpers the card renders from so the model grounds on exactly the
+// insight the reader sees and can never drift from it: the one slim streak line,
+// the per-part next-day pain-response + load-vs-pain lines, the checkpoint
+// scaffold (when a qualifying session supplied one), and the watch-outs.
 func progressDigest(tr Trend) []string {
-	out := []string{streakLine(tr.Streak), frequencyLine(tr)}
-	if body := bodyResponseLine(tr.BodyResponse); body != "" {
-		out = append(out, body)
+	out := []string{streakLine(tr.Streak)}
+	out = append(out, progressInsightLines(tr.PainResponse, tr.LoadPattern)...)
+	if line := checkpointLine(tr.Checkpoints); line != "" {
+		out = append(out, line)
 	}
+	out = append(out, tr.WatchOuts...)
 	return out
 }
 

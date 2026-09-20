@@ -104,16 +104,21 @@ config. This is the same firewall the companion draws for its routine
 and template files ([`../usage/companion.md`](../usage/companion.md)):
 
 * **In the repo (generic, synthetic):** the `Program` schema (rotation,
-  session cards, per-body-part recovery windows, daily anchor,
-  guardrails, goals, equipment, safety copy), the two kinds, the
-  deterministic recommender, the trend projection, the render, and a
-  **synthetic** example program used only by tests and docs.
+  session cards, per-body-part recovery windows, daily anchor, the
+  post-workout checkpoint block, guardrails, goals, equipment, safety
+  copy), the two kinds, the deterministic recommender, the trend / insight
+  projection, the render, and a **synthetic** example program used only by
+  tests and docs.
 * **Operator config (personal, private):** the actual program — a JSON
   file on an **opaque path** named in `lucid.json` (`workout.program`),
   read directly by the loader (no dir-walk, no filename convention), plus
   a personal system prompt and daily template. A real rehab program's
-  injury specifics, avoid-movements, and week-by-week numbers live here,
-  outside the public repo, exactly as the companion's routine files do.
+  injury specifics, avoid-movements, week-by-week numbers, and the
+  checkpoint block's real `subject` / `label` / `copy` (the area a
+  post-workout check-in watches, and its guidance wording) live here,
+  outside the public repo, exactly as the companion's routine files do. The
+  generic core hardcodes **no** body part, sport, or checkpoint copy —
+  every such value is read from the operator's program.
 
 The public-safe boundary (`lucid validate`, [`scope.md`](scope.md) §8
 S-7) is the enforced firewall: the repo stays synthetic-only, and no
@@ -191,6 +196,7 @@ The schema, with a **synthetic** example (no personal content):
       "name": "Pull + posture",
       "focus": ["back", "rear_shoulders"],
       "load": "moderate",
+      "checkpoint_eligible": true,
       "movements": ["supported row", "band pull-apart", "face pull"],
       "easier": {"name": "Easy pull", "load": "light",
                  "movements": ["band pull-apart", "face pull"]}
@@ -201,9 +207,17 @@ The schema, with a **synthetic** example (no personal content):
     "items": [
       {"name": "squats", "target": 50},
       {"name": "core", "target": 40},
-      {"name": "easy push-ups", "target": 20, "mode": "accumulate"}
+      {"name": "easy push-ups", "target": 20, "mode": "accumulate"},
+      {"name": "wall sit", "sets": 5, "hold_seconds": 45},
+      {"name": "breathing", "target": 5, "unit": "min"}
     ],
     "targets_by_week": {"2": {"squats": 55, "core": 50, "easy push-ups": 25}}
+  },
+  "checkpoints": {
+    "subject": "the loaded area",
+    "label": "Post-workout check-in",
+    "copy": "note how it feels",
+    "offset_hours": [0, 12, 24]
   },
   "guardrails": {
     "avoid_movements": ["loaded end-range overhead reaches"],
@@ -222,9 +236,10 @@ Field semantics, binding:
 | `start_date` | Civil `YYYY-MM-DD` the program is anchored to. The week index (`daily_anchor.targets_by_week`) and any dated calendar override count from here at the chain's rollover boundary. Absent or unparseable → week 1 always; a `now` on or before `start_date` is week 1 (never week 0 or negative). |
 | `goals`, `equipment`, `session_minutes` | Free-text context the phrasing call may read; the recommender uses `equipment`/`session_minutes` only to veto a card the operator cannot run. |
 | `rotation[]` | The weekly rotation: one card id per weekday. This is the default calendar; a program may also carry an optional dated `calendar[]` (`{date, card}`) that overrides the weekday rotation for specific days. |
-| `cards[]` | The session library. Each card has an `id`, `name`, `focus[]` (the body parts it loads — the key the recovery guardrail reads), a `load` (`light`/`moderate`/`hard`), `movements[]`, and an optional `easier` variant used as the message's fallback offering. A `recovery`/`mobility` card carries `load: "none"`. |
+| `cards[]` | The session library. Each card has an `id`, `name`, `focus[]` (the body parts it loads — the key the recovery guardrail reads), a `load` (`light`/`moderate`/`hard`), `movements[]`, and an optional `easier` variant used as the message's fallback offering. A `recovery`/`mobility` card carries `load: "none"`. An optional `checkpoint_eligible` bool marks the card as a **qualifying session** for the post-workout checkpoint scaffold (§"The trend / progress projection"); absent → `false`. |
 | `recovery_hours` | Per-body-part minimum hours before that part may take a **non-light** load again. The recovery guardrail (below) reads this. |
-| `daily_anchor` | The "something every day" floor — **surfaced on the card, never graded**. `items[]` are the anchor movements; each `target` is the count the card *shows* for today, not a bar the system scores the user against; `mode: "accumulate"` marks a movement done in small sets through the day; `targets_by_week` overrides item targets for a given 1-indexed program week (§"The daily-anchor projection"). Completion is self-reported inventory: the surface records that the anchor was done, and any counts given with it, and compares them to nothing. |
+| `daily_anchor` | The "something every day" floor — **surfaced on the card, never graded**. `items[]` are the anchor movements; each `target` is the count the card *shows* for today, not a bar the system scores the user against; `mode: "accumulate"` marks a movement done in small sets through the day; `targets_by_week` overrides item targets for a given 1-indexed program week (§"The daily-anchor projection"). An item may also carry the optional non-rep fields `sets`, `hold_seconds`, and `unit` so a hold-time or set-based movement renders cleanly (see the render table in §"The daily-anchor projection"). Completion is self-reported inventory: the surface records that the anchor was done, and any counts given with it, and compares them to nothing. |
+| `checkpoints` | Optional program-level **post-workout check-in** block: `subject` (the area a check-in watches), `label`, `copy`, and exactly **three ascending, non-negative** `offset_hours` (the private program supplies `0`, `12`, `24` for a right-after / ~12h / ~24h scaffold). Absent → no scaffold; present → validated strictly (non-blank `subject`/`label`/`copy` and three ascending offsets, else the program is rejected on load). The scaffold is computed off the most-recent logged **`checkpoint_eligible`** session (§"The trend / progress projection"); the block hardcodes no body part or health copy — those are the operator's values (synthetic in the repo, real in config). |
 | `guardrails` | `avoid_movements[]` and `provocative_positions[]` are never recommended; `no_strengthen[]` names parts the program deliberately does not load. All three are generic slots the operator fills with their real specifics. |
 | `pain_flag_threshold` | The `body_state.pain` value (0–10) at or above which the recommender emits a hard-stop and downshifts (default 5). |
 
@@ -272,7 +287,7 @@ records (`refs`-linked context, read-only); the Engine `metrics`
 ```text
 Recommendation{
   Primary  Card          // today's recommended plan
-  Fallback Card          // the easier variant — always present
+  Fallback Card          // the easier variant — always present, always genuinely lighter than Primary
   HardStop *SafetyOption // set only when a pain signal warrants backing off
   Reason   string        // one deterministic line: why this card today (not rendered)
   Vetoes   []string      // cards/parts vetoed this run and why (for tests + --json)
@@ -318,9 +333,23 @@ message carries no prose "Why" region (§"The message scaffold").
    calendar**: today's rotation card, its easier fallback, no hard stop,
    `Reason` naming the absence. Missing data never blocks a
    recommendation.
+7. **Distinct-Easier guarantee** (the always-lighter door). The `Fallback`
+   is **never identical** to the `Primary`. Normally it is the card's own
+   `easier` variant, or — for an already light/recovery Primary — a
+   downshift to a recovery card. When neither yields a door that is
+   *genuinely lighter* (most often a recovery-style card that carries no
+   distinct `easier`, the case that previously made *Recommended* and
+   *Easier* render word-for-word identically), the recommender
+   **deterministically synthesizes** a lighter Easier by downshifting the
+   Primary — one load tier down, volume and movement count trimmed — so the
+   two doors can never collapse to the same text. This holds on every path
+   (calendar, recovery rotation, hard-stop downshift, rest day), and it
+   preserves the exactly-three-offerings invariant (§"Three offerings")
+   without depending on the program to special-case each card.
 
-Every path yields a Primary, a Fallback, and a Reason; `HardStop` is the
-only optional field. The core makes zero model calls on every path.
+Every path yields a Primary, a Fallback distinct from it, and a Reason;
+`HardStop` is the only optional field. The core makes zero model calls on
+every path.
 
 ## The daily-anchor projection
 
@@ -331,7 +360,7 @@ shows today:
 ```text
 Anchor{
   Week  int          // 1-indexed program week, derived from start_date
-  Items []AnchorLine // {Name, Target, Mode} — one per daily_anchor item
+  Items []AnchorLine // {Name, Target, Mode, Sets, HoldSeconds, Unit} — one per daily_anchor item
 }
 ```
 
@@ -354,6 +383,25 @@ program that runs past its last defined week **holds** at that last target
 instead of falling back to the base or off a cliff. A ramp that ends is a
 plateau, not a reset.
 
+**Item rendering (unit / hold-time / sets).** Not every anchor item is a bare
+rep count — a hold-time or set-based movement needs its own unit or it reads as
+a dangling number (`wall sit 45 5`). `AnchorItem` / `AnchorLine` therefore carry
+three optional fields — `sets` (int), `hold_seconds` (int), and `unit` (string),
+all `omitempty` — and the renderer resolves one form deterministically, in this
+order:
+
+| Item fields | Renders | Example |
+|-------------|---------|---------|
+| `sets` **and** `hold_seconds` | `name {sets}x{hold_seconds}s` | `wall sit 5x45s` |
+| `hold_seconds` only | `name {hold_seconds}s` | `balance hold 45s` |
+| `target` **and** `unit` | `name {target} {unit}` | `breathing 5 min` |
+| `sets` only | `name {sets} sets` | `shoulder band 2 sets` |
+| `target` only (a plain rep count) | `name {target}` | `squats 50` |
+
+An item that carries none of the new fields renders exactly as before (a plain
+rep count), so existing programs are unchanged. The `(accumulate)` mode marker,
+when present, still trails the resolved form.
+
 The projection carries no completion state and no comparison. It answers
 only "what does today's floor look like" — the card shows it, and §"Capture"
 records what the user says they did, side by side, ungraded.
@@ -361,14 +409,21 @@ records what the user says they did, side by side, ungraded.
 ## The trend / progress projection
 
 `BuildTrend` is a **read-only projection** over the Ledger plus the
-Engine fold — nothing is written back onto any event (P3 sanctuary):
+Engine fold — nothing is written back onto any event (P3 sanctuary). The
+panel follows the same anti-staleness direction the weekly witness report
+took: **surface signal, do not restate a dashboard.** A flat recap of
+counters (frequency up/down, "M of 28 days missed", a single "Body:" line)
+tells the reader what they already know; the panel instead keeps **one slim
+consistency line** and otherwise carries a small set of *insights* — patterns
+the reader could not see at a glance:
 
-* **Workout streak** — the consecutive run of recent logical days that
-  carry a logged workout, counted on read from the `workout` events the
-  caller passes in. It is the surface's own honest number, **not** the
-  Engine chain's `CurrentStreak`: the chain defends the night close-out, a
-  different practice, and borrowing its count printed a number the workout
-  record had not earned. Three rules make it honest:
+* **Workout streak** (the one slim consistency line the panel keeps) — the
+  consecutive run of recent logical days that carry a logged workout, counted
+  on read from the `workout` events the caller passes in. It is the surface's
+  own honest number, **not** the Engine chain's `CurrentStreak`: the chain
+  defends the night close-out, a different practice, and borrowing its count
+  printed a number the workout record had not earned. Three rules make it
+  honest:
   * **A day closes on a completed daily anchor *or* a logged session.**
     Both are a `workout` event, so both land in the same day set; the
     low-friction anchor is the ordinary way a day closes, and a session
@@ -380,14 +435,53 @@ Engine fold — nothing is written back onto any event (P3 sanctuary):
   * **Zero is zero.** No logged workout day yields `0`, which the panel
     renders as "Building — no active streak yet". The surface never shows
     a borrowed or fabricated number in its place.
-* **Adherence** — still read from the Engine `metrics` (the chain fold),
-  never recomputed as a score on workout events.
-* **Volume / frequency trend** — sessions per week and a simple
-  direction (up / flat / down) from the recent `workout` events.
-* **Skipped days** — logical days in range with no `workout` event,
-  surfaced as inventory (a count, not a shame line).
-* **Body response** — recent `body_state` soreness/pain by part, so the
-  user can see how the body answered the load.
+* **Per-part next-day pain-response trend** (`PainResponse`) — for each body
+  part that recent **non-light** sessions targeted, the projection pairs each
+  such session day with the **following logical day's** `max(pain, soreness)`
+  for that part (read from `body_state`), orders the pairs chronologically, and
+  reports the direction as **`rising`**, **`stable`**, or **`easing`**. Below
+  **3 paired days for a part** it reports an explicit **insufficient-data**
+  state rather than inventing a trend from noise. This answers "did the load I
+  put in show up in how that part felt the next day", attributed to the
+  specific part — not a session-global average.
+* **Per-part load-vs-pain pattern** (`LoadPattern`) — over the same pairs, the
+  projection compares **ordinal load** (`light < moderate < hard`) against that
+  next-day `max(pain, soreness)` response. It reports **`tracks higher load`**
+  only when the **mean** response for higher-load pairs is greater than the mean
+  for lower-load pairs; otherwise it reports **`no tracked increase`** (this
+  includes the equal-mean case). It is a pattern read, never a claim of cause,
+  and never a grade.
+* **Post-workout checkpoint scaffold** (`Checkpoints`) — a **stateless
+  relative-time** scaffold, present **only** when the most-recent logged session
+  is a **`checkpoint_eligible`** card (§"The generic program schema"). The three
+  checkpoints (**right after / ~12h / ~24h**) are computed by adding the
+  program's `checkpoints.offset_hours` to *that session's* logged time, so they
+  are relative to **when the user actually trained** — **not** fixed calendar
+  days. The scaffold **tracks no done/pending state** and reads no post-session
+  `body_state`: it is a "when to check in" guide and nothing more (a live
+  pending/done tracker is a deliberately deferred follow-up). It is absent when
+  the checkpoint block is missing or incomplete, no `checkpoint_eligible`
+  session is logged, or that session's time cannot be resolved. The `subject`,
+  `label`, and `copy` are the operator's config values (synthetic in the repo),
+  never hardcoded body-part or health copy in the core.
+* **Watch-outs** (`WatchOuts`) — a short list of concrete, signal-bearing lines
+  derived from the folds above, rendered under a `⚠️ Watch-outs` label. It
+  reuses the weekly witness report's **frame-don't-restate** vocabulary
+  (`internal/witnessreport`): each line names a real signal (for example, a part
+  whose next-day response rose after higher load), and the list is **omitted
+  entirely** when nothing warrants it — a clean week shows no watch-outs. Part
+  labels flow from the event/config data, never hardcoded.
+* **Adherence** — still read from the Engine `metrics` (the chain fold), never
+  recomputed as a score on workout events. It rides in the `--json` projection.
+
+**What left the card (kept in `--json`).** The old flat dashboard lines — the
+**frequency direction** (`up`/`flat`/`down` with the this-week-vs-prior-week
+counts), the **skipped-day tally** ("N of the last M days had no logged
+session"), and the single flat **body-response line** ("Body: …") — are
+**dropped from the rendered card**. Their underlying fields (`Direction`,
+`ThisWeek`, `PriorWeek`, `SkippedDays`, `BodyResponse`) **remain on the `Trend`
+struct and in the `--json` projection**, so no machine consumer breaks; they
+simply no longer take a line on a surface meant for insight.
 
 The projection computes with zero data (an honest empty trend) and with
 sparse data. It is surfaced by `lucid workout` and inside the daily slot;
@@ -479,7 +573,12 @@ tables** — a chat surface renders them as raw text):
 * **Header** — `{emoji} **Workout** · {Weekday, Mon D}`.
 * **Three offerings** (the heart of the message) — exactly:
   1. **Recommended** — the Primary card, its focus and movements.
-  2. **Easier** — the Fallback variant, for a low-capacity day.
+  2. **Easier** — the Fallback variant, for a low-capacity day. It is
+     **always genuinely lighter than Recommended and never identical to
+     it**: when a card carries no distinct `easier`, the recommender
+     synthesizes a lighter one by downshifting the Primary
+     (§"The deterministic recommender contract", rule 7), so the two doors
+     always offer a real choice — never the same words twice.
   3. **Back off** — the `HardStop`/safety option: rendered as a real
      third choice **only** when a pain signal warrants it; on an ordinary
      day this line is the deterministic recovery/mobility option so there
@@ -488,13 +587,24 @@ tables** — a chat surface renders them as raw text):
   `{emoji} **Daily Anchor** · squats 50 · core 40 · easy push-ups 20
   (accumulate) — week 1`. Each item carries its current-week target and
   an `(accumulate)` marker when the program says the movement is done in
-  small sets through the day; the trailing `— week N` is the derived
-  program week, so a ramp is visible as it happens rather than guessed at.
-  The region is **dropped entirely** when the program carries no
-  `daily_anchor.items` — a program without a floor shows no empty label.
-* **Trend panel** — the read-only projection: the workout streak, frequency
-  direction, skipped-day count, recent body response — a compact panel,
-  never a grade.
+  small sets through the day; a non-rep item renders with its hold-time,
+  set count, or unit (`wall sit 5x45s`, `breathing 5 min`, `shoulder band
+  2 sets`) instead of a bare trailing number (§"The daily-anchor
+  projection"); the trailing `— week N` is the derived program week, so a
+  ramp is visible as it happens rather than guessed at. The region is
+  **dropped entirely** when the program carries no `daily_anchor.items` — a
+  program without a floor shows no empty label.
+* **Progress panel** — the read-only **insight** projection, not a flat
+  dashboard: **one slim streak/consistency line**, then the per-part
+  next-day pain-response trend (with an explicit insufficient-data state),
+  the per-part load-vs-pain pattern, a **stateless relative-time
+  post-workout checkpoint scaffold** (rendered only when a
+  `checkpoint_eligible` session is logged), and specific watch-outs under a
+  `⚠️ Watch-outs` label — a compact panel of signal, never a grade. The old
+  flat lines (the frequency-direction arrow, the "N of the last M days had
+  no logged session" tally, and the single flat "Body:" line) are **dropped
+  from the card** and remain only in `--json` (§"The trend / progress
+  projection").
 
 There is **no "Why" region.** A guardrail veto, a recovery downshift, or a
 pain hard stop still changes *which card is recommended* and still shows up

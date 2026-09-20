@@ -46,20 +46,23 @@ func sampleAnchor() Anchor {
 	}
 }
 
-// sampleTrend is a populated trend: a live streak, an up week, a skipped-day
-// count, and one body-response signal.
+// sampleTrend is a populated insight trend: a live streak, one loaded part whose
+// next-day response is rising and tracks higher load, and the concrete watch-out
+// that surfaces. The retired flat fields (frequency/skipped/body) stay in the
+// struct for --json but no longer render on the card.
 func sampleTrend() Trend {
-	sore := 6
 	return Trend{
-		Streak:      5,
-		WindowDays:  28,
-		Sessions:    8,
-		ThisWeek:    3,
-		PriorWeek:   2,
-		Direction:   DirectionUp,
-		SkippedDays: 20,
-		BodyResponse: []BodySignal{
-			{Part: "legs", Soreness: &sore, AsOf: "2026-07-19"},
+		Streak:     5,
+		WindowDays: 28,
+		Sessions:   8,
+		PainResponse: []PartTrend{
+			{Part: "legs", Loaded: true, Direction: ResponseRising, PairedDays: 4},
+		},
+		LoadPattern: []PartPattern{
+			{Part: "legs", Pattern: LoadPatternTracksHigher},
+		},
+		WatchOuts: []string{
+			"legs — next-day pain/soreness rising across 4 logged days.",
 		},
 	}
 }
@@ -86,9 +89,9 @@ func TestRenderGolden(t *testing.T) {
 		"",
 		emojiProgress + " **Progress**",
 		workoutBullet + " 5-day streak",
-		workoutBullet + " Frequency ↗ up · 3 this week vs 2 the week before",
-		workoutBullet + " 20 of the last 28 days had no logged session",
-		workoutBullet + " Body: legs soreness 6",
+		workoutBullet + " legs — next-day pain/soreness rising · tracks higher load",
+		labelWatchOuts,
+		workoutBullet + " legs — next-day pain/soreness rising across 4 logged days.",
 	}, "\n")
 
 	got := Render(sampleRecommendation(), sampleTrend(), sampleAnchor(), renderNow())
@@ -189,10 +192,36 @@ func TestRenderPainHardStopBecomesBackOffDoor(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(got, workoutBullet+" **"), "still exactly three offering doors with a hard stop")
 }
 
+// TestRenderRecoveryCardEasierDiffersFromRecommended proves the distinct-Easier
+// guarantee end to end: a recovery-style card with no config easier variant still
+// renders an Easier door whose text is distinct from Recommended and genuinely
+// lighter, with exactly three offering doors preserved.
+func TestRenderRecoveryCardEasierDiffersFromRecommended(t *testing.T) {
+	t.Parallel()
+
+	prog := recoveryOnlyProgram()
+	require.NoError(t, prog.Validate())
+
+	rec := Recommend(RecommendInput{Program: prog, Now: renderNow(), Loc: time.UTC})
+	require.Equal(t, "recovery", rec.Primary.ID, "today resolves the recovery card")
+
+	got := Render(rec, sampleTrend(), sampleAnchor(), renderNow())
+
+	recommended := cardOffering(rec.Primary)
+	easier := cardOffering(rec.Fallback)
+	assert.NotEqual(t, recommended, easier, "Easier must never render identically to Recommended")
+	assert.Contains(t, got, "**"+labelRecommended+"**")
+	assert.Contains(t, got, "**"+labelEasier+"**")
+	assert.Contains(t, got, "**"+labelBackOff+"**")
+	assert.Equal(t, 3, strings.Count(got, workoutBullet+" **"), "still exactly three offering doors")
+	assert.Less(t, len(rec.Fallback.Movements), len(rec.Primary.Movements),
+		"the synthesized Easier is genuinely lighter than Recommended")
+}
+
 // TestRenderEmptyTrendAndAnchor proves the honest empty message: a program with
 // no anchor items drops the whole anchor region (no dangling label), the streak
-// frames the build, the body line is absent, and no horizontal divider chrome
-// remains.
+// frames the build, the insight panel adds no lines with nothing to read, and no
+// horizontal divider chrome remains.
 func TestRenderEmptyTrendAndAnchor(t *testing.T) {
 	t.Parallel()
 
@@ -207,8 +236,10 @@ func TestRenderEmptyTrendAndAnchor(t *testing.T) {
 	assert.NotContains(t, got, "week 1", "the week index never renders without the items it labels")
 	assert.NotContains(t, got, "― ― ―", "no horizontal divider chrome")
 	assert.Contains(t, got, "Building — no active streak yet", "a zero streak frames the build, not a hollow 0-day")
-	assert.Contains(t, got, "0 of the last 28 days had no logged session")
-	assert.NotContains(t, got, "Body:", "no body line when nothing is logged")
+	assert.NotContains(t, got, "had no logged session", "the skipped-day tally left the card")
+	assert.NotContains(t, got, "Frequency", "the frequency direction left the card")
+	assert.NotContains(t, got, "Watch-outs", "no watch-outs when nothing warrants one")
+	assert.NotContains(t, got, "Body:", "no body line on the insight panel")
 }
 
 // TestRenderCarriesNoWhyRegion is the region-removal contract: no rendered
@@ -274,6 +305,35 @@ func TestRenderAnchorItemEdges(t *testing.T) {
 	assert.Equal(t, emojiAnchor+" **Daily Anchor** · PT app 6 · walk — week 3", got)
 }
 
+// TestRenderAnchorUnits proves the non-rep anchor forms render cleanly — a
+// sets×hold, a standalone hold, a target with a unit, and a bare set count —
+// while a plain rep count is unchanged, and none of the old dangling-number
+// artifacts (`x45s 5`, `(min) 5`, a bare `2`) survive. The `(accumulate)` mode
+// marker still trails the resolved quantity.
+func TestRenderAnchorUnits(t *testing.T) {
+	t.Parallel()
+
+	got := renderAnchor(Anchor{Week: 1, Items: []AnchorLine{
+		{Name: "wall sit", Sets: 5, HoldSeconds: 45},
+		{Name: "balance hold", HoldSeconds: 45},
+		{Name: "breathing", Target: 5, Unit: "min"},
+		{Name: "shoulder band", Sets: 2},
+		{Name: "mobility", HoldSeconds: 30, Mode: "accumulate"},
+		{Name: "PT app", Target: 6},
+	}})
+
+	want := emojiAnchor + " **Daily Anchor** · wall sit 5x45s · balance hold 45s · " +
+		"breathing 5 min · shoulder band 2 sets · mobility 30s (accumulate) · PT app 6 — week 1"
+	assert.Equal(t, want, got, "each non-rep form renders in the documented shape")
+	assert.Contains(t, got, "wall sit 5x45s")
+	assert.Contains(t, got, "balance hold 45s")
+	assert.Contains(t, got, "breathing 5 min")
+	assert.Contains(t, got, "shoulder band 2 sets")
+	assert.Contains(t, got, "PT app 6", "a plain rep count still renders as a bare number")
+	assert.NotContains(t, got, "x45s 5", "no sets×hold dangling-rep artifact")
+	assert.NotContains(t, got, "(min)", "a unit is never rendered as a mode-style parenthesis")
+}
+
 // TestRenderAnchorDropsAllBlankItems proves a region whose every item is unnamed
 // renders nothing at all rather than a header with an empty list.
 func TestRenderAnchorDropsAllBlankItems(t *testing.T) {
@@ -283,43 +343,83 @@ func TestRenderAnchorDropsAllBlankItems(t *testing.T) {
 	assert.Empty(t, renderAnchor(Anchor{Week: 2}), "no items renders no region")
 }
 
-// TestRenderBodyResponseFormatsPainAndSoreness proves a part reporting both
-// soreness and pain renders both, slash-joined.
-func TestRenderBodyResponseFormatsPainAndSoreness(t *testing.T) {
+// TestRenderProgressInsightPanel proves the panel is the insight surface, not the
+// old flat dashboard: it keeps the one slim streak line and the per-part next-day
+// pain-response signal with its load-vs-pain pattern, and it no longer prints the
+// frequency direction, the skipped-day tally, or the flat "Body:" line.
+func TestRenderProgressInsightPanel(t *testing.T) {
 	t.Parallel()
 
-	sore, pain := 4, 7
+	got := Render(sampleRecommendation(), sampleTrend(), sampleAnchor(), renderNow())
+
+	assert.Contains(t, got, workoutBullet+" 5-day streak", "the one slim streak line stays")
+	assert.Contains(t, got, "legs — next-day pain/soreness rising", "the per-part next-day trend renders")
+	assert.Contains(t, got, "tracks higher load", "the load-vs-pain pattern renders alongside it")
+	assert.NotContains(t, got, "Frequency", "the frequency direction left the card")
+	assert.NotContains(t, got, "had no logged session", "the skipped-day tally left the card")
+	assert.NotContains(t, got, "Body:", "the flat body line left the card")
+}
+
+// TestRenderProgressInsufficientData proves a part with fewer than the required
+// paired days renders its explicit insufficient-data state rather than inventing a
+// direction from noise.
+func TestRenderProgressInsufficientData(t *testing.T) {
+	t.Parallel()
+
 	tr := sampleTrend()
-	tr.BodyResponse = []BodySignal{{Part: "shoulder", Soreness: &sore, Pain: &pain, AsOf: "2026-07-19"}}
+	tr.PainResponse = []PartTrend{{Part: "knee", Loaded: true, PairedDays: 2, Insufficient: true}}
+	tr.LoadPattern = []PartPattern{{Part: "knee", Pattern: LoadPatternNoIncrease}}
+	tr.WatchOuts = nil
 
 	got := Render(sampleRecommendation(), tr, sampleAnchor(), renderNow())
-	assert.Contains(t, got, "Body: shoulder soreness 4/pain 7")
+	assert.Contains(t, got, "knee — next-day pain/soreness: 2 of 3 logged days, reading builds with more")
+	assert.NotContains(t, got, "no tracked increase", "an insufficient part shows no load-pattern claim")
 }
 
-// TestRenderFrequencyArrows proves each direction renders its glyph — the down
-// arrow in particular (the golden pins up, the empty trend pins flat).
-func TestRenderFrequencyArrows(t *testing.T) {
+// TestRenderProgressCheckpointScaffold proves the checkpoint scaffold renders only
+// when a qualifying session supplies one, as relative-time marks (right after /
+// ~12h / ~24h) computed off the logged session — never a fixed calendar day, never
+// a done/pending tracker.
+func TestRenderProgressCheckpointScaffold(t *testing.T) {
 	t.Parallel()
 
-	down := sampleTrend()
-	down.Direction = DirectionDown
-	down.ThisWeek, down.PriorWeek = 1, 3
-	assert.Contains(t, Render(sampleRecommendation(), down, sampleAnchor(), renderNow()), "Frequency ↘ down · 1 this week vs 3 the week before")
+	assert.NotContains(t, Render(sampleRecommendation(), sampleTrend(), sampleAnchor(), renderNow()),
+		"right after", "no scaffold without a qualifying session")
 
-	flat := sampleTrend()
-	flat.Direction = DirectionFlat
-	assert.Contains(t, Render(sampleRecommendation(), flat, sampleAnchor(), renderNow()), "Frequency → flat")
-}
-
-// TestRenderBodyResponseOmitsEmptySignal proves a body signal with neither
-// soreness nor pain contributes no body line — the panel drops it rather than
-// printing a bare part name.
-func TestRenderBodyResponseOmitsEmptySignal(t *testing.T) {
-	t.Parallel()
-
+	session := mustTime(t, "2026-07-19T18:30:00Z")
 	tr := sampleTrend()
-	tr.BodyResponse = []BodySignal{{Part: "legs", AsOf: "2026-07-19"}} // no soreness, no pain
-	assert.NotContains(t, Render(sampleRecommendation(), tr, sampleAnchor(), renderNow()), "Body:", "an empty signal renders no body line")
+	tr.Checkpoints = &CheckpointScaffold{
+		Subject:   "the loaded area",
+		Label:     "Post-workout check-in",
+		Copy:      "note how it feels",
+		SessionAt: session,
+		Checkpoints: []Checkpoint{
+			{OffsetHours: 0, At: session},
+			{OffsetHours: 12, At: session.Add(12 * time.Hour)},
+			{OffsetHours: 24, At: session.Add(24 * time.Hour)},
+		},
+	}
+
+	got := Render(sampleRecommendation(), tr, sampleAnchor(), renderNow())
+	assert.Contains(t, got,
+		workoutBullet+" Post-workout check-in · the loaded area — right after / ~12h / ~24h (note how it feels)",
+		"the scaffold renders relative-time marks off the logged session")
+}
+
+// TestRenderProgressWatchOuts proves the watch-outs render under the ⚠️ Watch-outs
+// label as plain bullets, and the label is absent when nothing warrants a
+// watch-out.
+func TestRenderProgressWatchOuts(t *testing.T) {
+	t.Parallel()
+
+	got := Render(sampleRecommendation(), sampleTrend(), sampleAnchor(), renderNow())
+	assert.Contains(t, got, labelWatchOuts)
+	assert.Contains(t, got, workoutBullet+" legs — next-day pain/soreness rising across 4 logged days.")
+
+	quiet := sampleTrend()
+	quiet.WatchOuts = nil
+	assert.NotContains(t, Render(sampleRecommendation(), quiet, sampleAnchor(), renderNow()), "Watch-outs",
+		"a clean read shows no watch-out label")
 }
 
 // TestCardTitleFallbacks proves the display title prefers the name, then the id,

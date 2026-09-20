@@ -79,15 +79,26 @@ byte-stable, mobile-friendly scaffold (bullets, no markdown tables):
 - **Header** — `🏋️ Workout · {Weekday, Mon D}`.
 - **Three offerings** — exactly a **Recommended** plan, an **Easier** fallback, and
   a **Back off** door (the pain-signal safety option when one is warranted, else a
-  plain "a lighter day is fine" line, so there is always a lowest-effort door).
+  plain "a lighter day is fine" line, so there is always a lowest-effort door). The
+  Easier door is **always genuinely lighter than Recommended** — when a card has no
+  distinct easier variant, the core synthesizes a lighter one by downshifting the
+  recommended plan, so the two are never the same words twice.
 - **Daily Anchor** — today's floor and this week's numbers on one line
   (`⚓ Daily Anchor · squats 50 · core 40 · easy push-ups 20 (accumulate) — week 1`).
   Each item shows the target for the **current program week**, counted from the
   program's `start_date`, so a ramp is visible as it happens; `(accumulate)` marks a
-  movement your program says is done in small sets through the day. The line is
-  dropped entirely if your program has no `daily_anchor`.
-- **Progress** — the workout streak, frequency direction, skipped-day count, and
-  recent body response — a compact glance, never a grade.
+  movement your program says is done in small sets through the day. A hold-time or
+  set-based item renders with its unit (`wall sit 5x45s`, `breathing 5 min`,
+  `shoulder band 2 sets`) rather than a bare number. The line is dropped entirely if
+  your program has no `daily_anchor`.
+- **Progress** — an **insight** panel, not a flat dashboard: one slim streak line,
+  then a per-part next-day pain-response trend (rising / stable / easing, with an
+  honest "insufficient data" note until there are enough paired days), a per-part
+  load-vs-pain pattern, a **post-workout check-in scaffold** (right after / ~12h /
+  ~24h, timed from a logged qualifying session, when your program defines one), and
+  any specific watch-outs — a compact glance at signal, never a grade. (The older
+  frequency-direction, skipped-day, and flat body-response lines are still in
+  `--json`, just no longer on the card.)
 
 There is no "Why" line: a recovery veto or a pain hard stop changes *which card is
 recommended* (and shows up in `--json`), it just doesn't argue its case at you.

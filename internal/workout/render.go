@@ -42,6 +42,12 @@ const (
 	labelBackOff     = "Back off"
 )
 
+// labelWatchOuts heads the progress panel's watch-outs — the frame-don't-restate
+// signal list, mirroring the weekly witness report's own `⚠️ Watch-outs` field
+// (internal/witnessreport). It is a plain header line, not a `• **` offering
+// bullet, so the exactly-three-doors invariant is untouched.
+const labelWatchOuts = "⚠️ Watch-outs"
+
 // Render turns an already-decided Recommendation, its Trend, and today's Anchor
 // into the final Discord message. It is pure and byte-stable: the same inputs
 // always render the identical bytes, which is what makes the readability
@@ -128,19 +134,31 @@ func backOffOffering(rec Recommendation) string {
 	return detail
 }
 
-// renderProgress renders the read-only trend panel — the workout streak (counted
-// from logged workout days), the frequency direction, the skipped-day count, and
-// the recent body response. It is a compact glance, never a grade; the
-// body-response line is omitted when there is nothing logged.
+// renderProgress renders the read-only progress panel as an **insight** surface,
+// not a flat dashboard (R-050): one slim streak/consistency line, then the
+// per-part next-day pain-response trend and its load-vs-pain pattern, the
+// stateless post-workout checkpoint scaffold (only when a qualifying session
+// supplied one), and the concrete watch-outs under a `⚠️ Watch-outs` label. It is
+// a compact panel of signal, never a grade. The old flat lines (frequency
+// direction, the skipped-day tally, and the single "Body:" line) are gone from
+// the card and live only in the `Trend` struct / `--json`
+// (docs/mvp/workout-module.md §"The trend / progress projection").
 func renderProgress(tr Trend) string {
 	var b strings.Builder
 	b.WriteString(emojiProgress)
 	b.WriteString(" **Progress**")
 	b.WriteString("\n" + bulletLine(streakLine(tr.Streak)))
-	b.WriteString("\n" + bulletLine(frequencyLine(tr)))
-	b.WriteString("\n" + bulletLine(skippedLine(tr)))
-	if body := bodyResponseLine(tr.BodyResponse); body != "" {
-		b.WriteString("\n" + bulletLine(body))
+	for _, line := range progressInsightLines(tr.PainResponse, tr.LoadPattern) {
+		b.WriteString("\n" + bulletLine(line))
+	}
+	if line := checkpointLine(tr.Checkpoints); line != "" {
+		b.WriteString("\n" + bulletLine(line))
+	}
+	if len(tr.WatchOuts) > 0 {
+		b.WriteString("\n" + labelWatchOuts)
+		for _, w := range tr.WatchOuts {
+			b.WriteString("\n" + bulletLine(w))
+		}
 	}
 	return b.String()
 }
@@ -154,53 +172,75 @@ func streakLine(streak int) string {
 	return fmt.Sprintf("%d-day streak", streak)
 }
 
-// frequencyLine renders the frequency read: an arrow and the direction word, then
-// this week's session count against the prior week's.
-func frequencyLine(tr Trend) string {
-	return fmt.Sprintf("Frequency %s %s · %d this week vs %d the week before",
-		directionArrow(tr.Direction), tr.Direction, tr.ThisWeek, tr.PriorWeek)
-}
-
-// directionArrow maps a frequency direction to its glyph.
-func directionArrow(direction string) string {
-	switch direction {
-	case DirectionUp:
-		return "↗"
-	case DirectionDown:
-		return "↘"
-	default:
-		return "→"
+// progressInsightLines renders the per-part next-day pain-response trend and its
+// load-vs-pain pattern as one compact line per loaded part — the panel's real
+// signal, in the sorted part order the fold produced. The load-pattern read is
+// matched to its part by name. Both renderProgress and compose.go's
+// progressDigest call this, so the rendered card and the model-grounding digest
+// can never drift.
+func progressInsightLines(painResponse []PartTrend, loadPattern []PartPattern) []string {
+	patternByPart := make(map[string]string, len(loadPattern))
+	for _, lp := range loadPattern {
+		patternByPart[lp.Part] = lp.Pattern
 	}
-}
-
-// skippedLine renders the skipped-day count as neutral inventory — a count over
-// the window, never a shame line.
-func skippedLine(tr Trend) string {
-	return fmt.Sprintf("%d of the last %d days had no logged session", tr.SkippedDays, tr.WindowDays)
-}
-
-// bodyResponseLine renders the recent body response — each part with whatever it
-// reported (soreness, pain, or both). Returns "" when nothing was logged, so the
-// panel drops the line entirely rather than showing an empty label.
-func bodyResponseLine(signals []BodySignal) string {
-	parts := make([]string, 0, len(signals))
-	for _, s := range signals {
-		var bits []string
-		if s.Soreness != nil {
-			bits = append(bits, fmt.Sprintf("soreness %d", *s.Soreness))
-		}
-		if s.Pain != nil {
-			bits = append(bits, fmt.Sprintf("pain %d", *s.Pain))
-		}
-		if len(bits) == 0 {
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s %s", s.Part, strings.Join(bits, "/")))
+	out := make([]string, 0, len(painResponse))
+	for _, pt := range painResponse {
+		out = append(out, partResponseLine(pt, patternByPart[pt.Part]))
 	}
-	if len(parts) == 0 {
+	return out
+}
+
+// partResponseLine renders one part's next-day pain-response read: an explicit
+// insufficient-data state below minPairedDays pairs, else the chronological
+// direction followed by the load-vs-pain pattern over the same pairs. The part
+// label flows from the fold's own data (never hardcoded); an empty part reads as
+// the neutral "that area".
+func partResponseLine(pt PartTrend, pattern string) string {
+	part := humanizePart(pt.Part)
+	if pt.Insufficient {
+		return fmt.Sprintf("%s — next-day pain/soreness: %d of %d logged days, reading builds with more",
+			part, pt.PairedDays, minPairedDays)
+	}
+	line := fmt.Sprintf("%s — next-day pain/soreness %s", part, pt.Direction)
+	if pattern != "" {
+		line += " · " + pattern
+	}
+	return line
+}
+
+// checkpointLine renders the stateless post-workout checkpoint scaffold as one
+// line: the operator's label and subject, then the relative-time marks (right
+// after / ~12h / ~24h) computed off the logged session, and the operator's copy
+// in parentheses. It tracks no done/pending state and reads no post-session
+// body_state — it is a "when to check in" guide. Returns "" when the scaffold is
+// absent or carries no checkpoints, so the panel drops the line entirely.
+func checkpointLine(cp *CheckpointScaffold) string {
+	if cp == nil || len(cp.Checkpoints) == 0 {
 		return ""
 	}
-	return "Body: " + strings.Join(parts, " · ")
+	marks := make([]string, 0, len(cp.Checkpoints))
+	for _, c := range cp.Checkpoints {
+		marks = append(marks, checkpointOffsetLabel(c.OffsetHours))
+	}
+	head := cardTitleFallback(strings.TrimSpace(cp.Label), "Post-session check-in")
+	if subject := strings.TrimSpace(cp.Subject); subject != "" {
+		head += " · " + subject
+	}
+	line := fmt.Sprintf("%s — %s", head, strings.Join(marks, " / "))
+	if note := strings.TrimSpace(cp.Copy); note != "" {
+		line += fmt.Sprintf(" (%s)", note)
+	}
+	return line
+}
+
+// checkpointOffsetLabel renders one checkpoint's offset as a relative-time mark:
+// the session moment itself reads "right after", and any later offset reads
+// "~Nh" — relative to when the user actually trained, never a fixed calendar day.
+func checkpointOffsetLabel(offset int) string {
+	if offset <= 0 {
+		return "right after"
+	}
+	return fmt.Sprintf("~%dh", offset)
 }
 
 // renderAnchor renders the daily floor as one ` · `-joined line — each item with
@@ -225,22 +265,48 @@ func renderAnchor(a Anchor) string {
 	return fmt.Sprintf("%s **Daily Anchor** · %s — week %d", emojiAnchor, strings.Join(parts, " · "), a.Week)
 }
 
-// anchorItemLine renders one anchor item — its name, its current-week target
-// when the program gives one, and its mode in parentheses ("accumulate" marks a
-// movement done in small sets through the day). An unnamed item renders "" so
-// the line never carries a bare number.
+// anchorItemLine renders one anchor item — its name, the quantity form the
+// program gives it, and its mode in parentheses ("accumulate" marks a movement
+// done in small sets through the day, and still trails the resolved form). The
+// quantity resolves to one form (see [anchorQuantity]), so a hold-time or
+// set-based movement reads cleanly instead of as a dangling number. An unnamed
+// item renders "" so the line never carries a bare number.
 func anchorItemLine(item AnchorLine) string {
 	name := strings.TrimSpace(item.Name)
 	if name == "" {
 		return ""
 	}
-	if item.Target > 0 {
-		name += fmt.Sprintf(" %d", item.Target)
+	if q := anchorQuantity(item); q != "" {
+		name += " " + q
 	}
 	if mode := strings.TrimSpace(item.Mode); mode != "" {
 		name += fmt.Sprintf(" (%s)", mode)
 	}
 	return name
+}
+
+// anchorQuantity resolves an anchor item's non-name quantity to exactly one
+// form, checked in a fixed order so a hold-time or set-based item never renders
+// as a dangling number (docs/mvp/workout-module.md §"The daily-anchor
+// projection"): sets×hold → `5x45s`, a standalone hold → `45s`, a target with a
+// unit → `5 min`, a bare set count → `2 sets`, and a plain rep count → `50`. An
+// item carrying none of these renders "", matching the prior bare-name behavior.
+func anchorQuantity(item AnchorLine) string {
+	unit := strings.TrimSpace(item.Unit)
+	switch {
+	case item.Sets > 0 && item.HoldSeconds > 0:
+		return fmt.Sprintf("%dx%ds", item.Sets, item.HoldSeconds)
+	case item.HoldSeconds > 0:
+		return fmt.Sprintf("%ds", item.HoldSeconds)
+	case item.Target > 0 && unit != "":
+		return fmt.Sprintf("%d %s", item.Target, unit)
+	case item.Sets > 0:
+		return fmt.Sprintf("%d sets", item.Sets)
+	case item.Target > 0:
+		return fmt.Sprintf("%d", item.Target)
+	default:
+		return ""
+	}
 }
 
 // bulletLine prefixes a panel line with the bullet mark.
