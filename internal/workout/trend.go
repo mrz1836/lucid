@@ -626,11 +626,13 @@ func buildWatchOuts(painResponse []PartTrend, loadPattern []PartPattern) []strin
 		}
 		if pt.Direction == ResponseRising {
 			out = append(out, fmt.Sprintf(
-				"%s — next-day pain/soreness rising across %d logged days.", humanizePart(pt.Part), pt.PairedDays))
+				"%s — next-day pain/soreness rising across %d logged days.", humanizePart(pt.Part), pt.PairedDays,
+			))
 		}
 		if byPart[pt.Part] == LoadPatternTracksHigher {
 			out = append(out, fmt.Sprintf(
-				"%s — next-day response tracks higher training load over %d logged days.", humanizePart(pt.Part), pt.PairedDays))
+				"%s — next-day response tracks higher training load over %d logged days.", humanizePart(pt.Part), pt.PairedDays,
+			))
 		}
 	}
 	return out
