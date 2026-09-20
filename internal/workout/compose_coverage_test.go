@@ -68,21 +68,30 @@ func TestComposeNilEnrichmentReadersComposeCleanly(t *testing.T) {
 	assert.Equal(t, "legs", res.Recommendation.Primary.ID)
 }
 
-// TestComposeBodyStateFlowsIntoProgress proves a body-state reading read from the
-// recent slice reaches both the rendered progress panel and the model's grounding
-// digest — the body-response line is present when there is a reading to show.
-func TestComposeBodyStateFlowsIntoProgress(t *testing.T) {
+// TestComposeInsightFlowsIntoProgress proves the per-part next-day pain-response
+// insight computed from the recent slice reaches both the rendered progress panel
+// and the model's grounding digest — three loaded sessions with rising next-day
+// readings surface the part's trend on the card and in the digest the model grounds
+// on without restating.
+func TestComposeInsightFlowsIntoProgress(t *testing.T) {
 	t.Parallel()
 
-	obs := &fakeObs{events: []observations.Event{bodyStateOn("2026-07-19", "legs", 4, -1)}}
+	obs := &fakeObs{events: []observations.Event{
+		sessionOn("2026-06-29", "legs", 8),
+		sessionOn("2026-07-03", "legs", 8),
+		sessionOn("2026-07-07", "legs", 8),
+		bodyStateOn("2026-06-30", "legs", 3, -1),
+		bodyStateOn("2026-07-04", "legs", 5, -1),
+		bodyStateOn("2026-07-08", "legs", 7, -1),
+	}}
 	fake := &provider.Fake{Script: []provider.Exchange{{Content: "note"}}}
 	res, err := New(baseDeps(t, obs, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
 	require.NoError(t, err)
 
-	assert.Contains(t, res.Text, "Body: legs soreness 4", "the recent body reading renders in the progress panel")
+	assert.Contains(t, res.Text, "legs — next-day pain/soreness rising", "the insight renders in the progress panel")
 	require.Equal(t, 1, fake.Calls())
-	assert.Contains(t, fake.Requests[0].Messages[0].Content, "soreness 4",
-		"the model grounds on the same body reading it never restates")
+	assert.Contains(t, fake.Requests[0].Messages[0].Content, "next-day pain/soreness rising",
+		"the model grounds on the same insight it never restates")
 }
 
 // TestRenderWithNoteEmptyNoteFallsBackToSpine proves the note-prepend helper
