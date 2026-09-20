@@ -274,6 +274,35 @@ func TestRenderAnchorItemEdges(t *testing.T) {
 	assert.Equal(t, emojiAnchor+" **Daily Anchor** · PT app 6 · walk — week 3", got)
 }
 
+// TestRenderAnchorUnits proves the non-rep anchor forms render cleanly — a
+// sets×hold, a standalone hold, a target with a unit, and a bare set count —
+// while a plain rep count is unchanged, and none of the old dangling-number
+// artifacts (`x45s 5`, `(min) 5`, a bare `2`) survive. The `(accumulate)` mode
+// marker still trails the resolved quantity.
+func TestRenderAnchorUnits(t *testing.T) {
+	t.Parallel()
+
+	got := renderAnchor(Anchor{Week: 1, Items: []AnchorLine{
+		{Name: "wall sit", Sets: 5, HoldSeconds: 45},
+		{Name: "balance hold", HoldSeconds: 45},
+		{Name: "breathing", Target: 5, Unit: "min"},
+		{Name: "shoulder band", Sets: 2},
+		{Name: "mobility", HoldSeconds: 30, Mode: "accumulate"},
+		{Name: "PT app", Target: 6},
+	}})
+
+	want := emojiAnchor + " **Daily Anchor** · wall sit 5x45s · balance hold 45s · " +
+		"breathing 5 min · shoulder band 2 sets · mobility 30s (accumulate) · PT app 6 — week 1"
+	assert.Equal(t, want, got, "each non-rep form renders in the documented shape")
+	assert.Contains(t, got, "wall sit 5x45s")
+	assert.Contains(t, got, "balance hold 45s")
+	assert.Contains(t, got, "breathing 5 min")
+	assert.Contains(t, got, "shoulder band 2 sets")
+	assert.Contains(t, got, "PT app 6", "a plain rep count still renders as a bare number")
+	assert.NotContains(t, got, "x45s 5", "no sets×hold dangling-rep artifact")
+	assert.NotContains(t, got, "(min)", "a unit is never rendered as a mode-style parenthesis")
+}
+
 // TestRenderAnchorDropsAllBlankItems proves a region whose every item is unnamed
 // renders nothing at all rather than a header with an empty list.
 func TestRenderAnchorDropsAllBlankItems(t *testing.T) {

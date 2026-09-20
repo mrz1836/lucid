@@ -27,11 +27,16 @@ const anchorWeekDays = 7
 // movement's name, the count that applies to the current program week, and the
 // item's optional mode ("accumulate" marks a movement done in small sets through
 // the day). Target is the number the card *displays*, never a bar the system
-// scores against.
+// scores against. The optional Sets, HoldSeconds, and Unit carry a non-rep
+// item's shape so the renderer emits `wall sit 5x45s` or `breathing 5 min`
+// rather than a bare trailing number (see [anchorItemLine]).
 type AnchorLine struct {
-	Name   string `json:"name"`
-	Target int    `json:"target,omitempty"`
-	Mode   string `json:"mode,omitempty"`
+	Name        string `json:"name"`
+	Target      int    `json:"target,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Sets        int    `json:"sets,omitempty"`
+	HoldSeconds int    `json:"hold_seconds,omitempty"`
+	Unit        string `json:"unit,omitempty"`
 }
 
 // Anchor is the daily-anchor projection: the derived 1-indexed program week and
@@ -61,9 +66,12 @@ func BuildAnchor(prog Program, now time.Time, loc *time.Location) Anchor {
 	lines := make([]AnchorLine, 0, len(prog.DailyAnchor.Items))
 	for _, item := range prog.DailyAnchor.Items {
 		lines = append(lines, AnchorLine{
-			Name:   item.Name,
-			Target: effectiveTarget(item, week, prog.DailyAnchor.TargetsByWeek),
-			Mode:   item.Mode,
+			Name:        item.Name,
+			Target:      effectiveTarget(item, week, prog.DailyAnchor.TargetsByWeek),
+			Mode:        item.Mode,
+			Sets:        item.Sets,
+			HoldSeconds: item.HoldSeconds,
+			Unit:        item.Unit,
 		})
 	}
 	return Anchor{Week: week, Items: lines}

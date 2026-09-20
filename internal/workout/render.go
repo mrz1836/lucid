@@ -225,22 +225,48 @@ func renderAnchor(a Anchor) string {
 	return fmt.Sprintf("%s **Daily Anchor** · %s — week %d", emojiAnchor, strings.Join(parts, " · "), a.Week)
 }
 
-// anchorItemLine renders one anchor item — its name, its current-week target
-// when the program gives one, and its mode in parentheses ("accumulate" marks a
-// movement done in small sets through the day). An unnamed item renders "" so
-// the line never carries a bare number.
+// anchorItemLine renders one anchor item — its name, the quantity form the
+// program gives it, and its mode in parentheses ("accumulate" marks a movement
+// done in small sets through the day, and still trails the resolved form). The
+// quantity resolves to one form (see [anchorQuantity]), so a hold-time or
+// set-based movement reads cleanly instead of as a dangling number. An unnamed
+// item renders "" so the line never carries a bare number.
 func anchorItemLine(item AnchorLine) string {
 	name := strings.TrimSpace(item.Name)
 	if name == "" {
 		return ""
 	}
-	if item.Target > 0 {
-		name += fmt.Sprintf(" %d", item.Target)
+	if q := anchorQuantity(item); q != "" {
+		name += " " + q
 	}
 	if mode := strings.TrimSpace(item.Mode); mode != "" {
 		name += fmt.Sprintf(" (%s)", mode)
 	}
 	return name
+}
+
+// anchorQuantity resolves an anchor item's non-name quantity to exactly one
+// form, checked in a fixed order so a hold-time or set-based item never renders
+// as a dangling number (docs/mvp/workout-module.md §"The daily-anchor
+// projection"): sets×hold → `5x45s`, a standalone hold → `45s`, a target with a
+// unit → `5 min`, a bare set count → `2 sets`, and a plain rep count → `50`. An
+// item carrying none of these renders "", matching the prior bare-name behavior.
+func anchorQuantity(item AnchorLine) string {
+	unit := strings.TrimSpace(item.Unit)
+	switch {
+	case item.Sets > 0 && item.HoldSeconds > 0:
+		return fmt.Sprintf("%dx%ds", item.Sets, item.HoldSeconds)
+	case item.HoldSeconds > 0:
+		return fmt.Sprintf("%ds", item.HoldSeconds)
+	case item.Target > 0 && unit != "":
+		return fmt.Sprintf("%d %s", item.Target, unit)
+	case item.Sets > 0:
+		return fmt.Sprintf("%d sets", item.Sets)
+	case item.Target > 0:
+		return fmt.Sprintf("%d", item.Target)
+	default:
+		return ""
+	}
 }
 
 // bulletLine prefixes a panel line with the bullet mark.

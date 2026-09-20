@@ -99,12 +99,20 @@ type CalendarEntry struct {
 
 // AnchorItem is one movement in the daily anchor — the "something every day"
 // floor. Target is the count for the item (overridable per program week); Mode
-// "accumulate" marks a movement done in small sets through the day. The anchor is
-// inventory only: nothing here is a target the system grades.
+// "accumulate" marks a movement done in small sets through the day. The optional
+// non-rep fields Sets, HoldSeconds, and Unit (all omitempty) let a hold-time or
+// set-based movement render cleanly — `wall sit 5x45s`, `breathing 5 min`,
+// `shoulder band 2 sets` — instead of a dangling number; the renderer resolves
+// one form in a fixed order (docs/mvp/workout-module.md §"The daily-anchor
+// projection"). The anchor is inventory only: nothing here is a target the
+// system grades.
 type AnchorItem struct {
-	Name   string `json:"name"`
-	Target int    `json:"target,omitempty"`
-	Mode   string `json:"mode,omitempty"`
+	Name        string `json:"name"`
+	Target      int    `json:"target,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Sets        int    `json:"sets,omitempty"`
+	HoldSeconds int    `json:"hold_seconds,omitempty"`
+	Unit        string `json:"unit,omitempty"`
 }
 
 // DailyAnchor is the program's daily floor. Items are the anchor movements;
