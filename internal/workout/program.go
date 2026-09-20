@@ -80,6 +80,12 @@ type Card struct {
 	Equipment []string `json:"equipment,omitempty"`
 	Minutes   int      `json:"minutes,omitempty"`
 	Easier    *Card    `json:"easier,omitempty"`
+	// CheckpointEligible marks a card as a qualifying session for the post-workout
+	// checkpoint scaffold: when the most-recent logged session resolves to a card
+	// carrying this flag, the trend renders the relative-time check-in scaffold
+	// (docs/mvp/workout-module.md §"The trend / progress projection"). Absent →
+	// false, so the scaffold stays inert unless a program opts a card into it.
+	CheckpointEligible bool `json:"checkpoint_eligible,omitempty"`
 }
 
 // RotationEntry maps a weekday to a card id — the default weekly calendar. The
@@ -135,27 +141,84 @@ type Guardrails struct {
 	NoStrengthen         []string `json:"no_strengthen,omitempty"`
 }
 
+// CheckpointConfig is the program-level post-workout check-in block: the generic
+// mechanism ships here, and the operator supplies the real Subject (the area a
+// check-in watches), Label, Copy, and exactly three ascending, non-negative
+// OffsetHours (the private program supplies 0/12/24 for a right-after / ~12h /
+// ~24h scaffold). It hardcodes no body part, sport, or health copy — those are the
+// operator's values, synthetic in this repo. Absent → no scaffold; present → it is
+// validated strictly on load. See docs/mvp/workout-module.md §"The generic program
+// schema" and §"The trend / progress projection".
+type CheckpointConfig struct {
+	Subject     string `json:"subject"`
+	Label       string `json:"label"`
+	Copy        string `json:"copy"`
+	OffsetHours []int  `json:"offset_hours"`
+}
+
+// validate reports the first structural problem with a checkpoint block: a
+// blank subject/label/copy, or offsets that are not exactly three, ascending, and
+// non-negative. It runs only when a program carries the block, so an absent block
+// is always valid.
+func (c *CheckpointConfig) validate() error {
+	if strings.TrimSpace(c.Subject) == "" {
+		return errors.New("workout: checkpoints.subject is required")
+	}
+	if strings.TrimSpace(c.Label) == "" {
+		return errors.New("workout: checkpoints.label is required")
+	}
+	if strings.TrimSpace(c.Copy) == "" {
+		return errors.New("workout: checkpoints.copy is required")
+	}
+	if len(c.OffsetHours) != 3 {
+		return fmt.Errorf("workout: checkpoints.offset_hours needs exactly 3 entries, got %d", len(c.OffsetHours))
+	}
+	prev := -1
+	for i, h := range c.OffsetHours {
+		if h < 0 {
+			return fmt.Errorf("workout: checkpoints.offset_hours[%d] is negative", i)
+		}
+		if h <= prev {
+			return fmt.Errorf("workout: checkpoints.offset_hours must ascend, got %v", c.OffsetHours)
+		}
+		prev = h
+	}
+	return nil
+}
+
+// complete reports whether a checkpoint block is present and carries the fields
+// the scaffold needs — the nil-safe guard the trend fold reads before rendering,
+// independent of whether the program came through the strict loader.
+func (c *CheckpointConfig) complete() bool {
+	return c != nil &&
+		strings.TrimSpace(c.Subject) != "" &&
+		strings.TrimSpace(c.Label) != "" &&
+		strings.TrimSpace(c.Copy) != "" &&
+		len(c.OffsetHours) == 3
+}
+
 // Program is the generic, versioned body of what to do. It is loaded from an
 // opaque operator path and validated on load; a bad or missing program is a
 // loader error the surface degrades on (workout-module.md §"Error states" W-1)
 // rather than a crash. The schema is synthetic-only in this repo — see
 // [ExampleProgram] — and the personal values live in the operator's file.
 type Program struct {
-	Version           int             `json:"version"`
-	ProgramID         string          `json:"program_id"`
-	Label             string          `json:"label,omitempty"`
-	StartDate         string          `json:"start_date,omitempty"`
-	Goals             []string        `json:"goals,omitempty"`
-	Equipment         []string        `json:"equipment,omitempty"`
-	SessionMinutes    int             `json:"session_minutes,omitempty"`
-	Rotation          []RotationEntry `json:"rotation,omitempty"`
-	Calendar          []CalendarEntry `json:"calendar,omitempty"`
-	Cards             []Card          `json:"cards"`
-	RecoveryHours     map[string]int  `json:"recovery_hours,omitempty"`
-	DailyAnchor       DailyAnchor     `json:"daily_anchor"`
-	Guardrails        Guardrails      `json:"guardrails"`
-	PainFlagThreshold int             `json:"pain_flag_threshold,omitempty"`
-	SafetyCopy        string          `json:"safety_copy,omitempty"`
+	Version           int               `json:"version"`
+	ProgramID         string            `json:"program_id"`
+	Label             string            `json:"label,omitempty"`
+	StartDate         string            `json:"start_date,omitempty"`
+	Goals             []string          `json:"goals,omitempty"`
+	Equipment         []string          `json:"equipment,omitempty"`
+	SessionMinutes    int               `json:"session_minutes,omitempty"`
+	Rotation          []RotationEntry   `json:"rotation,omitempty"`
+	Calendar          []CalendarEntry   `json:"calendar,omitempty"`
+	Cards             []Card            `json:"cards"`
+	RecoveryHours     map[string]int    `json:"recovery_hours,omitempty"`
+	DailyAnchor       DailyAnchor       `json:"daily_anchor"`
+	Guardrails        Guardrails        `json:"guardrails"`
+	Checkpoints       *CheckpointConfig `json:"checkpoints,omitempty"`
+	PainFlagThreshold int               `json:"pain_flag_threshold,omitempty"`
+	SafetyCopy        string            `json:"safety_copy,omitempty"`
 }
 
 // LoadProgram reads and validates a program from an explicit, opaque path. It
@@ -210,6 +273,11 @@ func (p Program) Validate() error {
 	}
 	if p.PainFlagThreshold < 0 || p.PainFlagThreshold > 10 {
 		return fmt.Errorf("workout: pain_flag_threshold %d out of range 0-10", p.PainFlagThreshold)
+	}
+	if p.Checkpoints != nil {
+		if err := p.Checkpoints.validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

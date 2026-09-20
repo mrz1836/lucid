@@ -1,6 +1,7 @@
 package workout
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -371,6 +372,480 @@ func TestEventLogicalDay(t *testing.T) {
 	assert.False(t, ok, "an event with no resolvable day is skipped, not mis-dated")
 }
 
+// --- Insight fold: per-part next-day pain-response trend (Q3=A). ---
+
+// TestBuildTrendPainResponseNextDay proves the per-part next-day pain-response
+// fold: it pairs each non-light targeted session day with the FOLLOWING logical
+// day's max(pain, soreness), reads the chronological direction, and reports an
+// explicit insufficient-data state below 3 paired days. Same-day readings never
+// pair — only the following day answers the load.
+func TestBuildTrendPainResponseNextDay(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		workouts   []observations.Event
+		body       []observations.Event
+		wantDir    string
+		wantPaired int
+		wantInsuff bool
+	}{{
+		name: "rising next-day response",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+			sessionOn("2026-07-09", "knee", 8),
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 3, -1),
+			bodyStateOn("2026-07-06", "knee", 5, -1),
+			bodyStateOn("2026-07-10", "knee", 7, -1),
+		},
+		wantDir:    ResponseRising,
+		wantPaired: 3,
+	}, {
+		name: "easing next-day response",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+			sessionOn("2026-07-09", "knee", 8),
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 7, -1),
+			bodyStateOn("2026-07-06", "knee", 5, -1),
+			bodyStateOn("2026-07-10", "knee", 3, -1),
+		},
+		wantDir:    ResponseEasing,
+		wantPaired: 3,
+	}, {
+		name: "stable next-day response",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+			sessionOn("2026-07-09", "knee", 8),
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 5, -1),
+			bodyStateOn("2026-07-06", "knee", 5, -1),
+			bodyStateOn("2026-07-10", "knee", 5, -1),
+		},
+		wantDir:    ResponseStable,
+		wantPaired: 3,
+	}, {
+		name: "two paired days is insufficient",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 3, -1),
+			bodyStateOn("2026-07-06", "knee", 9, -1),
+		},
+		wantDir:    "",
+		wantPaired: 2,
+		wantInsuff: true,
+	}, {
+		name: "same-day readings do not pair",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+			sessionOn("2026-07-09", "knee", 8),
+		},
+		body: []observations.Event{
+			// readings on the session days themselves — never the following day.
+			bodyStateOn("2026-07-01", "knee", 9, -1),
+			bodyStateOn("2026-07-05", "knee", 9, -1),
+			bodyStateOn("2026-07-09", "knee", 9, -1),
+		},
+		wantDir:    "",
+		wantPaired: 0,
+		wantInsuff: true,
+	}}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := BuildTrend(TrendInput{
+				Workouts:  tc.workouts,
+				BodyState: tc.body,
+				Now:       mustTime(t, trendNow),
+				Loc:       time.UTC,
+			})
+			pt := partTrend(t, tr.PainResponse, "knee")
+			assert.True(t, pt.Loaded, "a non-light session marks the part loaded")
+			assert.Equal(t, tc.wantPaired, pt.PairedDays, "paired-day count")
+			assert.Equal(t, tc.wantInsuff, pt.Insufficient, "insufficient-data state")
+			assert.Equal(t, tc.wantDir, pt.Direction, "chronological direction")
+		})
+	}
+}
+
+// TestBuildTrendPainResponsePerPart proves the fold attributes each part
+// separately: a rising knee and an easing back are read independently and never
+// flattened into a single session-global number.
+func TestBuildTrendPainResponsePerPart(t *testing.T) {
+	t.Parallel()
+
+	tr := BuildTrend(TrendInput{
+		Workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+			sessionOn("2026-07-09", "knee", 8),
+			sessionOn("2026-07-02", "back", 8),
+			sessionOn("2026-07-06", "back", 8),
+			sessionOn("2026-07-10", "back", 8),
+		},
+		BodyState: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 3, -1),
+			bodyStateOn("2026-07-06", "knee", 5, -1),
+			bodyStateOn("2026-07-10", "knee", 7, -1),
+			bodyStateOn("2026-07-03", "back", 7, -1),
+			bodyStateOn("2026-07-07", "back", 5, -1),
+			bodyStateOn("2026-07-11", "back", 3, -1),
+		},
+		Now: mustTime(t, trendNow),
+		Loc: time.UTC,
+	})
+
+	knee := partTrend(t, tr.PainResponse, "knee")
+	assert.Equal(t, ResponseRising, knee.Direction, "knee's own next-day response is rising")
+	back := partTrend(t, tr.PainResponse, "back")
+	assert.Equal(t, ResponseEasing, back.Direction, "back's own next-day response is easing, read independently")
+}
+
+// TestBuildTrendResponseUsesMaxPainSoreness proves the next-day response is the
+// greater of that day's pain and soreness — whichever is higher wins, so a pain
+// spike is not hidden behind a low soreness and vice versa.
+func TestBuildTrendResponseUsesMaxPainSoreness(t *testing.T) {
+	t.Parallel()
+
+	tr := BuildTrend(TrendInput{
+		Workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+			sessionOn("2026-07-09", "knee", 8),
+		},
+		BodyState: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 1, 3), // pain 3 > soreness 1 → 3
+			bodyStateOn("2026-07-06", "knee", 2, 5), // pain 5 > soreness 2 → 5
+			bodyStateOn("2026-07-10", "knee", 8, 1), // soreness 8 > pain 1 → 8
+		},
+		Now: mustTime(t, trendNow),
+		Loc: time.UTC,
+	})
+
+	pt := partTrend(t, tr.PainResponse, "knee")
+	assert.Equal(t, 3, pt.PairedDays)
+	assert.Equal(t, ResponseRising, pt.Direction, "the max(pain, soreness) series 3→5→8 reads rising")
+}
+
+// --- Insight fold: per-part load-vs-pain pattern (AC-4). ---
+
+// TestBuildTrendLoadPattern proves the ordinal load-vs-response comparison:
+// `tracks higher load` only when the heavier-load pairs' mean next-day response
+// exceeds the lighter ones', and `no tracked increase` on the equal-mean and
+// single-load-level cases.
+func TestBuildTrendLoadPattern(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		workouts []observations.Event
+		body     []observations.Event
+		want     string
+	}{{
+		name: "heavier load tracks a higher response",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 5), // moderate
+			sessionOn("2026-07-05", "knee", 5), // moderate
+			sessionOn("2026-07-09", "knee", 8), // hard
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 2, -1), // moderate → 2
+			bodyStateOn("2026-07-06", "knee", 3, -1), // moderate → 3 (mean 2.5)
+			bodyStateOn("2026-07-10", "knee", 8, -1), // hard → 8
+		},
+		want: LoadPatternTracksHigher,
+	}, {
+		name: "equal means report no tracked increase",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 5), // moderate
+			sessionOn("2026-07-05", "knee", 5), // moderate
+			sessionOn("2026-07-09", "knee", 8), // hard
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 2, -1), // moderate → 2
+			bodyStateOn("2026-07-06", "knee", 4, -1), // moderate → 4 (mean 3)
+			bodyStateOn("2026-07-10", "knee", 3, -1), // hard → 3 (mean 3, not greater)
+		},
+		want: LoadPatternNoIncrease,
+	}, {
+		name: "a single load level reports no tracked increase",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8), // hard
+			sessionOn("2026-07-05", "knee", 8), // hard
+			sessionOn("2026-07-09", "knee", 8), // hard
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 3, -1),
+			bodyStateOn("2026-07-06", "knee", 5, -1),
+			bodyStateOn("2026-07-10", "knee", 7, -1),
+		},
+		want: LoadPatternNoIncrease,
+	}}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := BuildTrend(TrendInput{
+				Workouts:  tc.workouts,
+				BodyState: tc.body,
+				Now:       mustTime(t, trendNow),
+				Loc:       time.UTC,
+			})
+			pp := partPattern(t, tr.LoadPattern, "knee")
+			assert.Equal(t, tc.want, pp.Pattern)
+		})
+	}
+}
+
+// --- Insight fold: stateless post-workout checkpoint scaffold (Q2/Q6=A). ---
+
+// TestBuildTrendCheckpointScaffold proves the stateless relative-time scaffold: a
+// logged checkpoint_eligible session yields three checkpoints computed off that
+// session's own time (never a fixed calendar day, never a done/pending tracker),
+// and it is nil when no qualifying session or no config is present.
+func TestBuildTrendCheckpointScaffold(t *testing.T) {
+	t.Parallel()
+
+	prog := checkpointProgram()
+	require.NoError(t, prog.Validate())
+
+	t.Run("qualifying session yields a relative scaffold", func(t *testing.T) {
+		t.Parallel()
+
+		const sessionAt = "2026-07-19T18:30:00Z"
+		tr := BuildTrend(TrendInput{
+			Program:  prog,
+			Workouts: []observations.Event{workoutEvent(sessionAt, "sport", nil, 8)},
+			Now:      mustTime(t, trendNow),
+			Loc:      time.UTC,
+		})
+
+		require.NotNil(t, tr.Checkpoints)
+		assert.Equal(t, "the loaded area", tr.Checkpoints.Subject)
+		assert.Equal(t, "Post-workout check-in", tr.Checkpoints.Label)
+		assert.Equal(t, "note how it feels", tr.Checkpoints.Copy)
+		require.Len(t, tr.Checkpoints.Checkpoints, 3)
+
+		base := mustTime(t, sessionAt)
+		assert.True(t, base.Equal(tr.Checkpoints.SessionAt), "the scaffold anchors on the session time")
+		assert.Equal(t, []int{0, 12, 24}, []int{
+			tr.Checkpoints.Checkpoints[0].OffsetHours,
+			tr.Checkpoints.Checkpoints[1].OffsetHours,
+			tr.Checkpoints.Checkpoints[2].OffsetHours,
+		})
+		assert.True(t, base.Equal(tr.Checkpoints.Checkpoints[0].At), "right-after is the session time")
+		assert.True(t, base.Add(12*time.Hour).Equal(tr.Checkpoints.Checkpoints[1].At))
+		assert.True(t, base.Add(24*time.Hour).Equal(tr.Checkpoints.Checkpoints[2].At))
+
+		// A session logged at a different clock time shifts every checkpoint by the
+		// same delta — proof the scaffold keys off the logged time, not a calendar day.
+		shifted := BuildTrend(TrendInput{
+			Program:  prog,
+			Workouts: []observations.Event{workoutEvent("2026-07-19T06:00:00Z", "sport", nil, 8)},
+			Now:      mustTime(t, trendNow),
+			Loc:      time.UTC,
+		})
+		require.NotNil(t, shifted.Checkpoints)
+		assert.False(t, tr.Checkpoints.Checkpoints[0].At.Equal(shifted.Checkpoints.Checkpoints[0].At),
+			"the scaffold is relative to the logged session time, not a fixed calendar day")
+	})
+
+	t.Run("most-recent eligible session wins", func(t *testing.T) {
+		t.Parallel()
+
+		tr := BuildTrend(TrendInput{
+			Program: prog,
+			Workouts: []observations.Event{
+				workoutEvent("2026-07-15T09:00:00Z", "sport", nil, 8),
+				workoutEvent("2026-07-18T20:00:00Z", "sport", nil, 8), // more recent
+			},
+			Now: mustTime(t, trendNow),
+			Loc: time.UTC,
+		})
+		require.NotNil(t, tr.Checkpoints)
+		assert.True(t, mustTime(t, "2026-07-18T20:00:00Z").Equal(tr.Checkpoints.SessionAt),
+			"the most-recent qualifying session anchors the scaffold")
+	})
+
+	t.Run("no qualifying session yields no scaffold", func(t *testing.T) {
+		t.Parallel()
+
+		tr := BuildTrend(TrendInput{
+			Program:  prog,
+			Workouts: []observations.Event{workoutEvent("2026-07-19T18:00:00Z", "easy", nil, 2)}, // not eligible
+			Now:      mustTime(t, trendNow),
+			Loc:      time.UTC,
+		})
+		assert.Nil(t, tr.Checkpoints, "a non-eligible session raises no scaffold")
+	})
+
+	t.Run("no checkpoint config yields no scaffold", func(t *testing.T) {
+		t.Parallel()
+
+		noCfg := checkpointProgram()
+		noCfg.Checkpoints = nil
+		tr := BuildTrend(TrendInput{
+			Program:  noCfg,
+			Workouts: []observations.Event{workoutEvent("2026-07-19T18:00:00Z", "sport", nil, 8)},
+			Now:      mustTime(t, trendNow),
+			Loc:      time.UTC,
+		})
+		assert.Nil(t, tr.Checkpoints, "no config, no scaffold")
+	})
+}
+
+// --- Insight fold: watch-outs (AC-6). ---
+
+// TestBuildTrendWatchOuts proves the watch-outs frame concrete signals — a rising
+// next-day response names its part and paired-day count — and are omitted entirely
+// when nothing warrants them.
+func TestBuildTrendWatchOuts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a rising response surfaces a concrete watch-out", func(t *testing.T) {
+		t.Parallel()
+
+		tr := BuildTrend(TrendInput{
+			Workouts: []observations.Event{
+				sessionOn("2026-07-01", "knee", 8),
+				sessionOn("2026-07-05", "knee", 8),
+				sessionOn("2026-07-09", "knee", 8),
+			},
+			BodyState: []observations.Event{
+				bodyStateOn("2026-07-02", "knee", 3, -1),
+				bodyStateOn("2026-07-06", "knee", 5, -1),
+				bodyStateOn("2026-07-10", "knee", 7, -1),
+			},
+			Now: mustTime(t, trendNow),
+			Loc: time.UTC,
+		})
+
+		require.NotEmpty(t, tr.WatchOuts)
+		joined := strings.Join(tr.WatchOuts, "\n")
+		assert.Contains(t, joined, "knee", "the watch-out names the part from the data")
+		assert.Contains(t, joined, "rising")
+		assert.Contains(t, joined, "3 logged days", "each line names a concrete number")
+	})
+
+	t.Run("a stable, single-load part warrants no watch-out", func(t *testing.T) {
+		t.Parallel()
+
+		tr := BuildTrend(TrendInput{
+			Workouts: []observations.Event{
+				sessionOn("2026-07-01", "knee", 8),
+				sessionOn("2026-07-05", "knee", 8),
+				sessionOn("2026-07-09", "knee", 8),
+			},
+			BodyState: []observations.Event{
+				bodyStateOn("2026-07-02", "knee", 5, -1),
+				bodyStateOn("2026-07-06", "knee", 5, -1),
+				bodyStateOn("2026-07-10", "knee", 5, -1),
+			},
+			Now: mustTime(t, trendNow),
+			Loc: time.UTC,
+		})
+		assert.Empty(t, tr.WatchOuts, "a clean, stable read shows no watch-outs")
+	})
+}
+
+// --- Correlation synthetic-fixture cases: present / absent / insufficient (AC-7). ---
+
+// TestBuildTrendCorrelationCases exercises the three required load-then-response
+// cases in one place: correlation present (`tracks higher load`, rising), absent
+// (`no tracked increase`, stable), and insufficient-data (fewer than 3 paired days
+// per part).
+func TestBuildTrendCorrelationCases(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		workouts    []observations.Event
+		body        []observations.Event
+		wantPattern string
+		wantDir     string
+		wantPaired  int
+		wantInsuff  bool
+	}{{
+		name: "present — heavier load tracks a higher, rising response",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 5), // moderate
+			sessionOn("2026-07-05", "knee", 8), // hard
+			sessionOn("2026-07-09", "knee", 8), // hard
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 2, -1), // moderate → 2 (lower mean 2)
+			bodyStateOn("2026-07-06", "knee", 6, -1), // hard → 6
+			bodyStateOn("2026-07-10", "knee", 8, -1), // hard → 8 (higher mean 7)
+		},
+		wantPattern: LoadPatternTracksHigher,
+		wantDir:     ResponseRising,
+		wantPaired:  3,
+	}, {
+		name: "absent — the response does not track load",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 5), // moderate
+			sessionOn("2026-07-05", "knee", 5), // moderate
+			sessionOn("2026-07-09", "knee", 8), // hard
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 4, -1), // moderate → 4
+			bodyStateOn("2026-07-06", "knee", 4, -1), // moderate → 4 (mean 4)
+			bodyStateOn("2026-07-10", "knee", 4, -1), // hard → 4 (mean 4, not greater)
+		},
+		wantPattern: LoadPatternNoIncrease,
+		wantDir:     ResponseStable,
+		wantPaired:  3,
+	}, {
+		name: "insufficient — fewer than three paired days",
+		workouts: []observations.Event{
+			sessionOn("2026-07-01", "knee", 8),
+			sessionOn("2026-07-05", "knee", 8),
+		},
+		body: []observations.Event{
+			bodyStateOn("2026-07-02", "knee", 3, -1),
+			bodyStateOn("2026-07-06", "knee", 9, -1),
+		},
+		wantPattern: LoadPatternNoIncrease,
+		wantDir:     "",
+		wantPaired:  2,
+		wantInsuff:  true,
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := BuildTrend(TrendInput{
+				Workouts:  tc.workouts,
+				BodyState: tc.body,
+				Now:       mustTime(t, trendNow),
+				Loc:       time.UTC,
+			})
+			pt := partTrend(t, tr.PainResponse, "knee")
+			assert.Equal(t, tc.wantPaired, pt.PairedDays, "paired-day count")
+			assert.Equal(t, tc.wantInsuff, pt.Insufficient, "insufficient-data state")
+			assert.Equal(t, tc.wantDir, pt.Direction, "chronological direction")
+
+			pp := partPattern(t, tr.LoadPattern, "knee")
+			assert.Equal(t, tc.wantPattern, pp.Pattern, "load-vs-pain classification")
+		})
+	}
+}
+
 // --- helpers ---
 
 // workoutOn builds a KindWorkout event on the given civil date (logged at midday,
@@ -392,6 +867,61 @@ func anchorOn(date string) observations.Event {
 		Kind:       observations.KindWorkout,
 		OccurredAt: date + "T12:00:00Z",
 		Payload:    map[string]any{"anchor": true},
+	}
+}
+
+// sessionOn builds a non-light targeted workout on the given civil date: a
+// KindWorkout carrying the part as an explicit body_part and the given session rpe
+// (5 → moderate, 8 → hard under inferredLoad), which is exactly what the
+// pain-response fold pairs against the following day's reading. It names no card
+// type, so the load comes from the rpe alone.
+func sessionOn(date, part string, rpe int) observations.Event {
+	return workoutEvent(date+"T12:00:00Z", "", []string{part}, rpe)
+}
+
+// partTrend returns the PartTrend for the named part or fails the test — a small
+// helper so a missing fold entry surfaces as a clear failure, not a zero value.
+func partTrend(t *testing.T, trends []PartTrend, part string) PartTrend {
+	t.Helper()
+	for _, pt := range trends {
+		if pt.Part == part {
+			return pt
+		}
+	}
+	t.Fatalf("no PartTrend for %q in %+v", part, trends)
+	return PartTrend{}
+}
+
+// partPattern returns the PartPattern for the named part or fails the test.
+func partPattern(t *testing.T, patterns []PartPattern, part string) PartPattern {
+	t.Helper()
+	for _, pp := range patterns {
+		if pp.Part == part {
+			return pp
+		}
+	}
+	t.Fatalf("no PartPattern for %q in %+v", part, patterns)
+	return PartPattern{}
+}
+
+// checkpointProgram is a synthetic program with a checkpoint-eligible session card
+// and a complete checkpoint block (0/12/24h) — no personal content, so the
+// scaffold fold is exercised without touching the operator's real program.
+func checkpointProgram() Program {
+	return Program{
+		Version:   ProgramSchema,
+		ProgramID: "checkpoint_fixture",
+		Cards: []Card{
+			{ID: "sport", Name: "Sport session", Load: LoadHard, CheckpointEligible: true, Movements: []string{"drill"}},
+			{ID: "easy", Name: "Easy day", Load: LoadLight, Movements: []string{"walk"}},
+		},
+		Rotation: []RotationEntry{{Weekday: "mon", Card: "sport"}},
+		Checkpoints: &CheckpointConfig{
+			Subject:     "the loaded area",
+			Label:       "Post-workout check-in",
+			Copy:        "note how it feels",
+			OffsetHours: []int{0, 12, 24},
+		},
 	}
 }
 

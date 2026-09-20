@@ -171,6 +171,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 		Loc:            loc,
 	})
 	tr := BuildTrend(TrendInput{
+		Program:   prog,
 		Workouts:  workouts,
 		BodyState: bodyState,
 		Metrics:   metrics,
