@@ -11,6 +11,7 @@ package workout
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -172,40 +173,83 @@ func streakLine(streak int) string {
 	return fmt.Sprintf("%d-day streak", streak)
 }
 
+// maxBuildingParts caps how many still-building parts the compact summary names
+// before it rolls the remainder into a "+N more", so the line stays one glance of
+// signal instead of the per-part wall of identical zero lines it replaced.
+const maxBuildingParts = 3
+
 // progressInsightLines renders the per-part next-day pain-response trend and its
-// load-vs-pain pattern as one compact line per loaded part — the panel's real
-// signal, in the sorted part order the fold produced. The load-pattern read is
-// matched to its part by name. Both renderProgress and compose.go's
-// progressDigest call this, so the rendered card and the model-grounding digest
-// can never drift.
+// load-vs-pain pattern — the panel's real signal, in the sorted part order the
+// fold produced. A part with a **direction** takes its own compact line. An
+// **insufficient** part takes no per-part line (R-050: signal, not a per-part
+// zero dashboard): parts with no paired days yet are dropped entirely, and parts
+// that have begun accumulating pairs fold into one compact "still building" line.
+// The load-pattern read is matched to its part by name. Both renderProgress and
+// compose.go's progressDigest call this, so the rendered card and the
+// model-grounding digest can never drift.
 func progressInsightLines(painResponse []PartTrend, loadPattern []PartPattern) []string {
 	patternByPart := make(map[string]string, len(loadPattern))
 	for _, lp := range loadPattern {
 		patternByPart[lp.Part] = lp.Pattern
 	}
 	out := make([]string, 0, len(painResponse))
+	building := make([]PartTrend, 0, len(painResponse))
 	for _, pt := range painResponse {
+		if pt.Insufficient {
+			// No paired days yet → no signal, no line. Some pairs but below
+			// the threshold → fold into the one summary line below.
+			if pt.PairedDays > 0 {
+				building = append(building, pt)
+			}
+			continue
+		}
 		out = append(out, partResponseLine(pt, patternByPart[pt.Part]))
+	}
+	if line := buildingSummaryLine(building); line != "" {
+		out = append(out, line)
 	}
 	return out
 }
 
-// partResponseLine renders one part's next-day pain-response read: an explicit
-// insufficient-data state below minPairedDays pairs, else the chronological
-// direction followed by the load-vs-pain pattern over the same pairs. The part
-// label flows from the fold's own data (never hardcoded); an empty part reads as
-// the neutral "that area".
+// partResponseLine renders one part's next-day pain-response read: the
+// chronological direction followed by the load-vs-pain pattern over the same
+// pairs. The part label flows from the fold's own data (never hardcoded); an
+// empty part reads as the neutral "that area". Insufficient parts never reach
+// here — progressInsightLines drops or folds them first.
 func partResponseLine(pt PartTrend, pattern string) string {
-	part := humanizePart(pt.Part)
-	if pt.Insufficient {
-		return fmt.Sprintf("%s — next-day pain/soreness: %d of %d logged days, reading builds with more",
-			part, pt.PairedDays, minPairedDays)
-	}
-	line := fmt.Sprintf("%s — next-day pain/soreness %s", part, pt.Direction)
+	line := fmt.Sprintf("%s — next-day pain/soreness %s", humanizePart(pt.Part), pt.Direction)
 	if pattern != "" {
 		line += " · " + pattern
 	}
 	return line
+}
+
+// buildingSummaryLine folds every part that has begun accumulating paired days
+// but not yet reached minPairedDays into one compact line — each named part with
+// its progress toward the threshold (core 2/3), the nearest first, the rest
+// rolled into "+N more". It returns "" when nothing is building, so a card with
+// no partial parts drops the line entirely rather than printing an empty nudge.
+func buildingSummaryLine(building []PartTrend) string {
+	if len(building) == 0 {
+		return ""
+	}
+	sort.SliceStable(building, func(i, j int) bool {
+		return building[i].PairedDays > building[j].PairedDays
+	})
+	extra := 0
+	if len(building) > maxBuildingParts {
+		extra = len(building) - maxBuildingParts
+		building = building[:maxBuildingParts]
+	}
+	parts := make([]string, 0, len(building))
+	for _, pt := range building {
+		parts = append(parts, fmt.Sprintf("%s %d/%d", humanizePart(pt.Part), pt.PairedDays, minPairedDays))
+	}
+	summary := strings.Join(parts, ", ")
+	if extra > 0 {
+		summary += fmt.Sprintf(", +%d more", extra)
+	}
+	return "Next-day reads still building · " + summary
 }
 
 // checkpointLine renders the stateless post-workout checkpoint scaffold as one

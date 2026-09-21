@@ -440,10 +440,19 @@ the reader could not see at a glance:
   such session day with the **following logical day's** `max(pain, soreness)`
   for that part (read from `body_state`), orders the pairs chronologically, and
   reports the direction as **`rising`**, **`stable`**, or **`easing`**. Below
-  **3 paired days for a part** it reports an explicit **insufficient-data**
-  state rather than inventing a trend from noise. This answers "did the load I
-  put in show up in how that part felt the next day", attributed to the
-  specific part — not a session-global average.
+  **3 paired days for a part** the fold reports an explicit **insufficient-data**
+  state (`Insufficient`) rather than inventing a trend from noise. This answers
+  "did the load I put in show up in how that part felt the next day", attributed
+  to the specific part — not a session-global average.
+  * **On the card, insufficient parts do not each take a line** (R-050: signal,
+    not a per-part zero dashboard). A part with **no paired days yet** carries no
+    signal and is **dropped from the card entirely**; parts that have *begun*
+    accumulating pairs (1 or 2) **fold into one compact "still building" line**
+    that names the nearest few with their progress toward the threshold
+    (`core 2/3, legs 1/3`, the rest rolled into `+N more`). Every part's full
+    `Insufficient`/`PairedDays` state **remains on the `Trend` struct and in
+    `--json`** — only the rendered card collapses the noise. When nothing has a
+    direction and nothing is building, the panel shows just the streak line.
 * **Per-part load-vs-pain pattern** (`LoadPattern`) — over the same pairs, the
   projection compares **ordinal load** (`light < moderate < hard`) against that
   next-day `max(pain, soreness)` response. It reports **`tracks higher load`**

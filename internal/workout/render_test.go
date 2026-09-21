@@ -360,20 +360,52 @@ func TestRenderProgressInsightPanel(t *testing.T) {
 	assert.NotContains(t, got, "Body:", "the flat body line left the card")
 }
 
-// TestRenderProgressInsufficientData proves a part with fewer than the required
-// paired days renders its explicit insufficient-data state rather than inventing a
-// direction from noise.
+// TestRenderProgressInsufficientData proves the card never invents a direction
+// from too-few pairs and never prints a per-part zero line: a part with no paired
+// days yet is dropped entirely, and parts that have begun accumulating pairs fold
+// into one compact "still building" line — nearest first, the rest rolled into
+// "+N more" — instead of one identical noise line each.
 func TestRenderProgressInsufficientData(t *testing.T) {
 	t.Parallel()
 
 	tr := sampleTrend()
-	tr.PainResponse = []PartTrend{{Part: "knee", Loaded: true, PairedDays: 2, Insufficient: true}}
-	tr.LoadPattern = []PartPattern{{Part: "knee", Pattern: LoadPatternNoIncrease}}
+	tr.PainResponse = []PartTrend{
+		{Part: "knee", Loaded: true, PairedDays: 2, Insufficient: true},
+		{Part: "core", Loaded: true, PairedDays: 1, Insufficient: true},
+		{Part: "shoulder", Loaded: true, PairedDays: 0, Insufficient: true},
+	}
+	tr.LoadPattern = nil
 	tr.WatchOuts = nil
 
 	got := Render(sampleRecommendation(), tr, sampleAnchor(), renderNow())
-	assert.Contains(t, got, "knee — next-day pain/soreness: 2 of 3 logged days, reading builds with more")
+	assert.Contains(t, got, "Next-day reads still building · knee 2/3, core 1/3",
+		"partial parts fold into one compact line, nearest first")
+	assert.NotContains(t, got, "shoulder", "a part with no paired days yet takes no line")
+	assert.NotContains(t, got, "logged days, reading builds with more",
+		"the per-part zero-line noise is gone")
 	assert.NotContains(t, got, "no tracked increase", "an insufficient part shows no load-pattern claim")
+}
+
+// TestRenderProgressBuildingSummaryCaps proves the still-building summary names at
+// most maxBuildingParts parts and rolls the remainder into a "+N more" so the line
+// stays one glance of signal, never the per-part wall it replaced.
+func TestRenderProgressBuildingSummaryCaps(t *testing.T) {
+	t.Parallel()
+
+	tr := sampleTrend()
+	tr.PainResponse = []PartTrend{
+		{Part: "abs", Loaded: true, PairedDays: 2, Insufficient: true},
+		{Part: "back", Loaded: true, PairedDays: 2, Insufficient: true},
+		{Part: "core", Loaded: true, PairedDays: 1, Insufficient: true},
+		{Part: "legs", Loaded: true, PairedDays: 1, Insufficient: true},
+		{Part: "shoulder", Loaded: true, PairedDays: 1, Insufficient: true},
+	}
+	tr.LoadPattern = nil
+	tr.WatchOuts = nil
+
+	got := Render(sampleRecommendation(), tr, sampleAnchor(), renderNow())
+	assert.Contains(t, got, "Next-day reads still building · abs 2/3, back 2/3, core 1/3, +2 more",
+		"the summary caps at maxBuildingParts and rolls the rest into +N more")
 }
 
 // TestRenderProgressCheckpointScaffold proves the checkpoint scaffold renders only
