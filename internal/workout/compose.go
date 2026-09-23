@@ -43,7 +43,7 @@ const contextHeader = "CONTEXT — Lucid has already decided today's session and
 // slotInstruction tells the model to return only the bounded phrasing slot: a
 // short, warm, non-commanding note. Everything structural is Lucid's, so the
 // model is asked for prose and nothing else.
-const slotInstruction = "Respond with ONLY 2–4 short sentences in a warm, grounded, non-clinical voice that phrase today's session and invite the user to take whichever option fits how their body actually feels. Do not list the options (Lucid renders them below), do not name any medical condition, and never tell them what they \"should\" or \"must\" do. Write nothing but those sentences."
+const slotInstruction = "Respond with ONLY 2–4 short sentences in a warm, grounded, non-clinical voice that phrase today's session and invite the user to take whichever option fits how their body actually feels. Do not list the options (Lucid renders them below), do not name any medical condition, and never tell them what they \"should\" or \"must\" do. Temporal honesty is required: do NOT claim a body part is sore, flaring, or \"speaking up\" today unless the plan explicitly cites a signal logged today — a known standing injury is a persistent guardrail to protect with care, not a fresh event, so phrase it as ongoing protection, never as something that happened today. Write nothing but those sentences."
 
 // MetricsReader is the read-only engine projection the composer folds the streak
 // and adherence from — the same fold `lucid metrics` exposes, read in-process so

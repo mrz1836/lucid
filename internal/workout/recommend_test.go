@@ -254,6 +254,15 @@ func TestRecommendActiveInjuryHardStop(t *testing.T) {
 	})
 	require.NotNil(t, active.HardStop, "an active injury on a targeted part hard-stops")
 	assert.Equal(t, "recovery", active.Primary.ID)
+	// Temporal honesty: a standing injury is a persistent guardrail on file, never
+	// a signal that fired today. Its reason must say "known … injury" and must NOT
+	// claim a "pain signal" — the false-"today" bug that narrated a registered
+	// injury as the part "speaking up today".
+	assert.Contains(t, active.Reason, "known", "a standing injury reads as a known constraint on file")
+	assert.Contains(t, active.Reason, "injury")
+	assert.NotContains(t, active.Reason, "pain signal", "a standing injury is not a fresh pain signal")
+	require.NotNil(t, active.HardStop)
+	assert.NotContains(t, active.HardStop.Reason, "pain signal", "the back-off door for an injury names the injury, not a today signal")
 
 	resolved := Recommend(RecommendInput{
 		Program: ExampleProgram(),

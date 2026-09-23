@@ -319,7 +319,14 @@ message carries no prose "Why" region (§"The message scaffold").
    active injury-registry constraint names a targeted part, the
    recommender emits a `HardStop` (a named safety back-off option) and
    downshifts the Primary to the easier or a recovery card. A specific
-   joint pain always wins over the calendar.
+   joint pain always wins over the calendar. The two triggers carry
+   **different temporal truth**, so the `Reason` and the back-off door copy
+   distinguish them: a fresh logged `body_state.pain` is phrased as a
+   *recent signal* ("a recent pain signal on …"), while a standing
+   injury-registry constraint is phrased as a *persistent guardrail on file*
+   ("a known … injury") — never as a signal that happened today. A registered
+   injury is not a same-day event, and the message must not imply the body
+   part "spoke up" or "flared" today when nothing was logged that day.
 4. **Guardrail filter.** A card whose movements intersect
    `guardrails.avoid_movements` or `provocative_positions`, or whose
    focus is a `no_strengthen` part, is never Primary or Fallback — it is

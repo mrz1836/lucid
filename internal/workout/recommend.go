@@ -106,13 +106,11 @@ func Recommend(in RecommendInput) Recommendation {
 	// Rule 3: pain-flag hard stop — a high pain on a targeted part, or an active
 	// injury naming one, backs the session off. A specific joint pain wins over
 	// the calendar.
-	if hs, part, triggered := painHardStop(prog, primary, in.BodyState, in.Injuries); triggered {
+	if hs, part, cause, triggered := painHardStop(prog, primary, in.BodyState, in.Injuries); triggered {
 		rec.HardStop = hs
 		rec.Vetoes = append(rec.Vetoes, painVetoLine(primary, part))
 		primary = downshiftCard(prog)
-		reason = fmt.Sprintf(
-			"A pain signal on %s means backing off today — an easy recovery session is the safe choice.", humanizePart(part),
-		)
+		reason = hardStopReason(cause, part)
 	}
 
 	// Rule 5: equipment / time veto — a card the operator cannot run downshifts to
@@ -364,18 +362,48 @@ func nextClearCard(prog Program, logDay time.Time, recent []observations.Event, 
 // a recent body_state.pain at or above the program threshold on a targeted part,
 // or an active injury-registry record naming a targeted part. It returns the
 // safety option, the part, and whether it triggered.
-func painHardStop(prog Program, c Card, bodyState []observations.Event, injuries []observations.Registry) (*SafetyOption, string, bool) {
+// painCause distinguishes why the pain hard stop fired. The two triggers carry
+// different temporal truth and must never share copy: a fresh logged pain signal
+// is a recent event, while a standing injury-registry constraint is a persistent
+// guardrail on file — not something that happened today. Conflating them is how
+// a known injury got narrated as the part "speaking up today" when nothing was
+// logged that day.
+type painCause int
+
+const (
+	causeNone painCause = iota
+	causeLoggedPain
+	causeStandingInjury
+)
+
+func painHardStop(prog Program, c Card, bodyState []observations.Event, injuries []observations.Registry) (*SafetyOption, string, painCause, bool) {
 	threshold := prog.PainFlagThreshold
 	if threshold <= 0 {
 		threshold = defaultPainThreshold
 	}
 	if part, ok := painFlaggedPart(c, bodyState, threshold); ok {
-		return safetyOption(part), part, true
+		return safetyOption(part, causeLoggedPain), part, causeLoggedPain, true
 	}
 	if part, ok := injuredTargetPart(c, injuries); ok {
-		return safetyOption(part), part, true
+		return safetyOption(part, causeStandingInjury), part, causeStandingInjury, true
 	}
-	return nil, "", false
+	return nil, "", causeNone, false
+}
+
+// hardStopReason renders the deterministic Reason line for a pain hard stop,
+// honest about the trigger's temporal nature: a fresh logged pain is a recent
+// signal; a standing injury is a persistent guardrail protected today, never a
+// signal that fired today.
+func hardStopReason(cause painCause, part string) string {
+	human := humanizePart(part)
+	if cause == causeStandingInjury {
+		return fmt.Sprintf(
+			"A known %s injury on file means protecting it today with an easy recovery session rather than loading it.", human,
+		)
+	}
+	return fmt.Sprintf(
+		"A recent pain signal on %s means backing off today — an easy recovery session is the safe choice.", human,
+	)
 }
 
 // painFlaggedPart returns the first targeted part with a body_state.pain at or
@@ -428,16 +456,22 @@ func injuryPart(inj observations.Registry) string {
 }
 
 // safetyOption builds the named back-off door for a flagged part — an offer to
-// protect it, never a scolding.
-func safetyOption(part string) *SafetyOption {
+// protect it, never a scolding. The door's reason stays honest about the trigger:
+// a fresh logged pain is a recent signal, a standing injury is a known constraint
+// on file — never phrased as a signal that fired today.
+func safetyOption(part string, cause painCause) *SafetyOption {
 	human := humanizePart(part)
+	reason := "A pain signal on " + human + " is a reason to rest it today rather than train through it."
+	if cause == causeStandingInjury {
+		reason = "A known " + human + " injury on file is a reason to protect it rather than load it."
+	}
 	return &SafetyOption{
 		Name: "Back off — protect " + human,
 		Movements: []string{
 			"gentle mobility only, no loaded work on " + human,
 			"stop entirely if it feels sharp",
 		},
-		Reason: "A pain signal on " + human + " is a reason to rest it today rather than train through it.",
+		Reason: reason,
 	}
 }
 
