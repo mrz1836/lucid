@@ -12,13 +12,21 @@ import (
 )
 
 // This file owns the companion's message *layout*. The split is deliberate:
-// Lucid renders the whole sectioned scaffold deterministically — the header, the
-// status panel, the context sections, the freshness labels, and the ordering —
-// while the model fills only two short slots dropped into fixed places (an
-// interpretation and one or two next actions). Because the layout is
-// code, not prose, the readability contract is unit-testable and a model can
-// never produce a wall of numbers or restate a raw metric: it never owns the
-// structure. See docs/usage/companion.md §"The message scaffold".
+// Lucid renders the deterministic frame — the header, the status panel, the
+// context sections, the freshness labels, and the ordering — while the model
+// fills the prose slots dropped into fixed places (an interpretation and one or
+// more next actions). Because the frame is code, not prose, the readability
+// contract is unit-testable and a model can never produce a wall of numbers or
+// restate a raw metric.
+//
+// The two windows own their body differently. Night keeps Lucid's sub-headers
+// (the close-out label) so the ritual stays a tight, Lucid-shaped card. Morning
+// drops the interpretation/action sub-headers entirely: the deterministic panel
+// carries the numbers, and everything below it is the template-owned body, so the
+// personal morning template owns its own labels (its Keystone/Focus/Reframe
+// lines) instead of being nested under a Lucid "The read"/"Morning routine"
+// heading that only doubled them. See docs/usage/companion.md §"The message
+// scaffold".
 
 // Scaffold literals. These are the fixed structural tokens the layout is built
 // from — a chat surface renders markdown tables as raw text, so the scaffold
@@ -87,9 +95,10 @@ type Briefing struct {
 // no model slots still reads cleanly (no dangling structural chrome).
 //
 // The region order differs by window. Morning is forward-looking — the status
-// panel is the hero, then the read; the recent-observation context sections are
-// deliberately omitted from the morning message (they are still read and fed to
-// the model as context) so the morning stays positive and never greets the user
+// panel is the hero, then the read and the routine actions, both rendered with no
+// sub-header as the template-owned body; the recent-observation context sections
+// are deliberately omitted from the morning message (they are still read and fed
+// to the model as context) so the morning stays positive and never greets the user
 // with a recited list of aches or a symptom they did not raise that day.
 // Night is a close-out ritual — the day's read-back (the context sections)
 // leads, then the numbers, then the single close-out action. Night deliberately
@@ -103,7 +112,7 @@ func Render(b Briefing) string {
 
 	interp := ""
 	if strings.TrimSpace(b.Interpretation) != "" {
-		interp = interpHeader(b.Mode) + "\n" + strings.TrimSpace(b.Interpretation)
+		interp = withHeader(interpHeader(b.Mode), strings.TrimSpace(b.Interpretation))
 	}
 
 	next := ""
@@ -189,37 +198,48 @@ func renderSection(s Section) string {
 	return b.String()
 }
 
-// renderActions renders the next-move slot — the mode's action header over `•`
-// bullet lines, one per concrete action.
+// renderActions renders the next-move slot — the mode's action header (when the
+// window uses one) over `•` bullet lines, one per concrete action. The morning
+// window uses no header (nextHeader returns ""), so its actions render as bare
+// bullets directly under the template-owned read.
 func renderActions(mode Mode, actions []string) string {
-	var b strings.Builder
-	b.WriteString(nextHeader(mode))
+	lines := make([]string, 0, len(actions))
 	for _, a := range actions {
-		b.WriteString("\n")
-		b.WriteString(bulletMark)
-		b.WriteString(" ")
-		b.WriteString(strings.TrimSpace(a))
+		lines = append(lines, bulletMark+" "+strings.TrimSpace(a))
 	}
-	return b.String()
+	return withHeader(nextHeader(mode), strings.Join(lines, "\n"))
 }
 
-// interpHeader is the interpretation-slot header. Night currently suppresses
-// the interpretation slot in Render, but this remains defined for parser/render
-// contract completeness.
+// withHeader prepends a scaffold sub-header to a rendered body, or returns the
+// body alone when the header is empty. An empty header is how the morning window
+// hands body ownership to the personal template — no "The read"/"Morning routine"
+// heading is laid over the model prose.
+func withHeader(header, body string) string {
+	if strings.TrimSpace(header) == "" {
+		return body
+	}
+	return header + "\n" + body
+}
+
+// interpHeader is the interpretation-slot header. The morning window returns ""
+// so the read renders directly beneath the panel as the template-owned body;
+// night keeps its label defined for parser/render contract completeness even
+// though Render suppresses the night interpretation slot.
 func interpHeader(mode Mode) string {
 	if mode == ModeNight {
 		return "🌙 **The read**"
 	}
-	return "🧭 **The read**"
+	return ""
 }
 
-// nextHeader is the next-move-slot header, framed for the window: the morning
-// "next" points forward; the night "close-out" ends the day.
+// nextHeader is the next-move-slot header. Night frames it as the close-out that
+// ends the day; the morning window returns "" so the action lines render as bare
+// bullets under the read, letting the personal template own their labels.
 func nextHeader(mode Mode) string {
 	if mode == ModeNight {
 		return "🌒 **Close-out**"
 	}
-	return "🌅 **Morning routine**"
+	return ""
 }
 
 // buildStatusPanel renders the compact status panel from the engine

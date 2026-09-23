@@ -52,11 +52,13 @@ const recentWindowDays = 7
 // slot(s).
 const contextHeader = "CONTEXT — Lucid has already rendered the header, the status panel, and the context sections below into the message. Do NOT restate any numbers or re-list these signals; read them only to ground your interpretation."
 
-// slotInstruction returns the model-slot instruction for the window. Morning
-// renders the action slot as a routine cue — no generic Next region — while night
-// renders the action slot as the close-out cue. It names the same delimiter
-// tokens the renderer's parseSlots scans for (interpDelim / actionsDelim), so
-// the prompt and the parser can never drift.
+// slotInstruction returns the model-slot instruction for the window. Night
+// renders the action slot as a single close-out cue. Morning renders the action
+// slot as the template-owned body: the personal morning template owns the number,
+// order, and labels of the lines, so the instruction defers to that structure
+// instead of forcing a single generic action. It names the same delimiter tokens
+// the renderer's parseSlots scans for (interpDelim / actionsDelim), so the prompt
+// and the parser can never drift.
 func slotInstruction(mode Mode) string {
 	base := "Lucid renders everything else. Write the interpretation as 2–4 short sentences: " +
 		"what matters now, what changed, what needs attention."
@@ -67,9 +69,12 @@ func slotInstruction(mode Mode) string {
 			actionsDelim + "\n- <close-out action>"
 	}
 	return "Respond with EXACTLY the two labeled slots below and nothing else. " + base +
-		" Then give one concrete action grounded in the intended morning routine; do not invent a generic Next item.\n\n" +
+		" Then, in the actions slot, follow the morning template's own line structure exactly:" +
+		" emit every line it calls for, in its order, keeping its labels — do not collapse them" +
+		" into a single line and do not invent a generic Next item. If the template gives no line" +
+		" structure, give one concrete action grounded in the intended morning routine.\n\n" +
 		interpDelim + "\n<your interpretation>\n\n" +
-		actionsDelim + "\n- <morning routine cue>"
+		actionsDelim + "\n- <one line per the morning template's structure>"
 }
 
 // The deterministic fallback copy fired when the model is unreachable or returns

@@ -193,7 +193,8 @@ func TestCompose_NormalDayMorning_RendersScaffold(t *testing.T) {
 	for _, line := range wantSamplePanel() {
 		assert.Contains(t, res.Text, line, "the compact status panel renders")
 	}
-	assert.Contains(t, res.Text, "🧭 **The read**\nWARM MORNING MESSAGE", "the model prose fills the read slot, trimmed")
+	assert.Contains(t, res.Text, "WARM MORNING MESSAGE", "the model prose fills the read slot, trimmed")
+	assert.NotContains(t, res.Text, "🧭 **The read**", "the morning read carries no sub-header — the template owns the body")
 
 	require.Equal(t, 1, p.Calls())
 	req := p.Requests[0]
@@ -238,8 +239,10 @@ func TestCompose_SlotSuccess_RendersInterpAndActions(t *testing.T) {
 	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
 	require.NoError(t, err)
 	assert.True(t, res.UsedLLM)
-	assert.Contains(t, res.Text, "🧭 **The read**\nSteady week. The streak holds.")
-	assert.Contains(t, res.Text, "🌅 **Morning routine**\n• Run the morning chain.")
+	assert.Contains(t, res.Text, "Steady week. The streak holds.")
+	assert.Contains(t, res.Text, "• Run the morning chain.")
+	assert.NotContains(t, res.Text, "🧭 **The read**", "morning read has no sub-header")
+	assert.NotContains(t, res.Text, "🌅 **Morning routine**", "morning actions render as bare bullets, template-owned")
 	assert.NotContains(t, res.Text, "▶️ **Next**", "morning does not render a generic next section")
 }
 
@@ -296,8 +299,10 @@ func TestCompose_ProviderDown_NormalMorning_FallsBackToScaffold(t *testing.T) {
 	assert.False(t, res.MissDay)
 	assert.Contains(t, res.Text, "☀️ **Morning** · ")
 	assert.Contains(t, res.Text, wantSamplePanel()[0], "the panel still renders on the fallback path")
-	assert.Contains(t, res.Text, "🧭 **The read**\n"+fallbackInterpMorning)
-	assert.Contains(t, res.Text, "🌅 **Morning routine**\n• "+fallbackActionMorning)
+	assert.Contains(t, res.Text, fallbackInterpMorning)
+	assert.Contains(t, res.Text, "• "+fallbackActionMorning)
+	assert.NotContains(t, res.Text, "🧭 **The read**", "morning fallback read has no sub-header")
+	assert.NotContains(t, res.Text, "🌅 **Morning routine**", "morning fallback action is a bare bullet")
 	assert.NotContains(t, res.Text, "▶️ **Next**", "morning fallback does not render generic Next")
 }
 
@@ -366,7 +371,8 @@ func TestCompose_MissingDelimiter_UsesProseAsInterp(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, res.UsedLLM, "plain prose is still the model's warmth, not a fallback")
 	assert.False(t, res.Fallback)
-	assert.Contains(t, res.Text, "🧭 **The read**\nA quiet, steady paragraph with no delimiters.")
+	assert.Contains(t, res.Text, "A quiet, steady paragraph with no delimiters.")
+	assert.NotContains(t, res.Text, "🧭 **The read**", "morning prose renders as the template-owned body, no sub-header")
 }
 
 // TestCompose_ModelOverride confirms companion.model overrides provider.model on

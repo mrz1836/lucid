@@ -48,16 +48,17 @@ func sampleMorningBriefing() Briefing {
 // read slot in the forward-looking order — is a hard contract, and asserts the
 // render is byte-stable across repeated calls.
 func TestRender_MorningGolden(t *testing.T) {
+	// The morning window drops the interpretation/action sub-headers: the panel is
+	// the only Lucid-labeled region, and the read + routine bullets render directly
+	// beneath it as the template-owned body.
 	want := strings.Join([]string{
 		"☀️ **Morning** · Monday, Jul 20",
 		"",
 		"⛓️ 5-day streak · 83% adherence (20/24 decided)",
 		"📊 Error budget · 2/3 isolated misses left · 4d to gate",
 		"",
-		"🧭 **The read**",
 		"Steady week. The streak holds; adherence is comfortably above floor.",
 		"",
-		"🌅 **Morning routine**",
 		"• Run the morning chain before email.",
 		"• Log a mood check at noon.",
 	}, "\n")

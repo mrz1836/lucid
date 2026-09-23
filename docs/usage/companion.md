@@ -119,7 +119,7 @@ For each window the compose worker:
 4. Sends the system prompt, the per-mode template, and the deterministic context
    (panel summary + observation digest + routine) to the model (default backend
    `claude_cli`, model `opus`; see the provider config) and asks it to return
-   exactly **two slots** — an interpretation and one or two next actions.
+   exactly **two slots** — an interpretation and one or more next actions.
 5. Parses the two slots and renders the final message from the deterministic
    scaffold. Every enrichment read is best-effort — a missing slice or an
    unreadable routine omits its section, never fails the send — while the prompt,
@@ -158,12 +158,17 @@ interpretation, and action are always in distinct, scannable regions:
   symptom they did not raise that morning. The synthesized **read** carries
   anything genuinely relevant, and the user logs what they choose to.
 - **Interpretation** — what matters, what changed, what needs attention — a few
-  sentences. Morning displays this as **The read**; night suppresses the
-  separate interpretation slot so close-out stays compact.
-- **Action cue** — morning renders this as **Morning routine**, grounded in the
-  configured routine; night renders it as the single **Close-out** cue. The
-  scaffold never renders a generic **Next** section or invents an action when no
-  routine/action is available.
+  sentences. In the **morning** window this renders directly beneath the status
+  panel with **no sub-header**: the panel carries the numbers, and everything below
+  it is the template-owned body, so the morning reads as one voice instead of a
+  Lucid scaffold wrapped around the personal template. Night suppresses the
+  separate interpretation slot so the close-out stays compact.
+- **Action cue** — in the **morning** window the action lines render as plain `•`
+  bullets directly under the read, again with **no sub-header**, so the personal
+  template owns their labels (for example its own Keystone/Focus/Reframe lines)
+  instead of being nested beneath a Lucid **Morning routine** heading that only
+  doubled them. Night renders the action as the single **Close-out** cue. The
+  scaffold never invents an action when no routine/action is available.
 - **Footer** — an optional closing line, and the appended verdict on a missed day.
 
 Major groups are separated by blank lines only. Both morning and night omit
@@ -193,11 +198,13 @@ its own line:
 ```
 
 - `%%INTERPRETATION%%` — the interpretation slot: free prose in your own voice
-  (owned by your personal template), a few sentences. Morning renders it as
-  **The read**; night currently does not display it.
-- `%%ACTIONS%%` — one or two lines, each a single concrete action. Morning
-  renders these as **Morning routine** when grounded in the configured routine;
-  night renders them as **Close-out**. The header is never the generic **Next**.
+  (owned by your personal template), a few sentences. Morning renders it directly
+  beneath the panel with **no sub-header** (the template owns the body); night
+  currently does not display it.
+- `%%ACTIONS%%` — one or more lines, each a single concrete action or a
+  template-owned labeled line. Morning renders these as plain `•` bullets directly
+  under the read with **no sub-header**; night renders them under **Close-out**.
+  The header is never the generic **Next**.
 
 The parser is deliberately tolerant: if the `%%INTERPRETATION%%` delimiter is
 absent, the whole trimmed model reply becomes the interpretation and there are no
