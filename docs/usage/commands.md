@@ -945,14 +945,16 @@ match tiers, confidence bands, and outward expression):
   migration is a single pass, and a retry restores the pre-migration
   `lucid backup` first.
 - **`reconcile`** scans the live tally for likely duplicates and **proposes**
-  folds — **dry-run by default**, writing nothing. Tier-2 pairs in the High band
-  are marked to apply; Ambiguous tier-2 pairs and every tier-3 (by-meaning) pair
-  are advisory, shown with the exact `lucid gratitude merge` command. Each entry
+  folds — **dry-run by default**, writing nothing. A tier-2 pair in the High band
+  (each entry the other's clear best match by wording) is marked **fold**;
+  Ambiguous tier-2 pairs and every tier-3 (by-meaning) pair are marked **look**
+  — advisory, shown with the exact `lucid gratitude merge` command. Each entry
   appears in at most one proposal per run; the lower-count entry folds into the
-  higher. **`--apply`** is the explicit confirmation: it folds exactly the
-  tier-2 High proposals through the ordinary `merge` path, one receipt per fold,
-  and never applies an advisory pair. Take a `lucid backup` first — restoring it
-  is how a wrong fold is undone.
+  higher. **`--apply`** is the explicit confirmation: it folds exactly the pairs
+  the dry run marks fold, through the ordinary `merge` path, one receipt per
+  fold; it never applies an advisory pair and never consults the model. Take a
+  `lucid backup` first — restoring it (`lucid restore --in <file> --force`) is
+  how a wrong fold is undone.
 - **`thank <id> --person <subject>`** records that you told a person you were
   grateful: it links the person onto the entry (if not already linked) and
   appends an **`expressed`** event with its own receipt. It is
@@ -993,7 +995,9 @@ nothing is captured. The event's write time is always the real `at`.
   are arrays, never null; `last_expressed` is `""` when never expressed.
 - **`reconcile`**: `{proposals: [{source, source_thing, target, target_thing,
   score, match_tier, band, will_apply, command}], tier3, applied: [{receipt,
-  source, target}]}` — `applied` is `[]` on a dry run.
+  source, target}]}` — `proposals` and `applied` are arrays, never null;
+  `applied` is `[]` on a dry run; `tier3` is omitted when the model was not
+  consulted (every `--apply`).
 - **`thank`**: `{receipt, id, thing, count, person_key, date}` — `count` is
   shown unchanged, since expressing gratitude never moves the tally.
 

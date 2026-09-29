@@ -22,6 +22,7 @@ const (
 	gratitudeCountFlag = "count"
 	gratitudeFirstFlag = "first"
 	gratitudeLastFlag  = "last"
+	gratitudeApplyFlag = "apply"
 )
 
 // gratitudeTier3UnavailableNote is the one-line stderr note an add prints when
@@ -53,11 +54,11 @@ var errGratitudeAskCanceled = errors.New("gratitude add canceled; nothing was sa
 //nolint:gochecknoglobals // one injected terminal seam so the ambiguous-band question is testable without a TTY
 var gratitudeStdinIsTerminal = stdinIsInteractive
 
-// newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§6): the accumulating
-// nightly-gratitude tally. It is a thin dispatch group over four subcommands —
-// deterministic and agent-free (architecture P9) apart from `add`'s optional
-// tier-3 by-meaning judge, which degrades to the model-free tiers — modeled on
-// `lucid reframe` and `lucid person`:
+// newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§7): the accumulating
+// nightly-gratitude tally. It is a thin dispatch group over five subcommands —
+// deterministic and agent-free (architecture P9) apart from the optional tier-3
+// by-meaning judge `add` and a `reconcile` dry run consult, which degrades to
+// the model-free tiers — modeled on `lucid reframe` and `lucid person`:
 //
 //	lucid gratitude add "my morning coffee"
 //	lucid gratitude add "my house" --into gratitude_a-river
@@ -66,6 +67,7 @@ var gratitudeStdinIsTerminal = stdinIsInteractive
 //	lucid gratitude list --json
 //	lucid gratitude merge gratitude_b-stone gratitude_a-river
 //	lucid gratitude import "clean drinking water" --count 22 --first 2025-11-02 --last 2026-08-20
+//	lucid gratitude reconcile --apply
 //
 // add tallies one occurrence (creating the entry, bumping the entry the match
 // tiers land it on, or bumping a specific entry with --into) and prints the
@@ -73,7 +75,9 @@ var gratitudeStdinIsTerminal = stdinIsInteractive
 // otherwise writes nothing and names the candidates; list shows
 // the tally sorted by count then recency with a stable id per entry; merge folds
 // an accidental duplicate; import seeds a pre-counted row (the one-time migration
-// path). Every mutation returns its own receipt id, distinct from the stable id.
+// path); reconcile proposes folds for duplicates already in the tally and, with
+// --apply, folds the clear ones through merge. Every mutation returns its own
+// receipt id, distinct from the stable id.
 func newGratitudeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gratitude",
@@ -84,6 +88,7 @@ func newGratitudeCmd() *cobra.Command {
 		newGratitudeListCmd(),
 		newGratitudeMergeCmd(),
 		newGratitudeImportCmd(),
+		newGratitudeReconcileCmd(),
 	)
 	return cmd
 }
@@ -382,6 +387,56 @@ entry, is rejected. Both arguments are stable gratitude ids (shown by list).`,
 			return nil
 		},
 	}
+}
+
+// newGratitudeReconcileCmd wires `lucid gratitude reconcile [--apply]`
+// (gratitude.md §7.9): scan the live tally for likely duplicates and propose
+// folds. It is dry-run by default and writes nothing; --apply is the explicit
+// confirmation that folds exactly the pairs the dry run marks "fold" — the
+// deterministic tier-2 clear matches — each through the ordinary merge path, one
+// receipt per fold. A dry run also asks the optional tier-3 by-meaning judge
+// (built through the buildProvider seam, like `add`) for pairs; those are always
+// advisory, printed with their merge command and never applied, and --apply
+// never consults a model at all. `--json` emits the proposals, the tier-3
+// status, and the applied folds.
+func newGratitudeReconcileCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reconcile",
+		Short: "Propose folds for duplicate gratitude entries (dry run unless --apply)",
+		Long: `reconcile scans the live tally for entries that name the same thing and
+proposes folding one into the other — the lower count into the higher. It is a
+dry run by default and writes nothing. A pair marked "fold" is a clear match by
+wording (tier 2): each entry is the other's best match by a clear margin.
+--apply folds exactly those pairs through the ordinary merge path (a merge event
+plus a redirect tombstone), one receipt per fold. A pair marked "look" — a
+closer call by wording, or any match by meaning from the optional tier-3 judge —
+is never folded for you; its merge command is printed for you to run if it is
+the same thing. Take a lucid backup before --apply: a fold has no unmerge, and
+restoring that backup is how a wrong one is undone.`,
+		Args: cobra.NoArgs,
+		Example: `  lucid gratitude reconcile
+  lucid gratitude reconcile --apply --json`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			apply, _ := cmd.Flags().GetBool(gratitudeApplyFlag)
+			req := router.ReconcileGratitudeRequest{Apply: apply, Now: clockNow()}
+			if !apply {
+				// An apply acts on the deterministic tier-2 set alone, so only a
+				// dry run reaches for the optional judge.
+				req.Provider = gratitudeJudge(r.Config())
+			}
+			res, err := r.ReconcileGratitude(cmd.Context(), req)
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			return emit(cmd, res.View, res.Lines)
+		},
+	}
+	cmd.Flags().Bool(gratitudeApplyFlag, false, "Fold the pairs marked fold (clear matches by wording) through merge")
+	return cmd
 }
 
 // newGratitudeImportCmd wires `lucid gratitude import <thing> --count N --first

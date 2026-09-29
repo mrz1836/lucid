@@ -58,15 +58,24 @@ const (
 // and a seed line carries only its count/span. The receipt id encodes the
 // event's logical date, so a backdated occurrence's receipt reflects the logical
 // day, not the recording time.
+//
+// MatchTier and MatchScore attribute an occurrence that an automatic match
+// landed (gratitude.md §2, §7.7): the tier (2 by wording, 3 by meaning) whose
+// High band chose the entry, and its winning score. They are set on nothing
+// else — a canonical-key (tier 1) bump, an `--into` bump, a human-confirmed
+// suggestion, and a create carry neither, so those stay exactly the v1 shape —
+// and they never change what the event contributes to the fold.
 type GratitudeEvent struct {
-	ID     string `json:"id"`
-	At     string `json:"at"`
-	Type   string `json:"type"`
-	Date   string `json:"date,omitempty"`   // occurrence: the logical date it counts at
-	Source string `json:"source,omitempty"` // occurrence/seed provenance
-	Count  int    `json:"count,omitempty"`  // seed: the explicit count (+N)
-	First  string `json:"first,omitempty"`  // seed: the explicit first date
-	Last   string `json:"last,omitempty"`   // seed: the explicit last date
+	ID         string  `json:"id"`
+	At         string  `json:"at"`
+	Type       string  `json:"type"`
+	Date       string  `json:"date,omitempty"`        // occurrence: the logical date it counts at
+	Source     string  `json:"source,omitempty"`      // occurrence/seed provenance
+	MatchTier  int     `json:"match_tier,omitempty"`  // occurrence: the tier that matched it automatically
+	MatchScore float64 `json:"match_score,omitempty"` // occurrence: that tier's winning score
+	Count      int     `json:"count,omitempty"`       // seed: the explicit count (+N)
+	First      string  `json:"first,omitempty"`       // seed: the explicit first date
+	Last       string  `json:"last,omitempty"`        // seed: the explicit last date
 	// merge fields: the absorbed source key and its derived count + span, so the
 	// fold reads the merge locally without re-reading the tombstoned source.
 	SourceKey   string `json:"source_key,omitempty"`

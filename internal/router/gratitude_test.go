@@ -3,6 +3,7 @@ package router
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/provider"
 )
 
 // TestGratitudeList_ReadError_IsWrappedWithIntent: a corrupt gratitude entry
@@ -366,4 +368,122 @@ func TestGratitudeListSortedByCountThenRecency(t *testing.T) {
 	for _, e := range res.View.Entries {
 		assert.Contains(t, e.ID, "gratitude_", "each row carries a stable gratitude_ id")
 	}
+}
+
+// gratitudeReceiptPattern is the receipt grammar (gratitude.md §2 Ids):
+// grat_<logical date with underscores>_<seq, three digits or wider>.
+var gratitudeReceiptPattern = regexp.MustCompile(`^grat_\d{4}_\d{2}_\d{2}_\d{3,}$`)
+
+// TestGratitudeReceiptsOnAutomaticActions: every automatic action is a receipted
+// event (gratitude.md §7.7) — a tier-2 automatic bump, a tier-3 automatic bump,
+// and each `reconcile --apply` fold — and each receipt is the id of the one event
+// that action appended: the attributed occurrence for a bump, the merge event on
+// the target for a fold. Every receipt is well-formed, distinct from the stable
+// entry ids, and unique within the entry that minted it (receipts are per-entry
+// by design, gratitude.md §2 Ids).
+func TestGratitudeReceiptsOnAutomaticActions(t *testing.T) {
+	r := bootedTier3(t)
+	seen := map[[2]string]bool{}
+	requireReceipt := func(receipt, key string, want observations.GratitudeEvent) {
+		t.Helper()
+		assert.Regexp(t, gratitudeReceiptPattern, receipt)
+		assert.NotEqual(t, key, receipt, "the receipt is distinct from the stable id")
+		assert.False(t, seen[[2]string{key, receipt}], "receipt %q repeated on %s", receipt, key)
+		seen[[2]string{key, receipt}] = true
+
+		e := gratitudeEntry(t, r, key)
+		var got observations.GratitudeEvent
+		for _, ev := range e.History {
+			if ev.ID == receipt {
+				got = ev
+			}
+		}
+		require.NotEmptyf(t, got.ID, "the receipt names an event on %s", key)
+		assert.Equal(t, want.Type, got.Type)
+		assert.Equal(t, want.MatchTier, got.MatchTier)
+		assert.Equal(t, want.SourceKey, got.SourceKey)
+	}
+
+	walk := addGratitude(t, r, "a morning walk by a river", day1())
+	wheels := addGratitude(t, r, "the two wheels that carry me to work", day1())
+	addGratitude(t, r, "the two wheels that carry me to work", day2())
+
+	byWording, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the morning walks by the river", Now: day2()})
+	require.NoError(t, err)
+	require.Equal(t, 2, byWording.MatchTier)
+	requireReceipt(byWording.Receipt, walk.Key,
+		observations.GratitudeEvent{Type: observations.GratitudeEventOccurrence, MatchTier: 2})
+	assert.Equal(t, observations.GratitudeReceiptID(observations.DateString(observations.DateOf(day2())), 2),
+		byWording.Receipt, "the receipt encodes the occurrence's logical day and the entry's next seq")
+
+	judge := &provider.Fake{Script: []provider.Exchange{judgeReply(t, r, "my bike", map[string]float64{wheels.Key: 0.95})}}
+	byMeaning, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike", Provider: judge, Now: day3()})
+	require.NoError(t, err)
+	require.Equal(t, 3, byMeaning.MatchTier)
+	requireReceipt(byMeaning.Receipt, wheels.Key,
+		observations.GratitudeEvent{Type: observations.GratitudeEventOccurrence, MatchTier: 3})
+
+	// Two clear duplicates by wording — a plural started with --new beside its
+	// singular — each folded by reconcile --apply.
+	coffee := addGratitude(t, r, "my morning coffee", day1())
+	addGratitude(t, r, "my morning coffee", day2())
+	coffees, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "morning coffees", ForceNew: true, Now: day2()})
+	require.NoError(t, err)
+	blanket := addGratitude(t, r, "a warm blanket", day1())
+	addGratitude(t, r, "a warm blanket", day2())
+	blankets, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "warm blankets", ForceNew: true, Now: day2()})
+	require.NoError(t, err)
+
+	res, err := r.ReconcileGratitude(t.Context(), ReconcileGratitudeRequest{Apply: true, Now: day3()})
+	require.NoError(t, err)
+	require.Len(t, res.View.Applied, 2)
+	targets := map[string]string{coffees.Key: coffee.Key, blankets.Key: blanket.Key}
+	for _, fold := range res.View.Applied {
+		require.Equal(t, targets[fold.Source], fold.Target, "each duplicate folds into its own singular")
+		requireReceipt(fold.Receipt, fold.Target,
+			observations.GratitudeEvent{Type: observations.GratitudeEventMerge, SourceKey: fold.Source})
+	}
+	assert.Len(t, seen, 4, "each automatic action returned its own receipt")
+}
+
+// TestGratitudeReceiptUndoOfAWrongAutoBump walks the documented undo for a wrong
+// automatic bump (gratitude.md §7.8): the mis-landed occurrence is found by the
+// receipt the ack printed, attributed to its tier; tallying the wording `--into`
+// the right entry lands it there with a receipt of its own; the mis-landed
+// occurrence stays where it landed, still attributed and still counted — append
+// only, nothing rewritten; and because the wording now sits in both entries'
+// aka[], the next time it comes up it is a tie, so it is suggested rather than
+// bumped automatically again.
+func TestGratitudeReceiptUndoOfAWrongAutoBump(t *testing.T) {
+	r := bootedGratitude(t)
+	const phrase = "the morning walks by the river"
+	walk := addGratitude(t, r, "a morning walk by a river", day1())
+	run := addGratitude(t, r, "my run before work", day1())
+
+	wrong, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: phrase, Now: day2()})
+	require.NoError(t, err)
+	require.Equal(t, walk.Key, wrong.Key, "the wording landed automatically on the walk entry")
+
+	fix, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: phrase, Into: run.Key, Now: day2()})
+	require.NoError(t, err)
+	assert.Equal(t, run.Key, fix.Key)
+	assert.Regexp(t, gratitudeReceiptPattern, fix.Receipt)
+	assert.Zero(t, fix.MatchTier, "the correction is the person's call, unattributed")
+	assert.Equal(t, 2, fix.Count)
+
+	walkEntry := gratitudeEntry(t, r, walk.Key)
+	require.Len(t, walkEntry.History, 2, "nothing was rewritten or removed")
+	misLanded := walkEntry.History[1]
+	assert.Equal(t, wrong.Receipt, misLanded.ID, "the receipt the ack printed finds the mis-landed occurrence")
+	assert.Equal(t, 2, misLanded.MatchTier, "still visibly attributed to its tier")
+	assert.Equal(t, 2, walkEntry.Tally().Count, "the residue still counts — append only")
+
+	_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: phrase, Now: day3()})
+	var sugg *GratitudeSuggestionError
+	require.ErrorAs(t, err, &sugg, "the wording now scores on both entries: a tie, so a suggestion")
+	ids := make([]string, 0, len(sugg.Candidates))
+	for _, c := range sugg.Candidates {
+		ids = append(ids, c.ID)
+	}
+	assert.ElementsMatch(t, []string{walk.Key, run.Key}, ids)
 }

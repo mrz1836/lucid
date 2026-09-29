@@ -180,6 +180,14 @@ func (r *Router) AddGratitude(ctx context.Context, req AddGratitudeRequest) (Gra
 		Date:   logicalDate,
 		Source: observations.GratitudeSourceGratitude,
 	}
+	if dec.automatic() {
+		// An automatic landing is attributed on the event itself, so the audit
+		// trail outlives the ack (gratitude.md §7.7): which tier chose the entry,
+		// and by what score. Tonight's wording joins aka[] below (MakePrimary is
+		// false), leaving the canonical display untouched.
+		ev.MatchTier = dec.Tier
+		ev.MatchScore = dec.Score
+	}
 	entry, appended, err := r.store.AppendGratitudeEvent(dec.Key, thing, logicalDate, dec.MakePrimary, ev, now)
 	if err != nil {
 		return GratitudeWriteResult{}, fmt.Errorf("could not add the gratitude; nothing was saved: %w", err)

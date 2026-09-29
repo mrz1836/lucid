@@ -1114,3 +1114,101 @@ func TestGratitudeNeverSilentCreateInAmbiguous(t *testing.T) {
 		})
 	}
 }
+
+// TestGratitudeAutoBumpRecordsMatchTier: an automatic landing is auditable on the
+// record itself, not just in the ack (gratitude.md §2, §7.7; ADR-0012 §5). A
+// clear tier-2 winner and a clear tier-3 winner each append an occurrence that
+// carries its receipt, the deciding tier, and the winning score; tonight's
+// wording joins the entry's aka[] while the canonical display stays; and no
+// entry is started at the phrase's own key. Every landing a person decided or
+// the canonical key decided — a create, a tier-1 bump, a forward through a merge
+// tombstone, `--into`, and `--new` — carries no attribution, the v1 shape.
+func TestGratitudeAutoBumpRecordsMatchTier(t *testing.T) {
+	requireNoOwnEntry := func(t *testing.T, r *Router, phrase string) {
+		t.Helper()
+		key, err := r.store.ResolveGratitudeKey(phrase)
+		require.NoError(t, err)
+		_, found, err := r.store.ReadGratitude(key)
+		require.NoError(t, err)
+		assert.False(t, found, "an automatic bump never starts an entry at the phrase's own key")
+	}
+	lastEvent := func(t *testing.T, r *Router, key string) observations.GratitudeEvent {
+		t.Helper()
+		e := gratitudeEntry(t, r, key)
+		require.NotEmpty(t, e.History)
+		return e.History[len(e.History)-1]
+	}
+
+	t.Run("tier 2 by wording", func(t *testing.T) {
+		r := bootedGratitude(t)
+		walk := addGratitude(t, r, "a morning walk by a river", day1())
+		addGratitude(t, r, "a quiet river", day1())
+
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the morning walks by the river", Now: day2()})
+		require.NoError(t, err)
+		require.Equal(t, walk.Key, res.Key)
+
+		ev := lastEvent(t, r, walk.Key)
+		assert.Equal(t, res.Receipt, ev.ID, "the attributed occurrence is the one the receipt names")
+		assert.Equal(t, observations.GratitudeEventOccurrence, ev.Type)
+		assert.Equal(t, 2, ev.MatchTier)
+		assert.InDelta(t, res.MatchScore, ev.MatchScore, 1e-9)
+		assert.InDelta(t, 1.0, ev.MatchScore, 1e-9)
+
+		entry := gratitudeEntry(t, r, walk.Key)
+		assert.Equal(t, "a morning walk by a river", entry.DisplayName, "the canonical display is kept")
+		assert.Contains(t, entry.Aka, "the morning walks by the river", "tonight's wording joins aka[]")
+		requireNoOwnEntry(t, r, "the morning walks by the river")
+	})
+
+	t.Run("tier 3 by meaning", func(t *testing.T) {
+		r := bootedTier3(t)
+		bike := addGratitude(t, r, "the two wheels that carry me to work", day1())
+		addGratitude(t, r, "clean drinking water from the tap", day2())
+
+		fake := &provider.Fake{Script: []provider.Exchange{judgeReply(t, r, "my bike", map[string]float64{bike.Key: 0.95})}}
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike", Provider: fake, Now: day3()})
+		require.NoError(t, err)
+		require.Equal(t, bike.Key, res.Key)
+
+		ev := lastEvent(t, r, bike.Key)
+		assert.Equal(t, res.Receipt, ev.ID)
+		assert.Equal(t, 3, ev.MatchTier)
+		assert.InDelta(t, 0.95, ev.MatchScore, 1e-9)
+
+		entry := gratitudeEntry(t, r, bike.Key)
+		assert.Equal(t, "the two wheels that carry me to work", entry.DisplayName)
+		assert.Equal(t, []string{"the two wheels that carry me to work", "my bike"}, entry.Aka)
+		requireNoOwnEntry(t, r, "my bike")
+	})
+
+	t.Run("a person's or the key's landing carries none", func(t *testing.T) {
+		r := bootedGratitude(t)
+		coffee := addGratitude(t, r, "my morning coffee", day1()) // create
+		addGratitude(t, r, "My Morning Coffee!", day2())          // tier 1
+		roof := addGratitude(t, r, "a roof over my head", day1()) // create
+		house := addGratitude(t, r, "my house", day1())           // create
+		_, err := r.MergeGratitude(GratitudeMergeRequest{Source: house.Key, Target: roof.Key, Now: day2()})
+		require.NoError(t, err)
+		addGratitude(t, r, "my house", day3()) // tier 1, forwarded through the tombstone
+		_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "hot tea", Into: coffee.Key, Now: day3()})
+		require.NoError(t, err)
+		_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "coffee in the morning", ForceNew: true, Now: day3()})
+		require.NoError(t, err)
+
+		all, err := r.store.ReadGratitudeAll()
+		require.NoError(t, err)
+		var occurrences int
+		for _, e := range all {
+			for _, ev := range e.History {
+				if ev.Type != observations.GratitudeEventOccurrence {
+					continue
+				}
+				occurrences++
+				assert.Zerof(t, ev.MatchTier, "%s %s carries no match_tier", e.Key, ev.ID)
+				assert.Zerof(t, ev.MatchScore, "%s %s carries no match_score", e.Key, ev.ID)
+			}
+		}
+		assert.Equal(t, 7, occurrences, "every landing above appended one occurrence")
+	})
+}

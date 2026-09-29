@@ -749,3 +749,150 @@ func gratitudeAka(t *testing.T, id string) []string {
 	require.Failf(t, "no live entry", "%s", id)
 	return nil
 }
+
+// gratitudeReconcileJSON is the documented `reconcile --json` shape
+// (gratitude.md §7.9); decoding with unknown fields disallowed pins it.
+type gratitudeReconcileJSON struct {
+	Proposals []struct {
+		Source      string  `json:"source"`
+		SourceThing string  `json:"source_thing"`
+		Target      string  `json:"target"`
+		TargetThing string  `json:"target_thing"`
+		Score       float64 `json:"score"`
+		MatchTier   int     `json:"match_tier"`
+		Band        string  `json:"band"`
+		WillApply   bool    `json:"will_apply"`
+		Command     string  `json:"command"`
+	} `json:"proposals"`
+	Tier3   string `json:"tier3"`
+	Applied []struct {
+		Receipt string `json:"receipt"`
+		Source  string `json:"source"`
+		Target  string `json:"target"`
+	} `json:"applied"`
+}
+
+// decodeReconcileJSON decodes a reconcile --json payload strictly and checks the
+// two arrays are arrays, never null.
+func decodeReconcileJSON(t *testing.T, out string) gratitudeReconcileJSON {
+	t.Helper()
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &raw))
+	assert.Equal(t, "[", string(raw["proposals"][:1]), "proposals is an array, never null")
+	assert.Equal(t, "[", string(raw["applied"][:1]), "applied is an array, never null")
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	var v gratitudeReconcileJSON
+	require.NoError(t, dec.Decode(&v))
+	return v
+}
+
+// seedReconcileCLI tallies a clear duplicate by wording (a plural started with
+// --new beside its singular) and a close call (an exact tie by wording), and
+// returns the entry ids by wording.
+func seedReconcileCLI(t *testing.T) map[string]string {
+	t.Helper()
+	addGratitudeCLI(t, "my morning coffee")
+	addGratitudeCLI(t, "my morning coffee")
+	addGratitudeCLI(t, "the walk to work")
+	addGratitudeCLI(t, "the walk to work") // counts, not same-second creation times, decide each fold's direction
+	for _, thing := range []string{"morning coffees", "the walk home"} {
+		_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", thing, "--new")
+		require.NoError(t, err)
+	}
+	ids := map[string]string{}
+	for _, e := range gratitudeListEntries(t) {
+		ids[e.Thing] = e.ID
+	}
+	require.Len(t, ids, 4)
+	return ids
+}
+
+// TestGratitudeReconcileCLI: `lucid gratitude reconcile` is a dry run by default
+// (gratitude.md §7.9) — it prints the proposals, a clear match marked fold and a
+// close call marked look with its merge command, and writes nothing; `--json`
+// emits the documented shape; `--apply --json` folds exactly the marked pair
+// through merge, returning its receipt, and leaves the close call alone.
+func TestGratitudeReconcileCLI(t *testing.T) {
+	isolatedHome(t)
+	ids := seedReconcileCLI(t)
+	coffee, coffees := ids["my morning coffee"], ids["morning coffees"]
+	home, work := ids["the walk home"], ids["the walk to work"]
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "reconcile")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Contains(t, out, "2 possible duplicates (dry run — nothing was changed):")
+	assert.Contains(t, out, fmt.Sprintf("fold  %s %q into %s %q", coffees, "morning coffees", coffee, "my morning coffee"))
+	assert.Contains(t, out, fmt.Sprintf("look  %s %q into %s %q", home, "the walk home", work, "the walk to work"))
+	assert.Contains(t, out, fmt.Sprintf("lucid gratitude merge %s %s", home, work))
+	assert.Contains(t, out, "Meaning match is off — proposed by wording only.")
+	assert.Len(t, gratitudeListEntries(t), 4, "a dry run folds nothing")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "reconcile", "--json")
+	require.NoError(t, err)
+	dry := decodeReconcileJSON(t, out)
+	require.Len(t, dry.Proposals, 2)
+	assert.Equal(t, coffees, dry.Proposals[0].Source)
+	assert.Equal(t, coffee, dry.Proposals[0].Target)
+	assert.Equal(t, "high", dry.Proposals[0].Band)
+	assert.True(t, dry.Proposals[0].WillApply)
+	assert.Equal(t, 2, dry.Proposals[0].MatchTier)
+	assert.Equal(t, "ambiguous", dry.Proposals[1].Band)
+	assert.False(t, dry.Proposals[1].WillApply)
+	assert.Equal(t, fmt.Sprintf("lucid gratitude merge %s %s", home, work), dry.Proposals[1].Command)
+	assert.Equal(t, "disabled", dry.Tier3)
+	assert.Empty(t, dry.Applied)
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "reconcile", "--apply", "--json")
+	require.NoError(t, err)
+	applied := decodeReconcileJSON(t, out)
+	require.Len(t, applied.Applied, 1, "only the pair marked fold is applied")
+	assert.Equal(t, coffees, applied.Applied[0].Source)
+	assert.Equal(t, coffee, applied.Applied[0].Target)
+	assert.Regexp(t, `^grat_\d{4}_\d{2}_\d{2}_\d{3,}$`, applied.Applied[0].Receipt, "each fold returns its receipt")
+	assert.Empty(t, applied.Tier3, "an apply never consults the model")
+
+	counts := gratitudeCounts(t)
+	assert.Equal(t, map[string]int{coffee: 3, home: 1, work: 2}, counts,
+		"the plural folded into the coffee entry; the close call was left alone")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "reconcile", "--apply")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Nothing to fold")
+	assert.Contains(t, out, "Worth a look, not folded:")
+}
+
+// TestGratitudeReconcileCLIJudge: opted in to tier 3, a dry run builds the judge
+// through the buildProvider seam and lists its by-meaning pair as advisory;
+// `--apply` never builds or calls it (gratitude.md §7.6, §7.9), and folds no
+// tier-3 pair.
+func TestGratitudeReconcileCLIJudge(t *testing.T) {
+	home := isolatedHome(t)
+	addGratitudeCLI(t, "the two wheels that carry me to work")
+	addGratitudeCLI(t, "my bike")
+	writeGratitudeMatch(t, home, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = true })
+
+	judge := &provider.Fake{Script: []provider.Exchange{{Content: `{"pairs": [{"a": 1, "b": 2, "score": 0.96}]}`}}}
+	built := withGratitudeJudge(t, judge)
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "reconcile", "--json")
+	require.NoError(t, err)
+	v := decodeReconcileJSON(t, out)
+	assert.Equal(t, "used", v.Tier3)
+	require.Len(t, v.Proposals, 1)
+	assert.Equal(t, 3, v.Proposals[0].MatchTier)
+	assert.False(t, v.Proposals[0].WillApply, "a by-meaning pair is advisory")
+	assert.Equal(t, 1, judge.Calls())
+	assert.Equal(t, config.Default().Gratitude.Match.Tier3Backend, built.Backend, "built with the gratitude.match overrides")
+
+	unused := &provider.Fake{}
+	builtOnApply := withGratitudeJudge(t, unused)
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "reconcile", "--apply", "--json")
+	require.NoError(t, err)
+	v = decodeReconcileJSON(t, out)
+	assert.Empty(t, v.Applied)
+	assert.Empty(t, v.Tier3)
+	assert.Zero(t, unused.Calls(), "an apply never calls the judge")
+	assert.Empty(t, builtOnApply.Backend, "an apply never even builds it")
+	assert.Len(t, gratitudeListEntries(t), 2, "no tier-3 pair is folded")
+}

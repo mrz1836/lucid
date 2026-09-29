@@ -1,6 +1,7 @@
 package observations
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -178,4 +179,74 @@ func TestNextGratitudeSeq(t *testing.T) {
 		{ID: "hand-edited-line"}, // ignored, not counted
 	}
 	assert.Equal(t, 6, NextGratitudeSeq(history), "max seq 5 + 1")
+}
+
+// TestGratitudeMatchTier_EventAttribution: an automatic landing's match_tier and
+// match_score ride on the occurrence (gratitude.md §2, §7.7) and round-trip; an
+// occurrence with neither marshals exactly as the v1 shape (no match keys at
+// all); and the attribution never changes what the event folds to — an
+// auto-matched occurrence is +1 at its date like any other.
+func TestGratitudeMatchTier_EventAttribution(t *testing.T) {
+	auto := GratitudeEvent{
+		ID: "grat_2026_03_12_002", At: "2026-03-12T21:00:00Z", Type: GratitudeEventOccurrence,
+		Date: "2026-03-12", Source: GratitudeSourceGratitude, MatchTier: 3, MatchScore: 0.94,
+	}
+	b, err := json.Marshal(auto)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"grat_2026_03_12_002","at":"2026-03-12T21:00:00Z","type":"occurrence",
+		"date":"2026-03-12","source":"gratitude","match_tier":3,"match_score":0.94}`, string(b))
+	var back GratitudeEvent
+	require.NoError(t, json.Unmarshal(b, &back))
+	assert.Equal(t, auto, back, "the attribution round-trips")
+
+	plain := auto
+	plain.MatchTier, plain.MatchScore = 0, 0
+	b, err = json.Marshal(plain)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "match_tier", "a tier-1, --into, or confirmed landing stays the v1 shape")
+	assert.NotContains(t, string(b), "match_score")
+
+	e := GratitudeEntry{History: []GratitudeEvent{
+		{Type: GratitudeEventOccurrence, Date: "2026-03-10"},
+		auto,
+	}}
+	assert.Equal(t, GratitudeTally{Count: 2, First: "2026-03-10", Last: "2026-03-12"}, e.Tally(),
+		"an auto-matched occurrence folds exactly like any other")
+}
+
+// TestGratitudeMatchTier_ReadsSchemaOneAndUnknownFields: a schema-1 entry written
+// before match attribution existed still decodes and folds unchanged, and a
+// reader tolerates fields and event types it does not know (gratitude.md §2
+// Versioning — read what you understand, skip what you don't).
+func TestGratitudeMatchTier_ReadsSchemaOneAndUnknownFields(t *testing.T) {
+	const v1 = `{
+	  "key": "gratitude_a-river", "kind": "gratitude", "schema": 1,
+	  "display_name": "my morning coffee", "aka": ["my morning coffee"],
+	  "history": [
+	    {"id": "grat_2026_03_10_001", "at": "2026-03-10T21:00:00Z", "type": "occurrence", "date": "2026-03-10", "source": "gratitude"},
+	    {"id": "grat_2026_03_11_002", "at": "2026-03-11T21:00:00Z", "type": "seed", "count": 3, "first": "2026-01-01", "last": "2026-02-01", "source": "migration"}
+	  ],
+	  "redirect_to": "", "created_at": "2026-03-10T21:00:00Z", "updated_at": "2026-03-11T21:00:00Z"
+	}`
+	var e GratitudeEntry
+	require.NoError(t, json.Unmarshal([]byte(v1), &e))
+	require.NoError(t, e.Validate(), "a schema-1 entry is a valid entry")
+	assert.Zero(t, e.History[0].MatchTier, "a v1 occurrence carries no attribution")
+	assert.Equal(t, GratitudeTally{Count: 4, First: "2026-01-01", Last: "2026-03-10"}, e.Tally())
+
+	const future = `{
+	  "key": "gratitude_a-river", "kind": "gratitude", "schema": 1,
+	  "display_name": "my morning coffee", "aka": ["my morning coffee"],
+	  "a_future_field": ["anything"],
+	  "history": [
+	    {"id": "grat_2026_03_10_001", "at": "2026-03-10T21:00:00Z", "type": "occurrence", "date": "2026-03-10", "match_tier": 2, "match_score": 1, "a_future_key": true},
+	    {"id": "grat_2026_03_12_002", "at": "2026-03-12T21:00:00Z", "type": "a_future_type", "date": "2026-03-12"}
+	  ],
+	  "redirect_to": "", "created_at": "2026-03-10T21:00:00Z", "updated_at": "2026-03-12T21:00:00Z"
+	}`
+	var f GratitudeEntry
+	require.NoError(t, json.Unmarshal([]byte(future), &f), "unknown fields are skipped, not fatal")
+	assert.Equal(t, 2, f.History[0].MatchTier)
+	assert.Equal(t, GratitudeTally{Count: 1, First: "2026-03-10", Last: "2026-03-10"}, f.Tally(),
+		"an unknown event type contributes nothing")
 }

@@ -16,7 +16,9 @@ import (
 // function of its inputs — the router hands in the live entries, and no path
 // touches disk or a model (architecture P3/P9). By-meaning matching (tier 3) is
 // the router's optional provider step; it reuses [ClassifyGratitudeBand] so every
-// tier is banded by the one rule.
+// tier is banded by the one rule. The `reconcile` pass (gratitude.md §7.9) scores
+// the live entries against each other with the same scorer ([Tier2Pairs]) and
+// bands the pairs from both sides with the same rule ([BandGratitudePairs]).
 
 // GratitudeBand is the confidence band a ranked candidate list falls in
 // (gratitude.md §7.2). It decides what a nightly `add` does: bump, suggest, or
@@ -276,4 +278,137 @@ func GratitudeSuggestions(cands []GratitudeCandidate, floor float64) []Gratitude
 // atLeast reports v ≥ threshold, tolerating float noise of gratitudeBandEpsilon.
 func atLeast(v, threshold float64) bool {
 	return v >= threshold-gratitudeBandEpsilon
+}
+
+// GratitudePair is one pair of live entries a reconcile pass found possibly
+// naming the same thing (gratitude.md §7.9): the two stable keys, ordered A < B
+// so a pair has one spelling, the pair's score in [0, 1], and — once banded by
+// [BandGratitudePairs] — its confidence band. The pair is unordered: which entry
+// folds into which is the caller's call, not the score's.
+type GratitudePair struct {
+	A     string
+	B     string
+	Score float64
+	Band  GratitudeBand
+}
+
+// NewGratitudePair spells an unordered pair with its keys in order (A < B).
+func NewGratitudePair(x, y string, score float64) GratitudePair {
+	if y < x {
+		x, y = y, x
+	}
+	return GratitudePair{A: x, B: y, Score: score}
+}
+
+// Tier2Pairs is the tier-2 pass of `reconcile` (gratitude.md §7.9): it scores
+// every pair of live entries with the tier-2 scorer — the Dice score of the best
+// pair of wordings, one from each entry's display_name and aka[] forms — and
+// returns every pair with any overlap, unbanded, best first (then by key). Like
+// [Tier2] it is a pure function of the entries it is handed: no disk, no model,
+// and a merge tombstone is never paired.
+func Tier2Pairs(entries []GratitudeEntry) []GratitudePair {
+	type tokened struct {
+		key  string
+		sets [][]string
+	}
+	live := make([]tokened, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsTombstone() {
+			live = append(live, tokened{key: e.Key, sets: tier2WordingSets(e)})
+		}
+	}
+
+	var out []GratitudePair
+	for i := range live {
+		for j := i + 1; j < len(live); j++ {
+			if best := bestTier2Score(live[i].sets, live[j].sets); best > 0 {
+				out = append(out, NewGratitudePair(live[i].key, live[j].key, best))
+			}
+		}
+	}
+	rankGratitudePairs(out)
+	return out
+}
+
+// tier2WordingSets returns the tier-2 token set of each of an entry's wordings —
+// its display_name and every aka[] form — skipping any that are all stopwords.
+func tier2WordingSets(e GratitudeEntry) [][]string {
+	sets := make([][]string, 0, len(e.Aka)+1)
+	for _, w := range append([]string{e.DisplayName}, e.Aka...) {
+		if tok := Tier2Tokens(w); len(tok) > 0 {
+			sets = append(sets, tok)
+		}
+	}
+	return sets
+}
+
+// bestTier2Score is the best [Tier2Score] over every pair of wordings, one from
+// each side — how two entries score against each other.
+func bestTier2Score(a, b [][]string) float64 {
+	best := 0.0
+	for _, x := range a {
+		for _, y := range b {
+			best = max(best, Tier2Score(x, y))
+		}
+	}
+	return best
+}
+
+// BandGratitudePairs files scored pairs into confidence bands (gratitude.md
+// §7.9) with one tier's cutoffs, by the same rule [ClassifyGratitudeBand] applies
+// to an `add`, read from both sides of the pair:
+//
+//   - High — each entry is the other's clear single winner: ranking every pair
+//     that entry is in, the partner is its top-1, top-1 clears c.High, and it
+//     beats that entry's top-2 by c.Margin — checked for A and for B;
+//   - Ambiguous — the score is at or above c.Floor, but the pair is not High (a
+//     near-tie on either side, or a plausible-but-unconfident score);
+//   - Low — below the floor; such a pair is dropped, never proposed.
+//
+// It returns the High and Ambiguous pairs, best first (then by key). The input
+// is not modified.
+func BandGratitudePairs(pairs []GratitudePair, c GratitudeBandCutoffs) []GratitudePair {
+	ranks := make(map[string][]GratitudeCandidate)
+	for _, p := range pairs {
+		ranks[p.A] = append(ranks[p.A], GratitudeCandidate{Key: p.B, Score: p.Score})
+		ranks[p.B] = append(ranks[p.B], GratitudeCandidate{Key: p.A, Score: p.Score})
+	}
+	for k := range ranks {
+		RankGratitudeCandidates(ranks[k])
+	}
+	clearWinner := func(of, partner string) bool {
+		rank := ranks[of]
+		return ClassifyGratitudeBand(rank, c) == GratitudeBandHigh && rank[0].Key == partner
+	}
+
+	out := make([]GratitudePair, 0, len(pairs))
+	for _, p := range pairs {
+		switch {
+		case p.Score <= 0:
+			continue
+		case clearWinner(p.A, p.B) && clearWinner(p.B, p.A):
+			p.Band = GratitudeBandHigh
+		case atLeast(p.Score, c.Floor):
+			p.Band = GratitudeBandAmbiguous
+		default:
+			continue
+		}
+		out = append(out, p)
+	}
+	rankGratitudePairs(out)
+	return out
+}
+
+// rankGratitudePairs sorts pairs best first — score descending, then A, then B —
+// so a tie always ranks the same way.
+func rankGratitudePairs(pairs []GratitudePair) {
+	slices.SortStableFunc(pairs, func(x, y GratitudePair) int {
+		if c := cmp.Compare(y.Score, x.Score); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(x.A, y.A); c != 0 {
+			return c
+		}
+		return cmp.Compare(x.B, y.B)
+	})
 }

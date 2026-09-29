@@ -627,12 +627,21 @@ model ([ADR-0006](adr/0006-model-access.md)).
 
 ### 7.7 Audit and receipts
 
-Every automatic action is a receipted, attributable event: an automatic bump is
-an `occurrence` carrying `match_tier` and `match_score` and returns its receipt;
-a `reconcile --apply` fold is an ordinary `merge` event plus a `redirect_to`
-tombstone with the single-hop invariant intact — exactly what `lucid gratitude
-merge` writes — and returns one receipt per fold. Nothing automatic is ever
-unrecorded, and nothing is ever deleted.
+Every automatic action is a receipted, attributable event, and its receipt is
+the id of the one event it appended:
+
+* An **automatic bump** appends an `occurrence` carrying `match_tier` and
+  `match_score` to the matched entry, and returns that occurrence's receipt
+  (the ack prints it; `--json` carries it as `receipt`).
+* A **`reconcile --apply` fold** is an ordinary `merge` event on the target
+  plus a `redirect_to` tombstone on the source, with the single-hop invariant
+  intact — exactly what `lucid gratitude merge` writes — and returns one
+  receipt per fold: the id of that fold's `merge` event, which names the
+  absorbed `source_key`.
+
+A receipt is unique within the entry that minted it (§2 Ids), so a receipt
+plus the entry it names always finds exactly one event. Nothing automatic is
+ever unrecorded, and nothing is ever deleted.
 
 ### 7.8 Undo — correcting a wrong automatic match
 
@@ -652,9 +661,14 @@ Append-only means a correction is a new event, not an erasure:
   entries, which is a tie, so the next time it comes up it is a **suggestion**
   rather than an automatic bump, and your answer decides.
 * **A wrong `reconcile` fold.** A fold is a merge — the absorbed entry becomes
-  a tombstone and there is no unmerge verb. Take a `lucid backup` before
-  `reconcile --apply`; to undo a wrong fold, restore that pre-reconcile snapshot
-  — the same escape hatch §5 prescribes for a partial `import`.
+  a tombstone and there is no unmerge verb. The fold's receipt names its
+  `merge` event on the target, and the source's `redirect_to` names where it
+  went, so a wrong fold is always identifiable. Take a `lucid backup` before
+  `reconcile --apply` (the dry run and the report both say so); to undo a wrong
+  fold, restore that pre-reconcile snapshot with `lucid restore --in <file>
+  --force` — the same escape hatch §5 prescribes for a partial `import`. A
+  restore rewinds every write since the backup, so take it right before the
+  apply.
 
 ### 7.9 Reconcile — folding duplicates that already exist
 
@@ -664,30 +678,49 @@ folds. It is **dry-run by default**: it prints each proposal and writes
 nothing.
 
 * **Tier 2 pairs.** Every live entry is scored against every other with the
-  tier-2 scorer (best wording pair, Dice) and banded with the tier-2 cutoffs.
-  A **High** pair — clearly each other's best match, by the margin — is a
-  proposal that `--apply` will fold. An **Ambiguous** pair is listed as *worth a
-  look* with the exact `lucid gratitude merge` command, and is never applied.
-* **Tier 3 pairs (when available).** One `gratitude.reconcile` call sends only
-  the live entries' wordings, numbered (the §7.5 slice rules and off-limits
-  exclusion apply), and asks for pairs that name the same thing, with a score.
-  Tier-3 pairs are **always advisory** — listed with their `merge` command,
-  never applied by `--apply`, because a model's answer can differ between the
-  dry run you read and the run that applies. When tier 3 is disabled or
-  unavailable, reconcile says so and proposes tier-2 pairs only.
+  tier-2 scorer (the best pair of wordings, one from each entry's
+  `display_name` and `aka[]`, scored by Dice) and banded with the tier-2
+  cutoffs by the §7.2 rule read from **both** sides: a pair is **High** only
+  when each entry is the other's top match, clearing `tier2_high` and beating
+  that entry's runner-up by `tier2_margin` — clearly each other's best match.
+  A High pair is a proposal that `--apply` will fold, marked **fold**. A pair
+  at or above `ambiguous_floor` that is not High is **Ambiguous**, marked
+  **look** — *worth a look* — with the exact `lucid gratitude merge` command,
+  and is never applied. A pair below the floor is not proposed.
+* **Tier 3 pairs (dry run only, when available).** One `gratitude.reconcile`
+  call sends only the live entries' wordings, numbered (the §7.5 slice rules
+  and off-limits exclusion apply; an entry's tier-2 evidence for the cap is its
+  best pair score), and asks for pairs that name the same thing. The reply is
+  `{"pairs": [{"a": <position>, "b": <position>, "score": <0–1>}]}` alone (or
+  inside one enclosing code fence); a reply that does not parse, names an
+  unknown position, pairs an item with itself, repeats a pair, omits a position
+  or score, or scores outside [0, 1] is treated as **unavailable** — never
+  partially trusted. The pairs are banded with the tier-3 cutoffs by the same
+  both-sides rule. Tier-3 pairs are **always advisory** — marked **look** and
+  listed with their `merge` command, never applied, because a model's answer
+  can differ between the dry run you read and the run that applies. When tier 3
+  is disabled or unavailable, reconcile says so and proposes tier-2 pairs only.
 * **Direction and overlap.** In each pair, the entry with the lower count folds
-  into the higher; a tie folds the later-created into the earlier, then by key.
-  Each entry appears in at most one proposal per run (highest score first) so an
-  applied set never chains through a fresh tombstone; re-run to continue.
+  into the higher; a tie folds the later-created into the earlier, then the
+  greater key into the lesser. Each entry appears in at most one proposal per
+  run, so an applied set never chains through a fresh tombstone and every
+  printed `merge` command still runs after the others; re-run to continue. The
+  **fold** pairs are placed first, so no advisory pair can crowd one out; the
+  advisory pairs then take the entries left, highest score first (tier 2 before
+  tier 3 on a tie).
 * **`--apply`** is the explicit confirmation: it folds exactly the tier-2 High
   proposals the dry run lists — deterministic, so the same store yields the same
   set — each through the ordinary `merge` path (§4), returning one receipt per
-  fold. It never applies an Ambiguous or tier-3 proposal. Take a `lucid backup`
-  first (§7.8).
+  fold. It never applies an Ambiguous or tier-3 proposal, and it never consults
+  the model at all (its report lists the tier-2 proposals only). If a fold
+  cannot land, the apply stops with a clean error naming how many folds landed
+  before it, each with its receipt. Take a `lucid backup` first (§7.8).
 * **`--json`** emits `{proposals: [{source, source_thing, target,
   target_thing, score, match_tier, band, will_apply, command}], tier3,
   applied: [{receipt, source, target}]}` — `proposals` and `applied` are arrays,
-  never null; `applied` is `[]` on a dry run.
+  never null; `applied` is `[]` on a dry run. `band` is `high` or `ambiguous`;
+  `tier3` is `used`, `disabled`, or `unavailable`, and is omitted when tier 3
+  was not consulted (an `--apply`, or fewer than two live entries).
 
 ## 8. Outward expression — linking a person and saying thank you
 
@@ -773,9 +806,9 @@ non-interactive / `--json` refuses-and-defers (writes nothing, exit 1, resolve
 with `--into` or `--new`), at most three candidates shown · `--into` targets a
 stable id regardless of wording; `merge` folds + redirects (single-hop, no
 cycles) · `reconcile` dry-run by default; `--apply` folds tier-2 High pairs
-only · `import` / `add --count` writes one `seed` event with explicit
-Count/First/Last, canonical key only, fabricates no dates; it is **not**
-idempotent · `add --day` / `thank --day` strict tier, future dates rejected,
+only and never consults the model · `import` / `add --count` writes one `seed`
+event with explicit Count/First/Last, canonical key only, fabricates no dates;
+it is **not** idempotent · `add --day` / `thank --day` strict tier, future dates rejected,
 real write time kept as the event's `at` · `list` sorted by count then recency,
 shows the stable id, linked people, and last-expressed dates; at most three
 reminder lines, never a count · `schema` = 2 (schema 1 read unchanged) ·

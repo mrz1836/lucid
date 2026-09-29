@@ -318,3 +318,126 @@ func TestTier2SuggestionsCapAndFloor(t *testing.T) {
 	RankGratitudeCandidates(tied)
 	assert.Equal(t, []string{"c", "a", "b"}, []string{tied[0].Key, tied[1].Key, tied[2].Key})
 }
+
+// TestTier2Pairs: the reconcile pass scores every pair of live entries with the
+// tier-2 scorer (gratitude.md §7.9) — the best pair of wordings, one from each
+// entry's display_name and aka[] — keeps only pairs with any overlap, never
+// pairs a tombstone, and returns them best first. "my dog" and "my dad" share no
+// token, so they are never a pair.
+func TestTier2Pairs(t *testing.T) {
+	tomb := gEntry("gratitude_e-tomb", "morning coffee")
+	tomb.RedirectTo = "gratitude_a-coffee"
+	entries := []GratitudeEntry{
+		gEntry("gratitude_g-tap", "hot water at the tap"),
+		gEntry("gratitude_a-coffee", "my morning coffee"),
+		gEntry("gratitude_b-coffee", "morning coffees"),
+		gEntry("gratitude_c-dog", "my dog"),
+		gEntry("gratitude_d-dad", "my dad"),
+		tomb,
+		gEntry("gratitude_f-shower", "hot showers", "hot water"),
+	}
+
+	got := Tier2Pairs(entries)
+	require.Len(t, got, 2, "only overlapping live pairs: no dog/dad, no tombstone")
+	assert.Equal(t, NewGratitudePair("gratitude_a-coffee", "gratitude_b-coffee", 1), got[0],
+		"a plural and its singular meet, best first")
+	assert.Equal(t, "gratitude_f-shower", got[1].A, "a pair is spelled with its keys in order")
+	assert.Equal(t, "gratitude_g-tap", got[1].B)
+	assert.InDelta(t, 0.8, got[1].Score, 1e-9, "the best wording pair counts: an aka form (0.8), not the display (0.4)")
+	for _, p := range got {
+		assert.Empty(t, p.Band, "Tier2Pairs only scores; banding is separate")
+	}
+
+	assert.Empty(t, Tier2Pairs(entries[:1]), "one entry has nothing to pair with")
+	assert.Empty(t, Tier2Pairs(nil))
+}
+
+// TestBandGratitudePairs pins the pair band rule (gratitude.md §7.9): a pair is
+// High only when each entry is the other's clear single winner — over the high
+// cutoff and ahead of that entry's runner-up by the margin, read from both sides
+// — Ambiguous at or above the floor otherwise, and dropped below it. The same
+// rule runs with each tier's own cutoffs.
+func TestBandGratitudePairs(t *testing.T) {
+	const a, b, c, d = "gratitude_a-one", "gratitude_b-two", "gratitude_c-three", "gratitude_d-four"
+	pair := func(x, y string, score float64, band GratitudeBand) GratitudePair {
+		p := NewGratitudePair(x, y, score)
+		p.Band = band
+		return p
+	}
+	tier3Cutoffs := GratitudeBandCutoffs{High: 0.90, Margin: 0.20, Floor: 0.50}
+
+	tests := []struct {
+		name  string
+		pairs []GratitudePair
+		c     GratitudeBandCutoffs
+		want  []GratitudePair
+	}{
+		{
+			name:  "each other's clear winner is High",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 1)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{pair(a, b, 1, GratitudeBandHigh)},
+		},
+		{
+			name:  "a clear winner amid weaker pairs; the weaker pair is only worth a look, the weakest is dropped",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 1), NewGratitudePair(a, c, 0.6), NewGratitudePair(b, d, 0.3)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{pair(a, b, 1, GratitudeBandHigh), pair(a, c, 0.6, GratitudeBandAmbiguous)},
+		},
+		{
+			name:  "a near-tie on one side is never High, even when the other side is clear",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 1), NewGratitudePair(b, c, 0.9)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{pair(a, b, 1, GratitudeBandAmbiguous), pair(b, c, 0.9, GratitudeBandAmbiguous)},
+		},
+		{
+			name:  "an exact tie is Ambiguous",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 0.5), NewGratitudePair(a, c, 0.5)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{pair(a, b, 0.5, GratitudeBandAmbiguous), pair(a, c, 0.5, GratitudeBandAmbiguous)},
+		},
+		{
+			name:  "a lone pair under the high cutoff is Ambiguous",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 0.7)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{pair(a, b, 0.7, GratitudeBandAmbiguous)},
+		},
+		{
+			name:  "below the floor is dropped",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 0.4)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{},
+		},
+		{
+			name:  "tier 3 bands with its own, stricter cutoffs",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 0.88)},
+			c:     tier3Cutoffs,
+			want:  []GratitudePair{pair(a, b, 0.88, GratitudeBandAmbiguous)},
+		},
+		{
+			name:  "the same score clears tier 2's cutoff",
+			pairs: []GratitudePair{NewGratitudePair(a, b, 0.88)},
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{pair(a, b, 0.88, GratitudeBandHigh)},
+		},
+		{
+			name:  "nothing in, nothing out",
+			pairs: nil,
+			c:     tier2Cutoffs,
+			want:  []GratitudePair{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, BandGratitudePairs(tt.pairs, tt.c))
+		})
+	}
+}
+
+// TestNewGratitudePair: a pair is unordered, so either spelling yields the same
+// value, keys in order.
+func TestNewGratitudePair(t *testing.T) {
+	assert.Equal(t, NewGratitudePair("gratitude_a-one", "gratitude_b-two", 0.5),
+		NewGratitudePair("gratitude_b-two", "gratitude_a-one", 0.5))
+	assert.Equal(t, "gratitude_a-one", NewGratitudePair("gratitude_b-two", "gratitude_a-one", 0.5).A)
+}
