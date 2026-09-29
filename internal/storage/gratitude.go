@@ -119,8 +119,10 @@ func (a *Adapter) ReadGratitudeAll() ([]observations.GratitudeEntry, error) {
 // date), so a backdated write's receipt encodes the logical day, not the
 // recording time. makePrimary refreshes display_name to displayName (a plain
 // `add`, whose canonical key already matched) versus only recording the wording
-// into aka (an `add --into` bump). A merged-away (tombstoned) entry is refused —
-// its destination must be targeted instead (gratitude.md §4).
+// into aka (an `add --into` bump). An event naming a Person (an `add --person`)
+// also links that person onto the entry's grow-only people[] in the same write
+// (gratitude.md §8). A merged-away (tombstoned) entry is refused — its
+// destination must be targeted instead (gratitude.md §4).
 func (a *Adapter) AppendGratitudeEvent(
 	key, displayName, receiptDate string, makePrimary bool, ev observations.GratitudeEvent, now time.Time,
 ) (observations.GratitudeEntry, observations.GratitudeEvent, error) {
@@ -144,6 +146,7 @@ func (a *Adapter) AppendGratitudeEvent(
 	} else {
 		entry = observations.NewGratitudeEntry(key, displayName, nowStr)
 	}
+	entry = entry.LinkPerson(ev.Person)
 
 	seq := observations.NextGratitudeSeq(entry.History)
 	ev.ID = observations.GratitudeReceiptID(receiptDate, seq)
@@ -160,12 +163,69 @@ func (a *Adapter) AppendGratitudeEvent(
 	return entry, ev, nil
 }
 
+// AppendGratitudeExpressed records that you told a person about a gratitude
+// (gratitude.md §8, the write behind `lucid gratitude thank`): it links the
+// person key onto the live entry at key (grow-only people[], a no-op when
+// already linked) and appends one tally-neutral `expressed` event naming them at
+// logicalDate, minting its receipt under the single-writer discipline exactly as
+// [Adapter.AppendGratitudeEvent] does. Unlike an add it never creates an entry
+// and never touches the wordings: a missing entry or a merge tombstone is a
+// clean error that writes nothing. It returns the stored entry and the appended
+// event with its receipt id filled.
+func (a *Adapter) AppendGratitudeExpressed(
+	key, personKey, logicalDate string, now time.Time,
+) (observations.GratitudeEntry, observations.GratitudeEvent, error) {
+	key = strings.TrimSpace(key)
+	personKey = strings.TrimSpace(personKey)
+	if personKey == "" {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: an expressed gratitude needs a person key; nothing was saved",
+		)
+	}
+	entry, found, err := a.ReadGratitude(key)
+	if err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+	if !found {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: no gratitude entry %q; nothing was saved", key,
+		)
+	}
+	if entry.IsTombstone() {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, fmt.Errorf(
+			"storage: gratitude entry %q was merged into %q; target the destination instead", key, entry.RedirectTo,
+		)
+	}
+
+	nowStr := now.Format(time.RFC3339)
+	entry = entry.LinkPerson(personKey)
+	ev := observations.GratitudeEvent{
+		ID:     observations.GratitudeReceiptID(logicalDate, observations.NextGratitudeSeq(entry.History)),
+		At:     nowStr,
+		Type:   observations.GratitudeEventExpressed,
+		Date:   logicalDate,
+		Person: personKey,
+	}
+	entry.History = append(slices.Clone(entry.History), ev)
+	entry.UpdatedAt = nowStr
+
+	if err = entry.Validate(); err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+	if err = a.writeGratitude(entry); err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+	return entry, ev, nil
+}
+
 // MergeGratitude folds the source gratitude entry into the target (gratitude.md
 // §4; the same append-and-redirect identity model [Adapter.MergePersons] uses).
 // The whole of the source's tally — its derived count and its first/last span —
 // is folded into the target via a single `merge` event appended to the target
-// that names the absorbed source key, and the target's aka[] absorbs the
-// source's wordings. The source is then rewritten as a redirect tombstone
+// that names the absorbed source key (and carries the source's last-expressed
+// date per person, so the target's fold stays local), and the target's aka[]
+// and people[] absorb the source's wordings and links. The source is then
+// rewritten as a redirect tombstone
 // forwarding to the target: omitted from the active tally (gratitude.md §6) but
 // auditably kept, never deleted. Every tombstone that already pointed at the
 // source is re-pointed at the target so the redirect graph stays single-hop.
@@ -232,6 +292,11 @@ func (a *Adapter) MergeGratitude(
 	for _, aka := range source.Aka {
 		target.Aka = addUnique(target.Aka, aka)
 	}
+	// The source's person links carry across, grow-only, like its wordings
+	// (gratitude.md §4, §8).
+	for _, person := range source.People {
+		target = target.LinkPerson(person)
+	}
 
 	// The whole source tally folds into the target as one auditable merge event,
 	// minted under the single-writer discipline. Its receipt encodes today's
@@ -246,6 +311,9 @@ func (a *Adapter) MergeGratitude(
 		SourceCount: srcTally.Count,
 		SourceFirst: srcTally.First,
 		SourceLast:  srcTally.Last,
+	}
+	if expressed := source.LastExpressed(); len(expressed) > 0 {
+		ev.SourceExpressed = expressed
 	}
 	target.History = append(slices.Clone(target.History), ev)
 	target.UpdatedAt = nowStr
@@ -293,7 +361,13 @@ func (a *Adapter) flattenGratitudeRedirects(oldTarget, newTarget string) error {
 
 // writeGratitude persists one gratitude entry as indented JSON, creating the
 // subtree if needed. It is the only writer of a gratitude file (architecture P3).
+// An entry read at an older schema is written back at the current one
+// (gratitude.md §2 Versioning): every schema-2 addition is optional, so the
+// upgrade is the version stamp alone — there is no migration pass.
 func (a *Adapter) writeGratitude(entry observations.GratitudeEntry) error {
+	if entry.Schema < observations.GratitudeSchema {
+		entry.Schema = observations.GratitudeSchema
+	}
 	path, err := a.gratitudePath(entry.Key)
 	if err != nil {
 		return err

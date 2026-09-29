@@ -228,7 +228,8 @@ Grammar, binding:
   the people registry (§8) — a **link-only** convenience: it records no
   "expressed" event and has no tally effect beyond the ordinary occurrence. The
   subject is resolved and validated **before** anything is written; an
-  unresolvable or ambiguous subject writes nothing.
+  unresolvable or ambiguous subject writes nothing. It applies to a nightly
+  occurrence, not the `--count` seed — the two cannot be combined.
 * **`--day` backdating.** `--day` sets the `occurrence` event's logical `date`
   (and therefore the entry's derived last-date), reading the one shared date
   grammar every logical-day verb uses

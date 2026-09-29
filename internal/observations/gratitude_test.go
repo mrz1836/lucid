@@ -2,6 +2,7 @@ package observations
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -249,4 +250,123 @@ func TestGratitudeMatchTier_ReadsSchemaOneAndUnknownFields(t *testing.T) {
 	assert.Equal(t, 2, f.History[0].MatchTier)
 	assert.Equal(t, GratitudeTally{Count: 1, First: "2026-03-10", Last: "2026-03-10"}, f.Tally(),
 		"an unknown event type contributes nothing")
+}
+
+// TestGratitudeExpressed_TallyNeutral: an `expressed` event is a private note,
+// never a count (gratitude.md §0, §2, §8) — it contributes nothing to Count and
+// never moves First or Last, even when its date falls outside the tallied span —
+// while it feeds the person's last-expressed date.
+func TestGratitudeExpressed_TallyNeutral(t *testing.T) {
+	counted := GratitudeEntry{History: []GratitudeEvent{
+		{Type: GratitudeEventOccurrence, Date: "2026-03-10"},
+		{Type: GratitudeEventOccurrence, Date: "2026-03-12"},
+	}}
+	told := counted
+	told.History = append(slices.Clone(counted.History),
+		GratitudeEvent{Type: GratitudeEventExpressed, Date: "2026-03-01", Person: "person_a-river"},
+		GratitudeEvent{Type: GratitudeEventExpressed, Date: "2026-03-20", Person: "person_a-river"},
+	)
+
+	assert.Equal(t, GratitudeTally{Count: 2, First: "2026-03-10", Last: "2026-03-12"}, counted.Tally())
+	assert.Equal(t, counted.Tally(), told.Tally(), "telling someone never moves the count or the span")
+	assert.Equal(t, map[string]string{"person_a-river": "2026-03-20"}, told.LastExpressed(),
+		"the latest expressed date per person")
+	assert.Empty(t, counted.LastExpressed(), "never told: empty, not nil")
+	assert.NotNil(t, counted.LastExpressed())
+}
+
+// TestGratitudeExpressed_LastExpressedFoldsMerges: a merge carries the absorbed
+// source's last-expressed dates in source_expressed, so the destination's fold
+// stays local (gratitude.md §2) — the later of the destination's own and the
+// absorbed date wins, per person; blank persons and dates contribute nothing.
+func TestGratitudeExpressed_LastExpressedFoldsMerges(t *testing.T) {
+	e := GratitudeEntry{History: []GratitudeEvent{
+		{Type: GratitudeEventExpressed, Date: "2026-04-02", Person: "person_a-river"},
+		{Type: GratitudeEventMerge, SourceKey: "gratitude_b-stone", SourceCount: 3, SourceExpressed: map[string]string{
+			"person_a-river": "2026-04-09", "person_b-stone": "2026-02-01",
+		}},
+		{Type: GratitudeEventMerge, SourceKey: "gratitude_c-field", SourceCount: 1, SourceExpressed: map[string]string{
+			"person_b-stone": "2026-01-15",
+		}},
+		{Type: GratitudeEventExpressed, Date: "", Person: "person_c-field"},
+		{Type: GratitudeEventExpressed, Date: "2026-04-10", Person: "  "},
+	}}
+	assert.Equal(t, map[string]string{"person_a-river": "2026-04-09", "person_b-stone": "2026-02-01"}, e.LastExpressed())
+	assert.Equal(t, 4, e.Tally().Count, "the merges still fold their counts; the expressed events add nothing")
+}
+
+// TestGratitudeExpressed_LinkPerson: people[] is grow-only and deduplicated, a
+// blank key is a no-op, and the receiver is never mutated (gratitude.md §2, §8).
+func TestGratitudeExpressed_LinkPerson(t *testing.T) {
+	base := NewGratitudeEntry("gratitude_a-river", "coffee with Sam on the porch", "2026-01-01T00:00:00Z")
+	assert.Nil(t, base.People, "a fresh entry is unlinked")
+
+	one := base.LinkPerson(" person_a-river ")
+	assert.Equal(t, []string{"person_a-river"}, one.People)
+	assert.Nil(t, base.People, "the receiver is not mutated")
+
+	two := one.LinkPerson("person_b-stone").LinkPerson("person_a-river").LinkPerson("")
+	assert.Equal(t, []string{"person_a-river", "person_b-stone"}, two.People, "grow-only, deduplicated, blank ignored")
+	assert.Equal(t, []string{"person_a-river"}, one.People, "linking onto a copy never aliases the earlier slice")
+}
+
+// TestGratitudeSchema_V2RoundTrip: a schema-2 entry — people[], an occurrence
+// carrying the person an `add --person` linked, an `expressed` event, and a merge
+// carrying source_expressed — marshals to the documented shape and round-trips
+// (gratitude.md §2); an unlinked entry omits people entirely.
+func TestGratitudeSchema_V2RoundTrip(t *testing.T) {
+	e := GratitudeEntry{
+		Key: "gratitude_a-river", Kind: RegistryGratitude, Schema: GratitudeSchema,
+		DisplayName: "coffee with Sam on the porch",
+		Aka:         []string{"coffee with Sam on the porch", "slow coffee outside"},
+		People:      []string{"person_a-river"},
+		History: []GratitudeEvent{
+			{ID: "grat_2026_08_23_001", At: "2026-08-23T21:45:10-04:00", Type: GratitudeEventOccurrence, Date: "2026-08-23", Source: GratitudeSourceGratitude, Person: "person_a-river"},
+			{ID: "grat_2026_08_24_002", At: "2026-08-24T21:50:02-04:00", Type: GratitudeEventMerge, SourceKey: "gratitude_b-stone", SourceCount: 2, SourceFirst: "2026-08-01", SourceLast: "2026-08-02", SourceExpressed: map[string]string{"person_a-river": "2026-08-02"}},
+			{ID: "grat_2026_08_25_003", At: "2026-08-25T19:12:40-04:00", Type: GratitudeEventExpressed, Date: "2026-08-25", Person: "person_a-river"},
+		},
+		CreatedAt: "2026-08-23T21:45:10-04:00", UpdatedAt: "2026-08-25T19:12:40-04:00",
+	}
+	require.NoError(t, e.Validate())
+	b, err := json.Marshal(e)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+	  "key": "gratitude_a-river", "kind": "gratitude", "schema": 2,
+	  "display_name": "coffee with Sam on the porch",
+	  "aka": ["coffee with Sam on the porch", "slow coffee outside"],
+	  "people": ["person_a-river"],
+	  "history": [
+	    {"id": "grat_2026_08_23_001", "at": "2026-08-23T21:45:10-04:00", "type": "occurrence", "date": "2026-08-23", "source": "gratitude", "person": "person_a-river"},
+	    {"id": "grat_2026_08_24_002", "at": "2026-08-24T21:50:02-04:00", "type": "merge", "source_key": "gratitude_b-stone", "source_count": 2, "source_first": "2026-08-01", "source_last": "2026-08-02", "source_expressed": {"person_a-river": "2026-08-02"}},
+	    {"id": "grat_2026_08_25_003", "at": "2026-08-25T19:12:40-04:00", "type": "expressed", "date": "2026-08-25", "person": "person_a-river"}
+	  ],
+	  "redirect_to": "", "created_at": "2026-08-23T21:45:10-04:00", "updated_at": "2026-08-25T19:12:40-04:00"
+	}`, string(b))
+
+	var back GratitudeEntry
+	require.NoError(t, json.Unmarshal(b, &back))
+	assert.Equal(t, e, back, "schema 2 round-trips")
+	assert.Equal(t, GratitudeTally{Count: 3, First: "2026-08-01", Last: "2026-08-23"}, back.Tally())
+	assert.Equal(t, map[string]string{"person_a-river": "2026-08-25"}, back.LastExpressed())
+
+	unlinked := NewGratitudeEntry("gratitude_b-stone", "clean drinking water", "2026-01-01T00:00:00Z")
+	b, err = json.Marshal(unlinked)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), `"people"`, "an unlinked entry carries no people key")
+}
+
+// TestGratitudeSchema_ValidateAcceptsOneAndTwo: readers and Validate take every
+// schema this build understands — 1 and 2 — and refuse anything outside that
+// range (gratitude.md §2 Versioning); a fresh entry is minted at schema 2.
+func TestGratitudeSchema_ValidateAcceptsOneAndTwo(t *testing.T) {
+	e := NewGratitudeEntry("gratitude_a-river", "the ocean", "2026-01-01T00:00:00Z")
+	assert.Equal(t, 2, e.Schema, "new entries are minted at schema 2")
+	for schema, ok := range map[int]bool{0: false, 1: true, 2: true, 3: false} {
+		e.Schema = schema
+		if ok {
+			assert.NoErrorf(t, e.Validate(), "schema %d is read and accepted", schema)
+		} else {
+			assert.ErrorContainsf(t, e.Validate(), "unsupported gratitude schema", "schema %d is refused", schema)
+		}
+	}
 }

@@ -57,6 +57,11 @@ const (
 	// GratitudeTier3Unavailable means no judge was reachable, the call failed or
 	// timed out, or its reply could not be trusted; the tier-2 decision stood.
 	GratitudeTier3Unavailable GratitudeTier3Status = "unavailable"
+	// GratitudeTier3OffLimits means the judge was withheld for privacy
+	// (gratitude.md §7.5, §8): the add links a person marked off-limits, or every
+	// live entry is linked to one, so no wording went to a model and the tier-2
+	// decision stood.
+	GratitudeTier3OffLimits GratitudeTier3Status = "off_limits"
 )
 
 // gratitudeMatchIntent is the audit label on the tier-3 judge request
@@ -221,7 +226,8 @@ func bandGratitudeDecision(
 // untouched. Disabled, or with no judge reachable, tier 2 stands and the status
 // says why. Otherwise one bounded call scores the phrase against the live list
 // ([gratitudeJudgeSlate] — semantic retrieval over the whole tally, never tier
-// 2's lexical shortlist, so a zero-overlap match is reachable), and the scores
+// 2's lexical shortlist, so a zero-overlap match is reachable — less every entry
+// linked to an off-limits person, [Router.judgeableGratitude]), and the scores
 // are banded with the tier-3 cutoffs: High bumps the tier-3 winner, Ambiguous
 // suggests the tier-3 candidates, and Low falls back to the tier-2 band — the
 // safer-outcome rule, so tier 3 can promote an add to a match but can never turn
@@ -245,7 +251,13 @@ func (r *Router) judgeGratitudeMatch(
 		return tier2, nil
 	}
 
-	cands, err := judgeGratitude(ctx, judge, thing, gratitudeJudgeSlate(tier2Cands, live, m.Tier3MaxCandidates))
+	judgeable := r.judgeableGratitude(live)
+	if len(judgeable) == 0 {
+		tier2.Tier3 = GratitudeTier3OffLimits // every live entry is withheld; nothing to send
+		return tier2, nil
+	}
+
+	cands, err := judgeGratitude(ctx, judge, thing, gratitudeJudgeSlate(tier2Cands, judgeable, m.Tier3MaxCandidates))
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return gratitudeMatchDecision{}, fmt.Errorf("gratitude add was canceled; nothing was saved: %w", ctxErr)

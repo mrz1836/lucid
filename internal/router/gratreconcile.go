@@ -171,7 +171,9 @@ func (r *Router) ReconcileGratitude(ctx context.Context, req ReconcileGratitudeR
 // or with no judge reachable, it adds no pairs and the status says why;
 // otherwise one bounded call scores pairs over the live list — the same slate
 // rule as the add-time judge ([gratitudeJudgeSlate]; an entry's tier-2 evidence
-// is its best pair score) — and the pairs are banded with the tier-3 cutoffs.
+// is its best pair score), with every entry linked to an off-limits person
+// withheld ([Router.judgeableGratitude]) — and the pairs are banded with the
+// tier-3 cutoffs.
 // Any provider error or untrustworthy reply degrades to no tier-3 pairs; only
 // the caller's own cancellation is returned as an error.
 func (r *Router) judgeGratitudePairs(
@@ -185,9 +187,9 @@ func (r *Router) judgeGratitudePairs(
 		return nil, GratitudeTier3Unavailable, nil
 	}
 
-	slate := gratitudeReconcileSlate(live, raw, m.Tier3MaxCandidates)
+	slate := gratitudeReconcileSlate(r.judgeableGratitude(live), raw, m.Tier3MaxCandidates)
 	if len(slate) < 2 {
-		return nil, "", nil // a capped slate of one has no pair to judge
+		return nil, "", nil // a capped or withheld slate of one has no pair to judge
 	}
 
 	pairs, err := judgeGratitudeReconcile(ctx, judge, slate)
@@ -464,7 +466,7 @@ func gratitudeReconcileLines(view GratitudeReconcileView, acks []string, applied
 		lines = append(lines, "Meaning match is off — proposed by wording only.")
 	case GratitudeTier3Unavailable:
 		lines = append(lines, "Meaning match unavailable — proposed by wording only.")
-	case GratitudeTier3Used:
+	case GratitudeTier3Used, GratitudeTier3OffLimits:
 	}
 	return lines
 }

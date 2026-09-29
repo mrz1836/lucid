@@ -441,12 +441,13 @@ func TestGratitudeSuggestionError_Sentence(t *testing.T) {
 
 // judgeSlatePositions maps each live entry's key to its 1-based position in the
 // slate the router sends the judge for phrase — computed by the production slate
-// rule, so a scripted reply names the entry a test intends.
+// rule (off-limits-linked entries withheld), so a scripted reply names the entry
+// a test intends.
 func judgeSlatePositions(t *testing.T, r *Router, phrase string) map[string]int {
 	t.Helper()
 	live, err := r.liveGratitude()
 	require.NoError(t, err)
-	slate := gratitudeJudgeSlate(observations.Tier2(phrase, live), live, r.gratitudeMatchConfig().Tier3MaxCandidates)
+	slate := gratitudeJudgeSlate(observations.Tier2(phrase, live), r.judgeableGratitude(live), r.gratitudeMatchConfig().Tier3MaxCandidates)
 	pos := make(map[string]int, len(slate))
 	for i, e := range slate {
 		pos[e.Key] = i + 1

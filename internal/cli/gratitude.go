@@ -15,14 +15,15 @@ import (
 	"github.com/mrz1836/lucid/internal/router"
 )
 
-// Flag names for the gratitude verbs (gratitude.md §3, §4, §5).
+// Flag names for the gratitude verbs (gratitude.md §3, §4, §5, §7.9, §8).
 const (
-	gratitudeIntoFlag  = "into"
-	gratitudeNewFlag   = "new"
-	gratitudeCountFlag = "count"
-	gratitudeFirstFlag = "first"
-	gratitudeLastFlag  = "last"
-	gratitudeApplyFlag = "apply"
+	gratitudeIntoFlag   = "into"
+	gratitudeNewFlag    = "new"
+	gratitudeCountFlag  = "count"
+	gratitudeFirstFlag  = "first"
+	gratitudeLastFlag   = "last"
+	gratitudeApplyFlag  = "apply"
+	gratitudePersonFlag = "person"
 )
 
 // gratitudeTier3UnavailableNote is the one-line stderr note an add prints when
@@ -54,8 +55,8 @@ var errGratitudeAskCanceled = errors.New("gratitude add canceled; nothing was sa
 //nolint:gochecknoglobals // one injected terminal seam so the ambiguous-band question is testable without a TTY
 var gratitudeStdinIsTerminal = stdinIsInteractive
 
-// newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§7): the accumulating
-// nightly-gratitude tally. It is a thin dispatch group over five subcommands —
+// newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§8): the accumulating
+// nightly-gratitude tally. It is a thin dispatch group over six subcommands —
 // deterministic and agent-free (architecture P9) apart from the optional tier-3
 // by-meaning judge `add` and a `reconcile` dry run consult, which degrades to
 // the model-free tiers — modeled on `lucid reframe` and `lucid person`:
@@ -64,10 +65,12 @@ var gratitudeStdinIsTerminal = stdinIsInteractive
 //	lucid gratitude add "my house" --into gratitude_a-river
 //	lucid gratitude add "the walk home" --new
 //	lucid gratitude add "a walk outside" --day @yesterday
+//	lucid gratitude add "coffee with Sam on the porch" --person person_a-river
 //	lucid gratitude list --json
 //	lucid gratitude merge gratitude_b-stone gratitude_a-river
 //	lucid gratitude import "clean drinking water" --count 22 --first 2025-11-02 --last 2026-08-20
 //	lucid gratitude reconcile --apply
+//	lucid gratitude thank gratitude_a-river --person person_a-river
 //
 // add tallies one occurrence (creating the entry, bumping the entry the match
 // tiers land it on, or bumping a specific entry with --into) and prints the
@@ -76,8 +79,9 @@ var gratitudeStdinIsTerminal = stdinIsInteractive
 // the tally sorted by count then recency with a stable id per entry; merge folds
 // an accidental duplicate; import seeds a pre-counted row (the one-time migration
 // path); reconcile proposes folds for duplicates already in the tally and, with
-// --apply, folds the clear ones through merge. Every mutation returns its own
-// receipt id, distinct from the stable id.
+// --apply, folds the clear ones through merge; thank links a person and notes,
+// privately and tally-neutrally, that you told them. Every mutation returns its
+// own receipt id, distinct from the stable id.
 func newGratitudeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gratitude",
@@ -89,27 +93,31 @@ func newGratitudeCmd() *cobra.Command {
 		newGratitudeMergeCmd(),
 		newGratitudeImportCmd(),
 		newGratitudeReconcileCmd(),
+		newGratitudeThankCmd(),
 	)
 	return cmd
 }
 
 // newGratitudeAddCmd wires `lucid gratitude add <thing> [--into <id> | --new]
-// [--day <date>]` and the seed alias `add <thing> --count N --first <date> --last
-// <date>`. The thing is joined from the trailing args (the obs/injury precedent)
-// and stored verbatim. Without flags the match tiers decide (gratitude.md §7): the
-// canonical key, a clear token match, or a clear by-meaning match (the optional
-// tier-3 judge, built through the buildProvider seam) bumps an existing entry,
-// and nothing close starts a new one. An ambiguous match never guesses
+// [--person <subject>] [--day <date>]` and the seed alias `add <thing> --count N
+// --first <date> --last <date>`. The thing is joined from the trailing args (the
+// obs/injury precedent) and stored verbatim. Without flags the match tiers
+// decide (gratitude.md §7): the canonical key, a clear token match, or a clear
+// by-meaning match (the optional tier-3 judge, built through the buildProvider
+// seam) bumps an existing entry, and nothing close starts a new one. An ambiguous match never guesses
 // ([resolveGratitudeSuggestion]): on a terminal it asks "did you mean …?" and
 // writes only on the answer; under --json, or off a terminal, it writes nothing
 // and exits 1 with the suggestion — the --json payload, or a sentence on stderr —
 // for the caller to resolve with --into or --new. When the judge was needed but
 // unreachable the add still completes on tiers 1–2 and says so on stderr
 // (gratitude.md §7.6); `--into <id>` bumps that specific stable entry regardless
-// of wording; `--new` starts a new entry (tier 1 still applies); `--count` routes to the one-time seed/import path (an
-// explicit Count/First/Last, gratitude.md §5). `--day` is the strict backdating
-// tier — a bad token or a future day is a clean refusal that writes nothing,
-// printed to stderr. `--json` emits the receipt and the resulting tally.
+// of wording; `--new` starts a new entry (tier 1 still applies); `--person` links
+// a person onto the entry the add lands on (link-only, validated before any
+// write, gratitude.md §8); `--count` routes to the one-time seed/import path (an
+// explicit Count/First/Last, gratitude.md §5) and takes none of those. `--day`
+// is the strict backdating tier — a bad token or a future day is a clean refusal
+// that writes nothing, printed to stderr. `--json` emits the receipt and the
+// resulting tally.
 func newGratitudeAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <thing>",
@@ -128,17 +136,13 @@ func newGratitudeAddCmd() *cobra.Command {
 			}
 			into, _ := cmd.Flags().GetString(gratitudeIntoFlag)
 			forceNew, _ := cmd.Flags().GetBool(gratitudeNewFlag)
-
+			person, _ := cmd.Flags().GetString(gratitudePersonFlag)
+			if err = checkGratitudeAddFlags(cmd, into, forceNew, person); err != nil {
+				return emitErr(cmd, err)
+			}
 			// `add --count …` is the documented alias for the one-time seed/import
-			// path; it carries explicit Count/First/Last, so it never mixes with a
-			// targeted bump or a matching answer.
+			// path (its flag conflicts were refused above).
 			if cmd.Flags().Changed(gratitudeCountFlag) {
-				if strings.TrimSpace(into) != "" {
-					return emitErr(cmd, fmt.Errorf("gratitude add: --into and --count cannot be combined; nothing was saved"))
-				}
-				if forceNew {
-					return emitErr(cmd, fmt.Errorf("gratitude add: --new and --count cannot be combined; nothing was saved"))
-				}
 				return runGratitudeImport(cmd, r, thing)
 			}
 
@@ -148,6 +152,7 @@ func newGratitudeAddCmd() *cobra.Command {
 				DayArg:   day,
 				Into:     into,
 				ForceNew: forceNew,
+				Person:   person,
 				Provider: gratitudeJudge(r.Config()),
 				Now:      clockNow(),
 			}
@@ -175,9 +180,35 @@ func newGratitudeAddCmd() *cobra.Command {
 	registerDayFlag(cmd)
 	cmd.Flags().String(gratitudeIntoFlag, "", "Bump a specific entry by its stable id, regardless of wording")
 	cmd.Flags().Bool(gratitudeNewFlag, false, "Start a new entry instead of matching an existing one by wording")
+	cmd.Flags().String(gratitudePersonFlag, "", "Link a person (name or person_key) to the entry this lands on")
 	registerGratitudeSeedFlags(cmd)
 	registerBodyFileFlag(cmd, "thing you're grateful for")
 	return cmd
+}
+
+// checkGratitudeAddFlags refuses the flag combinations `add` cannot honor,
+// before anything is read or written: an empty --person, and --into, --new, or
+// --person alongside the --count seed — `add --count …` is the alias for the
+// one-time seed/import path, carrying explicit Count/First/Last, so it never
+// mixes with a targeted bump, a matching answer, or a person link (gratitude.md
+// §3, §5).
+func checkGratitudeAddFlags(cmd *cobra.Command, into string, forceNew bool, person string) error {
+	if cmd.Flags().Changed(gratitudePersonFlag) && strings.TrimSpace(person) == "" {
+		return errors.New("gratitude add: --person needs a person name or key; nothing was saved")
+	}
+	if !cmd.Flags().Changed(gratitudeCountFlag) {
+		return nil
+	}
+	switch {
+	case strings.TrimSpace(into) != "":
+		return errors.New("gratitude add: --into and --count cannot be combined; nothing was saved")
+	case forceNew:
+		return errors.New("gratitude add: --new and --count cannot be combined; nothing was saved")
+	case strings.TrimSpace(person) != "":
+		return errors.New("gratitude add: --person and --count cannot be combined; nothing was saved")
+	default:
+		return nil
+	}
 }
 
 // gratitudeJudge builds the optional tier-3 by-meaning judge for a plain `add`
@@ -439,6 +470,59 @@ restoring that backup is how a wrong one is undone.`,
 	return cmd
 }
 
+// newGratitudeThankCmd wires `lucid gratitude thank <id> --person <subject>
+// [--day <date>]` (gratitude.md §8): note that you told a person you were
+// grateful. It links the person onto the entry (if not already linked) and
+// appends one tally-neutral `expressed` event with its own receipt — Count,
+// First, and Last never move. The id must name a live entry, and the subject is
+// resolved like every person write verb's — both validated before anything is
+// written, so an unknown id or an unknown or ambiguous person is a clean error
+// on stderr that saves nothing. `--day` is the strict backdating tier for "I told
+// them yesterday". Lucid sends nothing: the person did the telling. `--json`
+// emits the receipt, the entry, the unchanged count, the person, and the date.
+func newGratitudeThankCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "thank <id>",
+		Short: "Note that you told someone you're grateful (never moves the tally)",
+		Long: `thank keeps a private note that you told a person about a gratitude — Lucid
+never sends anything; you do the telling, however you choose. It links the person
+onto the entry (if not already linked) and records the day you told them, with its
+own receipt. It never moves the tally: the count, first, and last stay as they
+are. <id> is a stable gratitude id (shown by list); --person is a name or a
+person_key, resolved like the person write verbs resolve a subject. A person
+marked off-limits can be thanked — it is your own record — but is never named in
+list's gentle reminders.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  lucid gratitude thank gratitude_a-river --person person_a-river
+  lucid gratitude thank gratitude_a-river --person "Sam Rivera" --day @yesterday --json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			person, _ := cmd.Flags().GetString(gratitudePersonFlag)
+			day, _ := cmd.Flags().GetString(flagDay)
+			res, err := r.ThankGratitude(router.ThankGratitudeRequest{
+				ID:     args[0],
+				Person: person,
+				DayArg: day,
+				Now:    clockNow(),
+			})
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				return writeJSON(cmd.OutOrStdout(), gratitudeThankViewOf(res))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+	registerDayFlag(cmd)
+	cmd.Flags().String(gratitudePersonFlag, "", "Whom you told — a person name or person_key (required)")
+	return cmd
+}
+
 // newGratitudeImportCmd wires `lucid gratitude import <thing> --count N --first
 // <date> --last <date>` (gratitude.md §5): the one-time seed/migration path. It
 // writes one entry carrying a single seed event with the explicit Count/First/
@@ -503,8 +587,10 @@ func registerGratitudeSeedFlags(cmd *cobra.Command) {
 }
 
 // newGratitudeListCmd wires `lucid gratitude list [--json]`: the live tally
-// (tombstones omitted), sorted by count then recency, human-first by default
-// with the structured list under `--json` (ADR-0007). It writes nothing.
+// (tombstones omitted), sorted by count then recency, each row naming its linked
+// people and when you last told them, then at most three gentle "You might tell"
+// lines — never a count (gratitude.md §6, §8). Human-first by default with the
+// structured list under `--json` (ADR-0007). It writes nothing.
 func newGratitudeListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
@@ -528,9 +614,10 @@ func newGratitudeListCmd() *cobra.Command {
 // the receipt id of this write, the stable entry id, and the resulting tally.
 // Built CLI-side with stable snake_case names so a harness branches on fields
 // rather than parsing the ack prose. match_tier and match_score appear only when
-// the occurrence landed by an automatic match (gratitude.md §7.4), and tier3 only
-// when the by-meaning judge was needed (gratitude.md §7.6), so a tier-1,
-// `--into`, or first-entry write keeps exactly its v1 shape.
+// the occurrence landed by an automatic match (gratitude.md §7.4), tier3 only
+// when the by-meaning judge was needed (gratitude.md §7.6), and person_key only
+// when `--person` linked someone (gratitude.md §8), so a tier-1, `--into`, or
+// first-entry write keeps exactly its v1 shape.
 type gratitudeAddView struct {
 	Receipt    string  `json:"receipt"`
 	ID         string  `json:"id"`
@@ -541,7 +628,33 @@ type gratitudeAddView struct {
 	Created    bool    `json:"created"`
 	MatchTier  int     `json:"match_tier,omitempty"`
 	MatchScore float64 `json:"match_score,omitempty"`
+	PersonKey  string  `json:"person_key,omitempty"`
 	Tier3      string  `json:"tier3,omitempty"`
+}
+
+// gratitudeThankView is the --json payload of a `thank` (gratitude.md §8;
+// commands.md `### gratitude`): the expressed event's receipt, the stable entry
+// id and wording, the count — shown unchanged, since expressing gratitude never
+// moves the tally — the canonical person key, and the logical date recorded.
+type gratitudeThankView struct {
+	Receipt   string `json:"receipt"`
+	ID        string `json:"id"`
+	Thing     string `json:"thing"`
+	Count     int    `json:"count"`
+	PersonKey string `json:"person_key"`
+	Date      string `json:"date"`
+}
+
+// gratitudeThankViewOf projects a thank result into its stable --json shape.
+func gratitudeThankViewOf(res router.GratitudeThankResult) gratitudeThankView {
+	return gratitudeThankView{
+		Receipt:   res.Receipt,
+		ID:        res.Key,
+		Thing:     res.Thing,
+		Count:     res.Count,
+		PersonKey: res.PersonKey,
+		Date:      res.Date,
+	}
 }
 
 // gratitudeSuggestionView is the --json payload of an ambiguous-band add — the
@@ -592,6 +705,7 @@ func gratitudeAddViewOf(res router.GratitudeWriteResult) gratitudeAddView {
 		Created:    res.Created,
 		MatchTier:  res.MatchTier,
 		MatchScore: res.MatchScore,
+		PersonKey:  res.PersonKey,
 		Tier3:      string(res.Tier3),
 	}
 }

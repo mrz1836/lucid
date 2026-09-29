@@ -921,7 +921,8 @@ match tiers, confidence bands, and outward expression):
   on to a person (link-only: no "expressed" record, no extra tally effect). The
   subject is resolved like every person write verb's
   ([Resolving a subject](#resolving-a-subject)) and validated **before**
-  anything is written — no match or several matches writes nothing.
+  anything is written — no match or several matches writes nothing. It cannot
+  be combined with the `--count` seed.
 - **`list`** folds each live entry's Count/First/Last and prints the tally
   **sorted by count then recency**, each row showing its **stable id** for
   `--into` / `merge` / `thank` targeting, plus any linked people and when you

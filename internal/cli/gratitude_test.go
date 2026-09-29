@@ -8,9 +8,11 @@ import (
 	"io"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -895,4 +897,293 @@ func TestGratitudeReconcileCLIJudge(t *testing.T) {
 	assert.Zero(t, unused.Calls(), "an apply never calls the judge")
 	assert.Empty(t, builtOnApply.Backend, "an apply never even builds it")
 	assert.Len(t, gratitudeListEntries(t), 2, "no tier-3 pair is folded")
+}
+
+// gratitudeCLIOK runs one `lucid` invocation that must succeed and returns its
+// stdout.
+func gratitudeCLIOK(t *testing.T, args ...string) string {
+	t.Helper()
+	out, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+	require.NoErrorf(t, err, "lucid %s: %s", strings.Join(args, " "), errOut)
+	return out
+}
+
+// gratitudeAddID tallies one thing (with any extra flags) under --json and
+// returns the stable id it landed on.
+func gratitudeAddID(t *testing.T, thing string, flags ...string) string {
+	t.Helper()
+	out := gratitudeCLIOK(t, append([]string{"gratitude", "add", thing, "--json"}, flags...)...)
+	var view struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	return view.ID
+}
+
+// gratitudeListJSON is the documented `list --json` shape with the outward-
+// expression fields (gratitude.md §6, §8).
+type gratitudeListJSON struct {
+	Count   int `json:"count"`
+	Entries []struct {
+		ID     string `json:"id"`
+		Thing  string `json:"thing"`
+		People []struct {
+			PersonKey     string `json:"person_key"`
+			DisplayName   string `json:"display_name"`
+			OffLimits     bool   `json:"off_limits"`
+			LastExpressed string `json:"last_expressed"`
+		} `json:"people"`
+	} `json:"entries"`
+	Reminders []map[string]any `json:"reminders"`
+}
+
+// TestGratitudeThankCLI: `thank <id> --person <subject>` prints a receipt-bearing
+// ack, emits exactly {receipt, id, thing, count, person_key, date} under --json
+// with the count unchanged (gratitude.md §8), and refuses — on stderr, with a
+// non-zero exit and nothing saved — a missing --person, an unknown person, and an
+// unknown id.
+func TestGratitudeThankCLI(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, time.Date(2026, time.July, 10, 21, 45, 0, 0, time.UTC))
+	writePersonRecord(t, home, "person_a-river", "Sam Rivera", []string{"Sam Rivera", "Sam"}, nil, personSeed())
+	id := gratitudeAddID(t, "coffee with Sam on the porch")
+	gratitudeAddID(t, "coffee with Sam on the porch")
+
+	out := gratitudeCLIOK(t, "gratitude", "thank", id, "--person", "Sam")
+	assert.Contains(t, out, "Noted that you told Sam Rivera about \"coffee with Sam on the porch\" (2026-07-10) as `grat_2026_07_10_003`")
+	assert.Contains(t, out, "the tally stays ×2")
+
+	out = gratitudeCLIOK(t, "gratitude", "thank", id, "--person", "person_a-river", "--day", "@yesterday", "--json")
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	var view struct {
+		Receipt   string `json:"receipt"`
+		ID        string `json:"id"`
+		Thing     string `json:"thing"`
+		Count     int    `json:"count"`
+		PersonKey string `json:"person_key"`
+		Date      string `json:"date"`
+	}
+	require.NoError(t, dec.Decode(&view), "exactly the documented keys")
+	assert.Equal(t, "grat_2026_07_09_004", view.Receipt)
+	assert.Equal(t, id, view.ID)
+	assert.Equal(t, "coffee with Sam on the porch", view.Thing)
+	assert.Equal(t, 2, view.Count, "expressing gratitude never moves the tally")
+	assert.Equal(t, "person_a-river", view.PersonKey)
+	assert.Equal(t, "2026-07-09", view.Date)
+
+	before := gratitudeFileSnapshot(t, home)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"gratitude", "thank", id}, "needs --person"},
+		{[]string{"gratitude", "thank", id, "--person", "Robin Nobody"}, "no one matches"},
+		{[]string{"gratitude", "thank", "gratitude_z-nowhere", "--person", "Sam"}, "no live gratitude entry"},
+	} {
+		stdout, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, tc.args...)
+		require.Errorf(t, err, "lucid %s", strings.Join(tc.args, " "))
+		assert.Empty(t, stdout)
+		assert.Contains(t, errOut, tc.want, "the reason reaches stderr")
+		assert.Contains(t, errOut, "nothing was saved")
+	}
+	assert.Equal(t, before, gratitudeFileSnapshot(t, home), "a refused thank writes nothing")
+}
+
+// gratitudeFileSnapshot reads every gratitude record byte for byte.
+func gratitudeFileSnapshot(t *testing.T, home string) map[string]string {
+	t.Helper()
+	dir := home + "/registries/gratitude"
+	des, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	files := make(map[string]string, len(des))
+	for _, de := range des {
+		b, rerr := os.ReadFile(dir + "/" + de.Name())
+		require.NoError(t, rerr)
+		files[de.Name()] = string(b)
+	}
+	return files
+}
+
+// TestGratitudeAddPersonCLI: `add --person <subject>` links the person onto the
+// entry and reports person_key under --json (gratitude.md §3, §8); an empty
+// --person, an unknown person, and --person with the --count seed are clean
+// refusals that save nothing.
+func TestGratitudeAddPersonCLI(t *testing.T) {
+	home := isolatedHome(t)
+	writePersonRecord(t, home, "person_a-river", "Sam Rivera", []string{"Sam Rivera"}, nil, personSeed())
+
+	out := gratitudeCLIOK(t, "gratitude", "add", "coffee with Sam on the porch", "--person", "Sam Rivera", "--json")
+	var view map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.Equal(t, "person_a-river", view["person_key"])
+	assert.Equal(t, true, view["created"])
+
+	out = gratitudeCLIOK(t, "gratitude", "add", "coffee with Sam on the porch")
+	assert.NotContains(t, out, "Linked to", "an add without --person keeps its ack")
+	out = gratitudeCLIOK(t, "gratitude", "add", "coffee with Sam on the porch", "--person", "person_a-river")
+	assert.Contains(t, out, "Linked to Sam Rivera.")
+
+	var list gratitudeListJSON
+	require.NoError(t, json.Unmarshal([]byte(gratitudeCLIOK(t, "gratitude", "list", "--json")), &list))
+	require.Len(t, list.Entries, 1)
+	require.Len(t, list.Entries[0].People, 1, "linked once")
+	assert.Equal(t, "person_a-river", list.Entries[0].People[0].PersonKey)
+	assert.Empty(t, list.Entries[0].People[0].LastExpressed, "linking is not expressing")
+
+	before := gratitudeFileSnapshot(t, home)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"gratitude", "add", "a new thing", "--person", " "}, "--person needs a person name or key"},
+		{[]string{"gratitude", "add", "a new thing", "--person", "Robin Nobody"}, "no one matches"},
+		{[]string{"gratitude", "add", "a new thing", "--person", "Sam Rivera", "--count", "3", "--first", "2026-01-01", "--last", "2026-02-01"}, "--person and --count cannot be combined"},
+	} {
+		_, errOut, err := runRoot(t, BuildInfo{Version: "dev"}, tc.args...)
+		require.Errorf(t, err, "lucid %s", strings.Join(tc.args, " "))
+		assert.Contains(t, errOut, tc.want)
+		assert.Contains(t, errOut, "nothing was saved")
+	}
+	assert.Equal(t, before, gratitudeFileSnapshot(t, home), "a refused add writes nothing")
+}
+
+// TestGratitudeListPeopleJSON: `list --json` always carries a people array on
+// every entry and a top-level reminders array — [] when unlinked or empty,
+// never null (gratitude.md §6, §8).
+func TestGratitudeListPeopleJSON(t *testing.T) {
+	isolatedHome(t)
+	out := gratitudeCLIOK(t, "gratitude", "list", "--json")
+	assert.Contains(t, out, `"reminders": []`, "an empty tally still carries the array")
+
+	addGratitudeCLI(t, "clean drinking water")
+	out = gratitudeCLIOK(t, "gratitude", "list", "--json")
+	assert.Contains(t, out, `"people": []`)
+	assert.Contains(t, out, `"reminders": []`)
+	assert.NotContains(t, out, "null")
+}
+
+// seedGratitudeReminders links five entries, each to its own person and tallied
+// on its own day (most recent last), and returns the people by key → name.
+func seedGratitudeReminders(t *testing.T, home string) map[string]string {
+	t.Helper()
+	people := []struct{ key, name, thing string }{
+		{"person_a-river", "Sam Rivera", "coffee with Sam on the porch"},
+		{"person_b-stone", "Alex Stone", "the long call with Alex"},
+		{"person_c-field", "Robin Field", "a letter from Robin"},
+		{"person_e-lark", "Jo Lark", "a ride home from Jo"},
+		{"person_g-reed", "Kit Reed", "Kit fixing the bike"},
+	}
+	names := make(map[string]string, len(people))
+	for i, p := range people {
+		writePersonRecord(t, home, p.key, p.name, []string{p.name}, nil, personSeed())
+		gratitudeAddID(t, p.thing, "--person", p.key, "--day", fmt.Sprintf("@2026-07-0%d", i+1))
+		names[p.key] = p.name
+	}
+	return names
+}
+
+// gratitudeReminderSection returns the human `list` output from the reminder
+// header on — "" when no reminder is offered.
+func gratitudeReminderSection(out string) string {
+	i := strings.Index(out, "You might tell:")
+	if i < 0 {
+		return ""
+	}
+	return out[i:]
+}
+
+// TestGratitudeReminderNoScore: the reminder is gentle and optional
+// (gratitude.md §0, §8) — at most three plain lines, the same wording however
+// long a person has gone untold, and no completion percentage, streak, quota,
+// "unthanked" backlog, overdue language, or count of how many others there are,
+// in the human view or under --json (whose reminder objects carry exactly the
+// four documented keys and nothing numeric).
+func TestGratitudeReminderNoScore(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, time.Date(2026, time.July, 10, 21, 45, 0, 0, time.UTC))
+	seedGratitudeReminders(t, home)
+	// Told Jo long ago; Jo's entry has been tallied since — offered again, in the
+	// same words as a person never told.
+	gratitudeCLIOK(t, "gratitude", "thank", gratitudeAddID(t, "a ride home from Jo"), "--person", "person_e-lark", "--day", "@2026-06-01")
+	gratitudeAddID(t, "a ride home from Jo")
+
+	out := gratitudeCLIOK(t, "gratitude", "list")
+	section := gratitudeReminderSection(out)
+	require.NotEmpty(t, section, "list offers reminders")
+	lines := strings.Split(strings.TrimRight(section, "\n"), "\n")
+	require.Len(t, lines, 4, "a header and at most three lines — five linked people, three offered")
+	for _, line := range lines[1:] {
+		assert.Regexp(t, `^  [A-Z][a-z]+ [A-Z][a-z]+ — "[^"]+" \(gratitude_[a-z0-9-]+\)$`, line,
+			"one fixed, quiet shape: no dates, counts, or escalation")
+	}
+	assert.Contains(t, lines[1], "Jo Lark", "the entry tallied most recently comes first")
+
+	lower := strings.ToLower(out)
+	for _, banned := range []string{
+		"%", "percent", "streak", "quota", "unthanked", "backlog", "overdue", "complete",
+		"remaining", "more", "others", "left to", "score", "goal", "haven't", "days since", "still",
+	} {
+		assert.NotContainsf(t, lower, banned, "the list never renders %q", banned)
+	}
+	for _, line := range lines[1:] {
+		wording := regexp.MustCompile(` \(gratitude_[^)]*\)$`).ReplaceAllString(line, "")
+		assert.NotRegexp(t, `\d`, wording, "a reminder line carries no number beyond the entry id")
+	}
+
+	var list struct {
+		Count     int                 `json:"count"`
+		Entries   []json.RawMessage   `json:"entries"`
+		Reminders []map[string]string `json:"reminders"`
+	}
+	raw := gratitudeCLIOK(t, "gratitude", "list", "--json")
+	var top map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(raw), &top))
+	assert.ElementsMatch(t, []string{"count", "entries", "reminders"}, slices.Collect(maps.Keys(top)),
+		"no top-level total, backlog, or progress field")
+	require.NoError(t, json.Unmarshal([]byte(raw), &list), "every reminder field is a string — nothing numeric")
+	require.Len(t, list.Reminders, 3)
+	for _, rm := range list.Reminders {
+		assert.ElementsMatch(t, []string{"person_key", "display_name", "entry_id", "thing"}, slices.Collect(maps.Keys(rm)))
+	}
+}
+
+// TestGratitudeReminderExcludesOffLimits: a person marked off-limits may be
+// linked and thanked — the link still shows on the entry, flagged off_limits —
+// but a reminder never names them, in the human view or under --json, even when
+// they are the most recently tallied (gratitude.md §8).
+func TestGratitudeReminderExcludesOffLimits(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, time.Date(2026, time.July, 10, 21, 45, 0, 0, time.UTC))
+	writePersonRecord(t, home, "person_a-river", "Sam Rivera", []string{"Sam Rivera"}, nil, personSeed())
+	writePersonRecord(t, home, "person_d-vale", "Dana Vale", []string{"Dana Vale"}, nil, personSeed())
+	writeOffLimits(t, home, "person_d-vale")
+
+	sam := gratitudeAddID(t, "coffee with Sam on the porch", "--person", "person_a-river", "--day", "@2026-07-01")
+	dana := gratitudeAddID(t, "the walks with Dana", "--person", "Dana Vale", "--day", "@2026-07-02")
+	shared := gratitudeAddID(t, "the dinner the three of us cooked", "--person", "person_d-vale", "--day", "@2026-07-03")
+	gratitudeCLIOK(t, "gratitude", "add", "the dinner the three of us cooked", "--into", shared, "--person", "person_a-river", "--day", "@2026-07-03")
+	out := gratitudeCLIOK(t, "gratitude", "thank", dana, "--person", "Dana Vale", "--day", "@2026-07-01")
+	assert.Contains(t, out, "Noted that you told Dana Vale", "thanking an off-limits person is allowed")
+
+	human := gratitudeCLIOK(t, "gratitude", "list")
+	section := gratitudeReminderSection(human)
+	require.NotEmpty(t, section)
+	assert.NotContains(t, section, "Dana", "an off-limits person is never named in a reminder")
+	assert.Contains(t, section, "Sam Rivera")
+	assert.Contains(t, human, "· with Dana Vale (told 2026-07-01) (off-limits)", "the link itself still shows, flagged")
+
+	var list gratitudeListJSON
+	require.NoError(t, json.Unmarshal([]byte(gratitudeCLIOK(t, "gratitude", "list", "--json")), &list))
+	require.Len(t, list.Reminders, 2, "Sam, for both entries he is linked to — never Dana")
+	for _, rm := range list.Reminders {
+		assert.Equal(t, "person_a-river", rm["person_key"])
+	}
+	assert.Equal(t, []any{shared, sam}, []any{list.Reminders[0]["entry_id"], list.Reminders[1]["entry_id"]},
+		"most recently tallied first")
+	for _, e := range list.Entries {
+		for _, p := range e.People {
+			assert.Equal(t, p.PersonKey == "person_d-vale", p.OffLimits, "the off-limits flag rides on the link")
+		}
+	}
 }
