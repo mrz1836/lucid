@@ -36,7 +36,7 @@ this reference stays the precise baseline.
   | Code | Meaning |
   |------|---------|
   | `0` | success |
-  | `1` | runtime error, or a breached gate (`validate` found errors, `mode` was rejected) |
+  | `1` | runtime error, a breached gate (`validate` found errors, `mode` was rejected), or a deferred choice (`gratitude add` in the ambiguous band wrote nothing and returned a suggestion) |
   | `2` | usage / flag-parse error (unknown command, bad flag) |
 
 - **Ledger location** is `~/.lucid/`, overridable with the `LUCID_HOME`
@@ -51,8 +51,8 @@ works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
 the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
 flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 [`reframe add`](#reframe), [`focus add`](#focus), [`gratitude add`](#gratitude),
-[`workout log`](#workout), [`mode`](#mode), [`storm`](#storm), and
-[`closeout`](#closeout).
+[`gratitude thank`](#gratitude), [`workout log`](#workout), [`mode`](#mode),
+[`storm`](#storm), and [`closeout`](#closeout).
 
 **The grammar.** A leading `@` is optional on every form.
 
@@ -136,8 +136,8 @@ registry now carries the future ceiling, so it is not on this list:
 
 **The closed write surface.** Every verb that stamps a logical day is named
 above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `gratitude add`,
-`memory`, `workout log`, `era`, `injury`, `anchor`, `mode`, `storm`,
-`closeout`. Three write verbs are deliberately N/A —
+`gratitude thank`, `memory`, `workout log`, `era`, `injury`, `anchor`, `mode`,
+`storm`, `closeout`. Three write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
 id or window, rather than capturing a new one, and [`self`](#self) records
@@ -852,71 +852,171 @@ lucid retro defer R-014 "Someday — revisit after the quarter closes"
 ### gratitude
 
 ```
-lucid gratitude add <thing> [--into <id>] [--day <date>]
-lucid gratitude add <thing> --count <N> --first <date> --last <date>
+lucid gratitude add <thing> [--into <id> | --new] [--person <subject>] [--day <date>] [--body-file <path>] [--json]
+lucid gratitude add <thing> --count <N> --first <date> --last <date> [--json]
 lucid gratitude list [--json]
-lucid gratitude merge <src> <dst>
-lucid gratitude import <thing> --count <N> --first <date> --last <date>
+lucid gratitude merge <src> <dst> [--json]
+lucid gratitude import <thing> --count <N> --first <date> --last <date> [--json]
+lucid gratitude reconcile [--apply] [--json]
+lucid gratitude thank <id> --person <subject> [--day <date>] [--json]
 ```
 
 Keep a running **gratitude tally** — the count of things you return to
-gratitude for ("grateful for my morning coffee ×15"). Deterministic, no LLM, an
-append-only **registry** kind under `~/.lucid/registries/gratitude/`, reusing
-the same salted-key identity and append-and-redirect merge as `injury`/`pet`/
-`person`. The verbatim nightly gratitude itself is a separate, unchanged
-`lucid log` (`#gratitude`) — this verb only tallies. Full layer spec (schema,
-the typed occurrence/seed/merge history, the derived Count/First/Last, and the
-canonical-key seam): [`../gratitude.md`](../gratitude.md).
+gratitude for ("grateful for my morning coffee ×15") — as an append-only
+**registry** kind under `~/.lucid/registries/gratitude/`, reusing the same
+salted-key identity and append-and-redirect merge as `injury`/`pet`/`person`.
+The verbatim nightly gratitude itself is a separate, unchanged `lucid log`
+(`#gratitude`) — this verb only tallies. Every path is deterministic and
+model-free **except** the optional tier-3 by-meaning match on `add` (and its
+advisory use in `reconcile`), which reaches a model only through the provider
+seam, is local-first by default, and degrades to the deterministic tiers when no
+model is available. Full layer spec (schema, the typed
+occurrence/seed/merge/expressed history, the derived Count/First/Last, the three
+match tiers, confidence bands, and outward expression):
+[`../gratitude.md`](../gratitude.md).
 
-- **`add <thing>`** derives the salted **canonical key** from the normalized
-  phrase and either **bumps** the live entry that holds it (appends an
-  `occurrence`, +1, last-date refreshed) or **creates** a new entry — then
-  prints the write's receipt id (`grat_<logical_date>_<seq>`). v1 auto-match is
-  canonical-key only: two phrasings that normalize equal land on the same entry;
-  differing wordings land on different entries (matching "my house" to a stored
-  "a roof over my head" is **R-011**, not this — see `../gratitude.md` §7).
-  Unlike the write verbs fixed alongside this, `gratitude add` **already emits JSON**
-  under `--json` — its own `receipt` / `id` / `count` keys, unchanged.
+- **`add <thing>`** tallies one occurrence and prints the write's receipt id
+  (`grat_<logical_date>_<seq>`). Which entry it lands on is decided by up to
+  three **match tiers**, cheapest first ([`../gratitude.md`](../gratitude.md)
+  §7): **tier 1** — the canonical key from the normalized phrase (two phrasings
+  that normalize equal are the same entry; v1 behavior, output unchanged);
+  **tier 2** — a deterministic normalized-token match (case, punctuation,
+  stopwords, light stemming) against every live entry's `display_name` and
+  `aka[]`; **tier 3** — only when tiers 1–2 are not confident, the optional
+  by-meaning judge (matching "my bike" to a stored "the two wheels that carry me
+  to work", which share no words). The result falls in one of three
+  **confidence bands**:
+  - **High** — the best candidate clears the tier's high cutoff **and** beats
+    the runner-up by the configured margin: the entry is **bumped
+    automatically**, the new wording joins its `aka[]`, the occurrence records
+    `match_tier` / `match_score`, and the ack says it matched by meaning.
+  - **Low** — nothing close: a **new entry** is created.
+  - **Ambiguous** — a near-tie, or a plausible-but-unconfident match: never
+    silently merged, never silently created. On a terminal, `add` asks *"Did you
+    mean to bump `<id>`: `<thing>`?"* (bump it / start a new entry / pick another
+    candidate / cancel). **Non-interactive or `--json`, it refuses and defers:**
+    writes nothing, **exits `1`**, and returns the suggestion (candidate ids,
+    wordings, scores, band) — resolve it by re-running with `--into <id>` or
+    `--new`. Interactive means stdin is a terminal and `--json` is unset, so
+    `--body-file -` is always non-interactive.
+
+  With tier 3 disabled or its model unreachable, timing out, or answering
+  garbage, `add` completes on tiers 1–2 alone — exit `0` when it writes — and
+  says so (a stderr note; `"tier3": "unavailable"` under `--json`). `gratitude
+  add` **already emits JSON** under `--json` — its own `receipt` / `id` /
+  `thing` / `count` / `first` / `last` / `created` keys, unchanged; the matching
+  work adds only optional keys (below).
 - **`add <thing> --into <id>`** bumps a **specific** entry by its stable id
   (`gratitude_<slug>`, shown by `list`) regardless of tonight's wording — the
-  interim by-meaning path the agent drives until R-011. The new wording is
-  recorded into the entry's `aka[]`; the canonical key is unchanged. An `<id>`
-  that resolves to no live entry is a clean error and appends nothing.
+  manual override, and how a non-interactive caller accepts a suggestion. No
+  matching runs. The new wording is recorded into the entry's `aka[]`; the
+  canonical key is unchanged. An `<id>` that resolves to no live entry is a
+  clean error and appends nothing.
+- **`add <thing> --new`** starts a new entry — how a caller answers "no, this
+  is something else" to a suggestion. Tiers 2–3 are skipped; tier 1 still
+  applies (a phrase that normalizes equal to a live entry's canonical key *is*
+  that entry). `--new` cannot be combined with `--into` or `--count`.
+- **`add <thing> --person <subject>`** also links the entry the occurrence lands
+  on to a person (link-only: no "expressed" record, no extra tally effect). The
+  subject is resolved like every person write verb's
+  ([Resolving a subject](#resolving-a-subject)) and validated **before**
+  anything is written — no match or several matches writes nothing.
 - **`list`** folds each live entry's Count/First/Last and prints the tally
   **sorted by count then recency**, each row showing its **stable id** for
-  `--into` / `merge` targeting; `--json` emits the structured tally.
-- **`merge <src> <dst>`** folds `<src>`'s whole count and first/last span into
-  `<dst>` (a `merge` event on `<dst>`, `aka[]` absorbed) and rewrites `<src>` as
-  a **redirect tombstone** (`redirect_to: <dst>`) — omitted from the active
-  `list` but auditably kept, never deleted. Single-hop, no cycles (the
-  `person merge` invariant). This repairs an accidental duplicate without
-  hand-editing storage.
+  `--into` / `merge` / `thank` targeting, plus any linked people and when you
+  last told them. Below the tally it may offer up to three gentle *"You might
+  tell …"* lines — a linked person you have not told since the entry last came
+  up. Never a count, percentage, streak, quota, backlog, or escalation, and
+  never an off-limits person. `--json` emits the structured tally (below).
+- **`merge <src> <dst>`** folds `<src>`'s whole count, first/last span, and
+  last-expressed dates into `<dst>` (a `merge` event on `<dst>`, `aka[]` and
+  linked people absorbed) and rewrites `<src>` as a **redirect tombstone**
+  (`redirect_to: <dst>`) — omitted from the active `list` and from matching,
+  but auditably kept, never deleted. Single-hop, no cycles (the `person merge`
+  invariant). This repairs an accidental duplicate without hand-editing
+  storage.
 - **`import <thing> --count N --first <date> --last <date>`** (and the
   equivalent `add --count …`) is the **one-time migration** path: it writes one
   entry carrying a single `seed` event with the explicit Count/First/Last and
   **fabricates no per-occurrence dates** — distinct from the nightly `add`,
-  which records one dated occurrence. **`import` is not idempotent** (re-running
-  double-counts): a migration is a single pass, and a retry restores the
-  pre-migration `lucid backup` first.
+  which records one dated occurrence. It resolves by canonical key only (no
+  tier 2 or 3). **`import` is not idempotent** (re-running double-counts): a
+  migration is a single pass, and a retry restores the pre-migration
+  `lucid backup` first.
+- **`reconcile`** scans the live tally for likely duplicates and **proposes**
+  folds — **dry-run by default**, writing nothing. Tier-2 pairs in the High band
+  are marked to apply; Ambiguous tier-2 pairs and every tier-3 (by-meaning) pair
+  are advisory, shown with the exact `lucid gratitude merge` command. Each entry
+  appears in at most one proposal per run; the lower-count entry folds into the
+  higher. **`--apply`** is the explicit confirmation: it folds exactly the
+  tier-2 High proposals through the ordinary `merge` path, one receipt per fold,
+  and never applies an advisory pair. Take a `lucid backup` first — restoring it
+  is how a wrong fold is undone.
+- **`thank <id> --person <subject>`** records that you told a person you were
+  grateful: it links the person onto the entry (if not already linked) and
+  appends an **`expressed`** event with its own receipt. It is
+  **tally-neutral** — Count/First/Last do not move. The subject is resolved and
+  validated before anything is written, like `add --person`; linking an
+  off-limits person is allowed (it is your private record) but reminders never
+  name them. Lucid sends nothing — you do the telling.
 
-Every mutation (`add`, `add --into`, `merge`, `import`) appends one event and
-returns **that event's** receipt id — distinct from the stable entry id, so two
-writes to the same entry return two different receipts.
+Every mutation (`add` however it matched, `add --into`, `add --new`, `merge`,
+`import`, each `reconcile --apply` fold, `thank`) appends one event and returns
+**that event's** receipt id — distinct from the stable entry id, so two writes
+to the same entry return two different receipts. A wrong automatic bump is
+corrected with `--into` the right entry; the mis-landed occurrence stays in the
+wrong entry's history, visibly attributed by its `match_tier`
+([`../gratitude.md`](../gratitude.md) §7.8).
 
-`gratitude add` carries the `--day` flag ([Backdating with --day](#backdating-with---day)),
-the **strict** tier: `--day @yesterday` and `--day @YYYY-MM-DD` set the
-occurrence's logical date (and so the entry's derived last-date); an unreadable
-token or a future day is a clean error and nothing is captured. The event's
-write time is always the real `at`.
+`gratitude add` and `gratitude thank` carry the `--day` flag
+([Backdating with --day](#backdating-with---day)), the **strict** tier:
+`--day @yesterday` and `--day @YYYY-MM-DD` set the event's logical date (on
+`add`, the occurrence's date and so the entry's derived last-date; on `thank`,
+when you told them); an unreadable token or a future day is a clean error and
+nothing is captured. The event's write time is always the real `at`.
+
+**`--json` shapes** (snake_case; stdout carries JSON only):
+
+- **`add`** (a write): `{receipt, id, thing, count, first, last, created}` as
+  before, plus — only when they apply — `match_tier` and `match_score` (an
+  automatic tier-2/3 bump), `person_key` (`--person`), and `tier3` (`used`,
+  `disabled`, `unavailable`, or `off_limits`; omitted when tier 3 was not
+  needed).
+- **`add`** (ambiguous band, exit `1`, nothing written): `{status:
+  "suggestion", thing, band: "ambiguous", match_tier, candidates: [{id, thing,
+  score}], resolve: ["--into <id>", "--new"], saved: false}` plus `tier3` —
+  at most three candidates, best first.
+- **`list`**: `{count, entries: [{id, thing, aka, count, first, last, people:
+  [{person_key, display_name, off_limits, last_expressed}]}], reminders:
+  [{person_key, display_name, entry_id, thing}]}` — `people` and `reminders`
+  are arrays, never null; `last_expressed` is `""` when never expressed.
+- **`reconcile`**: `{proposals: [{source, source_thing, target, target_thing,
+  score, match_tier, band, will_apply, command}], tier3, applied: [{receipt,
+  source, target}]}` — `applied` is `[]` on a dry run.
+- **`thank`**: `{receipt, id, thing, count, person_key, date}` — `count` is
+  shown unchanged, since expressing gratitude never moves the tally.
+
+The tier-3 judge is sent **only** the new phrase and the candidate entries'
+wordings — no ids, counts, dates, people, or journal text — and by default runs
+on a local model, so nothing leaves the machine; pointing
+`gratitude.match.tier3_backend` at `claude_cli` opts in to the hosted model.
+The cutoffs, margins, and tier-3 backend/model are `gratitude.match` settings in
+`lucid.json` ([`../mvp/data-model.md`](../mvp/data-model.md) §"`lucid.json`").
 
 ```sh
 lucid gratitude add "my morning coffee"
 lucid gratitude add "clean drinking water"
 lucid gratitude add "my house" --into gratitude_a-river
+lucid gratitude add "the walk home" --new
+lucid gratitude add "coffee with Sam on the porch" --person person_a-river
 lucid gratitude add "a walk outside" --day @yesterday
 lucid gratitude list --json
 lucid gratitude merge gratitude_b-stone gratitude_a-river
 lucid gratitude import "clean drinking water" --count 22 --first 2025-11-02 --last 2026-08-20
+lucid gratitude reconcile
+lucid gratitude reconcile --apply --json
+lucid gratitude thank gratitude_a-river --person person_a-river
+lucid gratitude thank gratitude_a-river --person "Sam Rivera" --day @yesterday
 ```
 
 ### day

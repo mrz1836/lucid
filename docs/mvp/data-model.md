@@ -122,8 +122,12 @@ further registry kind — `gratitude` — that reuses the same salted-key identi
 `aka[]`, and append-and-redirect tombstone (`person merge` precedent), but
 diverges from the injury/era/thread `Fields` model: instead of a
 `status_history`, a gratitude entry carries a **typed occurrence history**
-(`occurrence` / `seed` / `merge` events) from which its Count/First/Last are
-folded at read time, so it never stores a derived number.
+(`occurrence` / `seed` / `merge` / `expressed` events) from which its
+Count/First/Last are folded at read time, so it never stores a derived number.
+Schema 2 adds an optional `people[]` link list (person keys) and the
+tally-neutral `expressed` event that records having told a linked person; an
+automatically matched occurrence carries `match_tier` / `match_score`. Schema-1
+entries read unchanged ([`gratitude.md`](../gratitude.md) §2).
 
 ### Memory amendments — append-only correction of a stored story
 
@@ -198,7 +202,7 @@ the audit trail.
 | Reframe id | `reframe_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A correction appends a new entry whose `refs.corrects` names the superseded id — history is never rewritten. See [`reframes.md`](../reframes.md). | `reframe_2026_08_23_001` |
 | Focus id | `focus_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A retirement appends a new entry whose `refs.retires` names the target id, folding it to `retired` — history is never rewritten or deleted. See [`focus.md`](../focus.md). | `focus_2026_08_23_001` |
 | Gratitude entry id | `gratitude_<slug>` — the salted registry key derived from the normalized phrase (the `people/` key derivation), stable across the entry's life; shown by `list` and targeted by `--into` / `merge`. See [`gratitude.md`](../gratitude.md). | `gratitude_a-river` |
-| Gratitude receipt id | `grat_YYYY_MM_DD_<seq>` — one per appended tally event (`occurrence` / `seed` / `merge`), assigned single-writer as max-seq+1; returned by every `add` / `import` / `merge`, distinct from the stable entry id. See [`gratitude.md`](../gratitude.md). | `grat_2026_08_24_001` |
+| Gratitude receipt id | `grat_YYYY_MM_DD_<seq>` — one per appended tally event (`occurrence` / `seed` / `merge` / `expressed`), assigned single-writer as max-seq+1 over the entry's history; returned by every `add` / `import` / `merge` / `reconcile --apply` fold / `thank`, distinct from the stable entry id. See [`gratitude.md`](../gratitude.md). | `grat_2026_08_24_001` |
 | Retro item id | `R-NNN` — the parked-item id, minted **globally monotonic** as the max `R-NNN` across all `park` lines plus one (zero-padded to three digits, wider values legal; `park` auto-mints, `import` supplies explicit ids). A `resolve` / `defer` references it without advancing the counter. Shown by `list`, targeted by `show` / `resolve` / `defer`. See [`retro.md`](../retro.md). | `R-012` |
 | Retro receipt id | `retro_event_YYYY_MM_DD_<seq>` — one per appended retro event (`park` / `resolve` / `defer`), assigned single-writer per logical-day as max-seq+1; returned by every write, distinct from the stable `R-NNN` item id. See [`retro.md`](../retro.md). | `retro_event_2026_08_23_001` |
 
@@ -312,6 +316,20 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "system_prompt": "",
     "template": "",
     "model": ""
+  },
+  "gratitude": {
+    "match": {
+      "tier2_high": 0.85,
+      "tier2_margin": 0.15,
+      "ambiguous_floor": 0.5,
+      "tier3_enabled": true,
+      "tier3_backend": "ollama",
+      "tier3_model": "qwen3:8b",
+      "tier3_high": 0.9,
+      "tier3_margin": 0.2,
+      "tier3_timeout_seconds": 30,
+      "tier3_max_candidates": 200
+    }
   }
 }
 ```
@@ -415,6 +433,27 @@ The single global config file. Tiny, hand-editable, agent-readable.
   [`../observations.md`](../observations.md) §3), enable-gated and off by default;
   `~/.lucid/` gains no new top-level tree for the workout module — the program
   file it reads is the operator's, outside the Ledger.
+* `gratitude.match` tunes how a nightly `lucid gratitude add` decides which
+  tally entry a phrase lands on ([`../gratitude.md`](../gratitude.md) §7).
+  `tier2_high` / `tier2_margin` and `tier3_high` / `tier3_margin` are each
+  tier's **high cutoff** and **top-1/top-2 margin** — an automatic bump needs
+  both; `ambiguous_floor` is the score at or above which a not-confident match
+  is **suggested** rather than a new entry created. All five are scores in
+  [0, 1]; a value outside that range, or an `ambiguous_floor` above either high
+  cutoff, is clipped to its default with a load-time warning. `tier3_enabled`
+  gates the optional by-meaning judge (the only model-backed step; tiers 1–2 are
+  deterministic and always on). `tier3_backend` and `tier3_model` override
+  `provider.backend` / `provider.model` for that one call (empty inherits — the
+  companion/workout `model` rule); the default is `ollama`, **local-first**, so
+  the phrase and candidate wordings never leave the machine, and `claude_cli`
+  is the opt-in hosted alternative. An unrecognized `tier3_backend` is coerced to
+  the default with a warning — fail-safe toward local. The shipped model default
+  is a placeholder until the trust-gate evaluation
+  ([`../adr/0012-gratitude-semantic-matching.md`](../adr/0012-gratitude-semantic-matching.md)
+  §6) records the evaluated backend and model. `tier3_timeout_seconds` (≥ 1)
+  bounds the judge call so a stalled model never holds up an `add`;
+  `tier3_max_candidates` (≥ 1) caps how many entries one judge call carries. No
+  key, token, or credential lives here.
 
 Agent versions are stamped into every processed artifact and insight
 so the system can later identify "this insight was produced by a prompt
