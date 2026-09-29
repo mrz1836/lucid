@@ -322,9 +322,9 @@ The single global config file. Tiny, hand-editable, agent-readable.
       "tier2_high": 0.85,
       "tier2_margin": 0.15,
       "ambiguous_floor": 0.5,
-      "tier3_enabled": true,
-      "tier3_backend": "ollama",
-      "tier3_model": "qwen3:8b",
+      "tier3_enabled": false,
+      "tier3_backend": "claude_cli",
+      "tier3_model": "sonnet",
       "tier3_high": 0.9,
       "tier3_margin": 0.2,
       "tier3_timeout_seconds": 30,
@@ -442,15 +442,16 @@ The single global config file. Tiny, hand-editable, agent-readable.
   [0, 1]; a value outside that range, or an `ambiguous_floor` above either high
   cutoff, is clipped to its default with a load-time warning. `tier3_enabled`
   gates the optional by-meaning judge (the only model-backed step; tiers 1–2 are
-  deterministic and always on). `tier3_backend` and `tier3_model` override
-  `provider.backend` / `provider.model` for that one call (empty inherits — the
-  companion/workout `model` rule); the default is `ollama`, **local-first**, so
-  the phrase and candidate wordings never leave the machine, and `claude_cli`
-  is the opt-in hosted alternative. An unrecognized `tier3_backend` is coerced to
-  the default with a warning — fail-safe toward local. The shipped model default
-  is a placeholder until the trust-gate evaluation
+  deterministic and always on) and defaults to `false` — tier 3 is an **opt-in**.
+  `tier3_backend` and `tier3_model` override `provider.backend` /
+  `provider.model` for that one call (empty inherits — the companion/workout
+  `model` rule); they default to `claude_cli` / `sonnet`, the configuration that
+  cleared the trust gate
   ([`../adr/0012-gratitude-semantic-matching.md`](../adr/0012-gratitude-semantic-matching.md)
-  §6) records the evaluated backend and model. `tier3_timeout_seconds` (≥ 1)
+  §6), so enabling tier 3 sends the phrase and candidate wordings — only those —
+  to the hosted model, while `ollama` keeps them on the machine. An unrecognized
+  `tier3_backend` is coerced to `ollama` with a warning — fail-safe toward local.
+  `tier3_timeout_seconds` (≥ 1)
   bounds the judge call so a stalled model never holds up an `add`;
   `tier3_max_candidates` (≥ 1) caps how many entries one judge call carries. No
   key, token, or credential lives here.

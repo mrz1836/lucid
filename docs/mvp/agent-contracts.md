@@ -918,9 +918,10 @@ sits on the **module side** of the sanctuary line, not the agent side:
   the user issued, only when the deterministic tiers are not confident, and only
   while `gratitude.match.tier3_enabled` is set. With no model reachable the verb
   completes on the deterministic tiers (P9).
-* **Local-first.** The default backend is a local model, so the slice never
-  leaves the machine; a hosted backend is an explicit per-instance opt-in
-  (`gratitude.match.tier3_backend`).
+* **Opt-in egress.** Tier 3 is off by default. Its default judge is the hosted
+  model that cleared the trust gate, so setting `gratitude.match.tier3_enabled`
+  is the explicit per-instance opt-in to sending this slice off the machine;
+  `gratitude.match.tier3_backend: "ollama"` keeps it local.
 
 The denylist for inference stands unchanged: no Reflection-class agent reads the
 gratitude registry, and this reach adds no input to any contract above.

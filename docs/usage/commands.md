@@ -869,7 +869,7 @@ The verbatim nightly gratitude itself is a separate, unchanged `lucid log`
 (`#gratitude`) — this verb only tallies. Every path is deterministic and
 model-free **except** the optional tier-3 by-meaning match on `add` (and its
 advisory use in `reconcile`), which reaches a model only through the provider
-seam, is local-first by default, and degrades to the deterministic tiers when no
+seam, is off until you opt in, and degrades to the deterministic tiers when no
 model is available. Full layer spec (schema, the typed
 occurrence/seed/merge/expressed history, the derived Count/First/Last, the three
 match tiers, confidence bands, and outward expression):
@@ -997,9 +997,11 @@ nothing is captured. The event's write time is always the real `at`.
   shown unchanged, since expressing gratitude never moves the tally.
 
 The tier-3 judge is sent **only** the new phrase and the candidate entries'
-wordings — no ids, counts, dates, people, or journal text — and by default runs
-on a local model, so nothing leaves the machine; pointing
-`gratitude.match.tier3_backend` at `claude_cli` opts in to the hosted model.
+wordings — no ids, counts, dates, people, or journal text. Tier 3 is **off**
+until `gratitude.match.tier3_enabled` is set, so out of the box nothing leaves
+the machine. Its default judge is `claude_cli` with `sonnet` (the configuration
+that cleared the trust gate), so enabling it sends that minimal payload to the
+hosted model; `gratitude.match.tier3_backend: "ollama"` keeps it local.
 The cutoffs, margins, and tier-3 backend/model are `gratitude.match` settings in
 `lucid.json` ([`../mvp/data-model.md`](../mvp/data-model.md) §"`lucid.json`").
 

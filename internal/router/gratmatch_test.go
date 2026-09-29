@@ -1,9 +1,13 @@
 package router
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,12 +15,16 @@ import (
 
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/provider"
 )
 
 // gratmatch_test.go covers the gratitude match pipeline (gratmatch.go;
-// gratitude.md §7.1–§7.4): the tier-1 fast path, the single-hop tombstone
-// forward, the tier-2 token match and its configured bands, and the ambiguous
-// band's write-nothing suggestion. Every phrase here is synthetic.
+// gratitude.md §7.1–§7.6): the tier-1 fast path, the single-hop tombstone
+// forward, the tier-2 token match and its configured bands, the ambiguous band's
+// write-nothing suggestion, and the optional tier-3 judge — its request, its
+// bands and fallback, and its P9 degradation. Every tier-3 test drives the judge
+// with provider.Fake, so none needs a live model or the network (ADR-0006).
+// Every phrase here is synthetic.
 
 // corruptGratitudeFile plants an unreadable gratitude record at a key no phrase
 // can derive (a derived key has a single initial before the hyphen), so any path
@@ -50,13 +58,13 @@ func TestGratitudeTier1FastPath(t *testing.T) {
 	first := addGratitude(t, r, "my morning coffee", day1())
 	corrupt := corruptGratitudeFile(t, r)
 
-	dec, err := r.matchGratitude("My Morning Coffee!", false)
+	dec, err := r.matchGratitude(t.Context(), "My Morning Coffee!", false, nil)
 	require.NoError(t, err)
 	assert.Equal(t, gratitudeMatchDecision{
 		Action: gratitudeMatchBump, Key: first.Key, Tier: 1, MakePrimary: true,
 	}, dec, "a tier-1 hit is decided from the one keyed record")
 
-	res, err := r.AddGratitude(AddGratitudeRequest{Thing: "My Morning Coffee!", Now: day2()})
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "My Morning Coffee!", Now: day2()})
 	require.NoError(t, err, "the fast path never scans the tally, so the corrupt record is never read")
 	assert.Equal(t, first.Key, res.Key)
 	assert.False(t, res.Created)
@@ -80,7 +88,7 @@ func TestGratitudeTier1FastPath(t *testing.T) {
 
 	// Contrast: a phrase that misses tier 1 must scan the tally, and trips over
 	// the corrupt record — nothing is written.
-	_, err = r.AddGratitude(AddGratitudeRequest{Thing: "clean drinking water", Now: day2()})
+	_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "clean drinking water", Now: day2()})
 	require.Error(t, err, "tier 2 reads every live entry")
 	assert.Contains(t, err.Error(), "could not read the gratitude tally")
 	assert.Contains(t, err.Error(), "nothing was saved")
@@ -103,7 +111,7 @@ func TestGratitudeTier1ForwardsThroughTombstone(t *testing.T) {
 	_, err := r.MergeGratitude(GratitudeMergeRequest{Source: house.Key, Target: roof.Key, Now: day2()})
 	require.NoError(t, err)
 
-	dec, err := r.matchGratitude("my house", false)
+	dec, err := r.matchGratitude(t.Context(), "my house", false, nil)
 	require.NoError(t, err)
 	assert.Equal(t, gratitudeMatchBump, dec.Action)
 	assert.Equal(t, roof.Key, dec.Key, "the tombstone key forwards its single hop")
@@ -111,7 +119,7 @@ func TestGratitudeTier1ForwardsThroughTombstone(t *testing.T) {
 	assert.Equal(t, house.Key, dec.ForwardedFrom)
 	assert.False(t, dec.MakePrimary, "a forwarded wording never replaces the destination's display")
 
-	res, err := r.AddGratitude(AddGratitudeRequest{Thing: "My House", Now: day3()})
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "My House", Now: day3()})
 	require.NoError(t, err)
 	assert.Equal(t, roof.Key, res.Key)
 	assert.Equal(t, 3, res.Count, "the destination's own, the merged, and tonight's occurrence")
@@ -138,7 +146,7 @@ func TestGratitudeTier2AutoBump(t *testing.T) {
 	walk := addGratitude(t, r, "a morning walk by a river", day1())
 	addGratitude(t, r, "a quiet river", day1()) // a weak runner-up
 
-	res, err := r.AddGratitude(AddGratitudeRequest{Thing: "the morning walks by the river", Now: day2()})
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the morning walks by the river", Now: day2()})
 	require.NoError(t, err)
 	assert.Equal(t, walk.Key, res.Key)
 	assert.False(t, res.Created)
@@ -172,7 +180,7 @@ func TestGratitudeTier2AmbiguousSuggestsWritesNothing(t *testing.T) {
 	}
 
 	r, work, home := setup(t)
-	_, err := r.AddGratitude(AddGratitudeRequest{Thing: "the walk home", Now: day2()})
+	_, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the walk home", Now: day2()})
 	require.Error(t, err)
 	var sugg *GratitudeSuggestionError
 	require.ErrorAs(t, err, &sugg)
@@ -205,7 +213,7 @@ func TestGratitudeTier2AmbiguousSuggestsWritesNothing(t *testing.T) {
 
 	t.Run("--into resolves to the chosen entry", func(t *testing.T) {
 		r, work, _ := setup(t)
-		res, err := r.AddGratitude(AddGratitudeRequest{Thing: "the walk home", Into: work.Key, Now: day2()})
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the walk home", Into: work.Key, Now: day2()})
 		require.NoError(t, err)
 		assert.Equal(t, work.Key, res.Key)
 		assert.Equal(t, 2, res.Count)
@@ -214,7 +222,7 @@ func TestGratitudeTier2AmbiguousSuggestsWritesNothing(t *testing.T) {
 
 	t.Run("--new resolves to a new entry", func(t *testing.T) {
 		r, work, home := setup(t)
-		res, err := r.AddGratitude(AddGratitudeRequest{Thing: "the walk home", ForceNew: true, Now: day2()})
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the walk home", ForceNew: true, Now: day2()})
 		require.NoError(t, err)
 		assert.True(t, res.Created)
 		assert.NotEqual(t, work.Key, res.Key)
@@ -232,7 +240,7 @@ func TestGratitudeTier2NearMissCreates(t *testing.T) {
 	r := bootedGratitude(t)
 	dad := addGratitude(t, r, "my dad", day1())
 
-	dog, err := r.AddGratitude(AddGratitudeRequest{Thing: "my dog", Now: day2()})
+	dog, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my dog", Now: day2()})
 	require.NoError(t, err)
 	assert.True(t, dog.Created)
 	assert.NotEqual(t, dad.Key, dog.Key)
@@ -248,21 +256,21 @@ func TestGratitudeForceNew(t *testing.T) {
 	r := bootedGratitude(t)
 	coffee := addGratitude(t, r, "morning coffee", day1())
 
-	dec, err := r.matchGratitude("coffee in the morning", false)
+	dec, err := r.matchGratitude(t.Context(), "coffee in the morning", false, nil)
 	require.NoError(t, err)
 	require.Equal(t, gratitudeMatchBump, dec.Action, "without --new the wording would auto-bump")
 
-	fresh, err := r.AddGratitude(AddGratitudeRequest{Thing: "coffee in the morning", ForceNew: true, Now: day2()})
+	fresh, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "coffee in the morning", ForceNew: true, Now: day2()})
 	require.NoError(t, err)
 	assert.True(t, fresh.Created, "--new skips tier 2 and creates")
 	assert.NotEqual(t, coffee.Key, fresh.Key)
 
-	same, err := r.AddGratitude(AddGratitudeRequest{Thing: "Morning coffee!", ForceNew: true, Now: day2()})
+	same, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "Morning coffee!", ForceNew: true, Now: day2()})
 	require.NoError(t, err)
 	assert.Equal(t, coffee.Key, same.Key, "tier 1 still applies under --new")
 	assert.Equal(t, 2, same.Count)
 
-	_, err = r.AddGratitude(AddGratitudeRequest{Thing: "morning coffee", Into: coffee.Key, ForceNew: true, Now: day3()})
+	_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "morning coffee", Into: coffee.Key, ForceNew: true, Now: day3()})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--into and --new cannot be combined")
 	assert.Equal(t, 2, gratitudeEntry(t, r, coffee.Key).Tally().Count, "the refused add wrote nothing")
@@ -281,13 +289,13 @@ func TestGratitudeBands(t *testing.T) {
 	quiet := addGratitude(t, r, "a quiet evening walk along the river", day1())
 	// Seeded with --new: as a plain add it is itself a clear tier-2 winner (8/9,
 	// no runner-up) and would auto-bump the entry above rather than start its own.
-	_, err := r.AddGratitude(AddGratitudeRequest{Thing: "an evening walk along the river", ForceNew: true, Now: day1()})
+	_, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "an evening walk along the river", ForceNew: true, Now: day1()})
 	require.NoError(t, err)
 
 	decide := func(m config.GratitudeMatchConfig, phrase string) gratitudeMatchDecision {
 		t.Helper()
 		r.cfg.Gratitude.Match = m
-		dec, merr := r.matchGratitude(phrase, false)
+		dec, merr := r.matchGratitude(t.Context(), phrase, false, nil)
 		require.NoError(t, merr)
 		return dec
 	}
@@ -329,7 +337,7 @@ func TestGratitudeBands(t *testing.T) {
 	// An unbooted router (zero config) matches on the documented defaults, never
 	// on zero cutoffs that would auto-bump every overlap.
 	r.cfg = config.Config{}
-	dec, err = r.matchGratitude("sunny morning", false)
+	dec, err = r.matchGratitude(t.Context(), "sunny morning", false, nil)
 	require.NoError(t, err)
 	assert.Equal(t, gratitudeMatchSuggest, dec.Action)
 
@@ -359,4 +367,504 @@ func TestGratitudeSuggestionError_Sentence(t *testing.T) {
 		err.Error())
 	var target *GratitudeSuggestionError
 	assert.ErrorAs(t, err, &target)
+}
+
+// judgeSlatePositions maps each live entry's key to its 1-based position in the
+// slate the router sends the judge for phrase — computed by the production slate
+// rule, so a scripted reply names the entry a test intends.
+func judgeSlatePositions(t *testing.T, r *Router, phrase string) map[string]int {
+	t.Helper()
+	live, err := r.liveGratitude()
+	require.NoError(t, err)
+	slate := gratitudeJudgeSlate(observations.Tier2(phrase, live), live, r.gratitudeMatchConfig().Tier3MaxCandidates)
+	pos := make(map[string]int, len(slate))
+	for i, e := range slate {
+		pos[e.Key] = i + 1
+	}
+	return pos
+}
+
+// judgeReply scripts a judge answer scoring the given entries (by key) at their
+// slate positions for phrase, in position order.
+func judgeReply(t *testing.T, r *Router, phrase string, scores map[string]float64) provider.Exchange {
+	t.Helper()
+	pos := judgeSlatePositions(t, r, phrase)
+	type match struct {
+		N     int     `json:"n"`
+		Score float64 `json:"score"`
+	}
+	matches := make([]match, 0, len(scores))
+	for key, score := range scores {
+		n, ok := pos[key]
+		require.Truef(t, ok, "entry %q is on the judge slate", key)
+		matches = append(matches, match{N: n, Score: score})
+	}
+	slices.SortFunc(matches, func(x, y match) int { return x.N - y.N })
+	b, err := json.Marshal(map[string][]match{"matches": matches})
+	require.NoError(t, err)
+	return provider.Exchange{Content: string(b)}
+}
+
+// judgeInput decodes the one user message a judge request carries, rejecting any
+// field beyond the documented phrase + numbered wordings.
+func judgeInput(t *testing.T, req provider.Request) gratitudeJudgeInput {
+	t.Helper()
+	require.Len(t, req.Messages, 1, "the judge receives exactly one message")
+	assert.Equal(t, provider.RoleUser, req.Messages[0].Role)
+	dec := json.NewDecoder(strings.NewReader(req.Messages[0].Content))
+	dec.DisallowUnknownFields()
+	var in gratitudeJudgeInput
+	require.NoError(t, dec.Decode(&in))
+	return in
+}
+
+// withTier3 opts the router in to the tier-3 judge for one test — the
+// documented defaults with tier3_enabled set, as an operator enables it — then
+// applies mutate.
+func withTier3(r *Router, mutate func(*config.GratitudeMatchConfig)) {
+	m := config.DefaultGratitudeMatch()
+	m.Tier3Enabled = true
+	mutate(&m)
+	r.cfg.Gratitude.Match = m
+}
+
+// bootedTier3 is a booted gratitude router opted in to the tier-3 judge.
+func bootedTier3(t *testing.T) *Router {
+	t.Helper()
+	r := bootedGratitude(t)
+	withTier3(r, func(*config.GratitudeMatchConfig) {})
+	return r
+}
+
+// TestGratitudeZeroOverlap: a phrase that shares no word with the entry it names
+// — "my bike" against a stored "the two wheels that carry me to work" — is out of
+// tier 2's reach (no candidate at all, so alone it would create a duplicate), but
+// tier 3 judges it against the whole live list, not tier 2's lexical shortlist,
+// and a clear by-meaning winner is bumped automatically (gratitude.md §7.1, §7.4).
+// The wording joins aka[], so the next night the same phrase is an exact tier-2
+// hit and the model is not consulted again.
+func TestGratitudeZeroOverlap(t *testing.T) {
+	r := bootedTier3(t)
+	bike := addGratitude(t, r, "the two wheels that carry me to work", day1())
+	addGratitude(t, r, "clean drinking water from the tap", day2())
+
+	live, err := r.liveGratitude()
+	require.NoError(t, err)
+	assert.Empty(t, observations.Tier2("my bike", live), "the two wordings share no token: tier 2 has no candidate")
+
+	dec, err := r.matchGratitude(t.Context(), "my bike", false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, gratitudeMatchCreate, dec.Action, "without the judge the phrase would start a duplicate")
+
+	fake := &provider.Fake{Script: []provider.Exchange{judgeReply(t, r, "my bike", map[string]float64{bike.Key: 0.95})}}
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike", Provider: fake, Now: day3()})
+	require.NoError(t, err)
+	assert.Equal(t, 1, fake.Calls())
+	assert.Equal(t, bike.Key, res.Key, "tier 3 reached the zero-overlap entry")
+	assert.False(t, res.Created)
+	assert.Equal(t, 2, res.Count)
+	assert.Equal(t, 3, res.MatchTier)
+	assert.InDelta(t, 0.95, res.MatchScore, 1e-9)
+	assert.Equal(t, GratitudeTier3Used, res.Tier3)
+	assert.Equal(t,
+		fmt.Sprintf("Tallied %q (×2) as `%s` — matched %q by meaning (tier 3).",
+			"the two wheels that carry me to work", res.Receipt, "my bike"),
+		res.Ack)
+
+	var carried bool
+	for _, it := range judgeInput(t, fake.Requests[0]).Items {
+		carried = carried || slices.Contains(it.Wordings, "the two wheels that carry me to work")
+	}
+	assert.True(t, carried, "the judge saw the entry tier 2 could not surface")
+
+	entry := gratitudeEntry(t, r, bike.Key)
+	assert.Equal(t, "the two wheels that carry me to work", entry.DisplayName, "the canonical display is kept")
+	assert.Contains(t, entry.Aka, "my bike", "tonight's wording joins aka[]")
+
+	again := &provider.Fake{}
+	res, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike!", Provider: again, Now: day3()})
+	require.NoError(t, err)
+	assert.Equal(t, bike.Key, res.Key)
+	assert.Equal(t, 2, res.MatchTier, "the learned wording is now an exact tier-2 hit")
+	assert.Zero(t, again.Calls(), "a clear tier-2 winner never consults the model")
+	assert.Empty(t, res.Tier3)
+}
+
+// TestGratitudeJudgePayloadMinimal: the judge is sent exactly the documented
+// slice (gratitude.md §7.5) — the gratitude.match intent, the fixed instruction,
+// and one user message holding only the new phrase and each candidate's
+// wordings, numbered from 1 (entries tier 2 scored first, then most recently
+// tallied). No entry key, receipt, count, date, or anything else from the Ledger
+// travels: the message decodes into the two documented fields and nothing more.
+func TestGratitudeJudgePayloadMinimal(t *testing.T) {
+	r := bootedTier3(t)
+	wheels := addGratitude(t, r, "the two wheels that carry me to work", day1())
+	_, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "cycling to the office", Into: wheels.Key, Now: day1()})
+	require.NoError(t, err)
+	addGratitude(t, r, "clean drinking water from the tap", day2())
+	addGratitude(t, r, "a quiet morning with a good book", day3())
+
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: `{"matches": []}`}}}
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike", Provider: fake, Now: day3()})
+	require.NoError(t, err)
+	assert.True(t, res.Created, "a judge that names no entry leaves the tier-2 Low create standing")
+	assert.Equal(t, GratitudeTier3Used, res.Tier3)
+
+	require.Len(t, fake.Requests, 1)
+	req := fake.Requests[0]
+	assert.Equal(t, "gratitude.match", req.Intent)
+	assert.Equal(t, gratitudeJudgeSystem, req.System, "the instruction is fixed text, carrying no Ledger data")
+	assert.Equal(t, gratitudeJudgeInput{
+		Phrase: "my bike",
+		Items: []gratitudeJudgeItem{
+			{N: 1, Wordings: []string{"a quiet morning with a good book"}},
+			{N: 2, Wordings: []string{"clean drinking water from the tap"}},
+			{N: 3, Wordings: []string{"the two wheels that carry me to work", "cycling to the office"}},
+		},
+	}, judgeInput(t, req), "only the phrase and the wordings, most recently tallied first")
+
+	body := req.Messages[0].Content
+	for _, leak := range []string{"gratitude_", "grat_", "2026-", "count", "history", "source", "key"} {
+		assert.NotContains(t, body, leak, "nothing but wordings leaves the process")
+	}
+	for _, leak := range []string{"gratitude_", "grat_", "2026-"} {
+		assert.NotContains(t, req.System, leak)
+	}
+}
+
+// TestGratitudeProviderDisabled: tier 3 is never load-bearing (gratitude.md
+// §7.6, architecture P9). Switched off, unreachable (no provider), timing out, or
+// failing, the add completes on tiers 1–2 with no error — a create stays a
+// create, a tier-2 ambiguity stays a suggestion (never a silent create) — and the
+// Tier3 status says why. Disabled makes no model call at all, and `list` never
+// needs one.
+func TestGratitudeProviderDisabled(t *testing.T) {
+	seed := func(t *testing.T) *Router {
+		t.Helper()
+		r := bootedTier3(t)
+		addGratitude(t, r, "the walk to work", day1())
+		addGratitude(t, r, "a quiet home", day1())
+		return r
+	}
+	answering := func() *provider.Fake {
+		return &provider.Fake{Script: []provider.Exchange{{Content: `{"matches": [{"n": 1, "score": 1}]}`}}}
+	}
+
+	t.Run("off by default", func(t *testing.T) {
+		r := bootedGratitude(t) // the shipped defaults: tier 3 is an opt-in
+		addGratitude(t, r, "the walk to work", day1())
+		fake := answering()
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "fresh bread", Provider: fake, Now: day2()})
+		require.NoError(t, err)
+		assert.True(t, res.Created)
+		assert.Equal(t, GratitudeTier3Disabled, res.Tier3)
+		assert.Zero(t, fake.Calls(), "nothing is sent until tier 3 is enabled")
+	})
+
+	t.Run("disabled makes no model call", func(t *testing.T) {
+		r := seed(t)
+		withTier3(r, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = false })
+		fake := answering()
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "fresh bread", Provider: fake, Now: day2()})
+		require.NoError(t, err)
+		assert.True(t, res.Created)
+		assert.Equal(t, GratitudeTier3Disabled, res.Tier3)
+		assert.Zero(t, fake.Calls(), "a disabled judge is never called")
+
+		_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the walk home", Provider: fake, Now: day2()})
+		var sugg *GratitudeSuggestionError
+		require.ErrorAs(t, err, &sugg)
+		assert.Equal(t, GratitudeTier3Disabled, sugg.Tier3)
+		assert.Equal(t, 2, sugg.MatchTier, "the tier-2 suggestion stands")
+		assert.Zero(t, fake.Calls())
+	})
+
+	t.Run("no provider is unavailable", func(t *testing.T) {
+		r := seed(t)
+		res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "fresh bread", Now: day2()})
+		require.NoError(t, err, "a missing model is never an add failure")
+		assert.True(t, res.Created)
+		assert.Equal(t, GratitudeTier3Unavailable, res.Tier3)
+		assert.Equal(t, fmt.Sprintf("Started tally for %q (×1) as `%s`.", "fresh bread", res.Receipt), res.Ack)
+	})
+
+	for name, outage := range map[string]error{
+		"timeout":     fmt.Errorf("judge: %w", provider.ErrTimeout),
+		"unavailable": fmt.Errorf("judge: %w", provider.ErrUnavailable),
+		"other error": fmt.Errorf("judge: exit status 1"),
+	} {
+		t.Run(name+" degrades to tiers 1-2", func(t *testing.T) {
+			r := seed(t)
+			fake := &provider.Fake{Script: []provider.Exchange{{Err: outage}, {Err: outage}}}
+			res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "fresh bread", Provider: fake, Now: day2()})
+			require.NoError(t, err)
+			assert.True(t, res.Created, "tier-2 Low still creates")
+			assert.Equal(t, GratitudeTier3Unavailable, res.Tier3)
+			assert.Zero(t, res.MatchTier)
+
+			_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the walk home", Provider: fake, Now: day2()})
+			var sugg *GratitudeSuggestionError
+			require.ErrorAs(t, err, &sugg, "a tier-2 ambiguity is still a suggestion, never a silent create")
+			assert.Equal(t, GratitudeTier3Unavailable, sugg.Tier3)
+			assert.Equal(t, 2, sugg.MatchTier)
+			assert.Len(t, sugg.Candidates, 2)
+			assert.Equal(t, 2, fake.Calls(), "each add tried the judge once")
+		})
+	}
+
+	t.Run("list needs no model", func(t *testing.T) {
+		r := seed(t)
+		withTier3(r, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = false })
+		list, err := r.GratitudeList()
+		require.NoError(t, err)
+		assert.Equal(t, 2, list.View.Count)
+	})
+}
+
+// TestGratitudeTier3Bands: the judge's scores are banded with the tier-3 cutoffs
+// (0.90 / margin 0.20 / floor 0.50 by default) and combined with tier 2 by the
+// safer-outcome rule (gratitude.md §7.3): tier-3 High bumps the tier-3 winner,
+// tier-3 Ambiguous (a near-tie, or a plausible-but-unconfident single score)
+// suggests the tier-3 candidates, and tier-3 Low falls back to the tier-2 band —
+// a tier-2 tie is still suggested, never silently created. A suggestion writes
+// nothing.
+func TestGratitudeTier3Bands(t *testing.T) {
+	type outcome struct {
+		action    gratitudeMatchAction
+		tier      int
+		winner    string // "work" / "home" for a bump
+		suggested []string
+	}
+	for _, tc := range []struct {
+		name   string
+		phrase string // "the walk home" is a tier-2 tie; "my commute" has no tier-2 candidate
+		scores map[string]float64
+		want   outcome
+	}{
+		{
+			name: "tier-3 High breaks a tier-2 tie", phrase: "the walk home",
+			scores: map[string]float64{"work": 0.95, "home": 0.4},
+			want:   outcome{action: gratitudeMatchBump, tier: 3, winner: "work"},
+		},
+		{
+			name: "tier-3 High reaches a tier-2 Low", phrase: "my commute",
+			scores: map[string]float64{"work": 0.92},
+			want:   outcome{action: gratitudeMatchBump, tier: 3, winner: "work"},
+		},
+		{
+			name: "tier-3 near-tie suggests", phrase: "my commute",
+			scores: map[string]float64{"work": 0.93, "home": 0.88},
+			want:   outcome{action: gratitudeMatchSuggest, tier: 3, suggested: []string{"work", "home"}},
+		},
+		{
+			name: "tier-3 High without the margin suggests", phrase: "my commute",
+			scores: map[string]float64{"work": 0.95, "home": 0.8},
+			want:   outcome{action: gratitudeMatchSuggest, tier: 3, suggested: []string{"work", "home"}},
+		},
+		{
+			name: "tier-3 unconfident single suggests", phrase: "my commute",
+			scores: map[string]float64{"home": 0.7},
+			want:   outcome{action: gratitudeMatchSuggest, tier: 3, suggested: []string{"home"}},
+		},
+		{
+			name: "tier-3 Low keeps the tier-2 suggestion", phrase: "the walk home",
+			scores: map[string]float64{},
+			want:   outcome{action: gratitudeMatchSuggest, tier: 2, suggested: []string{"work", "home"}},
+		},
+		{
+			name: "tier-3 below the floor keeps the tier-2 suggestion", phrase: "the walk home",
+			scores: map[string]float64{"work": 0.3},
+			want:   outcome{action: gratitudeMatchSuggest, tier: 2, suggested: []string{"work", "home"}},
+		},
+		{
+			name: "tier-3 Low on a tier-2 Low creates", phrase: "my commute",
+			scores: map[string]float64{},
+			want:   outcome{action: gratitudeMatchCreate, tier: 2},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bootedTier3(t)
+			keys := map[string]string{
+				"work": addGratitude(t, r, "the walk to work", day1()).Key,
+				"home": addGratitude(t, r, "a quiet home", day1()).Key,
+			}
+			scores := make(map[string]float64, len(tc.scores))
+			for name, s := range tc.scores {
+				scores[keys[name]] = s
+			}
+			fake := &provider.Fake{Script: []provider.Exchange{judgeReply(t, r, tc.phrase, scores)}}
+
+			dec, err := r.matchGratitude(t.Context(), tc.phrase, false, fake)
+			require.NoError(t, err)
+			assert.Equal(t, 1, fake.Calls())
+			assert.Equal(t, tc.want.action, dec.Action)
+			assert.Equal(t, tc.want.tier, dec.Tier)
+			assert.Equal(t, GratitudeTier3Used, dec.Tier3)
+			if tc.want.winner != "" {
+				assert.Equal(t, keys[tc.want.winner], dec.Key)
+				assert.Equal(t, observations.GratitudeBandHigh, dec.Band)
+			}
+			suggested := make([]string, 0, len(dec.Candidates))
+			for _, c := range dec.Candidates {
+				suggested = append(suggested, c.Key)
+			}
+			want := make([]string, 0, len(tc.want.suggested))
+			for _, name := range tc.want.suggested {
+				want = append(want, keys[name])
+			}
+			assert.ElementsMatch(t, want, suggested)
+			if tc.want.tier == 3 && tc.want.action == gratitudeMatchSuggest {
+				assert.Equal(t, keys[tc.want.suggested[0]], suggested[0], "tier-3 candidates are ranked best first")
+			}
+
+			list, err := r.GratitudeList()
+			require.NoError(t, err)
+			assert.Equal(t, 2, list.View.Count, "the pipeline decides; it never writes")
+		})
+	}
+}
+
+// TestGratitudeTier3MalformedReplyDegrades: a judge reply that does not parse or
+// breaks the contract — no matches list, an unknown or repeated position, a
+// missing field, a score outside [0, 1], prose or markup around the JSON — is
+// never partially trusted (gratitude.md §7.5): it is treated as unavailable and
+// the tier-2 decision stands.
+func TestGratitudeTier3MalformedReplyDegrades(t *testing.T) {
+	for name, reply := range map[string]string{
+		"not json":           "the first one, probably",
+		"prose then fence":   "Here you go:\n```json\n{\"matches\": [{\"n\": 1, \"score\": 0.95}]}\n```",
+		"unclosed fence":     "```json\n{\"matches\": [{\"n\": 1, \"score\": 0.95}]}",
+		"fence of prose":     "```\nthe first one\n```",
+		"thinking preamble":  "<think>hmm</think>{\"matches\": [{\"n\": 1, \"score\": 0.95}]}",
+		"no matches key":     `{"result": []}`,
+		"null matches":       `{"matches": null}`,
+		"position zero":      `{"matches": [{"n": 0, "score": 0.95}]}`,
+		"position past list": `{"matches": [{"n": 3, "score": 0.95}]}`,
+		"repeated position":  `{"matches": [{"n": 1, "score": 0.95}, {"n": 1, "score": 0.2}]}`,
+		"missing score":      `{"matches": [{"n": 1}]}`,
+		"missing position":   `{"matches": [{"score": 0.95}]}`,
+		"score above one":    `{"matches": [{"n": 1, "score": 1.5}]}`,
+		"negative score":     `{"matches": [{"n": 1, "score": -0.1}]}`,
+		"empty reply":        "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := bootedTier3(t)
+			addGratitude(t, r, "the walk to work", day1())
+			addGratitude(t, r, "a quiet home", day1())
+			fake := &provider.Fake{Script: []provider.Exchange{{Content: reply}}}
+
+			res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "fresh bread", Provider: fake, Now: day2()})
+			require.NoError(t, err)
+			assert.Equal(t, 1, fake.Calls())
+			assert.True(t, res.Created, "the tier-2 Low create stands")
+			assert.Zero(t, res.MatchTier, "an untrusted reply never lands a match")
+			assert.Equal(t, GratitudeTier3Unavailable, res.Tier3)
+		})
+	}
+}
+
+// TestGratitudeTier3FencedReply: a reply that is exactly one markdown code fence
+// around the JSON object — a habit of some hosted models even when told not to —
+// is read as the object inside it (gratitude.md §7.5); the contract checks still
+// apply to what is inside.
+func TestGratitudeTier3FencedReply(t *testing.T) {
+	for name, fence := range map[string]string{
+		"json fence":  "```json\n%s\n```",
+		"plain fence": "```\n%s\n```",
+		"padded":      "\n  ```json\n%s\n```  \n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := bootedTier3(t)
+			wheels := addGratitude(t, r, "the two wheels that carry me to work", day1())
+			reply := judgeReply(t, r, "my bike", map[string]float64{wheels.Key: 0.95})
+			fake := &provider.Fake{Script: []provider.Exchange{{Content: fmt.Sprintf(fence, reply.Content)}}}
+
+			res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike", Provider: fake, Now: day2()})
+			require.NoError(t, err)
+			assert.Equal(t, wheels.Key, res.Key)
+			assert.Equal(t, 3, res.MatchTier)
+			assert.Equal(t, GratitudeTier3Used, res.Tier3)
+		})
+	}
+
+	r := bootedTier3(t)
+	addGratitude(t, r, "the two wheels that carry me to work", day1())
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: "```json\n{\"matches\": [{\"n\": 2, \"score\": 0.95}]}\n```"}}}
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my bike", Provider: fake, Now: day2()})
+	require.NoError(t, err)
+	assert.Equal(t, GratitudeTier3Unavailable, res.Tier3, "a fenced reply naming an unknown position is still untrusted")
+	assert.True(t, res.Created)
+}
+
+// TestGratitudeTier3NotNeeded: the judge runs only when tiers 1–2 did not
+// produce a confident landing (gratitude.md §7.3). A tier-1 hit, a clear tier-2
+// winner, an `--into` bump, a `--new` create, and a first entry (nothing live to
+// judge against) never call it, and report no tier-3 status — a v1-shaped add
+// stays v1-shaped.
+func TestGratitudeTier3NotNeeded(t *testing.T) {
+	r := bootedTier3(t)
+	judge := &provider.Fake{}
+	add := func(req AddGratitudeRequest) GratitudeWriteResult {
+		t.Helper()
+		req.Provider, req.Now = judge, day2()
+		res, err := r.AddGratitude(t.Context(), req)
+		require.NoError(t, err)
+		return res
+	}
+
+	first := add(AddGratitudeRequest{Thing: "a morning walk by a river"})
+	assert.True(t, first.Created, "a first entry has nothing to be judged against")
+	assert.Empty(t, first.Tier3)
+
+	assert.Empty(t, add(AddGratitudeRequest{Thing: "A morning walk by a river!"}).Tier3, "tier 1")
+	assert.Equal(t, 2, add(AddGratitudeRequest{Thing: "the morning walks by the river"}).MatchTier, "tier-2 High")
+	assert.Empty(t, add(AddGratitudeRequest{Thing: "fresh bread", Into: first.Key}).Tier3, "--into")
+	fresh := add(AddGratitudeRequest{Thing: "fresh bread", ForceNew: true})
+	assert.True(t, fresh.Created, "--new")
+	assert.Empty(t, fresh.Tier3)
+
+	assert.Zero(t, judge.Calls(), "no confident-or-explicit landing consults the model")
+}
+
+// TestGratitudeTier3SlateCap: above tier3_max_candidates live entries, the one
+// judge request carries the entries tier 2 scored first (best first), then the
+// most recently tallied, up to the cap (gratitude.md §7.5) — so an old entry that
+// shares a word still makes the cut over newer, unrelated ones.
+func TestGratitudeTier3SlateCap(t *testing.T) {
+	r := bootedTier3(t)
+	addGratitude(t, r, "a long walk in the hills", day1())
+	addGratitude(t, r, "clean drinking water from the tap", day1())
+	addGratitude(t, r, "a quiet morning with a good book", day2())
+	addGratitude(t, r, "fresh bread from the corner bakery", day3())
+	withTier3(r, func(m *config.GratitudeMatchConfig) { m.Tier3MaxCandidates = 2 })
+
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: `{"matches": []}`}}}
+	_, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my evening walk", Provider: fake, Now: day3()})
+	require.NoError(t, err)
+
+	in := judgeInput(t, fake.Requests[0])
+	require.Len(t, in.Items, 2, "the slate is capped")
+	assert.Equal(t, []string{"a long walk in the hills"}, in.Items[0].Wordings, "the tier-2-scored entry comes first")
+	assert.Equal(t, []string{"fresh bread from the corner bakery"}, in.Items[1].Wordings, "then the most recently tallied")
+	assert.Equal(t, []int{1, 2}, []int{in.Items[0].N, in.Items[1].N})
+}
+
+// TestGratitudeTier3CanceledWritesNothing: a caller that cancels while the judge
+// is thinking gets a clean error and nothing saved — cancellation is the
+// caller's own choice, not a model outage to degrade past.
+func TestGratitudeTier3CanceledWritesNothing(t *testing.T) {
+	r := bootedTier3(t)
+	addGratitude(t, r, "the walk to work", day1())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: `{"matches": []}`}}}
+	_, err := r.AddGratitude(ctx, AddGratitudeRequest{Thing: "fresh bread", Provider: fake, Now: day2()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "canceled")
+	assert.Contains(t, err.Error(), "nothing was saved")
+
+	list, err := r.GratitudeList()
+	require.NoError(t, err)
+	assert.Equal(t, 1, list.View.Count)
 }

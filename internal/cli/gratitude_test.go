@@ -2,11 +2,16 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/provider"
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // addGratitudeCLI runs `lucid gratitude add <thing>` and fails the test on error.
@@ -366,4 +371,140 @@ func TestGratitude_CLI_NewFlag(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, stderr, "--new and --count cannot be combined")
 	assert.Len(t, gratitudeListEntries(t), 2, "the refused adds wrote nothing")
+}
+
+// withGratitudeJudge injects p as the tier-3 judge for one test through the
+// buildProvider seam (restoring the package's offline default after) and returns
+// a pointer to the provider block the seam was last asked to build, so a test can
+// assert the gratitude.match overrides reached it.
+func withGratitudeJudge(t *testing.T, p provider.Provider) *config.ProviderConfig {
+	t.Helper()
+	prev := buildProvider
+	var got config.ProviderConfig
+	buildProvider = func(cfg config.ProviderConfig) (provider.Provider, error) {
+		got = cfg
+		return p, nil
+	}
+	t.Cleanup(func() { buildProvider = prev })
+	return &got
+}
+
+// writeGratitudeMatch rewrites the isolated home's lucid.json with the
+// documented defaults plus a mutated gratitude.match block.
+func writeGratitudeMatch(t *testing.T, home string, mutate func(*config.GratitudeMatchConfig)) {
+	t.Helper()
+	cfg := config.Default()
+	mutate(&cfg.Gratitude.Match)
+	b, err := cfg.Marshal()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(storage.New(home).ConfigPath(), b, 0o600))
+}
+
+// TestGratitudeProviderDisabledCLI: tier 3 is never load-bearing (gratitude.md
+// §7.6). Out of the box it is off — an opt-in, since its default judge is hosted
+// — so `add` completes on tiers 1–2 with no model built or called, no note, and
+// "tier3": "disabled" under --json. Opted in with no model reachable (the
+// package's offline default), `add` still completes — exit 0 on a write — and
+// says so: the documented one-line note on stderr and "tier3": "unavailable",
+// while stdout stays the clean ack or JSON; an ambiguous refusal prints the same
+// stderr line. A first entry and a clear tier-2 match never needed the judge, so
+// they carry no tier3 key. `list` completes either way.
+func TestGratitudeProviderDisabledCLI(t *testing.T) {
+	home := isolatedHome(t)
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walk to work", "--json")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "tier3", "a first entry had nothing to judge against")
+	assert.Empty(t, stderr)
+
+	judge := &provider.Fake{}
+	built := withGratitudeJudge(t, judge)
+	out, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "a quiet home", "--json")
+	require.NoError(t, err)
+	var view map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &view))
+	assert.Equal(t, "disabled", view["tier3"], "tier 3 is off by default")
+	assert.Empty(t, stderr, "switching tier 3 off is a choice, not a degradation")
+	assert.Zero(t, judge.Calls())
+	assert.Empty(t, built.Backend, "no judge is even built while tier 3 is off")
+
+	writeGratitudeMatch(t, home, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = true })
+	withGratitudeJudge(t, &provider.Fake{ExhaustErr: provider.ErrUnavailable})
+
+	out, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "fresh bread")
+	require.NoError(t, err, "a missing model is never an add failure")
+	assert.Contains(t, out, "Started tally for")
+	assert.Equal(t, gratitudeTier3UnavailableNote+"\n", stderr, "the degraded path is named on stderr")
+
+	out, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "warm sunlight", "--json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &view), "stdout stays pure JSON")
+	assert.Equal(t, "unavailable", view["tier3"])
+	assert.Equal(t, true, view["created"])
+	assert.Contains(t, stderr, gratitudeTier3UnavailableNote)
+
+	_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walk home")
+	require.Error(t, err, "a tier-2 ambiguity still refuses without the model")
+	assert.Contains(t, stderr, gratitudeTier3UnavailableNote)
+	assert.Contains(t, stderr, "--into <id>")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walks to work", "--json")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "tier3", "a clear tier-2 winner never needed the judge")
+
+	listOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "list")
+	require.NoError(t, err)
+	assert.Contains(t, listOut, "4 gratitude entries")
+}
+
+// TestGratitudeTier3CLI: opted in, a plain `add` builds the tier-3 judge through
+// the buildProvider seam from the provider block with the gratitude.match
+// overrides (backend, model, and per-call bound — the endpoint inherited), and a
+// clear by-meaning match of a zero-overlap phrase bumps the existing entry: the
+// ack says "by meaning (tier 3)" and --json carries match_tier 3 and tier3
+// "used" (gratitude.md §7.4–§7.5).
+func TestGratitudeTier3CLI(t *testing.T) {
+	home := isolatedHome(t)
+	addGratitudeCLI(t, "the two wheels that carry me to work")
+	id := gratitudeListEntries(t)[0].ID
+	writeGratitudeMatch(t, home, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = true })
+
+	judge := &provider.Fake{Script: []provider.Exchange{
+		{Content: `{"matches": [{"n": 1, "score": 0.96}]}`},
+		{Content: `{"matches": [{"n": 1, "score": 0.97}]}`},
+	}}
+	built := withGratitudeJudge(t, judge)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "my bike", "--json")
+	require.NoError(t, err)
+	var payload struct {
+		ID         string  `json:"id"`
+		Thing      string  `json:"thing"`
+		Count      int     `json:"count"`
+		Created    bool    `json:"created"`
+		MatchTier  int     `json:"match_tier"`
+		MatchScore float64 `json:"match_score"`
+		Tier3      string  `json:"tier3"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.Equal(t, id, payload.ID)
+	assert.Equal(t, "the two wheels that carry me to work", payload.Thing)
+	assert.Equal(t, 2, payload.Count)
+	assert.False(t, payload.Created)
+	assert.Equal(t, 3, payload.MatchTier)
+	assert.InDelta(t, 0.96, payload.MatchScore, 1e-9)
+	assert.Equal(t, "used", payload.Tier3)
+
+	def := config.Default()
+	assert.Equal(t, def.Gratitude.Match.Tier3Backend, built.Backend, "tier3_backend overrides provider.backend")
+	assert.Equal(t, def.Gratitude.Match.Tier3Model, built.Model, "tier3_model overrides provider.model")
+	assert.Equal(t, def.Gratitude.Match.Tier3TimeoutSeconds, built.TimeoutSeconds, "the per-call bound")
+	assert.Equal(t, def.Provider.Endpoint, built.Endpoint, "the endpoint is inherited")
+
+	human, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "cycling in")
+	require.NoError(t, err)
+	assert.Contains(t, human, "by meaning (tier 3)")
+	assert.Empty(t, stderr)
+	assert.Equal(t, 2, judge.Calls())
+	assert.Len(t, gratitudeListEntries(t), 1, "no near-duplicate row was created")
 }

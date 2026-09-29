@@ -1,8 +1,8 @@
-# ADR-0012 — Gratitude by-meaning matching and outward expression: three tiers behind the canonical-key seam, a local-first judge, a tally-neutral "expressed" record
+# ADR-0012 — Gratitude by-meaning matching and outward expression: three tiers behind the canonical-key seam, an opt-in judge, a tally-neutral "expressed" record
 
-**Status:** Accepted. The provider trust-gate *outcome* (§6) is recorded here
-once its fixture evaluation has run; the decision to gate is part of this
-record now.
+**Status:** Accepted. The provider trust-gate outcome is recorded in §6: no
+local model cleared it, so the judge defaults to `claude_cli` and tier 3 ships
+opt-in.
 
 ## Context
 
@@ -159,35 +159,81 @@ This is the same escape hatch a partial `import` uses.
 A `retract` event is a candidate follow-on if wrong automatic bumps prove
 common; it is not built speculatively.
 
-### 6. Provider default: local-first `ollama`, `claude_cli` opt-in — behind a trust gate
+### 6. Provider default: set by a trust gate — `claude_cli` with `sonnet`, and tier 3 opt-in
 
 The judge is built through `internal/provider/factory` from the `provider` block,
 with `gratitude.match.tier3_backend` / `tier3_model` overrides. Each is empty to
-inherit, the same rule the companion's and workout's `model` keys use. The
-**default is `ollama`**. Gratitude phrasings are intimate, and a local model
-keeps the phrase and candidate wordings on the machine. `claude_cli` is the
-**opt-in** alternative, with its egress documented: the same minimal payload
-goes to the vendor's hosted model. An unrecognized backend value coerces to the
-default, which fails safe toward local.
+inherit, the same rule the companion's and workout's `model` keys use.
 
-**The trust gate.** The local default is trusted only after its match quality is
-measured against the synthetic fixture set:
+**The intent was local-first.** Gratitude phrasings are intimate, and a local
+model keeps the phrase and candidate wordings on the machine. So `ollama` was
+the proposed default and `claude_cli` the opt-in alternative, with its egress
+documented — **on one condition**: the local default is trusted only after its
+match quality is measured against a synthetic fixture set. If it
+underperformed, the docs and config would name `claude_cli` instead. Either way
+tier 3 stays optional, and with no backend reachable `add` runs on tiers 1–2.
 
-* zero-overlap true matches;
-* near-ties that must be suggested;
-* different-meaning look-alikes that must not merge;
-* genuinely new phrases that must create.
+**The evaluation.** A synthetic tally of 16 elaborated entries and 17
+nightly-style phrases in five groups:
 
-If the local model underperforms, the docs and config name `claude_cli` as the
-recommended backend instead. Either way tier 3 stays optional, and with no
-backend reachable `add` runs on tiers 1–2. The model name shipped as the local
-default is a placeholder until this gate records the evaluated model.
+* six zero-overlap true matches ("my bike" → "the two wheels that carry me to
+  work", "the ocean" → "waves breaking on the shore near the cottage");
+* two partial-overlap true matches ("clean water" → "clean drinking water
+  straight from the tap");
+* two near-ties that must be suggested ("my walk" against "the walk to work" and
+  "an evening walk along the river");
+* four different-meaning look-alikes or related-but-different things that must
+  not merge ("my dog" against "my dad's advice", "morning tea" against "my
+  morning coffee", "my brother" against "my sister's laugh");
+* three genuinely new phrases that must create.
 
-**Trust-gate outcome:** _pending_ — the fixture evaluation runs once the tier-3
-judge exists. This section will record the models evaluated, the per-fixture
-results, and the resulting default backend and model. That update to this ADR,
-together with the matching lines in `gratitude.md` §9 and the `lucid.json`
-default, is the one design refinement recorded after the docs-first diff.
+Each phrase ran through the real `lucid gratitude add` path — all three tiers,
+the default cutoffs, the default 30 s bound — against a fresh copy of the
+tally. The pass bar was fixed before any run: **zero** wrong automatic bumps,
+**zero** unavailable replies, at least 80 % of true matches reached (bumped or
+suggested) and 60 % bumped automatically, at least two thirds of near-ties
+suggested, and every call inside the bound.
+
+| Backend / model | Runs per phrase | Wrong auto-bumps | Unavailable | True matches reached (auto-bumped) | Near-ties suggested | Median / max latency | Gate |
+|---|---|---|---|---|---|---|---|
+| `ollama` / `qwen3:8b` | 2 | 0 | 2 | 14/16 (14) | 2/4 — 1 confident pick | 17.7 s / 30.1 s | fail |
+| `ollama` / `qwen3:14b` | 1 | 0 | 3 | 7/8 (6) | 0/2 — both timed out | 25.5 s / 30.1 s | fail |
+| `ollama` / `gemma4:e4b` | 2 | **7** | 0 | 16/16 (16) | 1/4 — 3 confident picks | 1.3 s / 23.4 s | fail |
+| `claude_cli` / `haiku` | 2 | 0 | 5 | 13/16 (13) | 2/4 | 8.4 s / 30.1 s | fail |
+| `claude_cli` / `sonnet` | 1 | 0 | 0 | 8/8 (5) | 2/2 | 3.0 s / 3.7 s | **pass** |
+
+**Outcome.** No local model cleared the gate. The `qwen3` models judged well
+when they answered, but their thinking mode puts a call at 15–30 s: they
+breached the bound on some calls and gave a near-tie a confident 1.00 pick.
+`gemma4:e4b` is fast but confidently wrong. It auto-bumped seven look-alike or
+genuinely new phrases onto unrelated entries at a score of 1.00, which is
+exactly the silent wrong merge this design exists to prevent. `claude_cli` with
+`sonnet` cleared every criterion on its pass of the fixtures, at about three
+seconds a call, merging nothing it should not and suggesting where it was
+unsure. So:
+
+* **`tier3_backend` defaults to `claude_cli` and `tier3_model` to `sonnet`**,
+  the evaluated configuration.
+* **`tier3_enabled` defaults to `false`.** Tier 3 was to default on only because
+  its default backend was local (§7). With a hosted default, turning tier 3 on
+  is the explicit opt-in to sending the phrase and the candidate wordings, and
+  nothing else, to the vendor's model. Out of the box nothing leaves the
+  machine: `add` matches on tiers 1–2 and reports `"tier3": "disabled"` where the
+  judge would have run.
+* **Local stays available.** `tier3_backend: "ollama"` with a local
+  `tier3_model` keeps everything on-device. This evaluation does not recommend it
+  at the default bound, and a thinking model needs a longer
+  `tier3_timeout_seconds`. An unrecognized `tier3_backend` is still coerced to
+  `ollama`, so a typo fails safe toward local rather than toward the hosted
+  default.
+* **Replies in a code fence.** `haiku` wrapped its JSON in a markdown code fence
+  on every call, even when told not to. The judge now reads a reply that is
+  exactly one enclosing fence as the object inside it. Anything else around the
+  object (prose, a thinking preamble, an unclosed fence) is still untrusted
+  ([`../gratitude.md`](../gratitude.md) §7.5).
+
+The gate can be re-run as local models improve. Moving the default back to a
+local judge is a config change plus a docs diff recording the new evaluation.
 
 ### 7. The judge's sanctuary reach — module side, bounded slice
 
@@ -206,8 +252,9 @@ recorded as a contract note in [`../mvp/agent-contracts.md`](../mvp/agent-contra
 withheld from the judge, fail closed. An `add --person` naming an off-limits
 person skips tier 3.
 
-The per-instance gate is `gratitude.match.tier3_enabled`. It defaults on only
-because the default backend is local, so nothing leaves the device by default.
+The per-instance gate is `gratitude.match.tier3_enabled`. It defaults **off**:
+the judge that cleared the trust gate (§6) is hosted, so turning tier 3 on is
+the explicit opt-in to that egress, and nothing leaves the device by default.
 It does **not** extend `agent_slice_optins`, because no Reflection-class agent
 gains any access. Widening real agent access to registry data still needs a
 contract diff plus that opt-in.
@@ -280,7 +327,8 @@ is unchanged.
   to tiers 1–2 with exit `0` and a visible note. Every tier-3 test runs against
   `provider.Fake`.
 * Egress is minimal and, by default, zero. Only phrases leave the process, only
-  to the configured judge, and by default that judge is local.
+  to the configured judge, and only once tier 3 is enabled; out of the box it is
+  off.
 * Undo is honest rather than magical. A wrong automatic bump leaves a visible +1
   of residue; a wrong fold needs a backup restore. If wrong bumps prove common,
   a `retract` event is the documented next step.

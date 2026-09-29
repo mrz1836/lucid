@@ -207,12 +207,15 @@ type GratitudeConfig struct {
 // automatic bump needs both; AmbiguousFloor is the shared score at or above which
 // a not-confident match is suggested rather than a new entry created. All five
 // are scores in [0, 1]. Tier3Enabled gates the optional by-meaning judge (tiers
-// 1–2 are deterministic and always on). Tier3Backend and Tier3Model override
-// provider.backend / provider.model for that one call (empty inherits — the
-// companion/workout model rule); the default backend is ollama, local-first.
-// Tier3TimeoutSeconds bounds the judge call and Tier3MaxCandidates caps how many
-// entries one call carries. Every value is fail-safe: [Config.Clip] pulls an
-// out-of-range one back to its default with a warning, never a crash.
+// 1–2 are deterministic and always on); it is off by default, because the
+// judge that cleared the trust gate is hosted, so turning it on is the explicit
+// opt-in to that egress. Tier3Backend and Tier3Model override provider.backend /
+// provider.model for that one call (empty inherits — the companion/workout model
+// rule). Tier3TimeoutSeconds bounds the judge call and Tier3MaxCandidates caps
+// how many entries one call carries. Every value is fail-safe: [Config.Clip]
+// pulls an out-of-range one back to its default with a warning, never a crash —
+// except an unrecognized Tier3Backend, which is coerced to the local backend so a
+// typo can never route phrases off the machine.
 type GratitudeMatchConfig struct {
 	Tier2High           float64 `json:"tier2_high"`
 	Tier2Margin         float64 `json:"tier2_margin"`
@@ -226,21 +229,26 @@ type GratitudeMatchConfig struct {
 	Tier3MaxCandidates  int     `json:"tier3_max_candidates"`
 }
 
+// gratitudeTier3LocalBackend is the backend an unrecognized tier3_backend is
+// coerced to: the local one, so an unreadable value fails safe toward keeping
+// phrases on the machine (ADR-0012 §6).
+const gratitudeTier3LocalBackend = "ollama"
+
 // DefaultGratitudeMatch returns the documented gratitude.match defaults
-// (gratitude.md §9; ADR-0012 §2, §6): conservative placeholders tuned against the
+// (gratitude.md §9; ADR-0012 §2, §6): conservative cutoffs tuned against the
 // synthetic fixtures — tier 2 needs 0.85 with a 0.15 lead, tier 3 a stricter 0.90
 // with a 0.20 lead, and anything at or above the shared 0.50 floor that is not a
-// clear winner is suggested. Tier 3 defaults on because its default backend is
-// local (ollama), so nothing leaves the machine; the model name is a placeholder
-// until the provider trust gate records the evaluated model.
+// clear winner is suggested. The judge defaults to the backend and model that
+// cleared the trust gate (claude_cli, sonnet) — and, because that judge is
+// hosted, tier 3 defaults off: nothing leaves the machine until it is enabled.
 func DefaultGratitudeMatch() GratitudeMatchConfig {
 	return GratitudeMatchConfig{
 		Tier2High:           0.85,
 		Tier2Margin:         0.15,
 		AmbiguousFloor:      0.50,
-		Tier3Enabled:        true,
-		Tier3Backend:        "ollama",
-		Tier3Model:          "qwen3:8b",
+		Tier3Enabled:        false,
+		Tier3Backend:        "claude_cli",
+		Tier3Model:          "sonnet",
 		Tier3High:           0.90,
 		Tier3Margin:         0.20,
 		Tier3TimeoutSeconds: 30,
@@ -261,6 +269,24 @@ func (m GratitudeMatchConfig) OrDefault() GratitudeMatchConfig {
 	return m
 }
 
+// Tier3ProviderConfig returns the provider block the optional tier-3 judge is
+// built from (gratitude.md §7.5): base (the `provider` block) with tier3_backend
+// and tier3_model overriding its backend and model when set — empty inherits, the
+// companion/workout model rule — and tier3_timeout_seconds as the per-call bound,
+// short enough that a stalled model never holds up a nightly add. The endpoint is
+// inherited. A zero m reads as the defaults ([GratitudeMatchConfig.OrDefault]).
+func (m GratitudeMatchConfig) Tier3ProviderConfig(base ProviderConfig) ProviderConfig {
+	m = m.OrDefault()
+	if m.Tier3Backend != "" {
+		base.Backend = m.Tier3Backend
+	}
+	if m.Tier3Model != "" {
+		base.Model = m.Tier3Model
+	}
+	base.TimeoutSeconds = m.Tier3TimeoutSeconds
+	return base
+}
+
 // gratitudeIssue is one out-of-range gratitude.match value: the reason it is
 // unusable and the value it is clipped to. [Config.Clip] renders it as a
 // warning and [Config.Validate] as an error, so the two share one rule set and
@@ -275,7 +301,7 @@ type gratitudeIssue struct {
 // five scores must lie in [0, 1]; the ambiguous floor must not sit above either
 // high cutoff (the floor is reset first, and a high cutoff still below the reset
 // floor is reset too, so the three bands stay contiguous); an unrecognized
-// tier3_backend is coerced to the local default (empty is valid — it inherits
+// tier3_backend is coerced to the local backend (empty is valid — it inherits
 // provider.backend); and the timeout and candidate cap must be at least one. A
 // zero block reads as the defaults with no issue ([GratitudeMatchConfig.OrDefault]).
 // The receiver is not mutated, and clipping a clipped block reports nothing.
@@ -331,9 +357,9 @@ func (m GratitudeMatchConfig) clip() (GratitudeMatchConfig, []gratitudeIssue) {
 	if out.Tier3Backend != "" && !KnownBackends[out.Tier3Backend] {
 		issues = append(issues, gratitudeIssue{
 			reason:    fmt.Sprintf("gratitude.match.tier3_backend %q is not a known backend", out.Tier3Backend),
-			clippedTo: fmt.Sprintf("%q", def.Tier3Backend),
+			clippedTo: fmt.Sprintf("%q", gratitudeTier3LocalBackend),
 		})
-		out.Tier3Backend = def.Tier3Backend
+		out.Tier3Backend = gratitudeTier3LocalBackend
 	}
 	if out.Tier3TimeoutSeconds < 1 {
 		issues = append(issues, gratitudeIssue{

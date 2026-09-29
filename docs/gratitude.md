@@ -59,10 +59,10 @@ deterministic, agent-free, and carry **no LLM** (architecture P9): a nightly
 `add` and the whole of `list` complete with no model. Matching **by meaning** —
 connecting tonight's "my bike" to a stored "the two wheels that carry me to
 work", which share no words — is the one step that needs a model. It is tier 3
-of the match (§7): **optional**, reached only through the single
-`internal/provider` seam, run only when the deterministic tiers are not
-confident, and **local-first by default** (§7.5). With no model configured or
-reachable, `add` behaves exactly as tiers 1–2 decide and still completes (§7.6).
+of the match (§7): **optional** and **off until you opt in** (§7.5), reached
+only through the single `internal/provider` seam, and run only when the
+deterministic tiers are not confident. With tier 3 off, or no model reachable,
+`add` behaves exactly as tiers 1–2 decide and still completes (§7.6).
 The human keeps the last word through `--into`, `--new`, and `merge`.
 
 ## 2. The entry schema
@@ -549,8 +549,11 @@ cap.
 
 **What comes back.** A JSON object `{"matches": [{"n": <position>, "score":
 <0–1>}]}` listing only the candidates the model judges to name the same thing
-(an empty list means "none of these"). A reply that does not parse, names an
-unknown position, or carries a score outside [0, 1] is treated as
+(an empty list means "none of these"). The reply must be that object alone —
+or that object inside a single enclosing markdown code fence, which some hosted
+models add by habit. A reply that does not parse (prose or a thinking preamble
+around the object included), names an unknown or repeated position, omits a
+position or score, or carries a score outside [0, 1] is treated as
 **unavailable** (§7.6) — never partially trusted. The judge decides nothing:
 its scores go through the §7.2 band rule like tier 2's.
 
@@ -561,19 +564,27 @@ the same override rule the companion's and workout's `model` keys use). The
 endpoint is `provider.endpoint`; the per-call bound is `tier3_timeout_seconds`,
 short enough that a stalled model never holds up a nightly `add`.
 
-* **Default: `ollama`, local-first.** The phrase and the candidate wordings go
-  to a model on the same machine — **nothing leaves the device.** Gratitude
-  phrasings are intimate; local-first is the Sanctuary default.
-* **Opt-in: `claude_cli`.** Setting `tier3_backend` to `claude_cli` sends the
-  same minimal payload to the vendor's hosted model through the on-host CLI —
-  an explicit, documented egress of the phrase and candidate wordings only.
-* **The trust gate.** The local default is trusted only after its match quality
-  is checked against the synthetic fixture set (zero-overlap true matches,
-  near-ties, different-meaning look-alikes, genuinely new phrases). If the local
-  model underperforms, `claude_cli` is documented and configured as the
-  recommended backend instead. The evaluation, its result, and the resulting
-  default are recorded in [ADR-0012](adr/0012-gratitude-semantic-matching.md)
-  §6. Either way tier 3 stays optional.
+* **Off until you opt in.** `tier3_enabled` defaults to `false`: out of the
+  box `add` matches on tiers 1–2 alone and **nothing leaves the machine**.
+  Gratitude phrasings are intimate, so sending them anywhere is your call.
+* **Default judge: `claude_cli` with `sonnet`** — the configuration that
+  cleared the trust gate. Enabling tier 3 with it sends the minimal payload
+  above — the phrase and the candidate wordings, nothing else — to the vendor's
+  hosted model through the on-host CLI: an explicit, documented egress.
+* **Local: `ollama`.** Setting `tier3_backend` to `ollama` with a local
+  `tier3_model` keeps the phrase and wordings on the machine. It is supported,
+  but no local model evaluated cleared the trust gate at the default bound —
+  one answered too slowly, another confidently merged unrelated phrases — and a
+  "thinking" model needs a longer `tier3_timeout_seconds`. An unrecognized
+  `tier3_backend` is coerced to `ollama`, so a typo fails safe toward local.
+* **The trust gate.** A backend and model become the default only after their
+  match quality is checked against the synthetic fixture set (zero-overlap true
+  matches, near-ties, different-meaning look-alikes, genuinely new phrases).
+  Local-first was the intent; the local models underperformed, so `claude_cli`
+  is documented and configured as the default instead, and tier 3 ships opt-in.
+  The evaluation, its per-model results, and the resulting default are recorded
+  in [ADR-0012](adr/0012-gratitude-semantic-matching.md) §6. Either way tier 3
+  stays optional.
 
 **Sanctuary reach.** Gratitude entries live under `~/.lucid/registries/`,
 which the cross-cutting sanctuary denylist keeps away from agent inference
@@ -588,7 +599,8 @@ reach"; the denylist for Reflection-class inference stands unchanged.
 
 ### 7.6 No model, no problem — P9 degradation
 
-Tier 3 is never load-bearing. When it is **disabled** (`tier3_enabled: false`),
+Tier 3 is never load-bearing. When it is **disabled** (`tier3_enabled: false`,
+the default),
 **unavailable** (no provider reachable, a timeout, or a provider error — the
 `provider.ErrUnavailable` / `ErrTimeout` outage class), or **untrustworthy** (a
 malformed reply), the add proceeds on the tier-1/tier-2 decision alone (§7.3
@@ -746,11 +758,12 @@ distance; tier 3 = the optional by-meaning judge over the live list, run only
 when tier 2 is Ambiguous or Low · `gratitude.match` knobs (all configurable,
 out-of-range clipped to the default with a warning): `tier2_high` **0.85**,
 `tier2_margin` **0.15**, `ambiguous_floor` **0.50** (shared), `tier3_high`
-**0.90**, `tier3_margin` **0.20**, `tier3_enabled` **true**, `tier3_backend`
-**`ollama`** (local-first; `claude_cli` opt-in — final default recorded by the
-trust gate, [ADR-0012](adr/0012-gratitude-semantic-matching.md) §6),
-`tier3_model` **`qwen3:8b`** (placeholder until the trust gate records the
-evaluated model; empty inherits `provider.model`), `tier3_timeout_seconds`
+**0.90**, `tier3_margin` **0.20**, `tier3_enabled` **false** (tier 3 is
+opt-in), `tier3_backend` **`claude_cli`** and `tier3_model` **`sonnet`** (the
+configuration that cleared the trust gate,
+[ADR-0012](adr/0012-gratitude-semantic-matching.md) §6; `ollama` keeps the judge
+local; empty inherits `provider.backend` / `provider.model`; an unrecognized
+backend is coerced to `ollama`), `tier3_timeout_seconds`
 **30**, `tier3_max_candidates` **200** · ambiguous band: interactive asks,
 non-interactive / `--json` refuses-and-defers (writes nothing, exit 1, resolve
 with `--into` or `--new`), at most three candidates shown · `--into` targets a
@@ -781,7 +794,8 @@ rule").
   provider. Tier 3 reaches a model only through `internal/provider`, is
   optional, and degrades to tiers 1–2 (§7.6).
 * **Minimal egress.** The tier-3 judge sees the new phrase and the candidate
-  wordings — nothing else — and by default never leaves the machine (§7.5).
+  wordings — nothing else — and nothing leaves the machine unless you enable
+  tier 3 (§7.5).
 * **No sends.** Outward expression prompts and records; Lucid never messages a
   person on your behalf.
 * **Append-only** (§2). History is never rewritten; a duplicate is folded and

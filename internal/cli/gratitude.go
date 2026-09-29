@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/router"
 )
 
@@ -18,9 +22,15 @@ const (
 	gratitudeLastFlag  = "last"
 )
 
+// gratitudeTier3UnavailableNote is the one-line stderr note an add prints when
+// the by-meaning judge was needed but could not be reached or trusted, so the
+// phrase was matched on tiers 1–2 alone (gratitude.md §7.6).
+const gratitudeTier3UnavailableNote = "meaning match unavailable — matched by wording only"
+
 // newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§6): the accumulating
 // nightly-gratitude tally. It is a thin dispatch group over four subcommands —
-// deterministic, agent-free, no LLM in any path (architecture P9), modeled on
+// deterministic and agent-free (architecture P9) apart from `add`'s optional
+// tier-3 by-meaning judge, which degrades to the model-free tiers — modeled on
 // `lucid reframe` and `lucid person`:
 //
 //	lucid gratitude add "my morning coffee"
@@ -55,9 +65,12 @@ func newGratitudeCmd() *cobra.Command {
 // [--day <date>]` and the seed alias `add <thing> --count N --first <date> --last
 // <date>`. The thing is joined from the trailing args (the obs/injury precedent)
 // and stored verbatim. Without flags the match tiers decide (gratitude.md §7): the
-// canonical key or a clear token match bumps an existing entry, nothing close
-// starts a new one, and an ambiguous match writes nothing and prints the
-// candidates to stderr (exit 1) for the caller to resolve; `--into <id>` bumps
+// canonical key, a clear token match, or a clear by-meaning match (the optional
+// tier-3 judge, built through the buildProvider seam) bumps an existing entry,
+// nothing close starts a new one, and an ambiguous match writes nothing and
+// prints the candidates to stderr (exit 1) for the caller to resolve. When the
+// judge was needed but unreachable the add still completes on tiers 1–2 and says
+// so on stderr (gratitude.md §7.6); `--into <id>` bumps
 // that specific stable entry regardless of wording; `--new` starts a new entry
 // (tier 1 still applies); `--count` routes to the one-time seed/import path (an
 // explicit Count/First/Last, gratitude.md §5). `--day` is the strict backdating
@@ -96,13 +109,15 @@ func newGratitudeAddCmd() *cobra.Command {
 			}
 
 			day, _ := cmd.Flags().GetString(flagDay)
-			res, err := r.AddGratitude(router.AddGratitudeRequest{
+			res, err := r.AddGratitude(cmd.Context(), router.AddGratitudeRequest{
 				Thing:    thing,
 				DayArg:   day,
 				Into:     into,
 				ForceNew: forceNew,
+				Provider: gratitudeJudge(r.Config()),
 				Now:      clockNow(),
 			})
+			noteGratitudeTier3(cmd.ErrOrStderr(), res.Tier3, err)
 			if err != nil {
 				// The root silences returned errors, so a rejected --day, an empty
 				// thing, an unknown --into id, or an ambiguous-band suggestion would
@@ -125,6 +140,38 @@ func newGratitudeAddCmd() *cobra.Command {
 	registerGratitudeSeedFlags(cmd)
 	registerBodyFileFlag(cmd, "thing you're grateful for")
 	return cmd
+}
+
+// gratitudeJudge builds the optional tier-3 by-meaning judge for a plain `add`
+// (gratitude.md §7.5) through the buildProvider seam every provider-backed verb
+// shares: the provider block with the gratitude.match tier3_backend / tier3_model
+// / tier3_timeout_seconds overrides. It returns nil when tier 3 is disabled — the
+// router then reports it as such — or when no backend can be built, which the
+// router treats as unreachable: the add completes on tiers 1–2 either way.
+func gratitudeJudge(cfg config.Config) provider.Provider {
+	m := cfg.Gratitude.Match.OrDefault()
+	if !m.Tier3Enabled {
+		return nil
+	}
+	p, err := buildProvider(m.Tier3ProviderConfig(cfg.Provider))
+	if err != nil {
+		return nil
+	}
+	return p
+}
+
+// noteGratitudeTier3 prints the degraded-path note (gratitude.md §7.6) when the
+// by-meaning judge was needed but unavailable — on a completed add (status) or an
+// ambiguous-band refusal (the suggestion error carries its own status). It goes
+// to stderr so a `--json` stdout stays machine-clean.
+func noteGratitudeTier3(w io.Writer, status router.GratitudeTier3Status, err error) {
+	var sugg *router.GratitudeSuggestionError
+	if errors.As(err, &sugg) {
+		status = sugg.Tier3
+	}
+	if status == router.GratitudeTier3Unavailable {
+		_, _ = fmt.Fprintln(w, gratitudeTier3UnavailableNote)
+	}
 }
 
 // newGratitudeMergeCmd wires `lucid gratitude merge <src> <dst>` (gratitude.md
@@ -258,8 +305,9 @@ func newGratitudeListCmd() *cobra.Command {
 // the receipt id of this write, the stable entry id, and the resulting tally.
 // Built CLI-side with stable snake_case names so a harness branches on fields
 // rather than parsing the ack prose. match_tier and match_score appear only when
-// the occurrence landed by an automatic match (gratitude.md §7.4), so a tier-1,
-// `--into`, or create write keeps exactly its v1 shape.
+// the occurrence landed by an automatic match (gratitude.md §7.4), and tier3 only
+// when the by-meaning judge was needed (gratitude.md §7.6), so a tier-1,
+// `--into`, or first-entry write keeps exactly its v1 shape.
 type gratitudeAddView struct {
 	Receipt    string  `json:"receipt"`
 	ID         string  `json:"id"`
@@ -270,6 +318,7 @@ type gratitudeAddView struct {
 	Created    bool    `json:"created"`
 	MatchTier  int     `json:"match_tier,omitempty"`
 	MatchScore float64 `json:"match_score,omitempty"`
+	Tier3      string  `json:"tier3,omitempty"`
 }
 
 // gratitudeAddViewOf projects a router result into the stable --json shape.
@@ -284,5 +333,6 @@ func gratitudeAddViewOf(res router.GratitudeWriteResult) gratitudeAddView {
 		Created:    res.Created,
 		MatchTier:  res.MatchTier,
 		MatchScore: res.MatchScore,
+		Tier3:      string(res.Tier3),
 	}
 }

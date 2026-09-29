@@ -42,7 +42,7 @@ func bootedGratitude(t *testing.T) *Router {
 
 func addGratitude(t *testing.T, r *Router, thing string, now time.Time) GratitudeWriteResult {
 	t.Helper()
-	res, err := r.AddGratitude(AddGratitudeRequest{Thing: thing, Now: now})
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: thing, Now: now})
 	require.NoError(t, err)
 	return res
 }
@@ -114,7 +114,7 @@ func TestGratitudeWritesReturnDistinctReceipts(t *testing.T) {
 	record(b.Receipt)
 
 	// A targeted `--into` bump mints its own receipt against the same entry.
-	into, err := r.AddGratitude(AddGratitudeRequest{Thing: "the first cup of the day", Into: key, Now: day2()})
+	into, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the first cup of the day", Into: key, Now: day2()})
 	require.NoError(t, err)
 	assert.Equal(t, key, into.Key)
 	record(into.Receipt)
@@ -146,7 +146,7 @@ func TestGratitudeAddInto(t *testing.T) {
 	addGratitude(t, r, "my morning coffee", day1()) // a distractor entry
 
 	// A differing wording bumps the targeted entry, not a canonical-key match.
-	res, err := r.AddGratitude(AddGratitudeRequest{Thing: "my house", Into: roof.Key, Now: day2()})
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my house", Into: roof.Key, Now: day2()})
 	require.NoError(t, err)
 	assert.False(t, res.Created, "--into bumps, it never creates")
 	assert.Equal(t, roof.Key, res.Key, "the targeted entry is the one bumped")
@@ -167,7 +167,7 @@ func TestGratitudeAddInto(t *testing.T) {
 	assert.Equal(t, 2, list.View.Count)
 
 	// An --into id that resolves to no live entry is a clean error, nothing written.
-	_, err = r.AddGratitude(AddGratitudeRequest{Thing: "my house", Into: "gratitude_does-not-exist", Now: day2()})
+	_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "my house", Into: "gratitude_does-not-exist", Now: day2()})
 	require.Error(t, err)
 	after, err := r.GratitudeList()
 	require.NoError(t, err)
@@ -205,7 +205,7 @@ func TestGratitudeImportExplicitCounts(t *testing.T) {
 	assert.Empty(t, ev.Date, "a seed carries no single occurrence date")
 
 	// A later nightly add accumulates on top of the seeded count.
-	bump, err := r.AddGratitude(AddGratitudeRequest{Thing: "clean drinking water", Now: day2()})
+	bump, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "clean drinking water", Now: day2()})
 	require.NoError(t, err)
 	assert.Equal(t, 23, bump.Count, "a nightly add accumulates on the seed")
 
@@ -303,14 +303,14 @@ func TestGratitudeAddBackdated(t *testing.T) {
 	r := bootedGratitude(t)
 
 	// An explicit civil day in the past.
-	res, err := r.AddGratitude(AddGratitudeRequest{Thing: "a walk outside", DayArg: "2026-06-01", Now: day1()})
+	res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "a walk outside", DayArg: "2026-06-01", Now: day1()})
 	require.NoError(t, err)
 	assert.Equal(t, "2026-06-01", res.First)
 	assert.Equal(t, "2026-06-01", res.Last, "the occurrence files under the backdated day")
 	assert.Contains(t, res.Receipt, "grat_2026_06_01_", "the receipt encodes the logical date, not the write time")
 
 	// @yesterday relative to now, 04:00-rollover aware (shared capture grammar).
-	res2, err := r.AddGratitude(AddGratitudeRequest{Thing: "a warm bed", DayArg: "@yesterday", Now: day3()})
+	res2, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "a warm bed", DayArg: "@yesterday", Now: day3()})
 	require.NoError(t, err)
 	wantDay := observations.DateString(
 		observations.LogicalBaseDate(day3(), observations.DefaultRolloverMin).AddDate(0, 0, -1),
@@ -318,7 +318,7 @@ func TestGratitudeAddBackdated(t *testing.T) {
 	assert.Equal(t, wantDay, res2.Last)
 
 	// A future --day is a strict-tier refusal; nothing lands.
-	_, err = r.AddGratitude(AddGratitudeRequest{Thing: "the future", DayArg: "2999-01-01", Now: day1()})
+	_, err = r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "the future", DayArg: "2999-01-01", Now: day1()})
 	require.Error(t, err)
 	list, err := r.GratitudeList()
 	require.NoError(t, err)
@@ -330,7 +330,7 @@ func TestGratitudeAddBackdated(t *testing.T) {
 func TestGratitudeAddEmptyWritesNothing(t *testing.T) {
 	r := bootedGratitude(t)
 
-	_, err := r.AddGratitude(AddGratitudeRequest{Thing: "   ", Now: day1()})
+	_, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: "   ", Now: day1()})
 	require.Error(t, err)
 
 	list, err := r.GratitudeList()

@@ -873,16 +873,17 @@ func TestValidate_FrameworkBlockOptional(t *testing.T) {
 
 // TestDefault_GratitudeMatchBlock pins the documented gratitude.match defaults
 // (gratitude.md §9; ADR-0012 §2, §6): tier 2 at 0.85 / 0.15, the shared 0.50
-// floor, a stricter tier 3 at 0.90 / 0.20, tier 3 on with the local-first ollama
-// backend and its placeholder model, a 30s judge bound, and a 200-entry cap.
+// floor, a stricter tier 3 at 0.90 / 0.20, the judge that cleared the trust gate
+// (claude_cli, sonnet) switched off until opted in, a 30s judge bound, and a
+// 200-entry cap.
 func TestDefault_GratitudeMatchBlock(t *testing.T) {
 	m := Default().Gratitude.Match
 	assert.InDelta(t, 0.85, m.Tier2High, 1e-9)
 	assert.InDelta(t, 0.15, m.Tier2Margin, 1e-9)
 	assert.InDelta(t, 0.50, m.AmbiguousFloor, 1e-9)
-	assert.True(t, m.Tier3Enabled, "tier 3 ships on — its default backend is local")
-	assert.Equal(t, "ollama", m.Tier3Backend, "local-first: nothing leaves the machine by default")
-	assert.Equal(t, "qwen3:8b", m.Tier3Model)
+	assert.False(t, m.Tier3Enabled, "tier 3 ships off — its default judge is hosted, so enabling it is the opt-in")
+	assert.Equal(t, "claude_cli", m.Tier3Backend, "the backend that cleared the trust gate")
+	assert.Equal(t, "sonnet", m.Tier3Model, "the model that cleared the trust gate")
 	assert.InDelta(t, 0.90, m.Tier3High, 1e-9)
 	assert.InDelta(t, 0.20, m.Tier3Margin, 1e-9)
 	assert.Equal(t, 30, m.Tier3TimeoutSeconds)
@@ -911,9 +912,9 @@ func TestGratitudeMatch_MarshalsDocumentedShape(t *testing.T) {
 	assert.InDelta(t, 0.85, match["tier2_high"], 1e-9)
 	assert.InDelta(t, 0.15, match["tier2_margin"], 1e-9)
 	assert.InDelta(t, 0.5, match["ambiguous_floor"], 1e-9)
-	assert.Equal(t, true, match["tier3_enabled"])
-	assert.Equal(t, "ollama", match["tier3_backend"])
-	assert.Equal(t, "qwen3:8b", match["tier3_model"])
+	assert.Equal(t, false, match["tier3_enabled"])
+	assert.Equal(t, "claude_cli", match["tier3_backend"])
+	assert.Equal(t, "sonnet", match["tier3_model"])
 	assert.InDelta(t, 0.9, match["tier3_high"], 1e-9)
 	assert.InDelta(t, 0.2, match["tier3_margin"], 1e-9)
 	assert.EqualValues(t, 30, match["tier3_timeout_seconds"])
@@ -1059,17 +1060,17 @@ func TestGratitudeMatch_ClipFailSafe(t *testing.T) {
 }
 
 // TestGratitudeMatch_RoundTrip proves a tuned gratitude.match block survives a
-// write/read cycle exactly — including an explicit tier3_enabled false, which the
-// defaults pre-seed must not flip back on.
+// write/read cycle exactly — here an opt-in to a local judge, every knob moved
+// off its default, which the defaults pre-seed must not pull back.
 func TestGratitudeMatch_RoundTrip(t *testing.T) {
 	c := Default()
 	c.Gratitude.Match = GratitudeMatchConfig{
 		Tier2High:           0.8,
 		Tier2Margin:         0.1,
 		AmbiguousFloor:      0.4,
-		Tier3Enabled:        false,
-		Tier3Backend:        "claude_cli",
-		Tier3Model:          "sonnet",
+		Tier3Enabled:        true,
+		Tier3Backend:        "ollama",
+		Tier3Model:          "qwen3:8b",
 		Tier3High:           0.95,
 		Tier3Margin:         0.25,
 		Tier3TimeoutSeconds: 12,
@@ -1081,6 +1082,34 @@ func TestGratitudeMatch_RoundTrip(t *testing.T) {
 	got, err := Unmarshal(b)
 	require.NoError(t, err)
 	assert.Equal(t, c, got)
-	assert.False(t, got.Gratitude.Match.Tier3Enabled)
+	assert.True(t, got.Gratitude.Match.Tier3Enabled)
 	require.NoError(t, got.Validate())
+}
+
+// TestGratitudeMatch_Tier3ProviderConfig: the tier-3 judge is built from the
+// provider block with tier3_backend / tier3_model overriding backend / model when
+// set — empty inherits, the companion/workout model rule — and
+// tier3_timeout_seconds as the per-call bound, while the endpoint and every other
+// provider key are inherited unchanged (gratitude.md §7.5). A zero match block
+// reads as the defaults.
+func TestGratitudeMatch_Tier3ProviderConfig(t *testing.T) {
+	base := Default().Provider
+	base.Backend, base.Model, base.Endpoint, base.TimeoutSeconds = "ollama", "llama3", "http://127.0.0.1:9", 120
+
+	got := DefaultGratitudeMatch().Tier3ProviderConfig(base)
+	assert.Equal(t, "claude_cli", got.Backend, "the default tier-3 backend overrides provider.backend")
+	assert.Equal(t, "sonnet", got.Model, "the default tier-3 model overrides provider.model")
+	assert.Equal(t, 30, got.TimeoutSeconds, "the per-call bound is tier3_timeout_seconds")
+	assert.Equal(t, "http://127.0.0.1:9", got.Endpoint, "the endpoint is inherited")
+
+	inherit := DefaultGratitudeMatch()
+	inherit.Tier3Backend, inherit.Tier3Model, inherit.Tier3TimeoutSeconds = "", "", 7
+	got = inherit.Tier3ProviderConfig(base)
+	assert.Equal(t, "ollama", got.Backend, "an empty tier3_backend inherits provider.backend")
+	assert.Equal(t, "llama3", got.Model, "an empty tier3_model inherits provider.model")
+	assert.Equal(t, 7, got.TimeoutSeconds)
+
+	assert.Equal(t, DefaultGratitudeMatch().Tier3ProviderConfig(base), GratitudeMatchConfig{}.Tier3ProviderConfig(base),
+		"a zero block reads as the defaults")
+	assert.Equal(t, 120, base.TimeoutSeconds, "the base block is not mutated")
 }

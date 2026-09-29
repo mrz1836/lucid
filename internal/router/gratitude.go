@@ -2,6 +2,7 @@ package router
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/provider"
 )
 
 // storagePrefix is the package prefix the storage adapter stamps on its errors.
@@ -34,21 +36,26 @@ func surfaceMergeError(err error) error {
 // `list` folds each live entry's Count/First/Last and prints the tally sorted by
 // count then recency. Every write is deterministic and agent-free (architecture
 // P9): the canonical key is a normalized string derivation and the tier-2 token
-// match a pure score over the live entries' wordings.
+// match a pure score over the live entries' wordings. The one optional model
+// step — the tier-3 by-meaning judge on a plain `add` — only scores; the band
+// rule decides, and without it the add completes on tiers 1–2.
 
 // AddGratitudeRequest is one `lucid gratitude add` turn (gratitude.md §3): the
 // verbatim phrase, the strict-tier --day value, an optional Into target, the
-// ForceNew (`--new`) answer, and now (injected so backdating and receipt ids are
-// deterministic in tests). When Into is set, the phrase bumps that specific
-// stable entry regardless of wording (the manual override, gratitude.md §4) and
-// no matching runs. When ForceNew is set, the tier-2 token match is skipped and
-// the phrase starts a new entry — unless tier 1 finds its canonical key, which
-// by definition is the same entry (gratitude.md §3). The two cannot combine.
+// ForceNew (`--new`) answer, the Provider the optional tier-3 judge reaches
+// through, and now (injected so backdating and receipt ids are deterministic in
+// tests). When Into is set, the phrase bumps that specific stable entry
+// regardless of wording (the manual override, gratitude.md §4) and no matching
+// runs. When ForceNew is set, tiers 2–3 are skipped and the phrase starts a new
+// entry — unless tier 1 finds its canonical key, which by definition is the same
+// entry (gratitude.md §3). The two cannot combine. A nil Provider means no judge
+// could be reached: the add completes on tiers 1–2 (gratitude.md §7.6).
 type AddGratitudeRequest struct {
 	Thing    string
 	DayArg   string
 	Into     string
 	ForceNew bool
+	Provider provider.Provider
 	Now      time.Time
 }
 
@@ -80,7 +87,8 @@ type GratitudeMergeRequest struct {
 // occurrence just appended). MatchTier and MatchScore are set only when the
 // occurrence landed by an automatic match (gratitude.md §7.4 High band) — zero
 // for a tier-1 canonical-key bump, an `--into` bump, and a create, so those stay
-// exactly the v1 shape.
+// exactly the v1 shape. Tier3 says what became of the by-meaning judge when it
+// was needed (gratitude.md §7.6), empty otherwise.
 type GratitudeWriteResult struct {
 	Entry      observations.GratitudeEntry
 	Receipt    string
@@ -92,6 +100,7 @@ type GratitudeWriteResult struct {
 	Created    bool
 	MatchTier  int
 	MatchScore float64
+	Tier3      GratitudeTier3Status
 	Ack        string
 }
 
@@ -123,17 +132,20 @@ type GratitudeListResult struct {
 
 // AddGratitude tallies one occurrence of a thing a person is grateful for
 // (gratitude.md §3). It decides which entry the occurrence lands on — the
-// `--into` target verbatim, or the match pipeline (tier 1 canonical key, then the
-// tier-2 token match, gratitude.md §7.3) — appends one occurrence event, and
-// returns that event's receipt id alongside the resulting tally. It is
-// deterministic and agent-free. An empty phrase writes nothing (a clean usage
+// `--into` target verbatim, or the match pipeline (tier 1 canonical key, the
+// tier-2 token match, then the optional tier-3 judge through req.Provider,
+// gratitude.md §7.3) — appends one occurrence event, and returns that event's
+// receipt id alongside the resulting tally. Every step but the judge is
+// deterministic and agent-free, and the judge is never load-bearing: disabled,
+// unreachable, or garbled, the add completes on tiers 1–2 and reports it in
+// Tier3 (gratitude.md §7.6). An empty phrase writes nothing (a clean usage
 // error), and a strict-tier `--day` runs the shared capture grammar: an
 // unreadable token or a future day is a [DayRejectedError] and nothing is
 // written. An ambiguous-band match writes nothing either: it returns a
 // [GratitudeSuggestionError] carrying the candidates, resolved by re-running with
 // Into or ForceNew. The receipt encodes the occurrence's logical date; the
 // event's `at` is always the real write time.
-func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, error) {
+func (r *Router) AddGratitude(ctx context.Context, req AddGratitudeRequest) (GratitudeWriteResult, error) {
 	now := whenOr(req.Now)
 	thing := strings.TrimSpace(req.Thing)
 	if thing == "" {
@@ -155,7 +167,7 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 	// Resolve which entry this occurrence lands on (the `--into` target verbatim
 	// or the match pipeline) and whether the write refreshes the display. An
 	// ambiguous band writes nothing and hands the candidates back to the caller.
-	dec, err := r.resolveGratitudeAddKey(req.Into, thing, req.ForceNew)
+	dec, err := r.resolveGratitudeAddKey(ctx, req.Into, thing, req.ForceNew, req.Provider)
 	if err != nil {
 		return GratitudeWriteResult{}, err
 	}
@@ -184,6 +196,7 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 		First:   tally.First,
 		Last:    tally.Last,
 		Created: created,
+		Tier3:   dec.Tier3,
 		Ack:     gratitudeAddAck(entry.DisplayName, tally.Count, appended.ID, created),
 	}
 	if dec.automatic() {
@@ -199,12 +212,15 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 // verbatim (the manual override, gratitude.md §4) and no matching runs: it must
 // already name a live entry — a bump never creates one, and tonight's differing
 // wording only joins aka[]. Without it, the match pipeline decides
-// ([Router.matchGratitude]); forceNew (`--new`) skips its tier-2 step. `--into`
-// and `--new` contradict each other, so the pair is a clean error.
-func (r *Router) resolveGratitudeAddKey(into, thing string, forceNew bool) (gratitudeMatchDecision, error) {
+// ([Router.matchGratitude], with judge as its optional tier-3 provider);
+// forceNew (`--new`) skips its tier-2 and tier-3 steps. `--into` and `--new`
+// contradict each other, so the pair is a clean error.
+func (r *Router) resolveGratitudeAddKey(
+	ctx context.Context, into, thing string, forceNew bool, judge provider.Provider,
+) (gratitudeMatchDecision, error) {
 	into = strings.TrimSpace(into)
 	if into == "" {
-		return r.matchGratitude(thing, forceNew)
+		return r.matchGratitude(ctx, thing, forceNew, judge)
 	}
 	if forceNew {
 		return gratitudeMatchDecision{}, fmt.Errorf("gratitude add: --into and --new cannot be combined; nothing was saved")
