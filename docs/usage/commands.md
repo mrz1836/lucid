@@ -36,7 +36,7 @@ this reference stays the precise baseline.
   | Code | Meaning |
   |------|---------|
   | `0` | success |
-  | `1` | runtime error, a breached gate (`validate` found errors, `mode` was rejected), or a deferred choice (`gratitude add` in the ambiguous band wrote nothing and returned a suggestion) |
+  | `1` | runtime error, a breached gate (`validate` found errors, `mode` was rejected), or a deferred choice (`gratitude add` in the ambiguous band wrote nothing and returned a suggestion, or its question was canceled) |
   | `2` | usage / flag-parse error (unknown command, bad flag) |
 
 - **Ledger location** is `~/.lucid/`, overridable with the `LUCID_HOME`
@@ -893,8 +893,9 @@ match tiers, confidence bands, and outward expression):
   - **Low** — nothing close: a **new entry** is created.
   - **Ambiguous** — a near-tie, or a plausible-but-unconfident match: never
     silently merged, never silently created. On a terminal, `add` asks *"Did you
-    mean to bump `<id>`: `<thing>`?"* (bump it / start a new entry / pick another
-    candidate / cancel). **Non-interactive or `--json`, it refuses and defers:**
+    mean to bump `<id>`: `<thing>`?"* on stderr (bump it / start a new entry /
+    pick another candidate / cancel — a cancel writes nothing and exits `1`).
+    **Non-interactive or `--json`, it refuses and defers:**
     writes nothing, **exits `1`**, and returns the suggestion (candidate ids,
     wordings, scores, band) — resolve it by re-running with `--into <id>` or
     `--new`. Interactive means stdin is a terminal and `--json` is unset, so

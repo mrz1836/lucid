@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -27,6 +29,30 @@ const (
 // phrase was matched on tiers 1–2 alone (gratitude.md §7.6).
 const gratitudeTier3UnavailableNote = "meaning match unavailable — matched by wording only"
 
+// gratitudeSuggestionStatus is the "status" an ambiguous-band add's --json
+// payload carries (gratitude.md §7.4), telling it apart from a write's view.
+const gratitudeSuggestionStatus = "suggestion"
+
+// gratitudeSuggestionResolve lists the two explicit answers that resolve a
+// deferred suggestion, as the --json payload's "resolve" field names them. It
+// returns a fresh slice, so no caller can alter another's payload.
+func gratitudeSuggestionResolve() []string {
+	return []string{"--into <id>", "--new"}
+}
+
+// errGratitudeAskCanceled is an interactive add whose "did you mean …?" was
+// answered q, or met the end of input: nothing is written and the add exits 1,
+// like any other deferred choice (gratitude.md §7.4).
+var errGratitudeAskCanceled = errors.New("gratitude add canceled; nothing was saved")
+
+// gratitudeStdinIsTerminal reports whether an add's stdin is a terminal a person
+// can answer on — the one case an ambiguous-band add asks rather than refuses
+// (gratitude.md §7.4). It is a package var so tests can stand in for a terminal;
+// the cli test package defaults it to false, so no test ever waits on a real one.
+//
+//nolint:gochecknoglobals // one injected terminal seam so the ambiguous-band question is testable without a TTY
+var gratitudeStdinIsTerminal = stdinIsInteractive
+
 // newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§6): the accumulating
 // nightly-gratitude tally. It is a thin dispatch group over four subcommands —
 // deterministic and agent-free (architecture P9) apart from `add`'s optional
@@ -43,7 +69,8 @@ const gratitudeTier3UnavailableNote = "meaning match unavailable — matched by 
 //
 // add tallies one occurrence (creating the entry, bumping the entry the match
 // tiers land it on, or bumping a specific entry with --into) and prints the
-// receipt id; an ambiguous match writes nothing and names the candidates; list shows
+// receipt id; an ambiguous match asks "did you mean …?" on a terminal and
+// otherwise writes nothing and names the candidates; list shows
 // the tally sorted by count then recency with a stable id per entry; merge folds
 // an accidental duplicate; import seeds a pre-counted row (the one-time migration
 // path). Every mutation returns its own receipt id, distinct from the stable id.
@@ -67,12 +94,14 @@ func newGratitudeCmd() *cobra.Command {
 // and stored verbatim. Without flags the match tiers decide (gratitude.md §7): the
 // canonical key, a clear token match, or a clear by-meaning match (the optional
 // tier-3 judge, built through the buildProvider seam) bumps an existing entry,
-// nothing close starts a new one, and an ambiguous match writes nothing and
-// prints the candidates to stderr (exit 1) for the caller to resolve. When the
-// judge was needed but unreachable the add still completes on tiers 1–2 and says
-// so on stderr (gratitude.md §7.6); `--into <id>` bumps
-// that specific stable entry regardless of wording; `--new` starts a new entry
-// (tier 1 still applies); `--count` routes to the one-time seed/import path (an
+// and nothing close starts a new one. An ambiguous match never guesses
+// ([resolveGratitudeSuggestion]): on a terminal it asks "did you mean …?" and
+// writes only on the answer; under --json, or off a terminal, it writes nothing
+// and exits 1 with the suggestion — the --json payload, or a sentence on stderr —
+// for the caller to resolve with --into or --new. When the judge was needed but
+// unreachable the add still completes on tiers 1–2 and says so on stderr
+// (gratitude.md §7.6); `--into <id>` bumps that specific stable entry regardless
+// of wording; `--new` starts a new entry (tier 1 still applies); `--count` routes to the one-time seed/import path (an
 // explicit Count/First/Last, gratitude.md §5). `--day` is the strict backdating
 // tier — a bad token or a future day is a clean refusal that writes nothing,
 // printed to stderr. `--json` emits the receipt and the resulting tally.
@@ -109,22 +138,26 @@ func newGratitudeAddCmd() *cobra.Command {
 			}
 
 			day, _ := cmd.Flags().GetString(flagDay)
-			res, err := r.AddGratitude(cmd.Context(), router.AddGratitudeRequest{
+			req := router.AddGratitudeRequest{
 				Thing:    thing,
 				DayArg:   day,
 				Into:     into,
 				ForceNew: forceNew,
 				Provider: gratitudeJudge(r.Config()),
 				Now:      clockNow(),
-			})
+			}
+			res, err := r.AddGratitude(cmd.Context(), req)
 			noteGratitudeTier3(cmd.ErrOrStderr(), res.Tier3, err)
+			var sugg *router.GratitudeSuggestionError
+			if errors.As(err, &sugg) {
+				return resolveGratitudeSuggestion(cmd, r, req, sugg)
+			}
 			if err != nil {
 				// The root silences returned errors, so a rejected --day, an empty
-				// thing, an unknown --into id, or an ambiguous-band suggestion would
-				// otherwise be a bare exit code. emitErr prints the reason (a
-				// DayRejectedError's Error is its accepted-forms message; a
-				// GratitudeSuggestionError's names the candidates and how to resolve
-				// them) and returns the error unchanged so the exit code still travels.
+				// thing, or an unknown --into id would otherwise be a bare exit code.
+				// emitErr prints the reason (a DayRejectedError's Error is its
+				// accepted-forms message) and returns the error unchanged so the exit
+				// code still travels.
 				return emitErr(cmd, err)
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
@@ -171,6 +204,141 @@ func noteGratitudeTier3(w io.Writer, status router.GratitudeTier3Status, err err
 	}
 	if status == router.GratitudeTier3Unavailable {
 		_, _ = fmt.Fprintln(w, gratitudeTier3UnavailableNote)
+	}
+}
+
+// resolveGratitudeSuggestion handles an add that landed in the ambiguous band
+// (gratitude.md §7.4): the router wrote nothing and returned the suggestion.
+// Under --json it refuses and defers — the structured suggestion is the stdout
+// payload and the add exits 1, for the caller to resolve by re-running with
+// --into <id> or --new. Off a terminal (or with the phrase read from stdin by
+// --body-file -) it is the same refusal, as the suggestion's sentence on stderr.
+// On a terminal it asks "did you mean …?" and re-runs the add exactly as the
+// answer's explicit flag would: a chosen candidate is bumped as `--into <id>`
+// bumps it (no match_tier stamp — the person made the call), "no" starts a new
+// entry as `--new` does, and canceling writes nothing and exits 1.
+func resolveGratitudeSuggestion(
+	cmd *cobra.Command, r *router.Router, req router.AddGratitudeRequest, sugg *router.GratitudeSuggestionError,
+) error {
+	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+		if err := writeJSON(cmd.OutOrStdout(), gratitudeSuggestionViewOf(sugg)); err != nil {
+			return err
+		}
+		return sugg // the payload is the explanation; the error carries exit 1
+	}
+	if !gratitudeCanAsk(cmd, sugg) {
+		return emitErr(cmd, sugg)
+	}
+	answer, err := askGratitudeSuggestion(cmd.InOrStdin(), cmd.ErrOrStderr(), sugg.Candidates)
+	if err != nil {
+		return emitErr(cmd, err)
+	}
+	// The event's `at` is the real write time, so the answered add reads the
+	// clock again rather than reusing the moment the question was asked.
+	req.Into, req.ForceNew, req.Now = answer.into, answer.forceNew, clockNow()
+	res, err := r.AddGratitude(cmd.Context(), req)
+	if err != nil {
+		return emitErr(cmd, err)
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+	return nil
+}
+
+// gratitudeCanAsk reports whether an ambiguous-band add may put its question to
+// a person (gratitude.md §7.4): stdin is a terminal and was not already read for
+// the phrase itself — `--body-file -` is therefore always non-interactive — and
+// there is a candidate to ask about. The caller has already ruled out --json: a
+// machine caller is never asked.
+func gratitudeCanAsk(cmd *cobra.Command, sugg *router.GratitudeSuggestionError) bool {
+	if len(sugg.Candidates) == 0 {
+		return false
+	}
+	if path, _ := cmd.Flags().GetString("body-file"); cmd.Flags().Changed("body-file") && path == stdinPath {
+		return false
+	}
+	return gratitudeStdinIsTerminal(cmd.InOrStdin())
+}
+
+// gratitudeAnswer is one answer to the ambiguous-band question: the candidate id
+// to bump (into), a new entry (forceNew), or cancel.
+type gratitudeAnswer struct {
+	into     string
+	forceNew bool
+	cancel   bool
+}
+
+// askGratitudeSuggestion puts the "did you mean …?" question to a person on w
+// (stderr, so stdout carries only the ack) and reads answers from in, one per
+// line, until one is recognized ([parseGratitudeAnswer]); an unrecognized answer
+// names the choices and asks again. q, or the end of input, cancels with
+// [errGratitudeAskCanceled]. cands is never empty ([gratitudeCanAsk]).
+func askGratitudeSuggestion(
+	in io.Reader, w io.Writer, cands []router.GratitudeSuggestionCandidate,
+) (gratitudeAnswer, error) {
+	_, _ = fmt.Fprint(w, gratitudeQuestion(cands))
+	lines := bufio.NewScanner(in)
+	for lines.Scan() {
+		answer, ok := parseGratitudeAnswer(lines.Text(), cands)
+		switch {
+		case !ok:
+			_, _ = fmt.Fprintln(w, gratitudeAnswerHint(len(cands)))
+		case answer.cancel:
+			return gratitudeAnswer{}, errGratitudeAskCanceled
+		default:
+			return answer, nil
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return gratitudeAnswer{}, fmt.Errorf("gratitude add: could not read the answer; nothing was saved: %w", err)
+	}
+	return gratitudeAnswer{}, errGratitudeAskCanceled
+}
+
+// gratitudeQuestion renders the ambiguous-band question (gratitude.md §7.4): the
+// best candidate named in the question, then the choices — bump it, start a new
+// entry, pick another listed candidate by its number, or cancel.
+func gratitudeQuestion(cands []router.GratitudeSuggestionCandidate) string {
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, "Did you mean to bump %s: %q?\n", cands[0].ID, cands[0].Thing)
+	b.WriteString("  [y] bump it   [n] start a new entry")
+	for i, c := range cands[1:] {
+		_, _ = fmt.Fprintf(&b, "   [%d] %s: %q", i+2, c.ID, c.Thing)
+	}
+	b.WriteString("   [q] cancel\n")
+	return b.String()
+}
+
+// parseGratitudeAnswer reads one answer line, case- and space-insensitively: y
+// (or yes, or 1) bumps the first candidate, a listed number picks that
+// candidate, n (or no) starts a new entry, and q (or quit, or cancel) cancels.
+// ok is false for anything else, including a blank line — the question is never
+// answered by default.
+func parseGratitudeAnswer(line string, cands []router.GratitudeSuggestionCandidate) (gratitudeAnswer, bool) {
+	switch a := strings.ToLower(strings.TrimSpace(line)); a {
+	case "y", "yes":
+		return gratitudeAnswer{into: cands[0].ID}, true
+	case "n", "no":
+		return gratitudeAnswer{forceNew: true}, true
+	case "q", "quit", "cancel":
+		return gratitudeAnswer{cancel: true}, true
+	default:
+		n, err := strconv.Atoi(a)
+		if err != nil || n < 1 || n > len(cands) {
+			return gratitudeAnswer{}, false
+		}
+		return gratitudeAnswer{into: cands[n-1].ID}, true
+	}
+}
+
+// gratitudeAnswerHint names the accepted answers after an unrecognized one.
+func gratitudeAnswerHint(candidates int) string {
+	switch candidates {
+	case 1:
+		return "Answer y, n, or q."
+	case 2:
+		return "Answer y, n, 2, or q."
+	default:
+		return fmt.Sprintf("Answer y, n, a number from 2 to %d, or q.", candidates)
 	}
 }
 
@@ -319,6 +487,42 @@ type gratitudeAddView struct {
 	MatchTier  int     `json:"match_tier,omitempty"`
 	MatchScore float64 `json:"match_score,omitempty"`
 	Tier3      string  `json:"tier3,omitempty"`
+}
+
+// gratitudeSuggestionView is the --json payload of an ambiguous-band add — the
+// refuse-and-defer answer (gratitude.md §7.4): nothing was saved, and the
+// candidates (id, wording, score; best first, at most three) with the band, the
+// tier whose band produced it, and the two explicit ways to resolve it. tier3
+// says what became of the by-meaning judge, omitted when it was not needed.
+// Candidates and resolve are always arrays, never null.
+type gratitudeSuggestionView struct {
+	Status     string                                `json:"status"`
+	Thing      string                                `json:"thing"`
+	Band       string                                `json:"band"`
+	MatchTier  int                                   `json:"match_tier"`
+	Candidates []router.GratitudeSuggestionCandidate `json:"candidates"`
+	Resolve    []string                              `json:"resolve"`
+	Saved      bool                                  `json:"saved"`
+	Tier3      string                                `json:"tier3,omitempty"`
+}
+
+// gratitudeSuggestionViewOf projects an ambiguous-band suggestion into its
+// stable --json shape.
+func gratitudeSuggestionViewOf(sugg *router.GratitudeSuggestionError) gratitudeSuggestionView {
+	cands := sugg.Candidates
+	if cands == nil {
+		cands = []router.GratitudeSuggestionCandidate{}
+	}
+	return gratitudeSuggestionView{
+		Status:     gratitudeSuggestionStatus,
+		Thing:      sugg.Thing,
+		Band:       string(sugg.Band),
+		MatchTier:  sugg.MatchTier,
+		Candidates: cands,
+		Resolve:    gratitudeSuggestionResolve(),
+		Saved:      false,
+		Tier3:      string(sugg.Tier3),
+	}
 }
 
 // gratitudeAddViewOf projects a router result into the stable --json shape.

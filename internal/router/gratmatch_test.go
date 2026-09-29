@@ -348,6 +348,76 @@ func TestGratitudeBands(t *testing.T) {
 	for _, e := range list.View.Entries {
 		assert.Equal(t, 1, e.Count)
 	}
+
+	t.Run("each tier is banded by its own configured cutoffs", testGratitudeBandsPerTier)
+}
+
+// testGratitudeBandsPerTier drives the band step itself — the configured cutoffs
+// ([gratitudeTierCutoffs]) through the one pure rule into a decision — over
+// ranked score lists for each tier under the documented defaults (tier 2: 0.85
+// with a 0.15 lead; tier 3: 0.90 with a 0.20 lead; a shared 0.50 floor). High
+// needs the cutoff AND the margin; a near-tie or an exact tie is Ambiguous even
+// when top-1 is strong; a tier-3 score that would clear tier 2's cutoff or margin
+// but not tier 3's stricter one is Ambiguous; below the floor, or no candidate at
+// all, is Low and creates at the phrase's own key.
+func testGratitudeBandsPerTier(t *testing.T) {
+	const key = "gratitude_n-phrase"
+	keys := []string{"gratitude_a-river", "gratitude_b-stone", "gratitude_c-field", "gratitude_d-cedar"}
+	defaults := config.DefaultGratitudeMatch()
+
+	for _, tc := range []struct {
+		name      string
+		tier      int
+		scores    []float64 // ranked best first, one per keys[i]
+		band      observations.GratitudeBand
+		suggested int // how many candidates an Ambiguous decision lists
+	}{
+		{name: "tier 2 clear single winner", tier: 2, scores: []float64{0.9}, band: observations.GratitudeBandHigh},
+		{name: "tier 2 at the cutoff exactly", tier: 2, scores: []float64{0.85}, band: observations.GratitudeBandHigh},
+		{name: "tier 2 winner by the margin", tier: 2, scores: []float64{1, 0.85}, band: observations.GratitudeBandHigh},
+		{name: "tier 2 near-tie", tier: 2, scores: []float64{0.95, 0.85}, band: observations.GratitudeBandAmbiguous, suggested: 2},
+		{name: "tier 2 exact tie", tier: 2, scores: []float64{0.5, 0.5}, band: observations.GratitudeBandAmbiguous, suggested: 2},
+		{name: "tier 2 unconfident single", tier: 2, scores: []float64{0.8}, band: observations.GratitudeBandAmbiguous, suggested: 1},
+		{name: "tier 2 at the floor", tier: 2, scores: []float64{0.5, 0.4}, band: observations.GratitudeBandAmbiguous, suggested: 1},
+		{
+			name: "tier 2 suggestion capped at three", tier: 2, scores: []float64{0.7, 0.7, 0.6, 0.55},
+			band: observations.GratitudeBandAmbiguous, suggested: observations.GratitudeSuggestionLimit,
+		},
+		{name: "tier 2 below the floor", tier: 2, scores: []float64{0.4}, band: observations.GratitudeBandLow},
+		{name: "tier 2 no candidate", tier: 2, scores: nil, band: observations.GratitudeBandLow},
+		{name: "tier 3 clear single winner", tier: 3, scores: []float64{0.9}, band: observations.GratitudeBandHigh},
+		{name: "tier 3 winner by its margin", tier: 3, scores: []float64{0.95, 0.75}, band: observations.GratitudeBandHigh},
+		{name: "tier 3 under its own cutoff", tier: 3, scores: []float64{0.88}, band: observations.GratitudeBandAmbiguous, suggested: 1},
+		{name: "tier 3 under its own margin", tier: 3, scores: []float64{0.97, 0.8}, band: observations.GratitudeBandAmbiguous, suggested: 2},
+		{name: "tier 3 near-tie", tier: 3, scores: []float64{0.93, 0.88}, band: observations.GratitudeBandAmbiguous, suggested: 2},
+		{name: "tier 3 below the floor", tier: 3, scores: []float64{0.3}, band: observations.GratitudeBandLow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cands := make([]observations.GratitudeCandidate, 0, len(tc.scores))
+			for i, s := range tc.scores {
+				cands = append(cands, observations.GratitudeCandidate{Key: keys[i], Thing: "wording " + keys[i], Score: s})
+			}
+			dec, err := bandGratitudeDecision(key, tc.tier, cands, gratitudeTierCutoffs(defaults, tc.tier))
+			require.NoError(t, err)
+			assert.Equal(t, tc.band, dec.Band)
+			assert.Equal(t, tc.tier, dec.Tier)
+			switch tc.band {
+			case observations.GratitudeBandHigh:
+				assert.Equal(t, gratitudeMatchBump, dec.Action)
+				assert.Equal(t, keys[0], dec.Key, "High bumps the top-1 entry")
+				assert.InDelta(t, tc.scores[0], dec.Score, 1e-9)
+				assert.True(t, dec.automatic())
+			case observations.GratitudeBandAmbiguous:
+				assert.Equal(t, gratitudeMatchSuggest, dec.Action)
+				assert.Empty(t, dec.Key, "a suggestion names no entry to write")
+				require.Len(t, dec.Candidates, tc.suggested)
+				assert.Equal(t, keys[0], dec.Candidates[0].Key, "best first")
+			case observations.GratitudeBandLow:
+				assert.Equal(t, gratitudeMatchCreate, dec.Action)
+				assert.Equal(t, key, dec.Key, "Low creates at the phrase's own key")
+			}
+		})
+	}
 }
 
 // TestGratitudeSuggestionError_Sentence pins the ambiguous-band sentence a
@@ -867,4 +937,180 @@ func TestGratitudeTier3CanceledWritesNothing(t *testing.T) {
 	list, err := r.GratitudeList()
 	require.NoError(t, err)
 	assert.Equal(t, 1, list.View.Count)
+}
+
+// gratitudeSnapshot is the observable state of the tally a never-rule test pins:
+// every live entry's count, display wording, and aka[] forms, keyed by id.
+type gratitudeSnapshot map[string]struct {
+	Count int
+	Thing string
+	Aka   []string
+}
+
+// snapshotGratitude reads the live tally into a [gratitudeSnapshot].
+func snapshotGratitude(t *testing.T, r *Router) gratitudeSnapshot {
+	t.Helper()
+	list, err := r.GratitudeList()
+	require.NoError(t, err)
+	snap := make(gratitudeSnapshot, len(list.View.Entries))
+	for _, e := range list.View.Entries {
+		snap[e.ID] = struct {
+			Count int
+			Thing string
+			Aka   []string
+		}{Count: e.Count, Thing: e.Thing, Aka: e.Aka}
+	}
+	return snap
+}
+
+// requireGratitudeSuggestion asserts an add was refused in the ambiguous band —
+// a [GratitudeSuggestionError] naming at least one live candidate — and that the
+// tally is exactly as it was before: nothing merged into any entry, and no entry
+// at the phrase's own canonical key.
+func requireGratitudeSuggestion(t *testing.T, r *Router, err error, phrase string, before gratitudeSnapshot) *GratitudeSuggestionError {
+	t.Helper()
+	var sugg *GratitudeSuggestionError
+	require.ErrorAs(t, err, &sugg, "the ambiguous band surfaces a suggestion")
+	assert.Equal(t, observations.GratitudeBandAmbiguous, sugg.Band)
+	require.NotEmpty(t, sugg.Candidates, "the suggestion names what the phrase is close to")
+	for _, c := range sugg.Candidates {
+		assert.Contains(t, before, c.ID, "every candidate is a live entry")
+	}
+	assert.Equal(t, before, snapshotGratitude(t, r), "nothing was merged, bumped, or created")
+
+	key, kerr := r.store.ResolveGratitudeKey(phrase)
+	require.NoError(t, kerr)
+	_, found, rerr := r.store.ReadGratitude(key)
+	require.NoError(t, rerr)
+	assert.False(t, found, "no entry was started at the phrase's own key")
+	return sugg
+}
+
+// TestGratitudeNeverAutoMergeDifferentMeaning is the first "never" rule
+// (gratitude.md §7.2, §7.4; ADR-0012 §4): a look-alike that names a different
+// thing — "morning tea" beside a stored "my morning coffee" — is never folded
+// into it automatically, however high the similarity, while the evidence is in
+// the ambiguous band. Each case is a scored judge reply that a weaker rule would
+// auto-merge: a strong near-tie (dropping the margin would bump), a single score
+// that clears tier 2's cutoff but not tier 3's stricter one (banding tier 3 with
+// tier 2's numbers would bump), and a strong top-1 whose lead meets tier 2's
+// margin but not tier 3's. The tier-2 word overlap alone (0.5, the floor) is
+// ambiguous too. Every one refuses with a suggestion and writes nothing.
+func TestGratitudeNeverAutoMergeDifferentMeaning(t *testing.T) {
+	const phrase = "morning tea"
+	for _, tc := range []struct {
+		name   string
+		tier3  bool
+		scores map[string]float64 // by entry name: "coffee" / "kettle"
+		tier   int                // the tier whose band produced the suggestion
+	}{
+		{name: "strong near-tie", tier3: true, scores: map[string]float64{"coffee": 0.95, "kettle": 0.93}, tier: 3},
+		{name: "clears tier 2's cutoff, not tier 3's", tier3: true, scores: map[string]float64{"coffee": 0.89}, tier: 3},
+		{name: "tier 2's margin, not tier 3's", tier3: true, scores: map[string]float64{"coffee": 0.98, "kettle": 0.8}, tier: 3},
+		{name: "word overlap alone, judge off", tier3: false, tier: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bootedGratitude(t)
+			withTier3(r, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = tc.tier3 })
+			keys := map[string]string{
+				"coffee": addGratitude(t, r, "my morning coffee", day1()).Key,
+				"kettle": addGratitude(t, r, "the old kettle on the stove", day1()).Key,
+			}
+			before := snapshotGratitude(t, r)
+
+			fake := &provider.Fake{}
+			if tc.tier3 {
+				scores := make(map[string]float64, len(tc.scores))
+				for name, s := range tc.scores {
+					scores[keys[name]] = s
+				}
+				fake.Script = []provider.Exchange{judgeReply(t, r, phrase, scores)}
+			}
+
+			res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: phrase, Provider: fake, Now: day2()})
+			assert.Empty(t, res.Receipt, "no event was appended")
+			sugg := requireGratitudeSuggestion(t, r, err, phrase, before)
+			assert.Equal(t, tc.tier, sugg.MatchTier)
+			assert.Equal(t, keys["coffee"], sugg.Candidates[0].ID, "the look-alike is offered, not taken")
+			if tc.tier3 {
+				assert.Equal(t, 1, fake.Calls())
+				assert.Equal(t, GratitudeTier3Used, sugg.Tier3)
+			} else {
+				assert.Zero(t, fake.Calls())
+				assert.Equal(t, GratitudeTier3Disabled, sugg.Tier3)
+			}
+			assert.NotContains(t, gratitudeEntry(t, r, keys["coffee"]).Aka, phrase, "the wording was not recorded as evidence")
+		})
+	}
+}
+
+// TestGratitudeNeverSilentCreateInAmbiguous is the second "never" rule
+// (gratitude.md §7.3–§7.4; ADR-0012 §4): a phrase whose evidence lands in the
+// ambiguous band never quietly starts a new row — the suggestion is surfaced
+// instead — on every path where a create would be the easy answer: a tier-2 tie
+// with the judge switched off, unreachable, timing out, or answering "no match"
+// (tier-3 Low falls back to the tier-2 suggestion, never to a create); a
+// plausible-but-unconfident single tier-2 match; and a phrase tier 2 cannot reach
+// at all that the judge finds only plausibly close. Only an explicit `--new`
+// then creates.
+func TestGratitudeNeverSilentCreateInAmbiguous(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		phrase string
+		tier3  bool
+		judge  func(t *testing.T, r *Router, keys map[string]string) provider.Provider
+		tier   int
+	}{
+		{name: "tier-2 tie, judge off", phrase: "the walk home", tier: 2},
+		{
+			name: "tier-2 tie, no judge reachable", phrase: "the walk home", tier3: true, tier: 2,
+			judge: func(*testing.T, *Router, map[string]string) provider.Provider { return nil },
+		},
+		{
+			name: "tier-2 tie, judge times out", phrase: "the walk home", tier3: true, tier: 2,
+			judge: func(*testing.T, *Router, map[string]string) provider.Provider {
+				return &provider.Fake{Script: []provider.Exchange{{Err: fmt.Errorf("judge: %w", provider.ErrTimeout)}}}
+			},
+		},
+		{
+			name: "tier-2 tie, judge finds no match", phrase: "the walk home", tier3: true, tier: 2,
+			judge: func(*testing.T, *Router, map[string]string) provider.Provider {
+				return &provider.Fake{Script: []provider.Exchange{{Content: `{"matches": []}`}}}
+			},
+		},
+		{name: "tier-2 unconfident single, judge off", phrase: "sunny morning", tier: 2},
+		{
+			name: "no word overlap, judge plausibly close", phrase: "my commute", tier3: true, tier: 3,
+			judge: func(t *testing.T, r *Router, keys map[string]string) provider.Provider {
+				return &provider.Fake{Script: []provider.Exchange{
+					judgeReply(t, r, "my commute", map[string]float64{keys["work"]: 0.7}),
+				}}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := bootedGratitude(t)
+			withTier3(r, func(m *config.GratitudeMatchConfig) { m.Tier3Enabled = tc.tier3 })
+			keys := map[string]string{
+				"work": addGratitude(t, r, "the walk to work", day1()).Key,
+				"home": addGratitude(t, r, "a quiet home", day1()).Key,
+				"run":  addGratitude(t, r, "a sunny morning run", day1()).Key,
+			}
+			before := snapshotGratitude(t, r)
+			var judge provider.Provider
+			if tc.judge != nil {
+				judge = tc.judge(t, r, keys)
+			}
+
+			res, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: tc.phrase, Provider: judge, Now: day2()})
+			assert.False(t, res.Created, "nothing was created")
+			sugg := requireGratitudeSuggestion(t, r, err, tc.phrase, before)
+			assert.Equal(t, tc.tier, sugg.MatchTier)
+
+			fresh, err := r.AddGratitude(t.Context(), AddGratitudeRequest{Thing: tc.phrase, ForceNew: true, Now: day2()})
+			require.NoError(t, err)
+			assert.True(t, fresh.Created, "only the explicit --new answer creates")
+			assert.Len(t, snapshotGratitude(t, r), len(before)+1)
+		})
+	}
 }

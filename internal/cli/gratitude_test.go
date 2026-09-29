@@ -1,8 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -507,4 +513,239 @@ func TestGratitudeTier3CLI(t *testing.T) {
 	assert.Empty(t, stderr)
 	assert.Equal(t, 2, judge.Calls())
 	assert.Len(t, gratitudeListEntries(t), 1, "no near-duplicate row was created")
+}
+
+// runRootWithStdin runs the root command like runRoot, with stdin fed from the
+// given text — the answers a person would type.
+func runRootWithStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	root.SetIn(strings.NewReader(stdin))
+	root.SetArgs(args)
+	err = root.ExecuteContext(context.Background())
+	return out.String(), errBuf.String(), err
+}
+
+// withGratitudeTerminal stands a terminal in for stdin for one test, so an
+// ambiguous-band add asks its question (the package default is never a terminal).
+func withGratitudeTerminal(t *testing.T) {
+	t.Helper()
+	prev := gratitudeStdinIsTerminal
+	gratitudeStdinIsTerminal = func(io.Reader) bool { return true }
+	t.Cleanup(func() { gratitudeStdinIsTerminal = prev })
+}
+
+// seedGratitudeTie tallies two entries that "the walk home" ties exactly at the
+// tier-2 floor (0.5 each) and returns their ids in suggestion order — a tie
+// ranks by stable id — so a test knows which candidate the question leads with.
+func seedGratitudeTie(t *testing.T) []string {
+	t.Helper()
+	addGratitudeCLI(t, "the walk to work")
+	addGratitudeCLI(t, "a quiet home")
+	entries := gratitudeListEntries(t)
+	require.Len(t, entries, 2)
+	ids := []string{entries[0].ID, entries[1].ID}
+	slices.Sort(ids)
+	return ids
+}
+
+// gratitudeCounts maps each live entry's id to its count.
+func gratitudeCounts(t *testing.T) map[string]int {
+	t.Helper()
+	counts := map[string]int{}
+	for _, e := range gratitudeListEntries(t) {
+		counts[e.ID] = e.Count
+	}
+	return counts
+}
+
+// TestGratitudeAddJSONRefuseAndDefer: under --json an ambiguous-band add refuses
+// and defers (gratitude.md §7.4, ADR-0012 §4) — it writes nothing, exits 1, and
+// its stdout is exactly the documented suggestion payload: status, thing, band,
+// match_tier, the candidates (id, wording, score; best first), the two ways to
+// resolve, saved false, and tier3. The sentence form is not printed as well, and
+// --json never asks, even on a terminal with an answer waiting. Re-running with
+// --into bumps the chosen candidate (no match attribution — the caller chose);
+// re-running with --new starts a new entry.
+func TestGratitudeAddJSONRefuseAndDefer(t *testing.T) {
+	isolatedHome(t)
+	ids := seedGratitudeTie(t)
+	withGratitudeTerminal(t) // --json is a machine caller: never asked, terminal or not
+
+	out, stderr, err := runRootWithStdin(t, "y\n", "gratitude", "add", "the walk home", "--json")
+	require.Error(t, err, "a deferred choice is a failed exit")
+	assert.Equal(t, ExitErr, exitCodeForError(err), "the deferred choice exits 1")
+	assert.Empty(t, stderr, "no question, no sentence: the payload is the answer")
+
+	var keys map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &keys), "stdout is pure JSON")
+	assert.ElementsMatch(t,
+		[]string{"status", "thing", "band", "match_tier", "candidates", "resolve", "saved", "tier3"},
+		slices.Collect(maps.Keys(keys)), "exactly the documented fields")
+
+	type candidate struct {
+		ID    string  `json:"id"`
+		Thing string  `json:"thing"`
+		Score float64 `json:"score"`
+	}
+	var payload struct {
+		Status     string      `json:"status"`
+		Thing      string      `json:"thing"`
+		Band       string      `json:"band"`
+		MatchTier  int         `json:"match_tier"`
+		Candidates []candidate `json:"candidates"`
+		Resolve    []string    `json:"resolve"`
+		Saved      *bool       `json:"saved"`
+		Tier3      string      `json:"tier3"`
+	}
+	dec := json.NewDecoder(strings.NewReader(out))
+	dec.DisallowUnknownFields()
+	require.NoError(t, dec.Decode(&payload))
+	assert.Equal(t, "suggestion", payload.Status)
+	assert.Equal(t, "the walk home", payload.Thing)
+	assert.Equal(t, "ambiguous", payload.Band)
+	assert.Equal(t, 2, payload.MatchTier, "tier 2's band produced it")
+	require.Len(t, payload.Candidates, 2)
+	gotIDs := []string{payload.Candidates[0].ID, payload.Candidates[1].ID}
+	assert.Equal(t, ids, gotIDs, "best first, a tie by id")
+	things := map[string]string{}
+	for _, c := range payload.Candidates {
+		assert.InDelta(t, 0.5, c.Score, 1e-9)
+		things[c.ID] = c.Thing
+	}
+	assert.ElementsMatch(t, []string{"the walk to work", "a quiet home"}, []string{things[ids[0]], things[ids[1]]})
+	assert.Equal(t, []string{"--into <id>", "--new"}, payload.Resolve)
+	require.NotNil(t, payload.Saved)
+	assert.False(t, *payload.Saved)
+	assert.Equal(t, "disabled", payload.Tier3, "tier 3 is off by default, and the payload says so")
+
+	assert.Equal(t, map[string]int{ids[0]: 1, ids[1]: 1}, gratitudeCounts(t), "nothing was written")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walk home", "--into", ids[1], "--json")
+	require.NoError(t, err, "--into resolves the suggestion")
+	var bumped map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &bumped))
+	assert.Equal(t, ids[1], bumped["id"])
+	assert.InDelta(t, 2, bumped["count"], 1e-9)
+	assert.NotContains(t, bumped, "match_tier", "a chosen bump carries no match attribution")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walk home", "--new", "--json")
+	require.NoError(t, err, "--new resolves the suggestion")
+	var created map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &created))
+	assert.Equal(t, true, created["created"])
+	assert.Len(t, gratitudeListEntries(t), 3)
+}
+
+// TestGratitudeAddInteractiveSuggestion: on a terminal an ambiguous-band add asks
+// the documented question on stderr and writes only on the answer (gratitude.md
+// §7.4): y bumps the candidate it names, a listed number picks that candidate, n
+// starts a new entry, and q or the end of input cancels with nothing written and
+// exit 1. An unrecognized answer — a blank line included — names the choices and
+// asks again. A bump answered here lands exactly as --into would: tonight's
+// wording joins aka[], with no match attribution and the plain tally ack.
+func TestGratitudeAddInteractiveSuggestion(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		stdin   string
+		bumped  int // index into the suggestion-ordered ids; -1 for none
+		created bool
+		retries int // how many answers were not recognized
+	}{
+		{name: "y bumps the named candidate", stdin: "y\n", bumped: 0},
+		{name: "a number picks another candidate", stdin: "2\n", bumped: 1},
+		{name: "n starts a new entry", stdin: "n\n", bumped: -1, created: true},
+		{name: "q cancels", stdin: "q\n", bumped: -1},
+		{name: "end of input cancels", stdin: "", bumped: -1},
+		{name: "unrecognized answers ask again", stdin: "maybe\n\n3\n Y \n", bumped: 0, retries: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatedHome(t)
+			ids := seedGratitudeTie(t)
+			withGratitudeTerminal(t)
+
+			out, stderr, err := runRootWithStdin(t, tc.stdin, "gratitude", "add", "the walk home")
+			assert.True(t, strings.HasPrefix(stderr, fmt.Sprintf(
+				"Did you mean to bump %s: %q?\n  [y] bump it   [n] start a new entry   [2] %s: %q   [q] cancel\n",
+				ids[0], gratitudeThing(t, ids[0]), ids[1], gratitudeThing(t, ids[1]),
+			)), "the documented question, on stderr: %q", stderr)
+			assert.Equal(t, tc.retries, strings.Count(stderr, "Answer y, n, 2, or q."))
+			assert.NotContains(t, stderr, "re-run with --into", "a person is asked, not told to re-run")
+
+			counts := gratitudeCounts(t)
+			switch {
+			case tc.bumped >= 0:
+				require.NoError(t, err)
+				target := ids[tc.bumped]
+				assert.Equal(t, 2, counts[target])
+				assert.Equal(t, 1, counts[ids[1-tc.bumped]])
+				assert.Len(t, counts, 2, "no new entry")
+				ack := fmt.Sprintf("Tallied %q (×2) as `", gratitudeThing(t, target))
+				assert.True(t, strings.HasPrefix(out, ack),
+					"the plain tally ack — the person made the call, so no match attribution: %q", out)
+				assert.NotContains(t, out, "matched")
+				assert.Contains(t, gratitudeAka(t, target), "the walk home", "tonight's wording joins aka[] as --into records it")
+			case tc.created:
+				require.NoError(t, err)
+				assert.Contains(t, out, `Started tally for "the walk home" (×1)`)
+				assert.Len(t, counts, 3)
+			default:
+				require.ErrorIs(t, err, errGratitudeAskCanceled)
+				assert.Equal(t, ExitErr, exitCodeForError(err), "a canceled choice exits 1")
+				assert.Empty(t, out)
+				assert.Contains(t, stderr, "canceled; nothing was saved")
+				assert.Equal(t, map[string]int{ids[0]: 1, ids[1]: 1}, counts, "nothing was written")
+			}
+		})
+	}
+}
+
+// TestGratitudeAddAsksOnlyOnATerminal: the question is asked only when a person
+// can answer it (gratitude.md §7.4). Off a terminal the add refuses with the
+// suggestion sentence on stderr, even with answers piped in; with the phrase
+// itself read from stdin (--body-file -) there is no one left to ask, so it
+// refuses too, even on a terminal. Neither reads an answer or writes anything.
+func TestGratitudeAddAsksOnlyOnATerminal(t *testing.T) {
+	isolatedHome(t)
+	ids := seedGratitudeTie(t)
+
+	_, stderr, err := runRootWithStdin(t, "y\n", "gratitude", "add", "the walk home")
+	require.Error(t, err)
+	assert.NotContains(t, stderr, "Did you mean", "a pipe is not a person")
+	assert.Contains(t, stderr, "re-run with --into <id>")
+
+	withGratitudeTerminal(t)
+	_, stderr, err = runRootWithStdin(t, "the walk home\n", "gratitude", "add", "--body-file", "-")
+	require.Error(t, err)
+	assert.NotContains(t, stderr, "Did you mean", "stdin carried the phrase, not a person")
+	assert.Contains(t, stderr, "re-run with --into <id>")
+
+	assert.Equal(t, map[string]int{ids[0]: 1, ids[1]: 1}, gratitudeCounts(t), "nothing was written")
+}
+
+// gratitudeThing returns a live entry's display wording by id.
+func gratitudeThing(t *testing.T, id string) string {
+	t.Helper()
+	for _, e := range gratitudeListEntries(t) {
+		if e.ID == id {
+			return e.Thing
+		}
+	}
+	require.Failf(t, "no live entry", "%s", id)
+	return ""
+}
+
+// gratitudeAka returns a live entry's aka[] wordings by id.
+func gratitudeAka(t *testing.T, id string) []string {
+	t.Helper()
+	for _, e := range gratitudeListEntries(t) {
+		if e.ID == id {
+			return e.Aka
+		}
+	}
+	require.Failf(t, "no live entry", "%s", id)
+	return nil
 }

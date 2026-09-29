@@ -152,13 +152,8 @@ func (r *Router) matchGratitude(ctx context.Context, thing string, skipFuzzy boo
 		return gratitudeMatchDecision{}, fmt.Errorf("could not read the gratitude tally; nothing was saved: %w", err)
 	}
 
-	m := r.gratitudeMatchConfig()
 	cands := observations.Tier2(thing, live)
-	dec, err := bandGratitudeDecision(key, 2, cands, observations.GratitudeBandCutoffs{
-		High:   m.Tier2High,
-		Margin: m.Tier2Margin,
-		Floor:  m.AmbiguousFloor,
-	})
+	dec, err := bandGratitudeDecision(key, 2, cands, gratitudeTierCutoffs(r.gratitudeMatchConfig(), 2))
 	if err != nil || dec.Action == gratitudeMatchBump {
 		return dec, err
 	}
@@ -179,6 +174,19 @@ func (r *Router) liveGratitude() ([]observations.GratitudeEntry, error) {
 		}
 	}
 	return live, nil
+}
+
+// gratitudeTierCutoffs returns one tier's band thresholds from the effective
+// gratitude.match knobs (gratitude.md §7.2): tier 2's or tier 3's own high cutoff
+// and top-1/top-2 margin, and the ambiguous floor both tiers share. Every tier is
+// banded by the one pure rule ([observations.ClassifyGratitudeBand]); only these
+// numbers differ, so a tier-3 match reaches the automatic High band under the
+// same margin rule as tier 2, with its own, stricter defaults.
+func gratitudeTierCutoffs(m config.GratitudeMatchConfig, tier int) observations.GratitudeBandCutoffs {
+	if tier >= 3 {
+		return observations.GratitudeBandCutoffs{High: m.Tier3High, Margin: m.Tier3Margin, Floor: m.AmbiguousFloor}
+	}
+	return observations.GratitudeBandCutoffs{High: m.Tier2High, Margin: m.Tier2Margin, Floor: m.AmbiguousFloor}
 }
 
 // bandGratitudeDecision turns one tier's ranked candidates into a decision by
@@ -246,11 +254,7 @@ func (r *Router) judgeGratitudeMatch(
 		return tier2, nil
 	}
 
-	dec, err := bandGratitudeDecision(tier2.Key, 3, cands, observations.GratitudeBandCutoffs{
-		High:   m.Tier3High,
-		Margin: m.Tier3Margin,
-		Floor:  m.AmbiguousFloor,
-	})
+	dec, err := bandGratitudeDecision(tier2.Key, 3, cands, gratitudeTierCutoffs(m, 3))
 	if err != nil {
 		return gratitudeMatchDecision{}, err
 	}

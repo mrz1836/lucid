@@ -487,8 +487,9 @@ one.
 **Ambiguous — suggest.** The add never guesses. What happens depends on whether
 someone is there to answer:
 
-* **Interactive** (stdin is a terminal and `--json` is not set): `add` asks,
-  and writes only after the answer —
+* **Interactive** (stdin is a terminal, `--json` is not set, and the phrase
+  was not itself read from stdin by `--body-file -`): `add` asks on stderr —
+  so stdout still carries only the ack — and writes only after the answer —
 
   ```
   Did you mean to bump gratitude_a-river: "the walk to work"?
@@ -496,9 +497,12 @@ someone is there to answer:
   ```
 
   `y` bumps the named entry, a number picks another listed candidate, `n`
-  creates a new entry, and `q` (or end of input) cancels with nothing written.
-  A confirmed suggestion is the human's call, so it lands exactly as
-  `--into <id>` would — no `match_tier` is stamped.
+  creates a new entry (exactly as `--new` would), and `q` (or end of input)
+  cancels with nothing written, exiting `1` like any other deferred choice.
+  Any other answer — a blank line included — names the choices and asks
+  again; nothing is ever chosen by default. A confirmed suggestion is the
+  human's call, so it lands exactly as `--into <id>` would — no `match_tier` is
+  stamped.
 * **Non-interactive or `--json`: refuse and defer.** There is no one to ask,
   and neither "merge" nor "create" may be silent, so `add` **writes nothing**,
   **exits 1**, and returns the suggestion. The caller — a script, or a harness

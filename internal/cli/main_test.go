@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"testing"
 
@@ -17,9 +18,15 @@ import (
 // no-model path, deterministically. A test that exercises a model injects a
 // scripted provider.Fake (withServeProvider, withGratitudeJudge, …) and restores
 // this default when it ends.
+//
+// Likewise no test may wait on a person: `go test` can hand the test binary the
+// developer's real terminal as stdin, and an ambiguous-band `gratitude add` asks
+// its question only on a terminal. So stdin is never a terminal here, and a test
+// that exercises the question stands one in (withGratitudeTerminal).
 func TestMain(m *testing.M) {
 	buildProvider = func(config.ProviderConfig) (provider.Provider, error) {
 		return &provider.Fake{ExhaustErr: provider.ErrUnavailable}, nil
 	}
+	gratitudeStdinIsTerminal = func(io.Reader) bool { return false }
 	os.Exit(m.Run())
 }
