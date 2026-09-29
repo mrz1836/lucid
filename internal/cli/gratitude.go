@@ -12,6 +12,7 @@ import (
 // Flag names for the gratitude verbs (gratitude.md §3, §4, §5).
 const (
 	gratitudeIntoFlag  = "into"
+	gratitudeNewFlag   = "new"
 	gratitudeCountFlag = "count"
 	gratitudeFirstFlag = "first"
 	gratitudeLastFlag  = "last"
@@ -24,13 +25,15 @@ const (
 //
 //	lucid gratitude add "my morning coffee"
 //	lucid gratitude add "my house" --into gratitude_a-river
+//	lucid gratitude add "the walk home" --new
 //	lucid gratitude add "a walk outside" --day @yesterday
 //	lucid gratitude list --json
 //	lucid gratitude merge gratitude_b-stone gratitude_a-river
 //	lucid gratitude import "clean drinking water" --count 22 --first 2025-11-02 --last 2026-08-20
 //
-// add tallies one occurrence (creating the entry, bumping a canonical-key match,
-// or bumping a specific entry with --into) and prints the receipt id; list shows
+// add tallies one occurrence (creating the entry, bumping the entry the match
+// tiers land it on, or bumping a specific entry with --into) and prints the
+// receipt id; an ambiguous match writes nothing and names the candidates; list shows
 // the tally sorted by count then recency with a stable id per entry; merge folds
 // an accidental duplicate; import seeds a pre-counted row (the one-time migration
 // path). Every mutation returns its own receipt id, distinct from the stable id.
@@ -48,12 +51,15 @@ func newGratitudeCmd() *cobra.Command {
 	return cmd
 }
 
-// newGratitudeAddCmd wires `lucid gratitude add <thing> [--into <id>] [--day
-// <date>]` and the seed alias `add <thing> --count N --first <date> --last
+// newGratitudeAddCmd wires `lucid gratitude add <thing> [--into <id> | --new]
+// [--day <date>]` and the seed alias `add <thing> --count N --first <date> --last
 // <date>`. The thing is joined from the trailing args (the obs/injury precedent)
-// and stored verbatim. Without flags the canonical key auto-matches an existing
-// entry or starts a new one; `--into <id>` bumps that specific stable entry
-// regardless of wording; `--count` routes to the one-time seed/import path (an
+// and stored verbatim. Without flags the match tiers decide (gratitude.md §7): the
+// canonical key or a clear token match bumps an existing entry, nothing close
+// starts a new one, and an ambiguous match writes nothing and prints the
+// candidates to stderr (exit 1) for the caller to resolve; `--into <id>` bumps
+// that specific stable entry regardless of wording; `--new` starts a new entry
+// (tier 1 still applies); `--count` routes to the one-time seed/import path (an
 // explicit Count/First/Last, gratitude.md §5). `--day` is the strict backdating
 // tier — a bad token or a future day is a clean refusal that writes nothing,
 // printed to stderr. `--json` emits the receipt and the resulting tally.
@@ -74,30 +80,36 @@ func newGratitudeAddCmd() *cobra.Command {
 				return emitErr(cmd, err)
 			}
 			into, _ := cmd.Flags().GetString(gratitudeIntoFlag)
+			forceNew, _ := cmd.Flags().GetBool(gratitudeNewFlag)
 
 			// `add --count …` is the documented alias for the one-time seed/import
 			// path; it carries explicit Count/First/Last, so it never mixes with a
-			// targeted bump.
+			// targeted bump or a matching answer.
 			if cmd.Flags().Changed(gratitudeCountFlag) {
 				if strings.TrimSpace(into) != "" {
 					return emitErr(cmd, fmt.Errorf("gratitude add: --into and --count cannot be combined; nothing was saved"))
+				}
+				if forceNew {
+					return emitErr(cmd, fmt.Errorf("gratitude add: --new and --count cannot be combined; nothing was saved"))
 				}
 				return runGratitudeImport(cmd, r, thing)
 			}
 
 			day, _ := cmd.Flags().GetString(flagDay)
 			res, err := r.AddGratitude(router.AddGratitudeRequest{
-				Thing:  thing,
-				DayArg: day,
-				Into:   into,
-				Now:    clockNow(),
+				Thing:    thing,
+				DayArg:   day,
+				Into:     into,
+				ForceNew: forceNew,
+				Now:      clockNow(),
 			})
 			if err != nil {
 				// The root silences returned errors, so a rejected --day, an empty
-				// thing, or an unknown --into id would otherwise be a bare exit code.
-				// emitErr prints the reason (a DayRejectedError's Error is its
-				// accepted-forms message) and returns the error unchanged so the exit
-				// code still travels.
+				// thing, an unknown --into id, or an ambiguous-band suggestion would
+				// otherwise be a bare exit code. emitErr prints the reason (a
+				// DayRejectedError's Error is its accepted-forms message; a
+				// GratitudeSuggestionError's names the candidates and how to resolve
+				// them) and returns the error unchanged so the exit code still travels.
 				return emitErr(cmd, err)
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
@@ -109,6 +121,7 @@ func newGratitudeAddCmd() *cobra.Command {
 	}
 	registerDayFlag(cmd)
 	cmd.Flags().String(gratitudeIntoFlag, "", "Bump a specific entry by its stable id, regardless of wording")
+	cmd.Flags().Bool(gratitudeNewFlag, false, "Start a new entry instead of matching an existing one by wording")
 	registerGratitudeSeedFlags(cmd)
 	registerBodyFileFlag(cmd, "thing you're grateful for")
 	return cmd
@@ -244,26 +257,32 @@ func newGratitudeListCmd() *cobra.Command {
 // gratitudeAddView is the machine-readable projection of an `add` under --json:
 // the receipt id of this write, the stable entry id, and the resulting tally.
 // Built CLI-side with stable snake_case names so a harness branches on fields
-// rather than parsing the ack prose.
+// rather than parsing the ack prose. match_tier and match_score appear only when
+// the occurrence landed by an automatic match (gratitude.md §7.4), so a tier-1,
+// `--into`, or create write keeps exactly its v1 shape.
 type gratitudeAddView struct {
-	Receipt string `json:"receipt"`
-	ID      string `json:"id"`
-	Thing   string `json:"thing"`
-	Count   int    `json:"count"`
-	First   string `json:"first"`
-	Last    string `json:"last"`
-	Created bool   `json:"created"`
+	Receipt    string  `json:"receipt"`
+	ID         string  `json:"id"`
+	Thing      string  `json:"thing"`
+	Count      int     `json:"count"`
+	First      string  `json:"first"`
+	Last       string  `json:"last"`
+	Created    bool    `json:"created"`
+	MatchTier  int     `json:"match_tier,omitempty"`
+	MatchScore float64 `json:"match_score,omitempty"`
 }
 
 // gratitudeAddViewOf projects a router result into the stable --json shape.
 func gratitudeAddViewOf(res router.GratitudeWriteResult) gratitudeAddView {
 	return gratitudeAddView{
-		Receipt: res.Receipt,
-		ID:      res.Key,
-		Thing:   res.Thing,
-		Count:   res.Count,
-		First:   res.First,
-		Last:    res.Last,
-		Created: res.Created,
+		Receipt:    res.Receipt,
+		ID:         res.Key,
+		Thing:      res.Thing,
+		Count:      res.Count,
+		First:      res.First,
+		Last:       res.Last,
+		Created:    res.Created,
+		MatchTier:  res.MatchTier,
+		MatchScore: res.MatchScore,
 	}
 }

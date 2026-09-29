@@ -55,17 +55,16 @@ func (a *Adapter) ScaffoldGratitude() error {
 	return nil
 }
 
-// ResolveGratitudeKey resolves the canonical entry key for a phrase — the v1
-// canonical-key match seam (gratitude.md §7). It reuses the shared salted
-// registry-key derivation (the same low-signal key people/injuries/places use)
-// under the gratitude kind, with the collision-suffix rule so two genuinely
-// different things that hash alike get distinct keys. This IS the whole of v1
-// matching: two phrasings that normalize equal resolve to the same key (a
-// bump); two that normalize differently resolve to different keys (a new entry).
-// By-meaning matching — connecting "my house" to a stored "a roof over my head"
-// — is deliberately NOT attempted here; that is the future work item R-011,
-// which slots in behind this same seam. Until then the human agent supplies the
-// by-meaning judgment through `add --into` and `merge`.
+// ResolveGratitudeKey resolves the canonical entry key for a phrase — tier 1 of
+// the gratitude match, the canonical-key seam (gratitude.md §7.1). It reuses the
+// shared salted registry-key derivation (the same low-signal key
+// people/injuries/places use) under the gratitude kind, with the collision-suffix
+// rule so two genuinely different things that hash alike get distinct keys. Two
+// phrasings that normalize equal resolve to the same key; two that normalize
+// differently resolve to different keys. Matching beyond that — the tier-2 token
+// match over live wordings, and the optional by-meaning tier 3 — is deliberately
+// NOT attempted here: the router's match pipeline runs those steps only after
+// this key finds no record, reading the live set through [Adapter.ReadGratitudeAll].
 func (a *Adapter) ResolveGratitudeKey(phrase string) (string, error) {
 	return a.ResolveRegistryKey(observations.RegistryGratitude, phrase)
 }

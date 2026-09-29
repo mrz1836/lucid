@@ -29,22 +29,27 @@ func surfaceMergeError(err error) error {
 
 // gratitude.go is the user-facing gratitude-tally path (gratitude.md §3, §6):
 // the accumulating nightly-gratitude count. `add` tallies one occurrence —
-// creating an entry or bumping the canonical-key match — and returns the
-// appended event's receipt id; `list` folds each live entry's Count/First/Last
-// and prints the tally sorted by count then recency. Every write is
-// deterministic and agent-free (architecture P9): the canonical-key match is a
-// normalized string derivation, and by-meaning matching is the deferred R-011.
+// creating an entry, or bumping the entry the match pipeline (gratmatch.go,
+// gratitude.md §7) lands it on — and returns the appended event's receipt id;
+// `list` folds each live entry's Count/First/Last and prints the tally sorted by
+// count then recency. Every write is deterministic and agent-free (architecture
+// P9): the canonical key is a normalized string derivation and the tier-2 token
+// match a pure score over the live entries' wordings.
 
 // AddGratitudeRequest is one `lucid gratitude add` turn (gratitude.md §3): the
-// verbatim phrase, the strict-tier --day value, an optional Into target, and now
-// (injected so backdating and receipt ids are deterministic in tests). When Into
-// is set, the phrase bumps that specific stable entry regardless of wording (the
-// interim by-meaning path, gratitude.md §4) instead of resolving a canonical key.
+// verbatim phrase, the strict-tier --day value, an optional Into target, the
+// ForceNew (`--new`) answer, and now (injected so backdating and receipt ids are
+// deterministic in tests). When Into is set, the phrase bumps that specific
+// stable entry regardless of wording (the manual override, gratitude.md §4) and
+// no matching runs. When ForceNew is set, the tier-2 token match is skipped and
+// the phrase starts a new entry — unless tier 1 finds its canonical key, which
+// by definition is the same entry (gratitude.md §3). The two cannot combine.
 type AddGratitudeRequest struct {
-	Thing  string
-	DayArg string
-	Into   string
-	Now    time.Time
+	Thing    string
+	DayArg   string
+	Into     string
+	ForceNew bool
+	Now      time.Time
 }
 
 // ImportGratitudeRequest is one `lucid gratitude import` (or `add --count …`)
@@ -72,17 +77,22 @@ type GratitudeMergeRequest struct {
 // Receipt is the newly appended event's unique receipt id (gratitude.md §2 Ids)
 // — distinct from Key, the stable entry id that `list` shows and `--into`/`merge`
 // target. Created is true when this call minted the entry (its history is the one
-// occurrence just appended).
+// occurrence just appended). MatchTier and MatchScore are set only when the
+// occurrence landed by an automatic match (gratitude.md §7.4 High band) — zero
+// for a tier-1 canonical-key bump, an `--into` bump, and a create, so those stay
+// exactly the v1 shape.
 type GratitudeWriteResult struct {
-	Entry   observations.GratitudeEntry
-	Receipt string
-	Key     string
-	Thing   string
-	Count   int
-	First   string
-	Last    string
-	Created bool
-	Ack     string
+	Entry      observations.GratitudeEntry
+	Receipt    string
+	Key        string
+	Thing      string
+	Count      int
+	First      string
+	Last       string
+	Created    bool
+	MatchTier  int
+	MatchScore float64
+	Ack        string
 }
 
 // GratitudeListView is the `lucid gratitude list --json` payload: the live tally
@@ -112,14 +122,17 @@ type GratitudeListResult struct {
 }
 
 // AddGratitude tallies one occurrence of a thing a person is grateful for
-// (gratitude.md §3). It resolves the canonical entry key from the normalized
-// phrase (the v1 match seam — by-meaning matching is R-011), appends one
-// occurrence event, and returns that event's receipt id alongside the resulting
-// tally. It is deterministic and agent-free. An empty phrase writes nothing (a
-// clean usage error), and a strict-tier `--day` runs the shared capture grammar:
-// an unreadable token or a future day is a [DayRejectedError] and nothing is
-// written. The receipt encodes the occurrence's logical date; the event's `at`
-// is always the real write time.
+// (gratitude.md §3). It decides which entry the occurrence lands on — the
+// `--into` target verbatim, or the match pipeline (tier 1 canonical key, then the
+// tier-2 token match, gratitude.md §7.3) — appends one occurrence event, and
+// returns that event's receipt id alongside the resulting tally. It is
+// deterministic and agent-free. An empty phrase writes nothing (a clean usage
+// error), and a strict-tier `--day` runs the shared capture grammar: an
+// unreadable token or a future day is a [DayRejectedError] and nothing is
+// written. An ambiguous-band match writes nothing either: it returns a
+// [GratitudeSuggestionError] carrying the candidates, resolved by re-running with
+// Into or ForceNew. The receipt encodes the occurrence's logical date; the
+// event's `at` is always the real write time.
 func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, error) {
 	now := whenOr(req.Now)
 	thing := strings.TrimSpace(req.Thing)
@@ -140,10 +153,14 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 	logicalDate := when.LogicalDate
 
 	// Resolve which entry this occurrence lands on (the `--into` target verbatim
-	// or the v1 canonical-key seam) and whether the write refreshes the display.
-	key, makePrimary, err := r.resolveGratitudeAddKey(req.Into, thing)
+	// or the match pipeline) and whether the write refreshes the display. An
+	// ambiguous band writes nothing and hands the candidates back to the caller.
+	dec, err := r.resolveGratitudeAddKey(req.Into, thing, req.ForceNew)
 	if err != nil {
 		return GratitudeWriteResult{}, err
+	}
+	if dec.Action == gratitudeMatchSuggest {
+		return GratitudeWriteResult{}, dec.suggestionError(thing)
 	}
 
 	ev := observations.GratitudeEvent{
@@ -151,14 +168,14 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 		Date:   logicalDate,
 		Source: observations.GratitudeSourceGratitude,
 	}
-	entry, appended, err := r.store.AppendGratitudeEvent(key, thing, logicalDate, makePrimary, ev, now)
+	entry, appended, err := r.store.AppendGratitudeEvent(dec.Key, thing, logicalDate, dec.MakePrimary, ev, now)
 	if err != nil {
 		return GratitudeWriteResult{}, fmt.Errorf("could not add the gratitude; nothing was saved: %w", err)
 	}
 
 	tally := entry.Tally()
 	created := len(entry.History) == 1
-	return GratitudeWriteResult{
+	res := GratitudeWriteResult{
 		Entry:   entry,
 		Receipt: appended.ID,
 		Key:     entry.Key,
@@ -168,35 +185,40 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 		Last:    tally.Last,
 		Created: created,
 		Ack:     gratitudeAddAck(entry.DisplayName, tally.Count, appended.ID, created),
-	}, nil
+	}
+	if dec.automatic() {
+		res.MatchTier = dec.Tier
+		res.MatchScore = dec.Score
+		res.Ack = gratitudeAutoMatchAck(entry.DisplayName, tally.Count, appended.ID, thing, dec.Tier)
+	}
+	return res, nil
 }
 
-// resolveGratitudeAddKey picks the entry key an `add` lands on and whether the
+// resolveGratitudeAddKey decides the entry an `add` lands on and whether the
 // write refreshes the display wording. With `--into` the stable id is targeted
-// verbatim (the interim by-meaning path, gratitude.md §4): it must already name a
-// live entry — a bump never creates one, and tonight's differing wording only
-// joins aka[] (makePrimary=false). Without it, the v1 canonical-key seam
-// resolves-or-creates by the normalized phrase (makePrimary=true; the eventual
-// automatic by-meaning match is R-011).
-func (r *Router) resolveGratitudeAddKey(into, thing string) (key string, makePrimary bool, err error) {
+// verbatim (the manual override, gratitude.md §4) and no matching runs: it must
+// already name a live entry — a bump never creates one, and tonight's differing
+// wording only joins aka[]. Without it, the match pipeline decides
+// ([Router.matchGratitude]); forceNew (`--new`) skips its tier-2 step. `--into`
+// and `--new` contradict each other, so the pair is a clean error.
+func (r *Router) resolveGratitudeAddKey(into, thing string, forceNew bool) (gratitudeMatchDecision, error) {
 	into = strings.TrimSpace(into)
 	if into == "" {
-		key, err = r.store.ResolveGratitudeKey(thing)
-		if err != nil {
-			return "", false, fmt.Errorf("could not resolve the gratitude key; nothing was saved: %w", err)
-		}
-		return key, true, nil
+		return r.matchGratitude(thing, forceNew)
+	}
+	if forceNew {
+		return gratitudeMatchDecision{}, fmt.Errorf("gratitude add: --into and --new cannot be combined; nothing was saved")
 	}
 	existing, found, rerr := r.store.ReadGratitude(into)
 	if rerr != nil {
-		return "", false, fmt.Errorf("could not read the gratitude entry; nothing was saved: %w", rerr)
+		return gratitudeMatchDecision{}, fmt.Errorf("could not read the gratitude entry; nothing was saved: %w", rerr)
 	}
 	if !found || existing.IsTombstone() {
-		return "", false, fmt.Errorf(
+		return gratitudeMatchDecision{}, fmt.Errorf(
 			"no live gratitude entry %q to bump; run `lucid gratitude list` for the id; nothing was saved", into,
 		)
 	}
-	return into, false, nil
+	return gratitudeMatchDecision{Action: gratitudeMatchBump, Key: into}, nil
 }
 
 // GratitudeList reads the live tally, folds each entry's Count/First/Last, and
@@ -369,6 +391,20 @@ func gratitudeAddAck(thing string, count int, receipt string, created bool) stri
 		verb = "Started tally for"
 	}
 	return fmt.Sprintf("%s %q (×%d) as `%s`.", verb, thing, count, receipt)
+}
+
+// gratitudeAutoMatchAck builds the ack for an occurrence that landed by an
+// automatic match (gratitude.md §7.4 High band): the ordinary tally ack — the
+// entry's display wording, its running count, the receipt — plus the wording
+// that was typed and how it matched, so the automatic step is legible and
+// correctable with `--into` (gratitude.md §7.8). Tier 2 matches by wording; tier
+// 3, the optional judge, by meaning.
+func gratitudeAutoMatchAck(thing string, count int, receipt, phrase string, tier int) string {
+	how := "by wording"
+	if tier >= 3 {
+		how = "by meaning"
+	}
+	return fmt.Sprintf("Tallied %q (×%d) as `%s` — matched %q %s (tier %d).", thing, count, receipt, phrase, how, tier)
 }
 
 // gratitudeImportAck builds the ack emitted after a one-time seed lands: the

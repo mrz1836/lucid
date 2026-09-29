@@ -385,9 +385,11 @@ reduced to a **token set**: the tier-1 normalization, then split on whitespace,
 then a small fixed English stopword list removed (`a`, `an`, `the`, `my`,
 `our`, `your`, `his`, `her`, `their`, `its`, `of`, `for`, `to`, `and`, `with`,
 `in`, `on`, `at`, `that`, `this`, `these`, `those`, `some`), then **light
-stemming** (a possessive `'s` dropped; a plural `-ies` → `-y`; `-es` dropped
-after `s`/`x`/`z`/`ch`/`sh`; otherwise a trailing `-s` dropped except after
-`s`/`u`/`i`; a stem is never cut below three letters). The phrase's set is
+stemming** (a possessive `'s` dropped; a plural `-ies` → `-y`, with a word
+ending `-ie` folded to `-y` the same way so "cookie" and "cookies" agree; `-es`
+dropped after `ss`/`x`/`z`/`ch`/`sh` — not after a single `s`, so "houses" meets
+"house"; otherwise a trailing `-s` dropped except after `s`/`u`/`i`; a rule that
+would cut a stem below three letters is skipped). The phrase's set is
 scored against **every live entry** — each of its wordings (`display_name` and every `aka[]` form) — with
 the **Dice coefficient**, `2·|A∩B| / (|A|+|B|)`; an entry's score is its best
 wording's score. A phrase whose set is empty (all stopwords) scores 0

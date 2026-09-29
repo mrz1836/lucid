@@ -274,3 +274,96 @@ func TestGratitude_CLI_Import(t *testing.T) {
 		"gratitude", "import", "a walk outside", "--count", "3", "--first", "nope", "--last", "2026-08-01")
 	require.Error(t, err)
 }
+
+// TestGratitude_CLI_AutoMatchJSON: a phrase that misses the canonical key but is a
+// clear tier-2 match bumps the existing entry automatically, and `--json` carries
+// match_tier / match_score (gratitude.md §7.4) — while a plain canonical-key write
+// keeps exactly its v1 keys, with no match attribution at all.
+func TestGratitude_CLI_AutoMatchJSON(t *testing.T) {
+	isolatedHome(t)
+
+	first, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "a morning walk by a river", "--json")
+	require.NoError(t, err)
+	var v1 map[string]any
+	require.NoError(t, json.Unmarshal([]byte(first), &v1))
+	assert.NotContains(t, v1, "match_tier", "a create carries no match attribution")
+	assert.NotContains(t, v1, "match_score")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the morning walks by the river", "--json")
+	require.NoError(t, err)
+	var payload struct {
+		ID         string  `json:"id"`
+		Thing      string  `json:"thing"`
+		Count      int     `json:"count"`
+		Created    bool    `json:"created"`
+		MatchTier  int     `json:"match_tier"`
+		MatchScore float64 `json:"match_score"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.Equal(t, v1["id"], payload.ID, "the wording landed on the existing entry")
+	assert.Equal(t, "a morning walk by a river", payload.Thing, "the canonical display is kept")
+	assert.Equal(t, 2, payload.Count)
+	assert.False(t, payload.Created)
+	assert.Equal(t, 2, payload.MatchTier)
+	assert.InDelta(t, 1.0, payload.MatchScore, 1e-9)
+
+	human, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "morning walks by the river")
+	require.NoError(t, err)
+	assert.Contains(t, human, "by wording (tier 2)", "the ack says how it matched")
+	assert.Len(t, gratitudeListEntries(t), 1, "no near-duplicate row was created")
+}
+
+// TestGratitude_CLI_AmbiguousRefusesNonInteractive: an ambiguous-band phrase (an
+// exact tie between two entries) writes nothing and exits non-zero, printing the
+// candidates and the two ways to resolve on stderr (gratitude.md §7.4); re-running
+// with --into bumps the chosen entry.
+func TestGratitude_CLI_AmbiguousRefusesNonInteractive(t *testing.T) {
+	isolatedHome(t)
+	addGratitudeCLI(t, "the walk to work")
+	addGratitudeCLI(t, "a quiet home")
+	before := gratitudeListEntries(t)
+	require.Len(t, before, 2)
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walk home")
+	require.Error(t, err, "an ambiguous match is a non-zero exit")
+	assert.Empty(t, out, "nothing is acknowledged")
+	for _, e := range before {
+		assert.Contains(t, stderr, e.ID, "each candidate is named")
+	}
+	assert.Contains(t, stderr, "--into <id>")
+	assert.Contains(t, stderr, "--new")
+	assert.Contains(t, stderr, "nothing was saved")
+
+	after := gratitudeListEntries(t)
+	require.Len(t, after, 2, "never silently created")
+	for _, e := range after {
+		assert.Equal(t, 1, e.Count, "never silently merged")
+	}
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "the walk home", "--into", before[0].ID)
+	require.NoError(t, err, "--into resolves the suggestion")
+}
+
+// TestGratitude_CLI_NewFlag: `add --new` starts a new entry where the wording
+// would otherwise auto-bump an existing one (gratitude.md §3), and cannot combine
+// with --into or --count — each contradiction is a clean error that writes nothing.
+func TestGratitude_CLI_NewFlag(t *testing.T) {
+	isolatedHome(t)
+	addGratitudeCLI(t, "morning coffee")
+	id := gratitudeListEntries(t)[0].ID
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "coffee in the morning", "--new")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Started tally for", "--new creates rather than matching by wording")
+	require.Len(t, gratitudeListEntries(t), 2)
+
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "gratitude", "add", "coffee", "--new", "--into", id)
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--into and --new cannot be combined")
+
+	_, stderr, err = runRoot(t, BuildInfo{Version: "dev"},
+		"gratitude", "add", "warm sunlight", "--new", "--count", "5", "--first", "2026-02-01", "--last", "2026-08-01")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "--new and --count cannot be combined")
+	assert.Len(t, gratitudeListEntries(t), 2, "the refused adds wrote nothing")
+}

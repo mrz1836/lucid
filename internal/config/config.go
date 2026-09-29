@@ -193,6 +193,175 @@ type WitnessReportConfig struct {
 	Model        string `json:"model"`
 }
 
+// GratitudeConfig configures the gratitude tally (gratitude.md §7, §9). Today it
+// carries only the match block — how a nightly `lucid gratitude add` decides
+// which tally entry a phrase lands on. Like the other feature blocks it is
+// credential-dumb: no key, token, or credential lives here.
+type GratitudeConfig struct {
+	Match GratitudeMatchConfig `json:"match"`
+}
+
+// GratitudeMatchConfig tunes the three-tier gratitude match (gratitude.md §7.2,
+// §7.5; data-model.md §"lucid.json"). Tier2High/Tier2Margin and
+// Tier3High/Tier3Margin are each tier's high cutoff and top-1/top-2 margin — an
+// automatic bump needs both; AmbiguousFloor is the shared score at or above which
+// a not-confident match is suggested rather than a new entry created. All five
+// are scores in [0, 1]. Tier3Enabled gates the optional by-meaning judge (tiers
+// 1–2 are deterministic and always on). Tier3Backend and Tier3Model override
+// provider.backend / provider.model for that one call (empty inherits — the
+// companion/workout model rule); the default backend is ollama, local-first.
+// Tier3TimeoutSeconds bounds the judge call and Tier3MaxCandidates caps how many
+// entries one call carries. Every value is fail-safe: [Config.Clip] pulls an
+// out-of-range one back to its default with a warning, never a crash.
+type GratitudeMatchConfig struct {
+	Tier2High           float64 `json:"tier2_high"`
+	Tier2Margin         float64 `json:"tier2_margin"`
+	AmbiguousFloor      float64 `json:"ambiguous_floor"`
+	Tier3Enabled        bool    `json:"tier3_enabled"`
+	Tier3Backend        string  `json:"tier3_backend"`
+	Tier3Model          string  `json:"tier3_model"`
+	Tier3High           float64 `json:"tier3_high"`
+	Tier3Margin         float64 `json:"tier3_margin"`
+	Tier3TimeoutSeconds int     `json:"tier3_timeout_seconds"`
+	Tier3MaxCandidates  int     `json:"tier3_max_candidates"`
+}
+
+// DefaultGratitudeMatch returns the documented gratitude.match defaults
+// (gratitude.md §9; ADR-0012 §2, §6): conservative placeholders tuned against the
+// synthetic fixtures — tier 2 needs 0.85 with a 0.15 lead, tier 3 a stricter 0.90
+// with a 0.20 lead, and anything at or above the shared 0.50 floor that is not a
+// clear winner is suggested. Tier 3 defaults on because its default backend is
+// local (ollama), so nothing leaves the machine; the model name is a placeholder
+// until the provider trust gate records the evaluated model.
+func DefaultGratitudeMatch() GratitudeMatchConfig {
+	return GratitudeMatchConfig{
+		Tier2High:           0.85,
+		Tier2Margin:         0.15,
+		AmbiguousFloor:      0.50,
+		Tier3Enabled:        true,
+		Tier3Backend:        "ollama",
+		Tier3Model:          "qwen3:8b",
+		Tier3High:           0.90,
+		Tier3Margin:         0.20,
+		Tier3TimeoutSeconds: 30,
+		Tier3MaxCandidates:  200,
+	}
+}
+
+// OrDefault returns m, or [DefaultGratitudeMatch] when m is the zero value — a
+// config built before the gratitude block existed, or a router that was never
+// booted. The all-zero block is never a meaningful operator choice (a zero
+// timeout and candidate cap are themselves out of range), so reading it as
+// "absent" is fail-safe: matching never runs on zero cutoffs that would
+// auto-bump every overlap.
+func (m GratitudeMatchConfig) OrDefault() GratitudeMatchConfig {
+	if m == (GratitudeMatchConfig{}) {
+		return DefaultGratitudeMatch()
+	}
+	return m
+}
+
+// gratitudeIssue is one out-of-range gratitude.match value: the reason it is
+// unusable and the value it is clipped to. [Config.Clip] renders it as a
+// warning and [Config.Validate] as an error, so the two share one rule set and
+// a clipped config always validates.
+type gratitudeIssue struct {
+	reason    string
+	clippedTo string
+}
+
+// clip pulls every out-of-range gratitude.match value back to its documented
+// default (data-model.md §"lucid.json"), reporting one issue per change. The
+// five scores must lie in [0, 1]; the ambiguous floor must not sit above either
+// high cutoff (the floor is reset first, and a high cutoff still below the reset
+// floor is reset too, so the three bands stay contiguous); an unrecognized
+// tier3_backend is coerced to the local default (empty is valid — it inherits
+// provider.backend); and the timeout and candidate cap must be at least one. A
+// zero block reads as the defaults with no issue ([GratitudeMatchConfig.OrDefault]).
+// The receiver is not mutated, and clipping a clipped block reports nothing.
+func (m GratitudeMatchConfig) clip() (GratitudeMatchConfig, []gratitudeIssue) {
+	out := m.OrDefault()
+	def := DefaultGratitudeMatch()
+	var issues []gratitudeIssue
+
+	for _, s := range []struct {
+		name string
+		v    *float64
+		def  float64
+	}{
+		{"tier2_high", &out.Tier2High, def.Tier2High},
+		{"tier2_margin", &out.Tier2Margin, def.Tier2Margin},
+		{"ambiguous_floor", &out.AmbiguousFloor, def.AmbiguousFloor},
+		{"tier3_high", &out.Tier3High, def.Tier3High},
+		{"tier3_margin", &out.Tier3Margin, def.Tier3Margin},
+	} {
+		if *s.v >= 0 && *s.v <= 1 { // written this way round so NaN is out of range too
+			continue
+		}
+		issues = append(issues, gratitudeIssue{
+			reason:    fmt.Sprintf("gratitude.match.%s %v is outside [0, 1]", s.name, *s.v),
+			clippedTo: fmt.Sprintf("%v", s.def),
+		})
+		*s.v = s.def
+	}
+
+	if out.AmbiguousFloor > out.Tier2High || out.AmbiguousFloor > out.Tier3High {
+		issues = append(issues, gratitudeIssue{
+			reason: fmt.Sprintf("gratitude.match.ambiguous_floor %v is above a high cutoff (tier2_high %v, tier3_high %v)",
+				out.AmbiguousFloor, out.Tier2High, out.Tier3High),
+			clippedTo: fmt.Sprintf("%v", def.AmbiguousFloor),
+		})
+		out.AmbiguousFloor = def.AmbiguousFloor
+		if out.Tier2High < out.AmbiguousFloor {
+			issues = append(issues, gratitudeIssue{
+				reason:    fmt.Sprintf("gratitude.match.tier2_high %v is below ambiguous_floor %v", out.Tier2High, out.AmbiguousFloor),
+				clippedTo: fmt.Sprintf("%v", def.Tier2High),
+			})
+			out.Tier2High = def.Tier2High
+		}
+		if out.Tier3High < out.AmbiguousFloor {
+			issues = append(issues, gratitudeIssue{
+				reason:    fmt.Sprintf("gratitude.match.tier3_high %v is below ambiguous_floor %v", out.Tier3High, out.AmbiguousFloor),
+				clippedTo: fmt.Sprintf("%v", def.Tier3High),
+			})
+			out.Tier3High = def.Tier3High
+		}
+	}
+
+	if out.Tier3Backend != "" && !KnownBackends[out.Tier3Backend] {
+		issues = append(issues, gratitudeIssue{
+			reason:    fmt.Sprintf("gratitude.match.tier3_backend %q is not a known backend", out.Tier3Backend),
+			clippedTo: fmt.Sprintf("%q", def.Tier3Backend),
+		})
+		out.Tier3Backend = def.Tier3Backend
+	}
+	if out.Tier3TimeoutSeconds < 1 {
+		issues = append(issues, gratitudeIssue{
+			reason:    fmt.Sprintf("gratitude.match.tier3_timeout_seconds %d is below 1", out.Tier3TimeoutSeconds),
+			clippedTo: fmt.Sprintf("%d", def.Tier3TimeoutSeconds),
+		})
+		out.Tier3TimeoutSeconds = def.Tier3TimeoutSeconds
+	}
+	if out.Tier3MaxCandidates < 1 {
+		issues = append(issues, gratitudeIssue{
+			reason:    fmt.Sprintf("gratitude.match.tier3_max_candidates %d is below 1", out.Tier3MaxCandidates),
+			clippedTo: fmt.Sprintf("%d", def.Tier3MaxCandidates),
+		})
+		out.Tier3MaxCandidates = def.Tier3MaxCandidates
+	}
+	return out, issues
+}
+
+// validate reports the first out-of-range gratitude.match value as an error —
+// the same rules [Config.Clip] coerces, so a config fresh from Clip always
+// passes. A zero block validates (it reads as the defaults).
+func (m GratitudeMatchConfig) validate() error {
+	if _, issues := m.clip(); len(issues) > 0 {
+		return fmt.Errorf("config: %s", issues[0].reason)
+	}
+	return nil
+}
+
 // Config is the in-memory representation of lucid.json. Field order
 // matches the documented schema so a marshaled default file reads
 // identically to data-model.md §"lucid.json".
@@ -235,6 +404,11 @@ type Config struct {
 	Companion                CompanionConfig     `json:"companion"`
 	Workout                  WorkoutConfig       `json:"workout"`
 	WitnessReport            WitnessReportConfig `json:"witness_report"`
+	// Gratitude tunes the gratitude tally's three-tier match (gratitude.md §7).
+	// Unlike the off-by-default feature blocks its zero value is not a usable
+	// default, so [Unmarshal] pre-seeds it and [Config.Clip] fills an absent
+	// block — a lucid.json written before the block existed reads the defaults.
+	Gratitude GratitudeConfig `json:"gratitude"`
 	// FrameworkStack is the ordered standing-consent list — one interpretation
 	// lens id per line the user has admitted to their stack at calibration or a
 	// quarterly Charter amendment (docs/frameworks.md §3). A lens in the stack
@@ -311,6 +485,9 @@ func Default() Config {
 			Time:    "09:00",
 			Weekday: 1,
 		},
+		// The gratitude match ships its documented conservative cutoffs, with the
+		// optional by-meaning tier on a local backend (gratitude.md §9).
+		Gratitude: GratitudeConfig{Match: DefaultGratitudeMatch()},
 		// The frameworks layer ships off: no lens is stacked or consented, so
 		// LensConsented is false for every id and the reflection voice stays
 		// baseline until an operator amends the Charter stack. Non-nil empties
@@ -373,10 +550,13 @@ func (c Config) ActiveFramework() (string, bool) {
 
 // Clip returns a copy of the config with out-of-range values pulled
 // back into their allowed bounds, plus a human-readable warning for
-// each field it changed. recent_window is the only field with a
-// documented runtime ceiling: the router refuses any value above
-// recent_window_max and clips it (data-model.md §"lucid.json"; test
-// case 1.4). Clip never mutates the receiver.
+// each field it changed. Two blocks carry documented clip rules:
+// recent_window, whose runtime ceiling makes the router refuse any value
+// above recent_window_max and clip it (data-model.md §"lucid.json"; test
+// case 1.4), and gratitude.match, whose every knob is clipped to its
+// default when out of range (an absent block is filled with the defaults
+// silently — a missing block is not an out-of-range value). Clip never
+// mutates the receiver.
 func (c Config) Clip() (Config, []string) {
 	out := c
 	var warnings []string
@@ -397,6 +577,16 @@ func (c Config) Clip() (Config, []string) {
 			"recent_window %d below minimum — clipped to 1", out.RecentWindow,
 		))
 		out.RecentWindow = 1
+	}
+
+	// gratitude.match is fail-safe by design (data-model.md §"lucid.json"): an
+	// out-of-range cutoff, margin, floor, backend, timeout, or cap is clipped to
+	// its default with a warning rather than rejected, so a hand-edited typo
+	// never stops a nightly `add`.
+	match, issues := out.Gratitude.Match.clip()
+	out.Gratitude.Match = match
+	for _, is := range issues {
+		warnings = append(warnings, fmt.Sprintf("%s — clipped to %s", is.reason, is.clippedTo))
 	}
 
 	return out, warnings
@@ -445,6 +635,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.WitnessReport.validate(); err != nil {
+		return err
+	}
+	if err := c.Gratitude.Match.validate(); err != nil {
 		return err
 	}
 	return nil
@@ -596,9 +789,13 @@ func (c Config) Marshal() ([]byte, error) {
 }
 
 // Unmarshal parses lucid.json bytes into a Config. It does not clip or
-// validate — callers decide when to apply [Clip] and [Validate].
+// validate — callers decide when to apply [Clip] and [Validate]. The gratitude
+// block is pre-seeded with its defaults before decoding, so a file written before
+// the block existed — or one that sets only some gratitude.match keys — reads the
+// documented default for every missing key; a missing key is not an out-of-range
+// value, so it raises no clip warning and never rewrites the file.
 func Unmarshal(b []byte) (Config, error) {
-	var c Config
+	c := Config{Gratitude: GratitudeConfig{Match: DefaultGratitudeMatch()}}
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("config: unmarshal: %w", err)
 	}
