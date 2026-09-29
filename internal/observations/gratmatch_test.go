@@ -328,21 +328,21 @@ func TestTier2Pairs(t *testing.T) {
 	tomb := gEntry("gratitude_e-tomb", "morning coffee")
 	tomb.RedirectTo = "gratitude_a-coffee"
 	entries := []GratitudeEntry{
-		gEntry("gratitude_g-tap", "hot water at the tap"),
+		gEntry("gratitude_g-market", "fresh fruit at the market"),
 		gEntry("gratitude_a-coffee", "my morning coffee"),
 		gEntry("gratitude_b-coffee", "morning coffees"),
 		gEntry("gratitude_c-dog", "my dog"),
 		gEntry("gratitude_d-dad", "my dad"),
 		tomb,
-		gEntry("gratitude_f-shower", "hot showers", "hot water"),
+		gEntry("gratitude_f-bread", "fresh bread", "fresh fruit"),
 	}
 
 	got := Tier2Pairs(entries)
 	require.Len(t, got, 2, "only overlapping live pairs: no dog/dad, no tombstone")
 	assert.Equal(t, NewGratitudePair("gratitude_a-coffee", "gratitude_b-coffee", 1), got[0],
 		"a plural and its singular meet, best first")
-	assert.Equal(t, "gratitude_f-shower", got[1].A, "a pair is spelled with its keys in order")
-	assert.Equal(t, "gratitude_g-tap", got[1].B)
+	assert.Equal(t, "gratitude_f-bread", got[1].A, "a pair is spelled with its keys in order")
+	assert.Equal(t, "gratitude_g-market", got[1].B)
 	assert.InDelta(t, 0.8, got[1].Score, 1e-9, "the best wording pair counts: an aka form (0.8), not the display (0.4)")
 	for _, p := range got {
 		assert.Empty(t, p.Band, "Tier2Pairs only scores; banding is separate")
