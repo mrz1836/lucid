@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -53,7 +54,30 @@ var errGratitudeAskCanceled = errors.New("gratitude add canceled; nothing was sa
 // the cli test package defaults it to false, so no test ever waits on a real one.
 //
 //nolint:gochecknoglobals // one injected terminal seam so the ambiguous-band question is testable without a TTY
-var gratitudeStdinIsTerminal = stdinIsInteractive
+var gratitudeStdinIsTerminal = stdinIsTerminal
+
+// stdinIsTerminal is [stdinIsInteractive] minus the null device. The null device
+// is a character device too, and a caller running `lucid … </dev/null` (a
+// scheduler, an agent harness) has nobody to answer a question — so it must get
+// the refuse-and-defer suggestion, not a prompt that reads end-of-input.
+func stdinIsTerminal(r io.Reader) bool {
+	if !stdinIsInteractive(r) {
+		return false
+	}
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	null, err := os.Stat(os.DevNull)
+	if err != nil {
+		return true
+	}
+	return !os.SameFile(info, null)
+}
 
 // newGratitudeCmd wires `lucid gratitude` (gratitude.md §3–§8): the accumulating
 // nightly-gratitude tally. It is a thin dispatch group over six subcommands —

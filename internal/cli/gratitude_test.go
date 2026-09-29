@@ -728,6 +728,27 @@ func TestGratitudeAddAsksOnlyOnATerminal(t *testing.T) {
 	assert.Equal(t, map[string]int{ids[0]: 1, ids[1]: 1}, gratitudeCounts(t), "nothing was written")
 }
 
+// TestGratitudeStdinIsTerminal: the real terminal check behind the ambiguous-band
+// question. The null device is a character device, so the looser
+// stdinIsInteractive says yes to it — but a caller running `</dev/null` has
+// nobody to answer, so an add must refuse and defer rather than ask.
+func TestGratitudeStdinIsTerminal(t *testing.T) {
+	null, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = null.Close() })
+	assert.True(t, stdinIsInteractive(null), "the null device is a character device")
+	assert.False(t, stdinIsTerminal(null), "the null device is not a person")
+
+	path := t.TempDir() + "/phrase.txt"
+	require.NoError(t, os.WriteFile(path, []byte("a walk outside\n"), 0o600))
+	file, err := os.Open(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = file.Close() })
+	assert.False(t, stdinIsTerminal(file), "a regular file is not a person")
+
+	assert.False(t, stdinIsTerminal(strings.NewReader("y\n")), "a reader is not a person")
+}
+
 // gratitudeThing returns a live entry's display wording by id.
 func gratitudeThing(t *testing.T, id string) string {
 	t.Helper()
