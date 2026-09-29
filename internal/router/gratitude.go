@@ -2,6 +2,7 @@ package router
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/provider"
 )
 
 // storagePrefix is the package prefix the storage adapter stamps on its errors.
@@ -27,24 +29,39 @@ func surfaceMergeError(err error) error {
 	return errors.New(strings.TrimPrefix(err.Error(), storagePrefix))
 }
 
-// gratitude.go is the user-facing gratitude-tally path (gratitude.md §3, §6):
+// gratitude.go is the user-facing gratitude-tally path (gratitude.md §3, §6; the
+// outward-expression verbs — `thank`, the linked people, the reminders — live in
+// gratexpress.go):
 // the accumulating nightly-gratitude count. `add` tallies one occurrence —
-// creating an entry or bumping the canonical-key match — and returns the
-// appended event's receipt id; `list` folds each live entry's Count/First/Last
-// and prints the tally sorted by count then recency. Every write is
-// deterministic and agent-free (architecture P9): the canonical-key match is a
-// normalized string derivation, and by-meaning matching is the deferred R-011.
+// creating an entry, or bumping the entry the match pipeline (gratmatch.go,
+// gratitude.md §7) lands it on — and returns the appended event's receipt id;
+// `list` folds each live entry's Count/First/Last and prints the tally sorted by
+// count then recency. Every write is deterministic and agent-free (architecture
+// P9): the canonical key is a normalized string derivation and the tier-2 token
+// match a pure score over the live entries' wordings. The one optional model
+// step — the tier-3 by-meaning judge on a plain `add` — only scores; the band
+// rule decides, and without it the add completes on tiers 1–2.
 
 // AddGratitudeRequest is one `lucid gratitude add` turn (gratitude.md §3): the
-// verbatim phrase, the strict-tier --day value, an optional Into target, and now
-// (injected so backdating and receipt ids are deterministic in tests). When Into
-// is set, the phrase bumps that specific stable entry regardless of wording (the
-// interim by-meaning path, gratitude.md §4) instead of resolving a canonical key.
+// verbatim phrase, the strict-tier --day value, an optional Into target, the
+// ForceNew (`--new`) answer, the Provider the optional tier-3 judge reaches
+// through, and now (injected so backdating and receipt ids are deterministic in
+// tests). When Into is set, the phrase bumps that specific stable entry
+// regardless of wording (the manual override, gratitude.md §4) and no matching
+// runs. When ForceNew is set, tiers 2–3 are skipped and the phrase starts a new
+// entry — unless tier 1 finds its canonical key, which by definition is the same
+// entry (gratitude.md §3). The two cannot combine. A nil Provider means no judge
+// could be reached: the add completes on tiers 1–2 (gratitude.md §7.6). Person,
+// when set (`--person`), is a person subject linked onto whichever entry the
+// occurrence lands on — link-only, no expressed record (gratitude.md §3, §8).
 type AddGratitudeRequest struct {
-	Thing  string
-	DayArg string
-	Into   string
-	Now    time.Time
+	Thing    string
+	DayArg   string
+	Into     string
+	ForceNew bool
+	Person   string
+	Provider provider.Provider
+	Now      time.Time
 }
 
 // ImportGratitudeRequest is one `lucid gratitude import` (or `add --count …`)
@@ -72,36 +89,72 @@ type GratitudeMergeRequest struct {
 // Receipt is the newly appended event's unique receipt id (gratitude.md §2 Ids)
 // — distinct from Key, the stable entry id that `list` shows and `--into`/`merge`
 // target. Created is true when this call minted the entry (its history is the one
-// occurrence just appended).
+// occurrence just appended). MatchTier and MatchScore are set only when the
+// occurrence landed by an automatic match (gratitude.md §7.4 High band) — zero
+// for a tier-1 canonical-key bump, an `--into` bump, and a create, so those stay
+// exactly the v1 shape. Tier3 says what became of the by-meaning judge when it
+// was needed (gratitude.md §7.6), empty otherwise. PersonKey and PersonName name
+// the person an `add --person` linked (gratitude.md §8), empty otherwise.
 type GratitudeWriteResult struct {
-	Entry   observations.GratitudeEntry
-	Receipt string
-	Key     string
-	Thing   string
-	Count   int
-	First   string
-	Last    string
-	Created bool
-	Ack     string
+	Entry      observations.GratitudeEntry
+	Receipt    string
+	Key        string
+	Thing      string
+	Count      int
+	First      string
+	Last       string
+	Created    bool
+	MatchTier  int
+	MatchScore float64
+	Tier3      GratitudeTier3Status
+	PersonKey  string
+	PersonName string
+	Ack        string
 }
 
 // GratitudeListView is the `lucid gratitude list --json` payload: the live tally
-// (tombstones omitted) and its count, sorted by count then recency. Entries is
-// never null so automation always reads an array.
+// (tombstones omitted) and its count, sorted by count then recency, plus the
+// gentle reminders (gratitude.md §8) — at most three, never a count. Entries and
+// Reminders are never null so automation always reads an array.
 type GratitudeListView struct {
-	Count   int                  `json:"count"`
-	Entries []GratitudeListEntry `json:"entries"`
+	Count     int                  `json:"count"`
+	Entries   []GratitudeListEntry `json:"entries"`
+	Reminders []GratitudeReminder  `json:"reminders"`
 }
 
 // GratitudeListEntry is one folded tally row: the stable entry id, the display
-// phrase and its alternate wordings, and the derived count + first/last span.
+// phrase and its alternate wordings, the derived count + first/last span, and
+// the people it is linked to with when you last told each (gratitude.md §6, §8;
+// [] when unlinked, never null).
 type GratitudeListEntry struct {
-	ID    string   `json:"id"`
-	Thing string   `json:"thing"`
-	Aka   []string `json:"aka"`
-	Count int      `json:"count"`
-	First string   `json:"first"`
-	Last  string   `json:"last"`
+	ID     string                `json:"id"`
+	Thing  string                `json:"thing"`
+	Aka    []string              `json:"aka"`
+	Count  int                   `json:"count"`
+	First  string                `json:"first"`
+	Last   string                `json:"last"`
+	People []GratitudeListPerson `json:"people"`
+}
+
+// GratitudeListPerson is one person a tally row is linked to (gratitude.md §6,
+// §8): the canonical person key (resolved forward through person redirects at
+// read time), their display name, whether they are marked off-limits, and the
+// last date you recorded telling them about this gratitude — "" when never.
+type GratitudeListPerson struct {
+	PersonKey     string `json:"person_key"`
+	DisplayName   string `json:"display_name"`
+	OffLimits     bool   `json:"off_limits"`
+	LastExpressed string `json:"last_expressed"`
+}
+
+// GratitudeReminder is one gentle "you might tell …" line (gratitude.md §8): a
+// linked, not-off-limits person and the entry you might tell them about. It
+// carries no count, date, or score — it is offered, never required.
+type GratitudeReminder struct {
+	PersonKey   string `json:"person_key"`
+	DisplayName string `json:"display_name"`
+	EntryID     string `json:"entry_id"`
+	Thing       string `json:"thing"`
 }
 
 // GratitudeListResult carries the machine view and the human-first lines the CLI
@@ -112,15 +165,24 @@ type GratitudeListResult struct {
 }
 
 // AddGratitude tallies one occurrence of a thing a person is grateful for
-// (gratitude.md §3). It resolves the canonical entry key from the normalized
-// phrase (the v1 match seam — by-meaning matching is R-011), appends one
-// occurrence event, and returns that event's receipt id alongside the resulting
-// tally. It is deterministic and agent-free. An empty phrase writes nothing (a
-// clean usage error), and a strict-tier `--day` runs the shared capture grammar:
-// an unreadable token or a future day is a [DayRejectedError] and nothing is
-// written. The receipt encodes the occurrence's logical date; the event's `at`
-// is always the real write time.
-func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, error) {
+// (gratitude.md §3). It decides which entry the occurrence lands on — the
+// `--into` target verbatim, or the match pipeline (tier 1 canonical key, the
+// tier-2 token match, then the optional tier-3 judge through req.Provider,
+// gratitude.md §7.3) — appends one occurrence event, and returns that event's
+// receipt id alongside the resulting tally. Every step but the judge is
+// deterministic and agent-free, and the judge is never load-bearing: disabled,
+// unreachable, or garbled, the add completes on tiers 1–2 and reports it in
+// Tier3 (gratitude.md §7.6). An empty phrase writes nothing (a clean usage
+// error), and a strict-tier `--day` runs the shared capture grammar: an
+// unreadable token or a future day is a [DayRejectedError] and nothing is
+// written. An ambiguous-band match writes nothing either: it returns a
+// [GratitudeSuggestionError] carrying the candidates, resolved by re-running with
+// Into or ForceNew. A Person subject is resolved and validated before any write
+// (no match or several is a clean error), linked onto the landed entry, and
+// stamped on the occurrence; linking a person marked off-limits withholds the
+// tier-3 judge for this add (gratitude.md §7.5). The receipt encodes the
+// occurrence's logical date; the event's `at` is always the real write time.
+func (r *Router) AddGratitude(ctx context.Context, req AddGratitudeRequest) (GratitudeWriteResult, error) {
 	now := whenOr(req.Now)
 	thing := strings.TrimSpace(req.Thing)
 	if thing == "" {
@@ -139,26 +201,57 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 	}
 	logicalDate := when.LogicalDate
 
+	// `--person` is validated before anything else can happen: an unknown or
+	// ambiguous subject writes nothing, and an off-limits one withholds the
+	// judge — its entry's wordings stay off any model (gratitude.md §7.5, §8).
+	var person gratitudePerson
+	if strings.TrimSpace(req.Person) != "" {
+		if person, err = r.resolveGratitudePerson(req.Person); err != nil {
+			return GratitudeWriteResult{}, err
+		}
+	}
+	judge := req.Provider
+	if person.OffLimits {
+		judge = nil
+	}
+
 	// Resolve which entry this occurrence lands on (the `--into` target verbatim
-	// or the v1 canonical-key seam) and whether the write refreshes the display.
-	key, makePrimary, err := r.resolveGratitudeAddKey(req.Into, thing)
+	// or the match pipeline) and whether the write refreshes the display. An
+	// ambiguous band writes nothing and hands the candidates back to the caller.
+	dec, err := r.resolveGratitudeAddKey(ctx, req.Into, thing, req.ForceNew, judge)
 	if err != nil {
 		return GratitudeWriteResult{}, err
+	}
+	if person.OffLimits && dec.Tier3 == GratitudeTier3Unavailable {
+		// The judge was withheld, not unreachable: say why tier 3 did not run.
+		dec.Tier3 = GratitudeTier3OffLimits
+	}
+	if dec.Action == gratitudeMatchSuggest {
+		return GratitudeWriteResult{}, dec.suggestionError(thing)
 	}
 
 	ev := observations.GratitudeEvent{
 		Type:   observations.GratitudeEventOccurrence,
 		Date:   logicalDate,
 		Source: observations.GratitudeSourceGratitude,
+		Person: person.Key, // storage links a named person onto the entry
 	}
-	entry, appended, err := r.store.AppendGratitudeEvent(key, thing, logicalDate, makePrimary, ev, now)
+	if dec.automatic() {
+		// An automatic landing is attributed on the event itself, so the audit
+		// trail outlives the ack (gratitude.md §7.7): which tier chose the entry,
+		// and by what score. Tonight's wording joins aka[] below (MakePrimary is
+		// false), leaving the canonical display untouched.
+		ev.MatchTier = dec.Tier
+		ev.MatchScore = dec.Score
+	}
+	entry, appended, err := r.store.AppendGratitudeEvent(dec.Key, thing, logicalDate, dec.MakePrimary, ev, now)
 	if err != nil {
 		return GratitudeWriteResult{}, fmt.Errorf("could not add the gratitude; nothing was saved: %w", err)
 	}
 
 	tally := entry.Tally()
 	created := len(entry.History) == 1
-	return GratitudeWriteResult{
+	res := GratitudeWriteResult{
 		Entry:   entry,
 		Receipt: appended.ID,
 		Key:     entry.Key,
@@ -167,46 +260,66 @@ func (r *Router) AddGratitude(req AddGratitudeRequest) (GratitudeWriteResult, er
 		First:   tally.First,
 		Last:    tally.Last,
 		Created: created,
+		Tier3:   dec.Tier3,
 		Ack:     gratitudeAddAck(entry.DisplayName, tally.Count, appended.ID, created),
-	}, nil
+	}
+	if dec.automatic() {
+		res.MatchTier = dec.Tier
+		res.MatchScore = dec.Score
+		res.Ack = gratitudeAutoMatchAck(entry.DisplayName, tally.Count, appended.ID, thing, dec.Tier)
+	}
+	if person.Key != "" {
+		res.PersonKey = person.Key
+		res.PersonName = person.DisplayName
+		res.Ack += gratitudeLinkAck(person.DisplayName)
+	}
+	return res, nil
 }
 
-// resolveGratitudeAddKey picks the entry key an `add` lands on and whether the
+// resolveGratitudeAddKey decides the entry an `add` lands on and whether the
 // write refreshes the display wording. With `--into` the stable id is targeted
-// verbatim (the interim by-meaning path, gratitude.md §4): it must already name a
-// live entry — a bump never creates one, and tonight's differing wording only
-// joins aka[] (makePrimary=false). Without it, the v1 canonical-key seam
-// resolves-or-creates by the normalized phrase (makePrimary=true; the eventual
-// automatic by-meaning match is R-011).
-func (r *Router) resolveGratitudeAddKey(into, thing string) (key string, makePrimary bool, err error) {
+// verbatim (the manual override, gratitude.md §4) and no matching runs: it must
+// already name a live entry — a bump never creates one, and tonight's differing
+// wording only joins aka[]. Without it, the match pipeline decides
+// ([Router.matchGratitude], with judge as its optional tier-3 provider);
+// forceNew (`--new`) skips its tier-2 and tier-3 steps. `--into` and `--new`
+// contradict each other, so the pair is a clean error.
+func (r *Router) resolveGratitudeAddKey(
+	ctx context.Context, into, thing string, forceNew bool, judge provider.Provider,
+) (gratitudeMatchDecision, error) {
 	into = strings.TrimSpace(into)
 	if into == "" {
-		key, err = r.store.ResolveGratitudeKey(thing)
-		if err != nil {
-			return "", false, fmt.Errorf("could not resolve the gratitude key; nothing was saved: %w", err)
-		}
-		return key, true, nil
+		return r.matchGratitude(ctx, thing, forceNew, judge)
+	}
+	if forceNew {
+		return gratitudeMatchDecision{}, fmt.Errorf("gratitude add: --into and --new cannot be combined; nothing was saved")
 	}
 	existing, found, rerr := r.store.ReadGratitude(into)
 	if rerr != nil {
-		return "", false, fmt.Errorf("could not read the gratitude entry; nothing was saved: %w", rerr)
+		return gratitudeMatchDecision{}, fmt.Errorf("could not read the gratitude entry; nothing was saved: %w", rerr)
 	}
 	if !found || existing.IsTombstone() {
-		return "", false, fmt.Errorf(
+		return gratitudeMatchDecision{}, fmt.Errorf(
 			"no live gratitude entry %q to bump; run `lucid gratitude list` for the id; nothing was saved", into,
 		)
 	}
-	return into, false, nil
+	return gratitudeMatchDecision{Action: gratitudeMatchBump, Key: into}, nil
 }
 
 // GratitudeList reads the live tally, folds each entry's Count/First/Last, and
-// returns it sorted by count then recency (gratitude.md §6). It writes nothing.
-// Tombstones (merge redirects) are omitted from the active tally.
+// returns it sorted by count then recency (gratitude.md §6). It writes nothing
+// and calls no model. Tombstones (merge redirects) are omitted from the active
+// tally. A linked entry lists its people — resolved forward through person
+// redirects, with the off-limits flag and when you last told each — and the view
+// carries the gentle reminders ([gratitudeReminders], gratitude.md §8). The
+// people registry is read only when some entry is linked, so an unlinked tally
+// reads exactly as before.
 func (r *Router) GratitudeList() (GratitudeListResult, error) {
 	all, err := r.store.ReadGratitudeAll()
 	if err != nil {
 		return GratitudeListResult{}, fmt.Errorf("could not read the gratitude tally: %w", err)
 	}
+	people := r.newGratitudePeople()
 	entries := make([]GratitudeListEntry, 0, len(all))
 	for _, e := range all {
 		if e.IsTombstone() {
@@ -217,13 +330,18 @@ func (r *Router) GratitudeList() (GratitudeListResult, error) {
 		if aka == nil {
 			aka = []string{}
 		}
+		linked, lerr := people.linked(e)
+		if lerr != nil {
+			return GratitudeListResult{}, fmt.Errorf("could not read the gratitude tally's people: %w", lerr)
+		}
 		entries = append(entries, GratitudeListEntry{
-			ID:    e.Key,
-			Thing: e.DisplayName,
-			Aka:   aka,
-			Count: t.Count,
-			First: t.First,
-			Last:  t.Last,
+			ID:     e.Key,
+			Thing:  e.DisplayName,
+			Aka:    aka,
+			Count:  t.Count,
+			First:  t.First,
+			Last:   t.Last,
+			People: linked,
 		})
 	}
 	// Sort by count desc, then most-recent last desc, then key asc — the things
@@ -237,9 +355,10 @@ func (r *Router) GratitudeList() (GratitudeListResult, error) {
 		}
 		return cmp.Compare(x.ID, y.ID)
 	})
+	reminders := gratitudeReminders(entries)
 	return GratitudeListResult{
-		View:  GratitudeListView{Count: len(entries), Entries: entries},
-		Lines: gratitudeListLines(entries),
+		View:  GratitudeListView{Count: len(entries), Entries: entries, Reminders: reminders},
+		Lines: append(gratitudeListLines(entries), gratitudeReminderLines(reminders)...),
 	}, nil
 }
 
@@ -371,6 +490,20 @@ func gratitudeAddAck(thing string, count int, receipt string, created bool) stri
 	return fmt.Sprintf("%s %q (×%d) as `%s`.", verb, thing, count, receipt)
 }
 
+// gratitudeAutoMatchAck builds the ack for an occurrence that landed by an
+// automatic match (gratitude.md §7.4 High band): the ordinary tally ack — the
+// entry's display wording, its running count, the receipt — plus the wording
+// that was typed and how it matched, so the automatic step is legible and
+// correctable with `--into` (gratitude.md §7.8). Tier 2 matches by wording; tier
+// 3, the optional judge, by meaning.
+func gratitudeAutoMatchAck(thing string, count int, receipt, phrase string, tier int) string {
+	how := "by wording"
+	if tier >= 3 {
+		how = "by meaning"
+	}
+	return fmt.Sprintf("Tallied %q (×%d) as `%s` — matched %q %s (tier %d).", thing, count, receipt, phrase, how, tier)
+}
+
 // gratitudeImportAck builds the ack emitted after a one-time seed lands: the
 // thing, its seeded running count, the migrated first/last span, and the receipt
 // id — provenance over magic, distinct from the nightly `add` ack so a migration
@@ -387,7 +520,8 @@ func gratitudeMergeAck(sourceKey, thing, targetKey string, count int, receipt st
 }
 
 // gratitudeListLines renders the human-first tally: a count header then one line
-// per entry, `<id>  ×<count>  <thing>  (span)`. An empty tally prints the add
+// per entry, `<id>  ×<count>  <thing>  (span)`, a linked entry's people named at
+// the end of its row ([gratitudePeopleSuffix]). An empty tally prints the add
 // hint, so the read is never a bare blank.
 func gratitudeListLines(entries []GratitudeListEntry) []string {
 	if len(entries) == 0 {
@@ -400,7 +534,8 @@ func gratitudeListLines(entries []GratitudeListEntry) []string {
 	lines := make([]string, 0, len(entries)+1)
 	lines = append(lines, fmt.Sprintf("%d gratitude %s:", len(entries), noun))
 	for _, e := range entries {
-		lines = append(lines, fmt.Sprintf("  %s  ×%d  %s%s", e.ID, e.Count, e.Thing, gratitudeSpan(e.First, e.Last)))
+		lines = append(lines, fmt.Sprintf("  %s  ×%d  %s%s%s",
+			e.ID, e.Count, e.Thing, gratitudeSpan(e.First, e.Last), gratitudePeopleSuffix(e.People)))
 	}
 	return lines
 }

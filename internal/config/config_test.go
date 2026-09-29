@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -868,4 +869,247 @@ func TestValidate_FrameworkBlockOptional(t *testing.T) {
 	c.FrameworkStack = nil
 	c.FrameworkConsents = nil
 	assert.NoError(t, c.Validate(), "nil framework collections validate (layer off)")
+}
+
+// TestDefault_GratitudeMatchBlock pins the documented gratitude.match defaults
+// (gratitude.md §9; ADR-0012 §2, §6): tier 2 at 0.85 / 0.15, the shared 0.50
+// floor, a stricter tier 3 at 0.90 / 0.20, the judge that cleared the trust gate
+// (claude_cli, sonnet) switched off until opted in, a 30s judge bound, and a
+// 200-entry cap.
+func TestDefault_GratitudeMatchBlock(t *testing.T) {
+	m := Default().Gratitude.Match
+	assert.InDelta(t, 0.85, m.Tier2High, 1e-9)
+	assert.InDelta(t, 0.15, m.Tier2Margin, 1e-9)
+	assert.InDelta(t, 0.50, m.AmbiguousFloor, 1e-9)
+	assert.False(t, m.Tier3Enabled, "tier 3 ships off — its default judge is hosted, so enabling it is the opt-in")
+	assert.Equal(t, "claude_cli", m.Tier3Backend, "the backend that cleared the trust gate")
+	assert.Equal(t, "sonnet", m.Tier3Model, "the model that cleared the trust gate")
+	assert.InDelta(t, 0.90, m.Tier3High, 1e-9)
+	assert.InDelta(t, 0.20, m.Tier3Margin, 1e-9)
+	assert.Equal(t, 30, m.Tier3TimeoutSeconds)
+	assert.Equal(t, 200, m.Tier3MaxCandidates)
+	assert.Equal(t, DefaultGratitudeMatch(), m)
+	assert.GreaterOrEqual(t, m.Tier2High, m.AmbiguousFloor, "the floor never sits above a high cutoff")
+	assert.GreaterOrEqual(t, m.Tier3High, m.AmbiguousFloor)
+}
+
+// TestGratitudeMatch_MarshalsDocumentedShape asserts a marshaled default config
+// carries gratitude.match under the documented keys (data-model.md §"lucid.json")
+// and, like every other block, no credential.
+func TestGratitudeMatch_MarshalsDocumentedShape(t *testing.T) {
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+
+	var m struct {
+		Gratitude struct {
+			Match map[string]any `json:"match"`
+		} `json:"gratitude"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	match := m.Gratitude.Match
+	require.NotNil(t, match, "the gratitude.match block is written")
+	assert.Len(t, match, 10, "exactly the ten documented knobs")
+	assert.InDelta(t, 0.85, match["tier2_high"], 1e-9)
+	assert.InDelta(t, 0.15, match["tier2_margin"], 1e-9)
+	assert.InDelta(t, 0.5, match["ambiguous_floor"], 1e-9)
+	assert.Equal(t, false, match["tier3_enabled"])
+	assert.Equal(t, "claude_cli", match["tier3_backend"])
+	assert.Equal(t, "sonnet", match["tier3_model"])
+	assert.InDelta(t, 0.9, match["tier3_high"], 1e-9)
+	assert.InDelta(t, 0.2, match["tier3_margin"], 1e-9)
+	assert.EqualValues(t, 30, match["tier3_timeout_seconds"])
+	assert.EqualValues(t, 200, match["tier3_max_candidates"])
+
+	s := string(b)
+	assert.NotContains(t, s, "api_key")
+	assert.NotContains(t, s, "token")
+}
+
+// TestGratitudeMatch_AbsentOrPartialBlockReadsDefaults: a lucid.json written
+// before the gratitude block existed reads every documented default, and one that
+// sets only some gratitude.match keys keeps the defaults for the rest — neither
+// raises a clip warning (a missing key is not an out-of-range value), so boot
+// never rewrites an older file just to add the block.
+func TestGratitudeMatch_AbsentOrPartialBlockReadsDefaults(t *testing.T) {
+	absent, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14}`))
+	require.NoError(t, err)
+	assert.Equal(t, DefaultGratitudeMatch(), absent.Gratitude.Match, "an absent block reads the defaults")
+	_, warnings := absent.Clip()
+	assert.Empty(t, warnings, "an absent block is not a clip")
+
+	partial, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14,
+		"gratitude": {"match": {"tier3_enabled": false, "tier2_high": 0.9}}}`))
+	require.NoError(t, err)
+	want := DefaultGratitudeMatch()
+	want.Tier3Enabled = false
+	want.Tier2High = 0.9
+	assert.Equal(t, want, partial.Gratitude.Match, "set keys win, missing keys keep their defaults")
+	_, warnings = partial.Clip()
+	assert.Empty(t, warnings)
+
+	// A config literal with no block (never loaded, e.g. a router before Boot)
+	// clips to the defaults silently too, and OrDefault reads it the same way.
+	zero := Default()
+	zero.Gratitude = GratitudeConfig{}
+	clipped, warnings := zero.Clip()
+	assert.Empty(t, warnings)
+	assert.Equal(t, DefaultGratitudeMatch(), clipped.Gratitude.Match)
+	assert.Equal(t, DefaultGratitudeMatch(), GratitudeMatchConfig{}.OrDefault())
+	assert.NoError(t, zero.Validate(), "an absent block validates as the defaults")
+}
+
+// TestGratitudeMatch_ClipFailSafe covers every gratitude.match clip rule
+// (data-model.md §"lucid.json"): an out-of-range score, an ambiguous floor above a
+// high cutoff, an unknown tier-3 backend, and a sub-1 timeout or candidate cap are
+// each pulled back to the documented default with a warning naming the key — fail
+// safe, never a crash — and the clipped config validates. In-range values
+// (including the empty inherit-the-provider backend) pass untouched.
+func TestGratitudeMatch_ClipFailSafe(t *testing.T) {
+	def := DefaultGratitudeMatch()
+	tests := []struct {
+		name        string
+		mutate      func(*GratitudeMatchConfig)
+		check       func(t *testing.T, m GratitudeMatchConfig)
+		wantWarning string // substring of a warning; "" ⇒ expect none
+	}{
+		{
+			name:   "in-range values are untouched",
+			mutate: func(m *GratitudeMatchConfig) { m.Tier2High, m.Tier2Margin, m.Tier3Model = 0.8, 0.1, "llama3" },
+			check: func(t *testing.T, m GratitudeMatchConfig) {
+				assert.InDelta(t, 0.8, m.Tier2High, 1e-9)
+				assert.Equal(t, "llama3", m.Tier3Model)
+			},
+		},
+		{
+			name:   "an empty backend inherits provider.backend and is valid",
+			mutate: func(m *GratitudeMatchConfig) { m.Tier3Backend = "" },
+			check:  func(t *testing.T, m GratitudeMatchConfig) { assert.Empty(t, m.Tier3Backend) },
+		},
+		{
+			name:        "a high cutoff above one is clipped",
+			mutate:      func(m *GratitudeMatchConfig) { m.Tier2High = 1.7 },
+			check:       func(t *testing.T, m GratitudeMatchConfig) { assert.InDelta(t, def.Tier2High, m.Tier2High, 1e-9) },
+			wantWarning: "gratitude.match.tier2_high 1.7 is outside [0, 1]",
+		},
+		{
+			name:        "a negative margin is clipped",
+			mutate:      func(m *GratitudeMatchConfig) { m.Tier3Margin = -0.2 },
+			check:       func(t *testing.T, m GratitudeMatchConfig) { assert.InDelta(t, def.Tier3Margin, m.Tier3Margin, 1e-9) },
+			wantWarning: "gratitude.match.tier3_margin -0.2 is outside [0, 1]",
+		},
+		{
+			name:   "a floor above a high cutoff is reset to its default",
+			mutate: func(m *GratitudeMatchConfig) { m.AmbiguousFloor = 0.95 },
+			check: func(t *testing.T, m GratitudeMatchConfig) {
+				assert.InDelta(t, def.AmbiguousFloor, m.AmbiguousFloor, 1e-9)
+			},
+			wantWarning: "ambiguous_floor 0.95 is above a high cutoff",
+		},
+		{
+			name:   "a high cutoff still below the reset floor is reset too",
+			mutate: func(m *GratitudeMatchConfig) { m.Tier2High, m.AmbiguousFloor = 0.4, 0.45 },
+			check: func(t *testing.T, m GratitudeMatchConfig) {
+				assert.InDelta(t, def.AmbiguousFloor, m.AmbiguousFloor, 1e-9)
+				assert.InDelta(t, def.Tier2High, m.Tier2High, 1e-9)
+			},
+			wantWarning: "gratitude.match.tier2_high 0.4 is below ambiguous_floor",
+		},
+		{
+			name:        "an unknown backend fails safe toward local",
+			mutate:      func(m *GratitudeMatchConfig) { m.Tier3Backend = "gpt5_cli" },
+			check:       func(t *testing.T, m GratitudeMatchConfig) { assert.Equal(t, "ollama", m.Tier3Backend) },
+			wantWarning: `gratitude.match.tier3_backend "gpt5_cli" is not a known backend`,
+		},
+		{
+			name:        "a zero timeout is clipped",
+			mutate:      func(m *GratitudeMatchConfig) { m.Tier3TimeoutSeconds = 0 },
+			check:       func(t *testing.T, m GratitudeMatchConfig) { assert.Equal(t, 30, m.Tier3TimeoutSeconds) },
+			wantWarning: "gratitude.match.tier3_timeout_seconds 0 is below 1",
+		},
+		{
+			name:        "a negative candidate cap is clipped",
+			mutate:      func(m *GratitudeMatchConfig) { m.Tier3MaxCandidates = -3 },
+			check:       func(t *testing.T, m GratitudeMatchConfig) { assert.Equal(t, 200, m.Tier3MaxCandidates) },
+			wantWarning: "gratitude.match.tier3_max_candidates -3 is below 1",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			tc.mutate(&c.Gratitude.Match)
+			before := c.Gratitude.Match
+
+			out, warnings := c.Clip()
+
+			assert.Equal(t, before, c.Gratitude.Match, "Clip must not mutate the receiver")
+			tc.check(t, out.Gratitude.Match)
+			if tc.wantWarning == "" {
+				assert.Empty(t, warnings)
+				require.NoError(t, c.Validate(), "an in-range block validates as written")
+			} else {
+				require.NotEmpty(t, warnings)
+				assert.Contains(t, strings.Join(warnings, "\n"), tc.wantWarning)
+				assert.Contains(t, strings.Join(warnings, "\n"), "clipped to")
+				require.Error(t, c.Validate(), "Validate reports what Clip would coerce")
+			}
+			require.NoError(t, out.Validate(), "a clipped config always validates")
+			_, again := out.Clip()
+			assert.Empty(t, again, "clipping is idempotent")
+		})
+	}
+}
+
+// TestGratitudeMatch_RoundTrip proves a tuned gratitude.match block survives a
+// write/read cycle exactly — here an opt-in to a local judge, every knob moved
+// off its default, which the defaults pre-seed must not pull back.
+func TestGratitudeMatch_RoundTrip(t *testing.T) {
+	c := Default()
+	c.Gratitude.Match = GratitudeMatchConfig{
+		Tier2High:           0.8,
+		Tier2Margin:         0.1,
+		AmbiguousFloor:      0.4,
+		Tier3Enabled:        true,
+		Tier3Backend:        "ollama",
+		Tier3Model:          "qwen3:8b",
+		Tier3High:           0.95,
+		Tier3Margin:         0.25,
+		Tier3TimeoutSeconds: 12,
+		Tier3MaxCandidates:  50,
+	}
+	b, err := c.Marshal()
+	require.NoError(t, err)
+
+	got, err := Unmarshal(b)
+	require.NoError(t, err)
+	assert.Equal(t, c, got)
+	assert.True(t, got.Gratitude.Match.Tier3Enabled)
+	require.NoError(t, got.Validate())
+}
+
+// TestGratitudeMatch_Tier3ProviderConfig: the tier-3 judge is built from the
+// provider block with tier3_backend / tier3_model overriding backend / model when
+// set — empty inherits, the companion/workout model rule — and
+// tier3_timeout_seconds as the per-call bound, while the endpoint and every other
+// provider key are inherited unchanged (gratitude.md §7.5). A zero match block
+// reads as the defaults.
+func TestGratitudeMatch_Tier3ProviderConfig(t *testing.T) {
+	base := Default().Provider
+	base.Backend, base.Model, base.Endpoint, base.TimeoutSeconds = "ollama", "llama3", "http://127.0.0.1:9", 120
+
+	got := DefaultGratitudeMatch().Tier3ProviderConfig(base)
+	assert.Equal(t, "claude_cli", got.Backend, "the default tier-3 backend overrides provider.backend")
+	assert.Equal(t, "sonnet", got.Model, "the default tier-3 model overrides provider.model")
+	assert.Equal(t, 30, got.TimeoutSeconds, "the per-call bound is tier3_timeout_seconds")
+	assert.Equal(t, "http://127.0.0.1:9", got.Endpoint, "the endpoint is inherited")
+
+	inherit := DefaultGratitudeMatch()
+	inherit.Tier3Backend, inherit.Tier3Model, inherit.Tier3TimeoutSeconds = "", "", 7
+	got = inherit.Tier3ProviderConfig(base)
+	assert.Equal(t, "ollama", got.Backend, "an empty tier3_backend inherits provider.backend")
+	assert.Equal(t, "llama3", got.Model, "an empty tier3_model inherits provider.model")
+	assert.Equal(t, 7, got.TimeoutSeconds)
+
+	assert.Equal(t, DefaultGratitudeMatch().Tier3ProviderConfig(base), GratitudeMatchConfig{}.Tier3ProviderConfig(base),
+		"a zero block reads as the defaults")
+	assert.Equal(t, 120, base.TimeoutSeconds, "the base block is not mutated")
 }

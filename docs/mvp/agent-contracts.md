@@ -896,6 +896,39 @@ therefore stands unchanged: no Reflection-class agent reads the workout
 kinds, and widening that still requires a contract diff plus a per-instance
 `agent_slice_optins` entry, default off.
 
+## Note — the gratitude match reach
+
+The gratitude tally's optional tier-3 match
+([`../gratitude.md`](../gratitude.md) §7.5, §7.9) makes one bounded model call —
+intent `gratitude.match` on a nightly `add`, or `gratitude.reconcile` for the
+advisory by-meaning pass of `lucid gratitude reconcile` — over wordings read
+from `~/.lucid/registries/gratitude/`. Like the workout compose reach above, it
+sits on the **module side** of the sanctuary line, not the agent side:
+
+* **The input is the whole contract.** The phrase being tallied plus the live
+  entries' wordings (`display_name` and `aka[]`), numbered positionally — no
+  keys, counts, dates, people links, raw entries, insights, or any other tree.
+  Entries linked to an off-limits person are withheld, fail closed — the same
+  redaction the slice-build gate applies.
+* **The output is scores, not conclusions.** `{"matches": [{"n", "score"}]}`
+  (or scored pairs for reconcile). The deterministic band rule decides what
+  happens; the judge never writes, never proposes a pattern, never introduces a
+  hypothesis, and sees nothing it could generalize across.
+* **User-invoked and optional.** It runs only inside a `lucid gratitude` verb
+  the user issued, only when the deterministic tiers are not confident, and only
+  while `gratitude.match.tier3_enabled` is set. With no model reachable the verb
+  completes on the deterministic tiers (P9).
+* **Opt-in egress.** Tier 3 is off by default. Its default judge is the hosted
+  model that cleared the trust gate, so setting `gratitude.match.tier3_enabled`
+  is the explicit per-instance opt-in to sending this slice off the machine;
+  `gratitude.match.tier3_backend: "ollama"` keeps it local.
+
+The denylist for inference stands unchanged: no Reflection-class agent reads the
+gratitude registry, and this reach adds no input to any contract above.
+Widening any agent's access to registry data still requires a contract diff on
+this page plus a per-instance `agent_slice_optins` entry, default off.
+Rationale: [ADR-0012](../adr/0012-gratitude-semantic-matching.md) §7.
+
 ## Optional / deferred contracts
 
 These contracts are named so the architecture has explicit seams and so
