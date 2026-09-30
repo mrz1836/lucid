@@ -12,7 +12,8 @@ import (
 // balance review. `add` records one month's whole wheel — your own 1–10 rating
 // for all eight pillars, optional notes, optional `suggested` calibration
 // values, and the vision-review fields — as one append-only snapshot and returns
-// its receipt id. Every step is deterministic and agent-free (architecture P9):
+// its receipt id; `show` folds the latest snapshot per month into the
+// month-over-month trend, and `list` names the recorded months. Every step is deterministic and agent-free (architecture P9):
 // no model is reached from any wheel path, so the structured `add` completes
 // with no provider and no companion. The self-rating is authoritative — a
 // missing, blank, out-of-range, or non-integer rating is refused and nothing is
@@ -236,4 +237,429 @@ func quoteJoin(values []string) string {
 		quoted[i] = fmt.Sprintf("%q", v)
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// wheelTrendMonths is how many stored months the sparkline spans (wheel.md
+// §7.2): the shown month and up to five before it.
+const wheelTrendMonths = 6
+
+// wheelNoHistoryLine is what `show` and `list` print when no wheel is recorded
+// at all (wheel.md §7.2, §7.3) — never an invented row, rating, or delta.
+const wheelNoHistoryLine = "no prior month — no wheel recorded yet"
+
+// wheelNoPrior is the header and `biggest drop:` wording for a month with no
+// earlier stored month to compare against (wheel.md §7.2).
+const wheelNoPrior = "no prior month"
+
+// wheelSparkBlocks is the fixed eight-block sparkline scale (wheel.md §7.2).
+// It is never auto-scaled to a pillar's own range, so a block means the same
+// rating band on every pillar and every month.
+const wheelSparkBlocks = "▁▂▃▄▅▆▇█"
+
+// ShowWheelRequest is one `lucid wheel show` turn (wheel.md §7.2). Month picks
+// the month to show (YYYY-MM, a leading `@` tolerated); empty means the most
+// recent stored month.
+type ShowWheelRequest struct {
+	Month string
+}
+
+// WheelShowResult is a rendered `wheel show`: View is the --json payload and
+// Lines the human output (bullets and `key: value` lines, never a table).
+type WheelShowResult struct {
+	View  WheelShowView
+	Lines []string
+}
+
+// WheelShowView is the `wheel show --json` payload (wheel.md §7.2). Every array
+// is present and never null. Month is "" when no wheel is recorded; PriorMonth
+// is "" when the shown month is the first one recorded. Calibration is the only
+// place a stored `suggested` value appears — nothing else here is derived from
+// one (wheel.md §5).
+type WheelShowView struct {
+	Month            string             `json:"month"`
+	PriorMonth       string             `json:"prior_month"`
+	ReceiptID        string             `json:"receipt_id"`
+	Months           []string           `json:"months"`
+	Pillars          []WheelPillarTrend `json:"pillars"`
+	Lowest           []WheelPillarScore `json:"lowest"`
+	BiggestDrop      []WheelPillarDelta `json:"biggest_drop"`
+	VisionReviewed   bool               `json:"vision_reviewed"`
+	VisionReflection string             `json:"vision_reflection"`
+	Calibration      WheelCalibration   `json:"calibration"`
+}
+
+// WheelPillarTrend is one pillar in `wheel show` (wheel.md §7.2): your stored
+// rating verbatim, its signed delta against the prior stored month (nil when
+// there is none — never a fabricated 0), and its ratings over the trend window,
+// where Trend[i] is the rating in the view's Months[i].
+type WheelPillarTrend struct {
+	Pillar    string `json:"pillar"`
+	Label     string `json:"label"`
+	Score     int    `json:"score"`
+	Delta     *int   `json:"delta"`
+	Trend     []int  `json:"trend"`
+	Sparkline string `json:"sparkline"`
+	Note      string `json:"note"`
+}
+
+// WheelPillarScore names a pillar and its rating — one `lowest` callout.
+type WheelPillarScore struct {
+	Pillar string `json:"pillar"`
+	Score  int    `json:"score"`
+}
+
+// WheelPillarDelta names a pillar and its delta — one `biggest_drop` callout.
+type WheelPillarDelta struct {
+	Pillar string `json:"pillar"`
+	Delta  int    `json:"delta"`
+}
+
+// WheelCalibration carries the shown month's stored `suggested` values, keyed
+// by pillar (wheel.md §5) — {} when none. It feeds no rating, delta,
+// sparkline, or callout.
+type WheelCalibration struct {
+	Suggested map[string]int `json:"suggested"`
+}
+
+// WheelListResult is a rendered `wheel list`: View is the --json payload and
+// Lines the human output.
+type WheelListResult struct {
+	View  WheelListView
+	Lines []string
+}
+
+// WheelListView is the `wheel list --json` payload (wheel.md §7.3): every
+// recorded month, most recent first; Months is [] (never null) when empty.
+type WheelListView struct {
+	Months []WheelListMonth `json:"months"`
+}
+
+// WheelListMonth is one recorded month in `wheel list` (wheel.md §7.3): the
+// month's stable id, its latest snapshot's receipt and write time, how many
+// snapshots it keeps, and whether that snapshot records a vision re-read.
+type WheelListMonth struct {
+	Month          string `json:"month"`
+	EntryID        string `json:"entry_id"`
+	ReceiptID      string `json:"receipt_id"`
+	Snapshots      int    `json:"snapshots"`
+	RecordedAt     string `json:"recorded_at"`
+	VisionReviewed bool   `json:"vision_reviewed"`
+}
+
+// wheelMonth is one recorded month folded to its current wheel: the entry and
+// its latest snapshot (amend by append, latest wins).
+type wheelMonth struct {
+	entry observations.WheelEntry
+	snap  observations.WheelSnapshot
+}
+
+// ShowWheel renders one month's wheel against the most recent prior stored
+// month (wheel.md §7.2). It is a pure read — it writes nothing and reaches no
+// model. Every number it shows is a stored self-rating printed as stored: the
+// delta, sparkline, and callouts are computed from `score` alone, and a stored
+// `suggested` value appears only in the view's calibration block, never in the
+// human lines. With no wheel recorded it returns the empty view and the
+// no-history line; a malformed month, or one with no wheel, is a clean error.
+func (r *Router) ShowWheel(req ShowWheelRequest) (WheelShowResult, error) {
+	months, err := r.readWheelMonths()
+	if err != nil {
+		return WheelShowResult{}, err
+	}
+	idx, err := pickWheelMonth(months, req.Month)
+	if err != nil {
+		return WheelShowResult{}, err
+	}
+	if idx < 0 {
+		return WheelShowResult{View: emptyWheelShowView(), Lines: []string{wheelNoHistoryLine}}, nil
+	}
+	window := months[max(0, idx-(wheelTrendMonths-1)) : idx+1]
+	for _, m := range window {
+		if err = checkWheelRatings(m); err != nil {
+			return WheelShowResult{}, err
+		}
+	}
+	view := wheelShowViewOf(window)
+	return WheelShowResult{View: view, Lines: wheelShowLines(view)}, nil
+}
+
+// ListWheel lists every recorded month, most recent first (wheel.md §7.3). It
+// is a pure read — it writes nothing and reaches no model. With no wheel
+// recorded, Months is empty and the only line is the no-history line.
+func (r *Router) ListWheel() (WheelListResult, error) {
+	months, err := r.readWheelMonths()
+	if err != nil {
+		return WheelListResult{}, err
+	}
+	rows := make([]WheelListMonth, 0, len(months))
+	for i := len(months) - 1; i >= 0; i-- {
+		m := months[i]
+		rows = append(rows, WheelListMonth{
+			Month:          m.entry.Month,
+			EntryID:        m.entry.Key,
+			ReceiptID:      m.snap.ID,
+			Snapshots:      m.entry.SnapshotCount(),
+			RecordedAt:     m.snap.At,
+			VisionReviewed: m.snap.VisionReviewed,
+		})
+	}
+	return WheelListResult{View: WheelListView{Months: rows}, Lines: wheelListLines(rows)}, nil
+}
+
+// readWheelMonths reads every stored month, oldest first, folded to its latest
+// snapshot. A month file with no snapshot holds no wheel and is skipped.
+func (r *Router) readWheelMonths() ([]wheelMonth, error) {
+	entries, err := r.store.ReadWheelAll()
+	if err != nil {
+		return nil, fmt.Errorf("could not read the wheel: %w", err)
+	}
+	months := make([]wheelMonth, 0, len(entries))
+	for _, e := range entries {
+		if snap, ok := e.Fold(); ok {
+			months = append(months, wheelMonth{entry: e, snap: snap})
+		}
+	}
+	return months, nil
+}
+
+// pickWheelMonth returns the index of the month to show: the most recent when
+// arg is empty (-1 when nothing is recorded), else the named month. A malformed
+// month, or a month with no wheel, is a clean error.
+func pickWheelMonth(months []wheelMonth, arg string) (int, error) {
+	month := strings.TrimPrefix(strings.TrimSpace(arg), "@")
+	if month == "" {
+		return len(months) - 1, nil
+	}
+	if !observations.ValidWheelMonth(month) {
+		return 0, fmt.Errorf("could not read the month %q (want YYYY-MM)", arg)
+	}
+	for i, m := range months {
+		if m.entry.Month == month {
+			return i, nil
+		}
+	}
+	return 0, fmt.Errorf("no wheel is recorded for %s", month)
+}
+
+// checkWheelRatings refuses to show a month whose latest snapshot lacks a valid
+// 1–10 rating for any pillar — a hand-edited file, say — rather than print a
+// number that was never recorded.
+func checkWheelRatings(m wheelMonth) error {
+	for _, p := range observations.WheelPillars() {
+		ps, ok := m.snap.Pillars[p.Key]
+		if !ok || !observations.ValidWheelScore(ps.Score) {
+			return fmt.Errorf(
+				"could not show the %s wheel: %s has no valid %d–%d rating in %s; nothing is shown rather than a made-up number",
+				m.entry.Month, p.Label, observations.WheelScoreMin, observations.WheelScoreMax, m.snap.ID,
+			)
+		}
+	}
+	return nil
+}
+
+// emptyWheelShowView is the --json view with no wheel recorded: month "", every
+// array [] and the calibration map {} — never null.
+func emptyWheelShowView() WheelShowView {
+	return WheelShowView{
+		Months:      []string{},
+		Pillars:     []WheelPillarTrend{},
+		Lowest:      []WheelPillarScore{},
+		BiggestDrop: []WheelPillarDelta{},
+		Calibration: WheelCalibration{Suggested: map[string]int{}},
+	}
+}
+
+// wheelShowViewOf builds the view for the last month in window, which holds up
+// to six stored months oldest first; the month before the shown one, when
+// present, is the prior month the deltas are against. Ratings, deltas,
+// sparklines, and callouts read `score` only; `suggested` is copied into the
+// calibration block and nowhere else.
+func wheelShowViewOf(window []wheelMonth) WheelShowView {
+	cur := window[len(window)-1]
+	view := emptyWheelShowView()
+	view.Month = cur.entry.Month
+	view.ReceiptID = cur.snap.ID
+	view.VisionReviewed = cur.snap.VisionReviewed
+	view.VisionReflection = cur.snap.VisionReflection
+	for _, m := range window {
+		view.Months = append(view.Months, m.entry.Month)
+	}
+	var prior *wheelMonth
+	if len(window) > 1 {
+		prior = &window[len(window)-2]
+		view.PriorMonth = prior.entry.Month
+	}
+
+	for _, p := range observations.WheelPillars() {
+		ps := cur.snap.Pillars[p.Key]
+		trend := make([]int, len(window))
+		for i, m := range window {
+			trend[i] = m.snap.Pillars[p.Key].Score
+		}
+		pt := WheelPillarTrend{
+			Pillar:    p.Key,
+			Label:     p.Label,
+			Score:     ps.Score,
+			Trend:     trend,
+			Sparkline: wheelSparkline(trend),
+			Note:      ps.Note,
+		}
+		if prior != nil {
+			d := ps.Score - prior.snap.Pillars[p.Key].Score
+			pt.Delta = &d
+		}
+		view.Pillars = append(view.Pillars, pt)
+		if ps.Suggested != nil {
+			view.Calibration.Suggested[p.Key] = *ps.Suggested
+		}
+	}
+	view.Lowest = wheelLowest(view.Pillars)
+	view.BiggestDrop = wheelBiggestDrop(view.Pillars)
+	return view
+}
+
+// wheelLowest names every pillar tied at the lowest rating, in canonical order.
+func wheelLowest(pillars []WheelPillarTrend) []WheelPillarScore {
+	out := []WheelPillarScore{}
+	if len(pillars) == 0 {
+		return out
+	}
+	low := pillars[0].Score
+	for _, p := range pillars[1:] {
+		low = min(low, p.Score)
+	}
+	for _, p := range pillars {
+		if p.Score == low {
+			out = append(out, WheelPillarScore{Pillar: p.Pillar, Score: p.Score})
+		}
+	}
+	return out
+}
+
+// wheelBiggestDrop names every pillar tied at the most negative delta, in
+// canonical order — empty when there is no prior month or nothing dropped.
+func wheelBiggestDrop(pillars []WheelPillarTrend) []WheelPillarDelta {
+	out := []WheelPillarDelta{}
+	worst := 0
+	for _, p := range pillars {
+		if p.Delta != nil && *p.Delta < worst {
+			worst = *p.Delta
+		}
+	}
+	if worst == 0 {
+		return out
+	}
+	for _, p := range pillars {
+		if p.Delta != nil && *p.Delta == worst {
+			out = append(out, WheelPillarDelta{Pillar: p.Pillar, Delta: worst})
+		}
+	}
+	return out
+}
+
+// wheelSparkline renders ratings onto the fixed block scale (wheel.md §7.2):
+// block index = ((rating − 1) × 7 + 4) ÷ 9, integer arithmetic. It is shape
+// only; the rating and delta carry the exact numbers.
+func wheelSparkline(trend []int) string {
+	blocks := []rune(wheelSparkBlocks)
+	var b strings.Builder
+	for _, n := range trend {
+		idx := ((n-1)*7 + 4) / 9
+		idx = min(max(idx, 0), len(blocks)-1)
+		b.WriteRune(blocks[idx])
+	}
+	return b.String()
+}
+
+// wheelShowLines renders the human `wheel show` (wheel.md §7.2): a header
+// naming the comparison month, one `label: N (±d) <sparkline>` line per pillar
+// (no delta at all when there is no prior month), the lowest and biggest-drop
+// callouts, any notes as `- label: note` bullets, and the vision fields. Only
+// `key: value` lines and `- ` bullets — never a markdown table, never an
+// average or total, never a suggestion.
+func wheelShowLines(view WheelShowView) []string {
+	hasPrior := view.PriorMonth != ""
+	lines := make([]string, 0, len(view.Pillars)+8)
+	if hasPrior {
+		lines = append(lines, fmt.Sprintf("wheel: %s (vs %s)", view.Month, view.PriorMonth))
+	} else {
+		lines = append(lines, fmt.Sprintf("wheel: %s (%s)", view.Month, wheelNoPrior))
+	}
+	for _, p := range view.Pillars {
+		if p.Delta != nil {
+			lines = append(lines, fmt.Sprintf("%s: %d (%s) %s", p.Label, p.Score, signedWheelDelta(*p.Delta), p.Sparkline))
+		} else {
+			lines = append(lines, fmt.Sprintf("%s: %d %s", p.Label, p.Score, p.Sparkline))
+		}
+	}
+
+	lowest := make([]string, len(view.Lowest))
+	for i, l := range view.Lowest {
+		label, _ := observations.WheelPillarLabel(l.Pillar)
+		lowest[i] = fmt.Sprintf("%s (%d)", label, l.Score)
+	}
+	lines = append(lines, "lowest: "+strings.Join(lowest, ", "))
+
+	drop := "none"
+	switch {
+	case !hasPrior:
+		drop = wheelNoPrior
+	case len(view.BiggestDrop) > 0:
+		parts := make([]string, len(view.BiggestDrop))
+		for i, d := range view.BiggestDrop {
+			label, _ := observations.WheelPillarLabel(d.Pillar)
+			parts[i] = fmt.Sprintf("%s (%s)", label, signedWheelDelta(d.Delta))
+		}
+		drop = strings.Join(parts, ", ")
+	}
+	lines = append(lines, "biggest drop: "+drop)
+
+	var notes []string
+	for _, p := range view.Pillars {
+		if strings.TrimSpace(p.Note) != "" {
+			notes = append(notes, fmt.Sprintf("- %s: %s", p.Label, p.Note))
+		}
+	}
+	if len(notes) > 0 {
+		lines = append(append(lines, "notes:"), notes...)
+	}
+
+	reviewed := "no"
+	if view.VisionReviewed {
+		reviewed = "yes"
+	}
+	lines = append(lines, "vision reviewed: "+reviewed)
+	if strings.TrimSpace(view.VisionReflection) != "" {
+		lines = append(lines, "vision reflection: "+view.VisionReflection)
+	}
+	return lines
+}
+
+// signedWheelDelta renders a delta with an ASCII sign: +1, -2, and a bare 0.
+func signedWheelDelta(d int) string {
+	if d == 0 {
+		return "0"
+	}
+	return fmt.Sprintf("%+d", d)
+}
+
+// wheelListLines renders the human `wheel list` (wheel.md §7.3): one line per
+// month, most recent first — the month, its latest receipt, the snapshot count
+// when the month was amended, and whether the vision was reviewed — or the
+// no-history line when nothing is recorded.
+func wheelListLines(rows []WheelListMonth) []string {
+	if len(rows) == 0 {
+		return []string{wheelNoHistoryLine}
+	}
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		line := fmt.Sprintf("%s: %s", row.Month, row.ReceiptID)
+		if row.Snapshots > 1 {
+			line += fmt.Sprintf(" (%d snapshots)", row.Snapshots)
+		}
+		if row.VisionReviewed {
+			line += " · vision reviewed"
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }

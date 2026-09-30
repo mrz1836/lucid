@@ -368,3 +368,204 @@ func TestWheelAddCLI_RejectsArgs(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
 }
+
+// runWheel runs a wheel command on the isolated Ledger and fails on error.
+func runWheel(t *testing.T, args ...string) string {
+	t.Helper()
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+	require.NoError(t, err, stderr)
+	return out
+}
+
+// seedWheelMonths records two synthetic months through the CLI: August, then
+// September with notes, suggestions, and a vision reflection.
+func seedWheelMonths(t *testing.T) {
+	t.Helper()
+	runWheel(t, "wheel", "add", "--month", "2026-08",
+		"--health", "5", "--relationships", "7", "--career", "6", "--finances", "6",
+		"--growth", "7", "--fun", "4", "--environment", "6", "--contribution", "5")
+	runWheel(t, wheelAddArgs(
+		"--note", "health=synthetic walk note", "--suggested", "health=2", "--suggested", "fun=9",
+		"--vision-reflection", "Synthetic reflection.",
+	)...)
+}
+
+// TestWheelShowCLI_Human: `wheel show` prints the Discord-safe trend — the
+// header naming the prior month, one `label: N (±d) <sparkline>` line per
+// pillar, the callouts, notes, and vision fields — and never a suggestion or a
+// markdown table (wheel.md §7.2).
+func TestWheelShowCLI_Human(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, wheelClock())
+	seedWheelMonths(t)
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "show")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Equal(t, strings.Join([]string{
+		"wheel: 2026-09 (vs 2026-08)",
+		"health: 6 (+1) ▄▅",
+		"relationships: 7 (0) ▆▆",
+		"career/work: 5 (-1) ▅▄",
+		"finances: 4 (-2) ▅▃",
+		"personal growth: 7 (0) ▆▆",
+		"fun/recreation: 4 (0) ▃▃",
+		"environment: 6 (0) ▅▅",
+		"contribution: 5 (0) ▄▄",
+		"lowest: finances (4), fun/recreation (4)",
+		"biggest drop: finances (-2)",
+		"notes:",
+		"- health: synthetic walk note",
+		"vision reviewed: yes",
+		"vision reflection: Synthetic reflection.",
+	}, "\n")+"\n", out)
+	assert.NotContains(t, out, "|", "never a markdown table")
+	assert.NotContains(t, strings.ToLower(out), "suggest", "a suggestion never reaches human output")
+
+	prior := runWheel(t, "wheel", "show", "--month", "2026-08")
+	assert.True(t, strings.HasPrefix(prior, "wheel: 2026-08 (no prior month)\nhealth: 5 ▄\n"), prior)
+	assert.Contains(t, prior, "biggest drop: no prior month\n")
+}
+
+// TestWheelShowCLI_JSON: `wheel show --json` emits the structured view — the
+// stored ratings verbatim, deltas, trends, callouts — and the calibration
+// block is the only place the stored suggestions appear (wheel.md §5, §7.2).
+func TestWheelShowCLI_JSON(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, wheelClock())
+	seedWheelMonths(t)
+
+	var view struct {
+		Month      string   `json:"month"`
+		PriorMonth string   `json:"prior_month"`
+		ReceiptID  string   `json:"receipt_id"`
+		Months     []string `json:"months"`
+		Pillars    []struct {
+			Pillar string `json:"pillar"`
+			Score  int    `json:"score"`
+			Delta  *int   `json:"delta"`
+			Trend  []int  `json:"trend"`
+		} `json:"pillars"`
+		BiggestDrop []map[string]any `json:"biggest_drop"`
+		Calibration struct {
+			Suggested map[string]int `json:"suggested"`
+		} `json:"calibration"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, "wheel", "show", "--json")), &view))
+	assert.Equal(t, "2026-09", view.Month)
+	assert.Equal(t, "2026-08", view.PriorMonth)
+	assert.Equal(t, "wheel_2026_09_001", view.ReceiptID)
+	assert.Equal(t, []string{"2026-08", "2026-09"}, view.Months)
+	require.Len(t, view.Pillars, 8)
+	assert.Equal(t, "health", view.Pillars[0].Pillar)
+	assert.Equal(t, 6, view.Pillars[0].Score, "the score is the self-rating, not the suggestion")
+	require.NotNil(t, view.Pillars[0].Delta)
+	assert.Equal(t, 1, *view.Pillars[0].Delta)
+	assert.Equal(t, []int{5, 6}, view.Pillars[0].Trend)
+	assert.Equal(t, 4, view.Pillars[5].Score, "fun keeps its own 4 beside a suggestion of 9")
+	assert.Len(t, view.BiggestDrop, 1)
+	assert.Equal(t, map[string]int{"health": 2, "fun": 9}, view.Calibration.Suggested)
+}
+
+// TestWheelShowCLI_EmptyHistory: with no wheel recorded, show says so and
+// exits 0; --json emits the empty view with every array [] (wheel.md §7.2).
+func TestWheelShowCLI_EmptyHistory(t *testing.T) {
+	isolatedHome(t)
+	assert.Equal(t, "no prior month — no wheel recorded yet\n", runWheel(t, "wheel", "show"))
+
+	var view map[string]any
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, "wheel", "show", "--json")), &view))
+	assert.Empty(t, view["month"])
+	for _, key := range []string{"months", "pillars", "lowest", "biggest_drop"} {
+		assert.Equal(t, []any{}, view[key], "%s is [] not null", key)
+	}
+}
+
+// TestWheelShowCLI_MonthErrors: a malformed --month, or a month with no wheel,
+// is a clean error on stderr with a non-zero exit; show takes no positional
+// arguments.
+func TestWheelShowCLI_MonthErrors(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, wheelClock())
+	runWheel(t, wheelAddArgs()...)
+
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "show", "--month", "2026-07")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "no wheel is recorded for 2026-07")
+	assert.Equal(t, ExitErr, exitCodeForError(err))
+
+	_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "wheel", "show", "--month", "Sept")
+	require.Error(t, err)
+	assert.Contains(t, stderr, "want YYYY-MM")
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "wheel", "show", "extra")
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+}
+
+// TestWheelListCLI_EmptyHistory: with no wheel recorded, list prints `no prior
+// month` and exits 0 — never an invented row; --json emits {"months": []}
+// (wheel.md §7.3).
+func TestWheelListCLI_EmptyHistory(t *testing.T) {
+	isolatedHome(t)
+	assert.Equal(t, "no prior month — no wheel recorded yet\n", runWheel(t, "wheel", "list"))
+	assert.JSONEq(t, `{"months": []}`, runWheel(t, "wheel", "list", "--json"))
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "list", "extra")
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+}
+
+// TestWheelListCLI_Months: list names each recorded month, most recent first,
+// with its latest receipt, the snapshot count when amended, and the vision
+// flag; --json carries the same rows (wheel.md §7.3).
+func TestWheelListCLI_Months(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, wheelClock())
+	seedWheelMonths(t)
+	runWheel(t, wheelAddArgs("--vision-reviewed")...) // amend September
+
+	assert.Equal(t,
+		"2026-09: wheel_2026_09_002 (2 snapshots) · vision reviewed\n2026-08: wheel_2026_08_001\n",
+		runWheel(t, "wheel", "list"))
+
+	var view struct {
+		Months []struct {
+			Month          string `json:"month"`
+			EntryID        string `json:"entry_id"`
+			ReceiptID      string `json:"receipt_id"`
+			Snapshots      int    `json:"snapshots"`
+			RecordedAt     string `json:"recorded_at"`
+			VisionReviewed bool   `json:"vision_reviewed"`
+		} `json:"months"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, "wheel", "list", "--json")), &view))
+	require.Len(t, view.Months, 2)
+	assert.Equal(t, "2026-09", view.Months[0].Month)
+	assert.Equal(t, "wheel_2026-09", view.Months[0].EntryID)
+	assert.Equal(t, "wheel_2026_09_002", view.Months[0].ReceiptID)
+	assert.Equal(t, 2, view.Months[0].Snapshots)
+	assert.Equal(t, wheelClock().Format(time.RFC3339), view.Months[0].RecordedAt)
+	assert.True(t, view.Months[0].VisionReviewed)
+	assert.Equal(t, "2026-08", view.Months[1].Month)
+	assert.False(t, view.Months[1].VisionReviewed)
+}
+
+// TestWheelListCLI_NoModel: add, show, and list complete as a terminal path
+// with no companion and no model (architecture P9), and the reads leave the
+// Ledger byte-for-byte as they found it.
+func TestWheelListCLI_NoModel(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, wheelClock())
+	runWheel(t, wheelAddArgs()...)
+	path := filepath.Join(home, "registries", "wheel", "wheel_2026-09.json")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	assert.Contains(t, runWheel(t, "wheel", "show"), "wheel: 2026-09 (no prior month)\n")
+	assert.Equal(t, "2026-09: wheel_2026_09_001\n", runWheel(t, "wheel", "list"))
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "show and list write nothing")
+}

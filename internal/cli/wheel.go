@@ -40,16 +40,72 @@ const wheelAddVerb = "wheel add"
 //	lucid wheel add --health 6 --relationships 7 --career 5 --finances 4 \
 //	  --growth 7 --fun 4 --environment 6 --contribution 5 --note health="moving most days"
 //	lucid wheel add --input wheel-2026-09.json --json
+//	lucid wheel show [--month 2026-08] [--json]
+//	lucid wheel list [--json]
 //
 // add records one month's whole wheel and prints the snapshot's receipt id; a
 // second add for the same month appends another snapshot that wins on read.
+// show renders a month's ratings against the prior stored month; list names
+// every recorded month. show and list are pure reads.
 func newWheelCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wheel",
 		Short: "Keep a monthly Wheel of Life — your own 1–10 on eight life pillars",
 	}
-	cmd.AddCommand(newWheelAddCmd())
+	cmd.AddCommand(newWheelAddCmd(), newWheelShowCmd(), newWheelListCmd())
 	return cmd
+}
+
+// newWheelShowCmd wires `lucid wheel show` (wheel.md §7.2): one month's wheel —
+// by default the most recent, or --month — against the most recent prior stored
+// month. The human output is one `label: N (±d) <sparkline>` line per pillar,
+// then the lowest and biggest-drop callouts, notes, and the vision fields, as
+// `key: value` lines and `- ` bullets only — never a markdown table, never a
+// suggestion. --json emits the structured view, whose calibration block is the
+// only place a stored suggestion appears. It writes nothing.
+func newWheelShowCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show",
+		Short: "Show a month's wheel against the prior month — ratings, deltas, and trend",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			month, _ := cmd.Flags().GetString(wheelMonthFlag)
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.ShowWheel(router.ShowWheelRequest{Month: month})
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			return emit(cmd, res.View, res.Lines)
+		},
+	}
+	cmd.Flags().String(wheelMonthFlag, "", "The month to show, YYYY-MM (default: the most recent recorded month)")
+	return cmd
+}
+
+// newWheelListCmd wires `lucid wheel list` (wheel.md §7.3): every recorded
+// month, most recent first, with its latest receipt, its snapshot count when
+// amended, and whether the vision was reviewed. With nothing recorded it says so
+// and exits 0 — never an invented row. It writes nothing.
+func newWheelListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the recorded wheel months, most recent first",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			res, err := r.ListWheel()
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			return emit(cmd, res.View, res.Lines)
+		},
+	}
 }
 
 // newWheelAddCmd wires `lucid wheel add` (wheel.md §7.1). The wheel comes either
