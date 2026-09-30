@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -568,4 +569,94 @@ func TestWheelListCLI_NoModel(t *testing.T) {
 	after, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, before, after, "show and list write nothing")
+}
+
+// TestWheelRoundTrip_AddListShow_CLI: three months recorded through both add
+// paths — flags and a --input document — plus a same-month amend read back
+// through list and show exactly as written: the latest snapshot wins, every
+// receipt survives, each stored rating renders verbatim, and a past month
+// shows its own notes and vision fields (wheel.md §4, §7).
+func TestWheelRoundTrip_AddListShow_CLI(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, wheelClock())
+
+	runWheel(t, append([]string{"wheel", "add", "--month", "2026-07"}, wheelRatingArgs()...)...)
+	path := filepath.Join(t.TempDir(), "wheel.json")
+	require.NoError(t, os.WriteFile(path, []byte(syntheticWheelDoc), 0o600))
+	runWheel(t, "wheel", "add", "--input", path)
+	runWheel(t, wheelAddArgs()...)
+
+	var ack struct {
+		ReceiptID string         `json:"receipt_id"`
+		Month     string         `json:"month"`
+		Amended   bool           `json:"amended"`
+		Scores    map[string]int `json:"scores"`
+	}
+	amend := []string{
+		"wheel", "add", "--json", "--health", "8", "--relationships", "7", "--career", "5", "--finances", "3",
+		"--growth", "7", "--fun", "5", "--environment", "6", "--contribution", "5",
+	}
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, amend...)), &ack))
+	assert.Equal(t, "wheel_2026_09_002", ack.ReceiptID)
+	assert.Equal(t, "2026-09", ack.Month)
+	assert.True(t, ack.Amended)
+	assert.Equal(t, 8, ack.Scores["health"])
+
+	var list router.WheelListView
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, "wheel", "list", "--json")), &list))
+	require.Len(t, list.Months, 3)
+	assert.Equal(t, []string{"2026-09", "2026-08", "2026-07"},
+		[]string{list.Months[0].Month, list.Months[1].Month, list.Months[2].Month})
+	assert.Equal(t, "wheel_2026_09_002", list.Months[0].ReceiptID)
+	assert.Equal(t, 2, list.Months[0].Snapshots)
+	assert.True(t, list.Months[1].VisionReviewed)
+
+	var show router.WheelShowView
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, "wheel", "show", "--json")), &show))
+	assert.Equal(t, "2026-09", show.Month)
+	assert.Equal(t, "2026-08", show.PriorMonth)
+	assert.Equal(t, "wheel_2026_09_002", show.ReceiptID)
+	assert.Equal(t, []string{"2026-07", "2026-08", "2026-09"}, show.Months)
+	want := map[string]struct{ score, delta int }{
+		"health": {8, 2}, "relationships": {7, 0}, "career": {5, 0}, "finances": {3, -1},
+		"growth": {7, 0}, "fun": {5, 1}, "environment": {6, 0}, "contribution": {5, 0},
+	}
+	require.Len(t, show.Pillars, 8)
+	for _, p := range show.Pillars {
+		w := want[p.Pillar]
+		assert.Equal(t, w.score, p.Score, "%s renders the latest stored rating", p.Pillar)
+		require.NotNil(t, p.Delta, p.Pillar)
+		assert.Equal(t, w.delta, *p.Delta, "%s delta vs 2026-08", p.Pillar)
+	}
+	assert.Equal(t, []int{6, 6, 8}, show.Pillars[0].Trend)
+	assert.Equal(t, []router.WheelPillarScore{{Pillar: "finances", Score: 3}}, show.Lowest)
+
+	var aug router.WheelShowView
+	require.NoError(t, json.Unmarshal([]byte(runWheel(t, "wheel", "show", "--month", "2026-08", "--json")), &aug))
+	assert.Equal(t, "2026-07", aug.PriorMonth)
+	assert.True(t, aug.VisionReviewed)
+	assert.Equal(t, "Synthetic reflection.", aug.VisionReflection)
+	assert.Equal(t, "synthetic walk note", aug.Pillars[0].Note)
+	assert.Equal(t, map[string]int{"health": 5, "career": 6}, aug.Calibration.Suggested)
+
+	e, found := readWheelMonth(t, home, "2026-09")
+	require.True(t, found)
+	require.Len(t, e.History, 2, "the amend appended; the first snapshot is untouched")
+	assert.Equal(t, 6, e.History[0].Pillars["health"].Score)
+	assert.Equal(t, "wheel_2026_09_001", e.History[0].ID)
+}
+
+// TestWheelListCLI_ReadError: an unreadable month file is a clean error on
+// stderr with a non-zero exit, never a partial list.
+func TestWheelListCLI_ReadError(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, wheelClock())
+	runWheel(t, wheelAddArgs()...)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "registries", "wheel", "wheel_2026-09.json"), []byte("{bad"), 0o600))
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "list")
+	require.Error(t, err)
+	assert.Empty(t, out)
+	assert.Contains(t, stderr, "could not read the wheel")
+	assert.Equal(t, ExitErr, exitCodeForError(err))
 }
