@@ -60,7 +60,7 @@ These rules trace directly to
 ├── reframes/               # append-only catch→flip inner-work entries + surface_state.json projection — owned by reframes.md
 ├── focus/                   # append-only focus work-ons (+ retirement events) + surface_state.json projection — owned by focus.md
 ├── retro/                   # append-only retro parking-lot events (park + resolve/defer transitions), folded to open/resolved/deferred items — owned by retro.md
-├── registries/             # injuries, threads, places, eras, pets, gratitude — same key derivation as people/
+├── registries/             # injuries, threads, places, eras, pets, gratitude — same key derivation as people/ — plus wheel (month-keyed, owned by wheel.md)
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
 ├── secrets/                # append-only names-only reference catalog (secrets.jsonl)
 └── projections/            # rebuildable views/exports — deletable wholesale
@@ -127,7 +127,17 @@ Count/First/Last are folded at read time, so it never stores a derived number.
 Schema 2 adds an optional `people[]` link list (person keys) and the
 tally-neutral `expressed` event that records having told a linked person; an
 automatically matched occurrence carries `match_tier` / `match_score`. Schema-1
-entries read unchanged ([`gratitude.md`](../gratitude.md) §2).
+entries read unchanged ([`gratitude.md`](../gratitude.md) §2). The monthly
+**Wheel of Life** ([`wheel.md`](../wheel.md)) adds a further registry kind —
+`wheel` — that diverges from both: its key is the calendar month itself
+(`wheel_YYYY-MM`, deterministic and unsalted, because a month is not sensitive
+and must stay enumerable for the trend), it has no `aka[]` or merge, and it
+carries an append-only history of whole-wheel `snapshot` events (eight
+integer 1–10 self-ratings, optional per-pillar notes and a separate
+`suggested` calibration value, `vision_reviewed`, and `vision_reflection`).
+The month's wheel is the **latest** snapshot, folded at read time, so a
+same-month re-entry is an amend by append — nothing is mutated, and every
+snapshot keeps its receipt ([`wheel.md`](../wheel.md) §4).
 
 ### Memory amendments — append-only correction of a stored story
 
@@ -203,6 +213,8 @@ the audit trail.
 | Focus id | `focus_YYYY_MM_DD_<seq>` (logical day + per-day sequence, assigned single-writer as max-seq+1, never line count; zero-padded to three digits, wider values legal). A retirement appends a new entry whose `refs.retires` names the target id, folding it to `retired` — history is never rewritten or deleted. See [`focus.md`](../focus.md). | `focus_2026_08_23_001` |
 | Gratitude entry id | `gratitude_<slug>` — the salted registry key derived from the normalized phrase (the `people/` key derivation), stable across the entry's life; shown by `list` and targeted by `--into` / `merge`. See [`gratitude.md`](../gratitude.md). | `gratitude_a-river` |
 | Gratitude receipt id | `grat_YYYY_MM_DD_<seq>` — one per appended tally event (`occurrence` / `seed` / `merge` / `expressed`), assigned single-writer as max-seq+1 over the entry's history; returned by every `add` / `import` / `merge` / `reconcile --apply` fold / `thank`, distinct from the stable entry id. See [`gratitude.md`](../gratitude.md). | `grat_2026_08_24_001` |
+| Wheel entry id | `wheel_YYYY-MM` — the calendar month the wheel covers (deterministic, unsalted, one file per month under `registries/wheel/`), stable forever; shown by `list`. See [`wheel.md`](../wheel.md). | `wheel_2026-09` |
+| Wheel receipt id | `wheel_YYYY_MM_<seq>` — one per appended `snapshot`, assigned single-writer as max-seq+1 over that month's history (zero-padded to three digits, wider values legal); returned by every `wheel add`, distinct from the stable entry id. A second `add` for the same month mints the next receipt and wins on read (latest-wins). See [`wheel.md`](../wheel.md). | `wheel_2026_09_001` |
 | Retro item id | `R-NNN` — the parked-item id, minted **globally monotonic** as the max `R-NNN` across all `park` lines plus one (zero-padded to three digits, wider values legal; `park` auto-mints, `import` supplies explicit ids). A `resolve` / `defer` references it without advancing the counter. Shown by `list`, targeted by `show` / `resolve` / `defer`. See [`retro.md`](../retro.md). | `R-012` |
 | Retro receipt id | `retro_event_YYYY_MM_DD_<seq>` — one per appended retro event (`park` / `resolve` / `defer`), assigned single-writer per logical-day as max-seq+1; returned by every write, distinct from the stable `R-NNN` item id. See [`retro.md`](../retro.md). | `retro_event_2026_08_23_001` |
 

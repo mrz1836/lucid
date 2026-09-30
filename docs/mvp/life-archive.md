@@ -427,6 +427,16 @@ as the future owner of automatic by-meaning matching. The registry machinery it
 reuses (salted keys, `aka[]`, the redirect tombstone) is exactly the pet-kind
 template above.
 
+The monthly **Wheel of Life** is a third net-new registry kind
+([`../wheel.md`](../wheel.md)): a `wheel` entry is one calendar month's
+self-rated balance review, reached by its own verb (`lucid wheel add` / `show`
+/ `list`). It borrows the registry home and the append-only discipline but not
+the salted identity: its key is the month itself (`wheel_YYYY-MM`), it has no
+`aka[]` or merge, and its history is a list of whole-wheel `snapshot` events
+folded latest-wins — so a same-month correction appends rather than rewrites.
+Like every kind here it is inventory, never obligation: no balance score, no
+streak, no target.
+
 ## 9. Boundaries (inherited, restated)
 
 * **Never diagnosis, never treatment advice.** The injury projection

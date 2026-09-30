@@ -28,7 +28,10 @@ this reference stays the precise baseline.
   so it emits the minimal, string-valued shape `{"mode": "<green|yellow|red>"}`
   (no `receipt_id`, no `logical_date`). The verbs that already emitted JSON
   (`memory`, `attach`, `injury` / `thread` / `era` / `pet`, `gratitude`,
-  `retro park`) keep their own existing keys unchanged. In every case stdout
+  `retro park`) keep their own existing keys unchanged. `wheel add`, which
+  records a calendar month rather than a logical day, emits its own
+  `{receipt_id, entry_id, month, amended, scores}` receipt
+  ([`wheel`](#wheel)). In every case stdout
   carries JSON only — diagnostics stay on stderr — so a `--json` stream is
   always parseable.
 - **Exit codes** (stable, so scripts and supervised ops can branch on them):
@@ -137,12 +140,14 @@ registry now carries the future ceiling, so it is not on this list:
 **The closed write surface.** Every verb that stamps a logical day is named
 above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `gratitude add`,
 `gratitude thank`, `memory`, `workout log`, `era`, `injury`, `anchor`, `mode`,
-`storm`, `closeout`. Three write verbs are deliberately N/A —
+`storm`, `closeout`. Four write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
-id or window, rather than capturing a new one, and [`self`](#self) records
+id or window, rather than capturing a new one, [`self`](#self) records
 attributes rather than occurrences: its optional `--since` is an *origin* read
-with the same grammar, not a logical day.
+with the same grammar, not a logical day, and [`wheel add`](#wheel) records a
+calendar month, not a day: its `--month <YYYY-MM>` names the month the wheel
+covers, defaulting to the current logical day's month.
 
 ## CLI commands
 
@@ -1025,6 +1030,99 @@ lucid gratitude reconcile
 lucid gratitude reconcile --apply --json
 lucid gratitude thank gratitude_a-river --person person_a-river
 lucid gratitude thank gratitude_a-river --person "Sam Rivera" --day @yesterday
+```
+
+### wheel
+
+```
+lucid wheel add --health <1-10> --relationships <1-10> --career <1-10> --finances <1-10>
+                --growth <1-10> --fun <1-10> --environment <1-10> --contribution <1-10>
+                [--note <pillar>=<text>]... [--suggested <pillar>=<1-10>]...
+                [--vision-reviewed] [--vision-reflection <text> | --vision-reflection-file <path>]
+                [--month <YYYY-MM>] [--json]
+lucid wheel add --input <path> [--json]
+lucid wheel show [--month <YYYY-MM>] [--json]
+lucid wheel list [--json]
+```
+
+Keep a monthly **Wheel of Life** — your own 1–10 rating of eight life pillars
+(health, relationships, career/work, finances, personal growth,
+fun/recreation, environment, contribution), read back as a month-over-month
+trend. An append-only **registry** kind under `~/.lucid/registries/wheel/`, one
+file per calendar month keyed `wheel_YYYY-MM`. An inventory of balance, never a
+scorecard: no balance score, average, streak, or target. Deterministic and
+agent-free — no model in any path, so every subcommand completes with no
+provider and no companion. Full layer spec (the pillars and their definitions,
+the 1–10 scale, the snapshot schema, the `suggested` calibration field, the
+vision reflection, and the trend view): [`../wheel.md`](../wheel.md).
+
+- **`add`** records one month's whole wheel as one `snapshot` and prints the
+  write's receipt id (`wheel_YYYY_MM_<seq>`), then echoes the eight stored
+  ratings. **All eight rating flags are required**, each an integer **1–10** —
+  the wheel's own scale, not the 1–5 capacity or 1–7 Bristol scale. A missing,
+  out-of-range, or non-integer rating is a clean error and nothing is written;
+  a rating is never defaulted, inferred, or filled in.
+  - `--note <pillar>=<text>` (repeatable) stores a pillar's optional one-line
+    "why" verbatim.
+  - `--suggested <pillar>=<1-10>` (repeatable) stores a pillar's optional
+    **calibration** value — a companion's read of the month's evidence — in a
+    field kept separate from your rating. It is accepted only alongside all
+    eight ratings, is never the score, never shown in human output, and never
+    folded into the trend.
+  - `--vision-reviewed` records the monthly vision re-read;
+    `--vision-reflection <text>` / `--vision-reflection-file <path>` (`-` for
+    stdin; mutually exclusive) store a short reflection verbatim and imply
+    `--vision-reviewed`. The wheel stores no link to any vision document.
+  - `--month <YYYY-MM>` names the month (default: the month of the current
+    logical day, 04:00 rollover); a malformed or future month is a clean error.
+  - `--input <path>` (`-` for stdin) reads the whole wheel from a strict JSON
+    document instead (`{month?, pillars: {<key>: {score, note?, suggested?}},
+    vision_reviewed?, vision_reflection?}`) — the structured path a companion
+    uses to keep notes off the command line. It excludes every other `add` flag
+    but `--json`.
+
+  **Same month again = amend by append.** A second `add` for a month appends
+  another snapshot, which wins on read (latest-wins); the earlier snapshot and
+  its receipt stay on disk, and nothing is mutated. The ack says so.
+- **`show`** renders one month — the most recent by default, or `--month
+  <YYYY-MM>` — against the most recent prior stored month: one `label: N (±d)
+  <sparkline>` line per pillar (your stored rating verbatim, the signed delta,
+  and a fixed-scale sparkline of up to the last six stored months), then
+  `lowest:` and `biggest drop:` callouts, any notes, and the vision fields.
+  Human output is `key: value` lines and bullets only — **never a markdown
+  table** — so it relays cleanly into chat. The first recorded month shows
+  `no prior month` instead of a delta; with nothing recorded, `show` prints
+  `no prior month — no wheel recorded yet` and exits `0`.
+- **`list`** prints one line per recorded month, most recent first (latest
+  receipt, snapshot count when amended, whether the vision was reviewed); with
+  nothing recorded it prints `no prior month — no wheel recorded yet`.
+
+**`--json` shapes** (snake_case; stdout carries JSON only):
+
+- **`add`**: `{receipt_id, entry_id, month, amended, scores}` — `scores` is the
+  eight stored ratings as a `pillar key → integer` map; `amended` is `true` when
+  the month already had a wheel.
+- **`show`**: `{month, prior_month, receipt_id, months, pillars: [{pillar,
+  label, score, delta, trend, sparkline, note}], lowest: [{pillar, score}],
+  biggest_drop: [{pillar, delta}], vision_reviewed, vision_reflection,
+  calibration: {suggested: {<key>: <int>}}}` — `delta` is `null` and
+  `prior_month` `""` with no prior month; arrays are never null;
+  `calibration.suggested` is the only place stored `suggested` values appear,
+  and nothing else in the payload is derived from them.
+- **`list`**: `{months: [{month, entry_id, receipt_id, snapshots, recorded_at,
+  vision_reviewed}]}` — most recent first; `[]` when empty.
+
+```sh
+lucid wheel add --health 6 --relationships 7 --career 5 --finances 4 \
+  --growth 7 --fun 4 --environment 6 --contribution 5 \
+  --note health="moving most days" --vision-reviewed
+lucid wheel add --input wheel-2026-09.json --json
+lucid wheel add --input - < wheel-2026-09.json
+lucid wheel add --month 2026-08 --health 5 --relationships 7 --career 6 --finances 6 \
+  --growth 7 --fun 4 --environment 6 --contribution 5
+lucid wheel show
+lucid wheel show --month 2026-08 --json
+lucid wheel list
 ```
 
 ### day
