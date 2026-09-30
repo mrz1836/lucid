@@ -24,6 +24,12 @@ const (
 	// and the first/last span are folded from ([GratitudeEntry]). Its on-disk
 	// shape lives in gratitude.go, not the shared [Registry] struct.
 	RegistryGratitude = "gratitude"
+	// RegistryWheel is the monthly Wheel of Life kind (wheel.md §1). A wheel
+	// entry is keyed by its calendar month (wheel_YYYY-MM), not a salted phrase
+	// slug, and carries an append-only snapshot history the month's current
+	// wheel is folded from ([WheelEntry]). Its on-disk shape lives in wheel.go,
+	// not the shared [Registry] struct.
+	RegistryWheel = "wheel"
 )
 
 // Registry status values are recorded in an append-only status_history, never
@@ -52,6 +58,8 @@ func RegistryDir(kind string) (string, bool) {
 		return "pets", true
 	case RegistryGratitude:
 		return "gratitude", true
+	case RegistryWheel:
+		return "wheel", true
 	default:
 		return "", false
 	}
