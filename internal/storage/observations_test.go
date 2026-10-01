@@ -393,6 +393,57 @@ func TestReadDayView_RawGroupingHonorsRollover(t *testing.T) {
 	assert.Equal(t, []string{id}, under5.RawEntryIDs)
 }
 
+// TestReadDayView_LogicalDayAcrossDST pins the logical-day grouping to local
+// wall-clock time across both 2026 America/New_York DST transitions. On the
+// spring-forward night (2026-03-08, 02:00 EST → 03:00 EDT) the pre-rollover
+// window is an hour short, yet 01:59:59 EST and 03:30 EDT still belong to
+// 2026-03-07 and 04:00 EDT starts 2026-03-08. On the fall-back night
+// (2026-11-01, 02:00 EDT → 01:00 EST) 01:30 occurs twice — once per offset —
+// and both, plus 03:59:59 EST, belong to 2026-10-31 while 04:00 EST starts
+// 2026-11-01. Every instant is built from UTC so none is ambiguous or
+// nonexistent. Fixtures are wholly synthetic; the test skips when the tz
+// database is unavailable.
+func TestReadDayView_LogicalDayAcrossDST(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("tz database unavailable: %v", err)
+	}
+	a := newObsStore(t)
+	require.NoError(t, a.ScaffoldEngine())
+	at := func(y int, m time.Month, d, hh, mm, ss int) time.Time {
+		return time.Date(y, m, d, hh, mm, ss, 0, time.UTC).In(ny)
+	}
+	write := func(when time.Time, body string) string {
+		return writeRawAt(t, a, when, when, PrecisionExact, body)
+	}
+	read := func(date string) []string {
+		view, rerr := a.ReadDayView(date, ny, observations.DefaultRolloverMin)
+		require.NoError(t, rerr)
+		return view.RawEntryIDs
+	}
+
+	// Spring forward: 07:00 UTC is the 02:00 EST → 03:00 EDT jump.
+	beforeJump := write(at(2026, 3, 8, 6, 59, 59), "one second before the clocks jump")
+	afterJump := write(at(2026, 3, 8, 7, 30, 0), "after the jump, still before the rollover")
+	springRollover := write(at(2026, 3, 8, 8, 0, 0), "rollover on the short night")
+	assert.Equal(t, []string{beforeJump, afterJump}, read("2026-03-07"))
+	assert.Equal(t, []string{springRollover}, read("2026-03-08"))
+
+	// Fall back: 06:00 UTC is the 02:00 EDT → 01:00 EST repeat.
+	firstPass := at(2026, 11, 1, 5, 30, 0)
+	secondPass := at(2026, 11, 1, 6, 30, 0)
+	_, firstOffset := firstPass.Zone()
+	_, secondOffset := secondPass.Zone()
+	require.Equal(t, firstPass.Format("15:04"), secondPass.Format("15:04"), "the same wall-clock minute, twice")
+	require.NotEqual(t, firstOffset, secondOffset, "the two passes carry different UTC offsets")
+	firstID := write(firstPass, "the first pass through half past one")
+	secondID := write(secondPass, "the second pass through half past one")
+	lastSecond := write(at(2026, 11, 1, 8, 59, 59), "one second before the rollover on the long night")
+	fallRollover := write(at(2026, 11, 1, 9, 0, 0), "rollover on the long night")
+	assert.Equal(t, []string{firstID, secondID, lastSecond}, read("2026-10-31"))
+	assert.Equal(t, []string{fallRollover}, read("2026-11-01"))
+}
+
 // TestRawIDsForDate_SkipsUnreadableEntries: a raw file whose occurred_at is
 // not a timestamp, or that has no frontmatter at all, is skipped rather than
 // failing the day view — and the well-formed entry beside it still lists.
