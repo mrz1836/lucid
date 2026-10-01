@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -24,8 +25,9 @@ const (
 // optional provenance recorded on the session record when supplied. DayArg
 // is the optional `--day` token (`@yesterday` / `@YYYY-MM-DD`, or the bare
 // forms) resolved through the backdating grammar the capture verbs share; an
-// empty value records the entry at now, at exact precision, under the 04:00
-// rollover.
+// empty value records the entry at now, at exact precision, attributed under
+// the top-level chain.json rollover (04:00 when chain.json is missing or
+// invalid).
 type LogRequest struct {
 	Text      string
 	Now       time.Time
@@ -83,7 +85,14 @@ func (r *Router) Log(req LogRequest) (LogResult, error) {
 	if err != nil {
 		return LogResult{}, err
 	}
-	day := when.LogicalDate
+	// The attributed day is re-derived from the instant and precision the
+	// entry records, on the top-level chain.json rollover, through the one
+	// derivation the day view groups raw entries on (observations.md §2) — so
+	// the day this ack names is the day `lucid day` lists the entry under. A
+	// bare capture before the rollover lands on the day just lived; an explicit
+	// --day still wins, because its instant and precision already encode the
+	// chosen day. occurred_at itself is never moved.
+	day := observations.DeriveLogicalDate(when.OccurredAt, when.Precision, r.logicalRolloverMin())
 
 	// bootstrap follows the mode, not the entry path: a history load done with
 	// `lucid log --day` is as historical as the same content typed into

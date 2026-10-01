@@ -46,8 +46,13 @@ const (
 // (engine-module.md §1). observations.md §2 binds logical_date derivation to
 // "the rollover boundary (engine §1)"; the MVP default profile uses 04:00,
 // so the two trees resolve the same logical day — the join key stays aligned.
-// Phase 11 is independent of the Engine phases, so the value is a constant
-// here rather than a read of chain.json.
+//
+// It is also the documented fallback for the `lucid log` and `lucid day`
+// paths, which resolve the top-level chain.json rollover (observations.md §2)
+// and land here only when chain.json is missing or its rollover is invalid.
+// Per-profile overrides are not consulted on those paths. The other capture
+// paths still apply this constant directly, so they agree with log and day
+// while the top-level rollover is the default.
 const DefaultRolloverMin = 4 * 60
 
 // dateLayout is the logical_date string form (YYYY-MM-DD, local civil date).

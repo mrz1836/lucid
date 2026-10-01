@@ -262,8 +262,9 @@ func writeChain(t *testing.T, r *Router, edit func(*engine.ChainConfig)) {
 
 // TestLogicalRolloverMin_FallbackToDefault: when chain.json is absent,
 // unparseable, or its top-level rollover is missing or not a valid HH:MM, the
-// resolver falls back to the documented 04:00 — and the day view groups on
-// that same boundary (03:59:59 the day before, 04:00 its own day).
+// resolver falls back to the documented 04:00 — and a bare `lucid log` and the
+// day view both attribute on that same boundary (03:59:59 the day before,
+// 04:00 its own day).
 func TestLogicalRolloverMin_FallbackToDefault(t *testing.T) {
 	chainPath := func(r *Router) string { return filepath.Join(r.Store().Home(), "engine", "chain.json") }
 	cases := map[string]func(t *testing.T, r *Router){
@@ -286,6 +287,13 @@ func TestLogicalRolloverMin_FallbackToDefault(t *testing.T) {
 			require.NoError(t, r.Store().ScaffoldEngine())
 			breakChain(t, r)
 			assert.Equal(t, observations.DefaultRolloverMin, r.logicalRolloverMin())
+
+			before, err := r.Log(LogRequest{Text: "one second before the rollover", Now: time.Date(2026, 9, 28, 3, 59, 59, 0, edt)})
+			require.NoError(t, err)
+			assert.Equal(t, "2026-09-27", before.Day)
+			at, err := r.Log(LogRequest{Text: "exactly at the rollover", Now: time.Date(2026, 9, 28, 4, 0, 0, 0, edt)})
+			require.NoError(t, err)
+			assert.Equal(t, "2026-09-28", at.Day)
 		})
 	}
 
@@ -304,11 +312,13 @@ func TestLogicalRolloverMin_FallbackToDefault(t *testing.T) {
 		prior, err := r.DayView("", lastSecond)
 		require.NoError(t, err)
 		assert.Equal(t, "2026-09-27", prior.Date)
+		assert.Equal(t, before.Day, prior.Date, "the log and the day view name the same day")
 		assert.Equal(t, []string{before.RawID}, prior.View.RawEntryIDs)
 
 		own, err := r.DayView("", atRollover)
 		require.NoError(t, err)
 		assert.Equal(t, "2026-09-28", own.Date)
+		assert.Equal(t, at.Day, own.Date, "the log and the day view name the same day")
 		assert.Equal(t, []string{at.RawID}, own.View.RawEntryIDs)
 	})
 }
@@ -334,6 +344,7 @@ func TestLogicalRolloverMin_TopLevelIgnoresProfiles(t *testing.T) {
 	at := time.Date(2026, 9, 28, 4, 30, 0, 0, edt) // after 04:00, before the 05:00 top-level rollover
 	logged, err := r.Log(LogRequest{Text: "between four and five", Now: at})
 	require.NoError(t, err)
+	assert.Equal(t, "2026-09-27", logged.Day, "the log attributes on the top-level rollover too")
 
 	res, err := r.DayView("", at)
 	require.NoError(t, err)

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/lucidtest"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -387,4 +388,80 @@ func TestLog_MalformedHarnessWritesNothing(t *testing.T) {
 	assert.Contains(t, err.Error(), "nothing was saved")
 	assert.Equal(t, 0, countFiles(t, home, "raw"), "nothing written under raw/")
 	assert.Equal(t, 0, countFiles(t, home, "sessions"), "no dangling session")
+}
+
+// TestLog_BareLogRolloverAttribution pins the bare-capture boundary matrix on
+// the top-level chain.json rollover (04:00 here): before the mark the entry is
+// attributed to the day just lived, at the mark (inclusive) to its own date.
+// occurred_at keeps the true wall-clock instant at exact precision — only the
+// attributed day moves. A non-default top-level rollover proves the day is
+// read from chain.json rather than the built-in constant. Synthetic text,
+// injected clock and fixed zone.
+func TestLog_BareLogRolloverAttribution(t *testing.T) {
+	cases := []struct {
+		name     string
+		rollover string
+		at       time.Time
+		wantDay  string
+		wantOcc  string
+	}{
+		{"just after midnight", "04:00", time.Date(2026, 9, 28, 0, 33, 0, 0, edt), "2026-09-27", "2026-09-28T00:33:00-04:00"},
+		{"one second before rollover", "04:00", time.Date(2026, 9, 28, 3, 59, 59, 0, edt), "2026-09-27", "2026-09-28T03:59:59-04:00"},
+		{"exactly at rollover", "04:00", time.Date(2026, 9, 28, 4, 0, 0, 0, edt), "2026-09-28", "2026-09-28T04:00:00-04:00"},
+		{"after rollover", "04:00", time.Date(2026, 9, 28, 9, 15, 0, 0, edt), "2026-09-28", "2026-09-28T09:15:00-04:00"},
+		{"before a later chain rollover", "05:00", time.Date(2026, 9, 28, 4, 30, 0, 0, edt), "2026-09-27", "2026-09-28T04:30:00-04:00"},
+		{"at a later chain rollover", "05:00", time.Date(2026, 9, 28, 5, 0, 0, 0, edt), "2026-09-28", "2026-09-28T05:00:00-04:00"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, a, _ := newBootedRouter(t)
+			require.NoError(t, a.ScaffoldEngine())
+			writeChain(t, r, func(c *engine.ChainConfig) { c.Rollover = tc.rollover })
+
+			res, err := r.Log(LogRequest{Text: "a synthetic note", Now: tc.at})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantDay, res.Day)
+
+			doc, err := a.ReadRaw(res.RawID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOcc, doc.Fields["occurred_at"], "occurred_at keeps the true instant")
+			assert.Equal(t, doc.Fields["recorded_at"], doc.Fields["occurred_at"])
+			assert.Equal(t, "exact", doc.Fields["occurred_at_precision"])
+		})
+	}
+}
+
+// TestLog_DayFlagPrecedenceOverRollover: an explicit --day @2026-09-27 wins
+// over the rollover default at any capture hour — before the rollover, at it,
+// after it, and under a later top-level chain.json rollover — and the ack
+// names the chosen day.
+func TestLog_DayFlagPrecedenceOverRollover(t *testing.T) {
+	cases := []struct {
+		name     string
+		rollover string
+		at       time.Time
+	}{
+		{"just after midnight", "04:00", time.Date(2026, 9, 28, 0, 35, 0, 0, edt)},
+		{"one second before rollover", "04:00", time.Date(2026, 9, 28, 3, 59, 59, 0, edt)},
+		{"exactly at rollover", "04:00", time.Date(2026, 9, 28, 4, 0, 0, 0, edt)},
+		{"late evening", "04:00", time.Date(2026, 9, 28, 23, 10, 0, 0, edt)},
+		{"before a midday chain rollover", "12:00", time.Date(2026, 9, 28, 11, 0, 0, 0, edt)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, a, _ := newBootedRouter(t)
+			require.NoError(t, a.ScaffoldEngine())
+			writeChain(t, r, func(c *engine.ChainConfig) { c.Rollover = tc.rollover })
+
+			res, err := r.Log(LogRequest{Text: "attributed on purpose", Now: tc.at, DayArg: "@2026-09-27"})
+			require.NoError(t, err)
+			assert.Equal(t, "2026-09-27", res.Day)
+			assert.Contains(t, res.Ack, "for 2026-09-27.")
+
+			doc, err := a.ReadRaw(res.RawID)
+			require.NoError(t, err)
+			assert.Equal(t, "2026-09-27T00:00:00-04:00", doc.Fields["occurred_at"])
+			assert.Equal(t, "approximate", doc.Fields["occurred_at_precision"])
+		})
+	}
 }
