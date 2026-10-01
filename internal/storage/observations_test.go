@@ -300,7 +300,7 @@ func TestReadDayView_JoinsTreesAndSpanningRange(t *testing.T) {
 	_, err = a.AppendObservation(night)
 	require.NoError(t, err)
 
-	view, err := a.ReadDayView("2026-07-02", loc)
+	view, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	require.NotNil(t, view.EngineDay)
 	assert.True(t, view.EngineDay.Completed)
@@ -313,9 +313,125 @@ func TestReadDayView_JoinsTreesAndSpanningRange(t *testing.T) {
 func TestReadDayView_EmptyDay(t *testing.T) {
 	a := newObsStore(t)
 	require.NoError(t, a.ScaffoldEngine())
-	view, err := a.ReadDayView("2026-07-09", loc)
+	view, err := a.ReadDayView("2026-07-09", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Nil(t, view.EngineDay)
 	assert.True(t, view.Obs.Empty())
 	assert.Empty(t, view.RawEntryIDs)
+}
+
+// writeRawAt writes a synthetic raw entry recorded at recorded and occurring
+// at occurred with the given precision, returning its assigned id.
+func writeRawAt(t *testing.T, a *Adapter, recorded, occurred time.Time, precision, body string) string {
+	t.Helper()
+	res, err := a.WriteRaw(RawEntry{
+		RecordedAt: recorded, OccurredAt: occurred, OccurredAtPrecision: precision,
+		Source: "cli", Command: "/log", Body: body,
+	})
+	require.NoError(t, err)
+	return res.RawID
+}
+
+// TestReadDayView_GroupsRawByLogicalDay pins the day view's raw-entry grouping
+// to the logical day of occurred_at (observations.md §2), never the raw id's
+// recorded date. All four entries belong to 2026-09-27 though none was
+// recorded that day: a bare capture at 00:33 the next morning (before the
+// 04:00 rollover), two `--day @2026-09-27` captures written minutes later
+// (stored at local midnight, approximate), and one backdated to 2026-09-27
+// from a week later in another month's shard. The rollover boundary is pinned
+// on both sides: 03:59:59 still belongs to 2026-09-27, 04:00 exactly to
+// 2026-09-28. Fixtures are wholly synthetic.
+func TestReadDayView_GroupsRawByLogicalDay(t *testing.T) {
+	a := newObsStore(t)
+	require.NoError(t, a.ScaffoldEngine())
+
+	dayMidnight := time.Date(2026, 9, 27, 0, 0, 0, 0, loc)
+	bare := time.Date(2026, 9, 28, 0, 33, 0, 0, loc)
+	bareID := writeRawAt(t, a, bare, bare, PrecisionExact, "a late note about the day just lived")
+	dayFlagID := writeRawAt(t, a, time.Date(2026, 9, 28, 0, 35, 0, 0, loc), dayMidnight,
+		PrecisionApproximate, "backdated with an explicit day")
+	dayFlagSecondID := writeRawAt(t, a, time.Date(2026, 9, 28, 0, 35, 28, 0, loc), dayMidnight,
+		PrecisionApproximate, "a second backdated note in the same minute")
+	farBackdatedID := writeRawAt(t, a, time.Date(2026, 10, 5, 10, 0, 0, 0, loc), dayMidnight,
+		PrecisionApproximate, "remembered a week later")
+	lastSecond := time.Date(2026, 9, 28, 3, 59, 59, 0, loc)
+	lastSecondID := writeRawAt(t, a, lastSecond, lastSecond, PrecisionExact, "one second before the rollover")
+	atRollover := time.Date(2026, 9, 28, 4, 0, 0, 0, loc)
+	atRolloverID := writeRawAt(t, a, atRollover, atRollover, PrecisionExact, "exactly at the rollover")
+
+	prior, err := a.ReadDayView("2026-09-27", loc, observations.DefaultRolloverMin)
+	require.NoError(t, err)
+	assert.Equal(t,
+		[]string{dayFlagID, dayFlagSecondID, farBackdatedID, bareID, lastSecondID},
+		prior.RawEntryIDs, "every entry whose logical day is 2026-09-27, by occurred_at then id")
+
+	next, err := a.ReadDayView("2026-09-28", loc, observations.DefaultRolloverMin)
+	require.NoError(t, err)
+	assert.Equal(t, []string{atRolloverID}, next.RawEntryIDs,
+		"the recorded date never groups: only the at-rollover entry is 2026-09-28's")
+
+	// The ids still name the creation time — grouping changes nothing on disk.
+	assert.True(t, strings.HasPrefix(bareID, "raw_2026_09_28_"))
+	assert.True(t, strings.HasPrefix(farBackdatedID, "raw_2026_10_05_"))
+}
+
+// TestReadDayView_RawGroupingHonorsRollover proves the grouping boundary is
+// the caller's rollover, not a hidden constant: under a 05:00 rollover a 04:30
+// capture still belongs to the previous logical day.
+func TestReadDayView_RawGroupingHonorsRollover(t *testing.T) {
+	a := newObsStore(t)
+	require.NoError(t, a.ScaffoldEngine())
+	at := time.Date(2026, 9, 28, 4, 30, 0, 0, loc)
+	id := writeRawAt(t, a, at, at, PrecisionExact, "after four, before five")
+
+	under4, err := a.ReadDayView("2026-09-28", loc, 4*60)
+	require.NoError(t, err)
+	assert.Equal(t, []string{id}, under4.RawEntryIDs)
+
+	under5, err := a.ReadDayView("2026-09-27", loc, 5*60)
+	require.NoError(t, err)
+	assert.Equal(t, []string{id}, under5.RawEntryIDs)
+}
+
+// TestRawIDsForDate_SkipsUnreadableEntries: a raw file whose occurred_at is
+// not a timestamp, or that has no frontmatter at all, is skipped rather than
+// failing the day view — and the well-formed entry beside it still lists.
+func TestRawIDsForDate_SkipsUnreadableEntries(t *testing.T) {
+	a := newObsStore(t)
+	at := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	good := writeRawAt(t, a, at, at, PrecisionExact, "well formed")
+
+	shard := filepath.Join(a.Home(), rawDirName, "2026", "09")
+	require.NoError(t, os.WriteFile(filepath.Join(shard, "raw_2026_09_27_13_00.md"),
+		[]byte("---\nid: raw_2026_09_27_13_00\noccurred_at: sometime\noccurred_at_precision: exact\n---\nbody\n"), filePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(shard, "raw_2026_09_27_14_00.md"), []byte("no frontmatter"), filePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(shard, "notes.md"), []byte("not a raw entry"), filePerm))
+
+	ids, err := a.rawIDsForDate("2026-09-27", observations.DefaultRolloverMin)
+	require.NoError(t, err)
+	assert.Equal(t, []string{good}, ids)
+}
+
+// TestRawIDsForDate_MemoizesOccurrences: a multi-day read parses each raw
+// entry once per adapter — the second day's scan reuses the first's parsed
+// occurrences (raw entries are immutable) and still groups correctly, while
+// an entry that failed to parse is not memoized.
+func TestRawIDsForDate_MemoizesOccurrences(t *testing.T) {
+	a := newObsStore(t)
+	first := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	second := time.Date(2026, 9, 28, 12, 0, 0, 0, loc)
+	firstID := writeRawAt(t, a, first, first, PrecisionExact, "first day")
+	secondID := writeRawAt(t, a, second, second, PrecisionExact, "second day")
+	shard := filepath.Join(a.Home(), rawDirName, "2026", "09")
+	require.NoError(t, os.WriteFile(filepath.Join(shard, "raw_2026_09_28_13_00.md"), []byte("no frontmatter"), filePerm))
+
+	ids, err := a.rawIDsForDate("2026-09-27", observations.DefaultRolloverMin)
+	require.NoError(t, err)
+	assert.Equal(t, []string{firstID}, ids)
+	assert.Len(t, a.rawOccurrences, 2, "the well-formed entries are memoized; the unreadable one is not")
+
+	ids, err = a.rawIDsForDate("2026-09-28", observations.DefaultRolloverMin)
+	require.NoError(t, err)
+	assert.Equal(t, []string{secondID}, ids)
+	assert.Len(t, a.rawOccurrences, 2)
 }

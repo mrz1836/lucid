@@ -147,12 +147,11 @@ func TestStats_MixedDay(t *testing.T) {
 
 // TestStats_RolloverBoundary is the DST/rollover boundary case (AC-10). A
 // same-moment raw entry and observation logged at 02:00 — before the 04:00
-// logical-day rollover — land on DIFFERENT days: the raw entry buckets by its
-// recorded civil date (what `lucid day` uses), while the observation buckets by
-// its rollover-correct logical_date (the prior day). The 04:00 rollover is also
-// where a DST spring-forward falls, so civil-date bucketing keeps both trees
-// aligned with `lucid day` across the transition. America/New_York exercises a
-// real DST-aware zone; the fixed EDT zone is the fallback when tzdata is absent.
+// logical-day rollover — land on the SAME day: the raw entry buckets by the
+// logical day of its occurred_at (what `lucid day` uses), and the observation
+// by its rollover-correct logical_date — both the prior day, never the raw
+// id's recorded civil date. America/New_York exercises a real DST-aware zone;
+// the fixed EDT zone is the fallback when tzdata is absent.
 func TestStats_RolloverBoundary(t *testing.T) {
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
@@ -175,16 +174,16 @@ func TestStats_RolloverBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.View.Days, 2)
 
-	// Observation placement is rollover-correct (on 2026-07-01, the prior day).
+	// Both trees are rollover-correct: the 02:00 raw entry and observation land
+	// on 2026-07-01, the prior logical day — not the raw id's 2026-07-02.
 	assert.Equal(t, 1, res.View.Days[0].Observations, "obs on the rollover-correct logical day")
-	assert.Equal(t, 0, res.View.Days[0].RawEntries)
-	// Raw-entry placement equals lucid day's recorded-civil-date bucketing (2026-07-02).
-	assert.Equal(t, 1, res.View.Days[1].RawEntries, "raw entry on its recorded civil date")
+	assert.Equal(t, 1, res.View.Days[0].RawEntries, "raw entry on the logical day of its occurred_at")
+	assert.Equal(t, 0, res.View.Days[1].RawEntries, "raw entry never on its recorded civil date")
 	assert.Equal(t, 0, res.View.Days[1].Observations)
 
 	// Parity with the `lucid day` join (same ReadDayView), per day.
 	for i, date := range []string{"2026-07-01", "2026-07-02"} {
-		dv, derr := a.ReadDayView(date, loc)
+		dv, derr := a.ReadDayView(date, loc, observations.DefaultRolloverMin)
 		require.NoError(t, derr)
 		assert.Equal(t, len(dv.RawEntryIDs), res.View.Days[i].RawEntries, "raw parity for %s", date)
 		assert.Equal(t, len(dv.Obs.Events), res.View.Days[i].Observations, "obs parity for %s", date)
@@ -241,7 +240,7 @@ func TestStats_PerDaySumAndSpanning(t *testing.T) {
 	// Parity: each day matches len(ReadDayView(d).RawEntryIDs) / .Obs.Events —
 	// i.e. `lucid day` up to the two documented divergences (AC-11).
 	for i, date := range []string{"2026-07-01", "2026-07-02", "2026-07-03"} {
-		dv, derr := a.ReadDayView(date, edt)
+		dv, derr := a.ReadDayView(date, edt, observations.DefaultRolloverMin)
 		require.NoError(t, derr)
 		assert.Equal(t, len(dv.RawEntryIDs), res.View.Days[i].RawEntries, "raw parity for %s", date)
 		assert.Equal(t, len(dv.Obs.Events), res.View.Days[i].Observations, "obs parity for %s", date)

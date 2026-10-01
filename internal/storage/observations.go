@@ -405,11 +405,14 @@ func (a *Adapter) UpdateRegistry(kind, key string, patch observations.RegistryPa
 
 // ReadDayView assembles the `/day` join for a logical date (observations.md
 // §7): the folded engine day record if present, the day's observation events
-// plus any range event spanning the day (from the range index), the raw entry
-// ids recorded that day, and the media attachments attributed to the day
-// (data-model.md §"Media attachments"). loc interprets the civil dates. It is
-// a pure read — nothing is written.
-func (a *Adapter) ReadDayView(date string, loc *time.Location) (DayView, error) {
+// plus any range event spanning the day (from the range index), the raw
+// entries whose logical day is date (see [Adapter.rawIDsForDate]), and the
+// media attachments attributed to the day (data-model.md §"Media
+// attachments"). loc interprets the civil dates; rolloverMin is the
+// exact-precision rollover boundary the raw entries are grouped on (the
+// caller resolves it from chain.json). It is a pure read — nothing is
+// written.
+func (a *Adapter) ReadDayView(date string, loc *time.Location, rolloverMin int) (DayView, error) {
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -430,13 +433,15 @@ func (a *Adapter) ReadDayView(date string, loc *time.Location) (DayView, error) 
 	}
 	view.Obs = observations.AssembleDayView(date, dayEvents, rangeCandidates, loc)
 
-	view.RawEntryIDs, err = a.rawIDsForDate(date)
+	view.RawEntryIDs, err = a.rawIDsForDate(date, rolloverMin)
 	if err != nil {
 		return DayView{}, err
 	}
+	// The engine record's journal joins the day even when its own occurred_at
+	// files elsewhere; it trails the logical-day entries so their order stays
+	// chronological.
 	if rec.RawEntryID != "" && !slices.Contains(view.RawEntryIDs, rec.RawEntryID) {
 		view.RawEntryIDs = append(view.RawEntryIDs, rec.RawEntryID)
-		slices.Sort(view.RawEntryIDs)
 	}
 
 	view.Media, err = a.ReadMediaForDay(date)
@@ -529,35 +534,87 @@ func (a *Adapter) readObsFile(path string) (events []observations.Event, skipped
 	return events, skipped, nil
 }
 
-// rawIDsForDate returns the ids of raw entries recorded on a civil date,
-// sorted — the "entry list" half of the day view (data-model.md raw ids
-// encode the recorded date; raw_YYYY_MM_DD_*).
-func (a *Adapter) rawIDsForDate(date string) ([]string, error) {
-	d, err := observations.ParseDate(date, time.UTC)
-	if err != nil {
+// rawIDsForDate returns the ids of the raw entries whose logical day is date
+// — the "entry list" half of the day view (observations.md §2). Each entry's
+// logical day is derived at read time from its own occurred_at and precision
+// through [observations.DeriveLogicalDate], never from the raw id's date or
+// the day it was recorded: a bare capture at 00:33 lists under the day before
+// its id's date, and a `--day @D` entry lists under D however many days later
+// it was written. Because the recorded date bounds nothing, every raw shard is
+// scanned. An entry whose occurred_at cannot be read is skipped, not an error
+// — a stray or hand-damaged file must never break the day view. The ids are
+// ordered by occurred_at, then id.
+func (a *Adapter) rawIDsForDate(date string, rolloverMin int) ([]string, error) {
+	if _, err := observations.ParseDate(date, time.UTC); err != nil {
 		return nil, fmt.Errorf("storage: bad day date %q: %w", date, err)
 	}
-	shard := filepath.Join(a.home, rawDirName, fmt.Sprintf("%04d", d.Year()), fmt.Sprintf("%02d", int(d.Month())))
-	entries, rerr := os.ReadDir(shard)
-	if errors.Is(rerr, fs.ErrNotExist) {
-		return nil, nil
+	type rawOnDay struct {
+		id         string
+		occurredAt time.Time
 	}
-	if rerr != nil {
-		return nil, fmt.Errorf("storage: read raw shard %q: %w", shard, rerr)
+	ids, err := a.allRawIDs()
+	if err != nil {
+		return nil, err
 	}
-	prefix := fmt.Sprintf("raw_%04d_%02d_%02d_", d.Year(), int(d.Month()), d.Day())
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), rawExt) {
+	var matches []rawOnDay
+	for _, id := range ids {
+		occurredAt, precision, ok := a.rawOccurrence(id)
+		if !ok || observations.DeriveLogicalDate(occurredAt, precision, rolloverMin) != date {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), rawExt)
-		if strings.HasPrefix(id, prefix) {
-			out = append(out, id)
-		}
+		matches = append(matches, rawOnDay{id: id, occurredAt: occurredAt})
 	}
-	slices.Sort(out)
+	slices.SortFunc(matches, func(x, y rawOnDay) int {
+		if c := x.occurredAt.Compare(y.occurredAt); c != 0 {
+			return c
+		}
+		return cmp.Compare(x.id, y.id)
+	})
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m.id)
+	}
 	return out, nil
+}
+
+// rawWhen is the part of a raw entry its logical day derives from.
+type rawWhen struct {
+	occurredAt time.Time
+	precision  string
+}
+
+// rawOccurrence reads a raw entry's occurred_at (in its own recorded offset)
+// and precision, reporting false when the entry cannot be read or its
+// occurred_at is not RFC3339 — the caller skips such an entry rather than
+// guessing a day for it. A successful read is memoized on the adapter (raw
+// entries are immutable); a failed one is not, so an entry caught mid-write
+// is read again next time.
+func (a *Adapter) rawOccurrence(id string) (time.Time, string, bool) {
+	a.rawOccMu.Lock()
+	when, hit := a.rawOccurrences[id]
+	a.rawOccMu.Unlock()
+	if hit {
+		return when.occurredAt, when.precision, true
+	}
+
+	doc, err := a.ReadRaw(id)
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	raw, _ := doc.Fields["occurred_at"].(string)
+	occurredAt, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	precision, _ := doc.Fields["occurred_at_precision"].(string)
+
+	a.rawOccMu.Lock()
+	if a.rawOccurrences == nil {
+		a.rawOccurrences = map[string]rawWhen{}
+	}
+	a.rawOccurrences[id] = rawWhen{occurredAt: occurredAt, precision: precision}
+	a.rawOccMu.Unlock()
+	return occurredAt, precision, true
 }
 
 // obsDayPath returns observations/YYYY/MM/obs_YYYY_MM_DD.jsonl for a logical

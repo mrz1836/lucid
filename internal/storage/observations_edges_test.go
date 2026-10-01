@@ -37,7 +37,7 @@ func TestReadDayView_RawEntryIDFromEngineRecord(t *testing.T) {
 		DayID: "day_2026_07_02", LogicalDate: "2026-07-02", Mode: engine.ModeGreen,
 		Completed: true, RawEntryID: "raw_2026_07_02_21_45",
 	}))
-	view, err := a.ReadDayView("2026-07-02", loc)
+	view, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	require.NotNil(t, view.EngineDay)
 	assert.Contains(t, view.RawEntryIDs, "raw_2026_07_02_21_45")
@@ -46,7 +46,7 @@ func TestReadDayView_RawEntryIDFromEngineRecord(t *testing.T) {
 func TestReadDayView_BadDateErrors(t *testing.T) {
 	a := newObsStore(t)
 	require.NoError(t, a.ScaffoldEngine())
-	_, err := a.ReadDayView("not-a-date", loc)
+	_, err := a.ReadDayView("not-a-date", loc, observations.DefaultRolloverMin)
 	require.Error(t, err)
 }
 
@@ -62,7 +62,7 @@ func TestReadDayView_JoinsMediaForDay(t *testing.T) {
 	rec, err := a.WriteMedia(syntheticMedia("clinic intake form", "scan.pdf", content))
 	require.NoError(t, err)
 
-	view, err := a.ReadDayView("2026-07-05", loc)
+	view, err := a.ReadDayView("2026-07-05", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	require.Len(t, view.Media, 1, "the day view joins the day's media")
 	assert.Equal(t, rec.ID, view.Media[0].ID)
@@ -70,7 +70,7 @@ func TestReadDayView_JoinsMediaForDay(t *testing.T) {
 	assert.Equal(t, hashOf(content), view.Media[0].SHA256)
 	assert.Equal(t, rec.StoredPath, view.Media[0].StoredPath, "StoredPath resolves for the reader")
 
-	other, err := a.ReadDayView("2026-07-06", loc)
+	other, err := a.ReadDayView("2026-07-06", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Empty(t, other.Media, "media stays on its own logical day")
 }
@@ -86,7 +86,7 @@ func TestReadDayView_MediaReadErrorSurfaces(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(shard), 0o700))
 	require.NoError(t, os.WriteFile(shard, []byte("not a directory"), 0o600))
 
-	_, err := a.ReadDayView("2026-07-05", loc)
+	_, err := a.ReadDayView("2026-07-05", loc, observations.DefaultRolloverMin)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "media")
 }
@@ -161,7 +161,7 @@ func TestIndexRangeEvent_SingleDayAndBadEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// Neither produced a spanning candidate for the next day.
-	view, err := a.ReadDayView("2026-07-03", loc)
+	view, err := a.ReadDayView("2026-07-03", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Empty(t, view.Obs.RangeEvents)
 }
@@ -171,11 +171,11 @@ func TestRawIDsForDate_MissingShardAndBadDate(t *testing.T) {
 	require.NoError(t, a.ScaffoldEngine())
 
 	// A day with no raw shard yields no entries, no error.
-	ids, err := a.rawIDsForDate("2026-07-02")
+	ids, err := a.rawIDsForDate("2026-07-02", observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Empty(t, ids)
 
-	_, err = a.rawIDsForDate("bad")
+	_, err = a.rawIDsForDate("bad", observations.DefaultRolloverMin)
 	require.Error(t, err)
 }
 
@@ -199,7 +199,7 @@ func TestReadDayView_RawIDAlreadyPresentNotDuplicated(t *testing.T) {
 		DayID: "day_2026_07_02", LogicalDate: "2026-07-02", Completed: true, RawEntryID: res.RawID,
 	}))
 
-	view, err := a.ReadDayView("2026-07-02", loc)
+	view, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	// The journal raw id appears exactly once (the shard scan already had it).
 	var n int
@@ -260,7 +260,7 @@ func TestRangeCandidates_DedupesRepeatedIndexEntry(t *testing.T) {
 	dupe := `{"id":"` + ev.ID + `","start":"2026-07-01","end":"2026-07-02"}`
 	require.NoError(t, appendLineFsync(filepath.Join(a.projectionsDir(), rangeIndexFile), []byte(dupe)))
 
-	view, err := a.ReadDayView("2026-07-02", loc)
+	view, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Len(t, view.Obs.RangeEvents, 1, "a repeated index entry surfaces the event once")
 }
@@ -291,7 +291,7 @@ func TestRangeCandidates_SkipsMalformedIndexLine(t *testing.T) {
 	require.NoError(t, a.ScaffoldEngine())
 	// A garbage line in the range index is skipped, not fatal.
 	require.NoError(t, appendLineFsync(filepath.Join(a.projectionsDir(), rangeIndexFile), []byte("{ not json")))
-	view, err := a.ReadDayView("2026-07-02", loc)
+	view, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Empty(t, view.Obs.RangeEvents)
 }
@@ -324,7 +324,7 @@ func TestRangeCandidates_DanglingIndexEntrySkipped(t *testing.T) {
 	require.NoError(t, a.ScaffoldEngine())
 	require.NoError(t, appendLineFsync(filepath.Join(a.projectionsDir(), rangeIndexFile),
 		[]byte(`{"id":"obs_2026_07_01_999","start":"2026-07-01","end":"2026-07-03"}`)))
-	view, err := a.ReadDayView("2026-07-02", loc)
+	view, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Empty(t, view.Obs.RangeEvents, "a dangling index entry surfaces nothing")
 }
@@ -386,7 +386,7 @@ func TestReadDayView_SurfacesSpanningFromIndex(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	view, err := a.ReadDayView("2026-07-02", time.UTC)
+	view, err := a.ReadDayView("2026-07-02", time.UTC, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	require.Len(t, view.Obs.RangeEvents, 1)
 	assert.Equal(t, observations.KindSleep, view.Obs.RangeEvents[0].Kind)

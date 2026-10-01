@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mrz1836/lucid/internal/config"
@@ -64,6 +65,14 @@ type Adapter struct {
 	// between instances or tests, and so the open taxonomy costs one resolver
 	// per kind — not a mutable global the linter (gochecknoglobals) would reject.
 	subjects map[string]SubjectResolver
+	// rawOccurrences memoizes each raw entry's parsed occurred_at and
+	// precision by id for the day view's logical-day grouping (see
+	// rawOccurrence). Raw entries are immutable — an id is never rewritten —
+	// so a memoized value never goes stale, and a multi-day read (`lucid
+	// stats`, the week bundle) parses the raw tree once rather than once per
+	// day. rawOccMu guards it.
+	rawOccMu       sync.Mutex
+	rawOccurrences map[string]rawWhen
 }
 
 // New returns an adapter rooted at an explicit home directory. Tests

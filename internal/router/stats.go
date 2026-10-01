@@ -94,11 +94,12 @@ type StatsResult struct {
 // Ledger-volume rollup over a window of logical days. It is a pure projection —
 // for each day it reuses the exact `/day` join (storage.ReadDayView) and counts
 // raw entries and the day's own observation events, so a day's numbers match
-// what `lucid day` reports, with the two documented divergences (raw entries
-// follow recorded-civil-date bucketing while observations are rollover-correct;
-// a spanning observation counts once, on its start day). No model is reachable
-// from this path (Sanctuary), and nothing is written beyond the idempotent
-// observation- and engine-tree scaffolds the read verbs already perform.
+// what `lucid day` reports — raw entries on the logical day of their
+// occurred_at, observations on their logical_date — with the one documented
+// divergence (a spanning observation counts once, on its start day). No model
+// is reachable from this path (Sanctuary), and nothing is written beyond the
+// idempotent observation- and engine-tree scaffolds the read verbs already
+// perform.
 func (r *Router) Stats(opts StatsOptions, now time.Time) (StatsResult, error) {
 	now = whenOr(now)
 	loc := now.Location()
@@ -122,14 +123,15 @@ func (r *Router) Stats(opts StatsOptions, now time.Time) (StatsResult, error) {
 	byKind := make(map[observations.Kind]int, len(cfg.KindsEnabled))
 	days := make([]StatsDay, 0)
 	var totalRaw, totalObs int
+	rolloverMin := r.logicalRolloverMin()
 	for _, d := range logicalDayRange(from, to) {
 		dateStr := engine.DateString(d)
-		view, verr := r.store.ReadDayView(dateStr, loc)
+		view, verr := r.store.ReadDayView(dateStr, loc, rolloverMin)
 		if verr != nil {
 			return StatsResult{}, verr
 		}
-		// Raw entries: the civil-date-bucketed join `lucid day` uses (zero
-		// drift). Observations: the day's OWN events only — Obs.Events excludes
+		// Raw entries: the logical-day join `lucid day` uses (zero drift).
+		// Observations: the day's OWN events only — Obs.Events excludes
 		// spanning RangeEvents (range events that started earlier), so a
 		// spanning observation is counted once, on its start day.
 		raw := len(view.RawEntryIDs)
