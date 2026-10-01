@@ -183,9 +183,22 @@ the raw entry's id).
 |------|--------|
 | `--day <date>` | Attribute the entry to a prior logical day. Accepts the shared grammar — a relative word, a full or partial date, and an optional time-of-day — on the strict tier: see [Backdating with --day](#backdating-with---day). The real capture time is always kept as `recorded_at`; only `occurred_at` follows the flag. Defaults to now at exact precision. |
 
-Backdating attributes the entry — it does not move it: the day view still lists
-the entry under the day it was captured. `--day` records the day it belongs to on
-the entry itself.
+**Which day an entry belongs to.** An entry belongs to the logical day of its
+`occurred_at`, on the rollover set by the top-level `rollover` in
+`engine/chain.json` (04:00 when the file is absent or the value is invalid;
+per-profile rollovers are not consulted here). A bare `lucid log` before the
+rollover belongs to the previous day — at 00:33 that is the day you just lived,
+not the one that started at midnight — and from the rollover on (04:00 exactly
+included) to today. `occurred_at` keeps the true wall-clock instant; only the
+day it is attributed to follows the rollover. An explicit `--day` always takes
+precedence: `--day @2026-07-01` lands on July 1st at any hour. The `--json`
+receipt's `logical_date` (and, with `--day`, the acknowledgement) names that day,
+and [`day`](#day) lists the entry under its logical day.
+
+Backdating attributes the entry — it does not move it: the file and its id
+(`raw_YYYY_MM_DD_HH_MM`) keep the real creation time, and `recorded_at` preserves
+when you actually wrote it, while the day view lists the entry under its logical
+day. `--day` records the day it belongs to on the entry itself.
 
 ```sh
 lucid log "shower thought about the knee-and-weather thing"
@@ -1134,9 +1147,19 @@ lucid day [date|yesterday] [--json]
 Read-only joined view of one logical day: the Engine day record, the day's
 observations (plus any spanning range event), the raw entry ids, and any media
 attached to the day — surfaced as an inventory `Media:` line (stored path and
-caption only, never the body or a score). Defaults to today; accepts `yesterday`
-or a `YYYY-MM-DD` date. Writes nothing. `--json` emits the assembled view,
-including a `media` array.
+caption only, never the body or a score). Defaults to the current logical day
+(before the rollover, the day just lived); accepts `yesterday` or a `YYYY-MM-DD`
+date. Writes nothing. `--json` emits the assembled view, including a `media`
+array.
+
+Raw entries are grouped by the **logical day of their `occurred_at`** — never by
+the date in the raw id or the day they were recorded. The rollover is the
+top-level `rollover` in `engine/chain.json` (04:00 when the file is absent or the
+value is invalid), the same one [`log`](#log) uses, so a bare capture and the day
+view always agree: a bare 00:33 entry lists under the day before its id's date,
+and an entry written with `--day @2026-07-01` lists under July 1st no matter how
+many days later it was recorded. The entry ids themselves are unchanged — they
+still name the creation time.
 
 ```sh
 lucid day
@@ -1219,16 +1242,15 @@ By day:
 }
 ```
 
-**Two deliberate divergences from `lucid day`.** `stats` reuses the exact
-`lucid day` join per day, so a given day's counts match `lucid day` — with two
-documented exceptions:
+**One deliberate divergence from `lucid day`.** `stats` reuses the exact
+`lucid day` join per day, so a given day's counts match `lucid day`. Raw entries
+and observations are both rollover-correct: a raw entry is counted on the logical
+day of its `occurred_at` — the day `lucid day` lists it under, never the date in
+its id or the day it was recorded — and an observation on its `logical_date`.
+Near the rollover a same-moment raw entry and observation therefore land on the
+same logical day, and a backdated raw entry counts on the day it was backdated
+to. The one documented exception:
 
-- **Raw entries follow recorded-civil-date bucketing; observations are
-  rollover-correct.** A raw entry is counted on the civil date it was recorded
-  (the same bucketing `lucid day` uses), while an observation is placed on its
-  rollover-correct `logical_date`. Near a rollover / DST boundary a same-moment
-  raw entry and observation can therefore fall on different days — matching
-  `lucid day` exactly.
 - **A spanning observation is counted once, on its start day.** A range
   observation that covers several logical days is counted a single time, on its
   start (`logical_date`) day, so the per-day columns sum exactly to the top-line
