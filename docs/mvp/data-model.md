@@ -68,8 +68,10 @@ These rules trace directly to
 
 Subdirectories under `raw/` use a `YYYY/MM/` shard so a single
 directory does not grow unbounded (and `engine/days/` and `media/`
-shard the same way). All other directories are flat in the MVP;
-sharding can be added later without breaking ids.
+shard the same way). A raw entry's shard is its id's creation month,
+not its logical day (§"Raw entries" → "Day attribution"). All other
+directories are flat in the MVP; sharding can be added later without
+breaking ids.
 
 The `engine/` tree's record schemas, mutability rules, and derived-file
 semantics are owned by [`engine-module.md`](engine-module.md); the
@@ -202,7 +204,7 @@ the audit trail.
 
 | Kind | Convention | Example |
 |------|------------|---------|
-| Raw entry id | `raw_YYYY_MM_DD_HH_MM` (creation time, local TZ). Append `_SS` if a same-minute collision is detected. | `raw_2026_05_05_19_42`, or `raw_2026_05_05_19_42_07` on collision |
+| Raw entry id | `raw_YYYY_MM_DD_HH_MM` (creation time, local TZ). Append `_SS` if a same-minute collision is detected. The id is a creation-time identifier only: it is **not** the entry's logical day and is never used for day grouping (§"Raw entries" → "Day attribution"). | `raw_2026_05_05_19_42`, or `raw_2026_05_05_19_42_07` on collision |
 | Media attachment | `YYYY-MM-DD-<slug>.<ext>` — logical-day prefix + a low-signal slug (from the caption, else the original basename), original extension preserved. Append `_N` on a same-day slug collision. The metadata sidecar is `<stored-filename>.json`. | `2026-07-10-handwritten-notes.jpg` (+ sidecar `…-notes.jpg.json`) |
 | Processed artifact id | Same id as the raw entry it describes. | `raw_2026_05_05_19_42.json` |
 | Insight id | `i_YYYY_MM_DD_<slot>` where `<slot>` is `a`, `b`, ... per day. | `i_2026_05_05_a` |
@@ -515,7 +517,7 @@ folding.
 |-------|----------|---------|
 | `id` | yes | Stable, sortable identifier. |
 | `recorded_at` | yes | When the user wrote this (always "now" at write time). |
-| `occurred_at` | yes | When it happened. Equal to `recorded_at` for "now" entries. A backdated capture (`--day`) keeps the real `recorded_at` and moves only `occurred_at`, at `approximate` precision. |
+| `occurred_at` | yes | When it happened. Equal to `recorded_at` for "now" entries. A backdated capture (`--day`) keeps the real `recorded_at` and moves only `occurred_at`, at `approximate` precision. Always the true instant — never rewritten to a day boundary; the entry's logical day is *derived* from it (§"Day attribution"). |
 | `occurred_at_precision` | yes | `exact`, `approximate`, or `range`. Mirrors `technical-spec.md`. |
 | `occurred_at_end` | no | Only set when `precision: range`. |
 | `source` | yes | Harness identifier — a non-empty well-formed token, **normalized** on write (trimmed, lowercased, charset-restricted to `[a-z0-9._:-]`). Empty or malformed input is rejected with a clear error, never silently coerced or dropped. **No allowlist**: a recommended vocab (`cli`, `discord`, future surfaces) is documented but not enforced, so a new harness needs a passed token, not a code change. The relaying `agent`/`model` are **not** duplicated onto the (immutable) raw entry — a reader follows `session_id` to the session record's provenance cluster (`harness`/`channel_id`/`thread_id`/`agent`/`model`). |
@@ -524,6 +526,28 @@ folding.
 | `intake_questions` | no | Present for `/checkin`; the questions Intake actually asked. |
 | `agent_versions` | yes | Which agent versions touched the entry at write time. |
 | `bootstrap` | yes | `true` when the entry was written while **historical-entry (bootstrap) mode is on** — set from the persisted `bootstrap_mode`, whatever verb produced the entry (`/checkin`, `/log`, `/attach`). Reflection.propose is suppressed for these. Observation-backed verbs (`obs`, `memory`, `workout log`) write no raw entry of their own and so carry no bootstrap flag: the observation envelope is frozen and gains no field for it. Bootstrap mode is orthogonal to backdating — it suppresses pattern proposals during a bulk history load, while `--day` decides which logical day an entry lands on; neither relaxes or overrides the other's rules. |
+
+### Day attribution
+
+A raw entry belongs to the **logical day of its `occurred_at`**, derived
+at read time — the entry stores no `logical_date` field, and nothing on
+disk changes when the rule is applied. The derivation is the one shared,
+precision-aware rule of [`../observations.md`](../observations.md) §2:
+an `exact` `occurred_at` is rollover-aware (`D <rollover> ≤ t < D+1
+<rollover>`, inclusive at the rollover), an `approximate` one (a `--day
+@D` capture, stored at `D`'s local midnight) keys on its plain calendar
+date, and a `range` one on its start's calendar date. The rollover is
+the **top-level** `rollover` in `engine/chain.json` (the `default`
+profile; per-profile overrides are not consulted on this path), and
+04:00 when `chain.json` is absent or that value is invalid.
+
+`lucid day` groups raw entries by this logical day, across every
+`raw/YYYY/MM/` shard — **never** by the raw id's date or the
+`recorded_at` date. So a bare 00:33 capture lists under the day before
+its id's date, and a `--day @D` entry recorded a week later still lists
+under `D`. The id, the shard, and `recorded_at` keep the real creation
+time unchanged: they say when an entry was *written*, `occurred_at` says
+when it *happened*, and the logical day is derived from the latter.
 
 ### Example: `/log` entry (no Intake)
 

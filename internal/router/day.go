@@ -22,9 +22,11 @@ type DayViewResult struct {
 
 // DayView executes `/day [date|yesterday]` (observations-module.md §Commands):
 // a read-only join of the engine day record, the day's observations (plus any
-// spanning range event), and the raw entry ids for one logical day. It writes
-// nothing. An empty day is honest — "No record for <date>." — never a hollow
-// zero. The render is deterministic, so repeated calls are byte-stable.
+// spanning range event), and the raw entry ids for one logical day — raw
+// entries grouped by the logical day of their occurred_at under the top-level
+// chain.json rollover (observations.md §2). It writes nothing. An empty day is
+// honest — "No record for <date>." — never a hollow zero. The render is
+// deterministic, so repeated calls are byte-stable.
 func (r *Router) DayView(dateArg string, now time.Time) (DayViewResult, error) {
 	now = whenOr(now)
 	loc := now.Location()
@@ -35,8 +37,12 @@ func (r *Router) DayView(dateArg string, now time.Time) (DayViewResult, error) {
 		return DayViewResult{}, err
 	}
 
-	date := resolveDayArg(dateArg, now)
-	view, err := r.store.ReadDayView(date, loc)
+	rolloverMin := r.logicalRolloverMin()
+	date, err := resolveDayArg(dateArg, now, rolloverMin)
+	if err != nil {
+		return DayViewResult{}, err
+	}
+	view, err := r.store.ReadDayView(date, loc, rolloverMin)
 	if err != nil {
 		return DayViewResult{}, err
 	}
@@ -95,21 +101,43 @@ func dayHasWeather(view storage.DayView) bool {
 	})
 }
 
+// logicalRolloverMin resolves the rollover boundary, in minutes since local
+// midnight, that `lucid log` and `lucid day` attribute raw entries on
+// (observations.md §2): the top-level chain.json rollover — the default
+// profile's clock. Per-profile overrides are deliberately not consulted here.
+// A missing or unreadable chain.json, or a top-level clock that does not
+// parse, falls back to the documented 04:00 default.
+func (r *Router) logicalRolloverMin() int {
+	chain, err := r.store.ReadChainConfig()
+	if err != nil {
+		return observations.DefaultRolloverMin
+	}
+	clocks, err := chain.ClocksFor(engine.DefaultProfile)
+	if err != nil {
+		return observations.DefaultRolloverMin
+	}
+	return clocks.RolloverMin
+}
+
 // resolveDayArg maps the optional `/day` argument to a logical date: empty is
 // today's logical day, "yesterday" is the logical day before, and anything
 // else is taken as the given YYYY-MM-DD (the storage read validates it). It
-// resolves "today"/"yesterday" on the rollover boundary — the same one events
-// file under — so a pre-rollover `/day` shows the day just lived, not an empty
-// new one.
-func resolveDayArg(arg string, now time.Time) string {
-	base := observations.LogicalBaseDate(now, observations.DefaultRolloverMin)
+// resolves "today"/"yesterday" through the shared derivation on rolloverMin —
+// the same boundary the day's raw entries are grouped on — so a pre-rollover
+// `/day` shows the day just lived, not an empty new one.
+func resolveDayArg(arg string, now time.Time, rolloverMin int) (string, error) {
+	today := observations.DeriveLogicalDate(now, observations.PrecisionExact, rolloverMin)
 	switch strings.TrimSpace(arg) {
 	case "":
-		return observations.DateString(base)
+		return today, nil
 	case "yesterday":
-		return observations.DateString(base.AddDate(0, 0, -1))
+		base, err := observations.ParseDate(today, now.Location())
+		if err != nil {
+			return "", err
+		}
+		return observations.DateString(base.AddDate(0, 0, -1)), nil
 	default:
-		return strings.TrimSpace(arg)
+		return strings.TrimSpace(arg), nil
 	}
 }
 

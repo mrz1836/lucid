@@ -121,9 +121,10 @@ func (r *Router) BuildWeekBundle(now time.Time, win ReflectWindow) (WeekBundle, 
 	// it into the digest, the observation slice, and the per-day volume row. This
 	// is the same read `lucid stats` performs (stats.go): a user-invoked
 	// projection joining across trees, not an agent reading the sanctuary tree.
+	rolloverMin := r.logicalRolloverMin()
 	for _, d := range logicalDayRange(start, end) {
 		dateStr := engine.DateString(d)
-		view, verr := r.store.ReadDayView(dateStr, loc)
+		view, verr := r.store.ReadDayView(dateStr, loc, rolloverMin)
 		if verr != nil {
 			return WeekBundle{}, fmt.Errorf("weekbundle: read day view %s: %w", dateStr, verr)
 		}

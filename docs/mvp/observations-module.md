@@ -52,7 +52,7 @@ own *scope*; the older MVP docs own *conventions*.
 | `/pain`, `/ate`, `/drank`, `/bm`, `/mood`, `/slept` | Named shorthands, one line each, parsed per the grammar in [`../observations.md`](../observations.md) §4 — including the `@` backdating token (`@yesterday 19:30`), per-kind head rules, bare-form defaults, and dictation tolerance. All alias one router intent (`observation.capture`). | One event appended to `observations/YYYY/MM/obs_<logical_date>.jsonl` |
 | `/obs <kind> ...` | Generic form for every other enabled kind (`symptom`, `sleep`, `med`, `intervention`, `measurement`, `memory`, `where`). | Same |
 | `/obs where <place>` | Sticky location: writes a `context.location` event; creates/merges the place registry entry. | Event + `registries/places/<key>.json` |
-| `/day [date\|yesterday]` | Read-only day view: engine day record + observations + enrichment + entry ids for one logical day, plus range events spanning it. No date resolves to the current **logical** day (and `yesterday` to the one before it), on the same rollover boundary that files events (§2) — so a 02:00 `/day` shows the day just lived, not an empty new one. | None |
+| `/day [date\|yesterday]` | Read-only day view: engine day record + observations + enrichment + entry ids for one logical day, plus range events spanning it. Raw entries are grouped by the **logical day of their `occurred_at`** — `DeriveLogicalDate(occurred_at, precision, rollover)`, never the raw id's or the recorded date — so a bare 00:33 capture lists under the day before, and a `--day @D` entry lists under `D` however many days later it was recorded. No date resolves to the current **logical** day (and `yesterday` to the one before it), on the same rollover — the top-level `chain.json` `rollover`, 04:00 when absent or invalid (§2) — so a 02:00 `/day` shows the day just lived, not an empty new one. | None |
 | `/packet clinician [@<date>\|all]` | Renders the clinician packet projection per [`../observations.md`](../observations.md) §7 and posts only its *path*. Window: since the last packet export; **first-ever export: trailing 90 days**; `@<date>` overrides the window start, `all` exports everything. Header includes any standing `packet.clinical_context` lines from `observations/config.json`, verbatim; regimen derives from the most recent `taken: true` event per distinct med, and a med whose latest event is `taken: false` renders `(last logged: skipped <date>)` rather than disappearing. | Packet under `projections/` + one line appended to `projections/exports.log` (what, window, when, path) |
 | `lucid injury <name> [--status …] [--onset …] [--body-area …] …` | Life-archive registry-write verb: create or amend an `injury` record with the documented `Fields` convention ([`life-archive.md`](life-archive.md) §2). Append-only `status_history`; backdate-aware onset. | `registries/injuries/<key>.json` |
 | `lucid era list` · `lucid era create <name> [--start …] [--end …]` · `lucid era amend <name>` · `lucid thread <name> [--intent …]` | `era list` reads (never writes); `era create` mints and `era amend` amends an `era` (name + date range) — only `create` mints, a non-matching `amend`/bare `era <name>` hard-errors; `thread` creates/amends a thread (name + intent — **no progress number**, the obliquity guard) ([`life-archive.md`](life-archive.md) §4). | `registries/eras\|threads/<key>.json` (`era list` writes nothing) |
@@ -66,6 +66,19 @@ times only, calendar date for approximate/range, occurred_at's own
 offset) is specified in [`../observations.md`](../observations.md) §2
 and is the file-placement rule — a backdated event appends to the file
 for its logical date, not today's.
+
+Raw entries follow the **same** logical-day rule, applied at read time
+rather than at write time: a raw entry stores no `logical_date` and
+keeps its creation-time id, so the day view computes each entry's
+logical day with the one shared, precision-aware derivation
+(`DeriveLogicalDate(occurred_at, precision, rollover)`) and lists it
+under that day. The bare-capture default of `lucid log` reports its
+logical day through the same derivation, so capture and the day view
+cannot drift apart. On these two paths the rollover is the
+**top-level** `rollover` in `engine/chain.json` (the `default`
+profile), with 04:00 as the documented fallback when `chain.json` is
+absent or its rollover invalid; per-profile resolution is deferred
+([`../observations.md`](../observations.md) §2).
 
 **Partial dates (`YYYY`, `YYYY-MM`) — representation, binding.** Every
 date surface accepts a partial date, but a capture still needs one real

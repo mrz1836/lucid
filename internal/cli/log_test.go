@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -330,4 +331,36 @@ func TestLog_CLI_MalformedSourceRejected(t *testing.T) {
 	for _, e := range entries {
 		assert.Falsef(t, strings.HasSuffix(e.Name(), ".json"), "no dangling session record, found %s", e.Name())
 	}
+}
+
+// TestLog_CLI_RolloverAttribution drives the rollover fix through the command
+// surface on a pinned clock: a bare `lucid log` at 00:33 is receipted for the
+// day just lived (2026-09-27) while its occurred_at keeps the true instant,
+// and `lucid day 2026-09-27` — not `lucid day 2026-09-28`, the date its id
+// carries — lists it. Synthetic text, fixed zone.
+func TestLog_CLI_RolloverAttribution(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, time.Date(2026, 9, 28, 0, 33, 0, 0, time.FixedZone("EDT", -4*3600)))
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "log", "a synthetic late note", "--json")
+	require.NoError(t, err)
+	var receipt struct {
+		ReceiptID   string `json:"receipt_id"`
+		LogicalDate string `json:"logical_date"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &receipt))
+	assert.Equal(t, "raw_2026_09_28_00_33", receipt.ReceiptID, "the id keeps the creation instant")
+	assert.Equal(t, "2026-09-27", receipt.LogicalDate, "a pre-rollover capture belongs to the day just lived")
+
+	raw := readOnlyRaw(t, home)
+	assert.Contains(t, raw, `occurred_at: "2026-09-28T00:33:00-04:00"`, "occurred_at keeps the true instant")
+	assert.Contains(t, raw, "occurred_at_precision: exact")
+
+	prior, _, err := runRoot(t, BuildInfo{Version: "dev"}, "day", "2026-09-27")
+	require.NoError(t, err)
+	assert.Contains(t, prior, "Entries: "+receipt.ReceiptID)
+
+	next, _, err := runRoot(t, BuildInfo{Version: "dev"}, "day", "2026-09-28")
+	require.NoError(t, err)
+	assert.NotContains(t, next, receipt.ReceiptID, "never grouped by the id's recorded date")
 }

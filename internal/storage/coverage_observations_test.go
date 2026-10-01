@@ -175,7 +175,7 @@ func TestCovUpdateRegistry_WriteError(t *testing.T) {
 // join still assembles on an empty Ledger.
 func TestCovReadDayView_NilLocDefaults(t *testing.T) {
 	a := newObsStore(t)
-	view, err := a.ReadDayView("2026-07-02", nil)
+	view, err := a.ReadDayView("2026-07-02", nil, observations.DefaultRolloverMin)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-02", view.Date)
 }
@@ -185,7 +185,7 @@ func TestCovReadDayView_NilLocDefaults(t *testing.T) {
 func TestCovReadDayView_DayReadError(t *testing.T) {
 	a := newObsStore(t)
 	mkdirAt(t, a.obsDayPathT(t, "2026-07-02"))
-	_, err := a.ReadDayView("2026-07-02", loc)
+	_, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	assert.Error(t, err)
 }
 
@@ -194,7 +194,7 @@ func TestCovReadDayView_DayReadError(t *testing.T) {
 func TestCovReadDayView_RangeIndexError(t *testing.T) {
 	a := newObsStore(t)
 	mkdirAt(t, filepath.Join(a.projectionsDir(), rangeIndexFile))
-	_, err := a.ReadDayView("2026-07-02", loc)
+	_, err := a.ReadDayView("2026-07-02", loc, observations.DefaultRolloverMin)
 	assert.Error(t, err)
 }
 
@@ -210,20 +210,28 @@ func TestCovRangeCandidatesFor_EventReadError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestCovRawIDsForDate_ReadErrorAndSkip covers both the unreadable-shard error
-// (a file where the shard belongs) and the skip of a non-entry directory entry.
+// TestCovRawIDsForDate_ReadErrorAndSkip covers the unreadable-tree error (a
+// file where the raw tree belongs), the skip of a stray file where a shard
+// belongs, and the skip of a non-entry directory entry.
 func TestCovRawIDsForDate_ReadErrorAndSkip(t *testing.T) {
-	t.Run("file where shard belongs errors", func(t *testing.T) {
+	t.Run("file where raw tree belongs errors", func(t *testing.T) {
+		a := New(t.TempDir())
+		require.NoError(t, os.WriteFile(filepath.Join(a.home, rawDirName), []byte("x"), 0o600))
+		_, err := a.rawIDsForDate("2026-07-02", observations.DefaultRolloverMin)
+		assert.Error(t, err)
+	})
+	t.Run("file where shard belongs is skipped", func(t *testing.T) {
 		a := New(t.TempDir())
 		require.NoError(t, os.MkdirAll(filepath.Join(a.home, rawDirName, "2026"), 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(a.home, rawDirName, "2026", "07"), []byte("x"), 0o600))
-		_, err := a.rawIDsForDate("2026-07-02")
-		assert.Error(t, err)
+		ids, err := a.rawIDsForDate("2026-07-02", observations.DefaultRolloverMin)
+		require.NoError(t, err)
+		assert.Empty(t, ids)
 	})
 	t.Run("subdir entry is skipped", func(t *testing.T) {
 		a := New(t.TempDir())
 		require.NoError(t, os.MkdirAll(filepath.Join(a.home, rawDirName, "2026", "07", "nested"), 0o700))
-		ids, err := a.rawIDsForDate("2026-07-02")
+		ids, err := a.rawIDsForDate("2026-07-02", observations.DefaultRolloverMin)
 		require.NoError(t, err)
 		assert.Empty(t, ids)
 	})

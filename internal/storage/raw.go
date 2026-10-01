@@ -266,24 +266,9 @@ func (a *Adapter) ListRawIDsInRange(since, until string) ([]string, error) {
 		return nil, fmt.Errorf("storage: since date %q is after until date %q", since, until)
 	}
 
-	root := filepath.Join(a.home, rawDirName)
-	years, err := readSubdirNames(root)
+	candidates, err := a.allRawIDs()
 	if err != nil {
 		return nil, err
-	}
-	var candidates []string
-	for _, year := range years {
-		months, merr := readSubdirNames(filepath.Join(root, year))
-		if merr != nil {
-			return nil, merr
-		}
-		for _, month := range months {
-			names, nerr := rawIDsInShard(filepath.Join(root, year, month))
-			if nerr != nil {
-				return nil, nerr
-			}
-			candidates = append(candidates, names...)
-		}
 	}
 
 	ids := make([]string, 0, len(candidates))
@@ -295,6 +280,32 @@ func (a *Adapter) ListRawIDsInRange(since, until string) ([]string, error) {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
+	return ids, nil
+}
+
+// allRawIDs returns the id of every raw entry file in every raw/YYYY/MM
+// shard, unjudged and in walk order — the caller filters and sorts. An absent
+// raw tree is empty, not an error.
+func (a *Adapter) allRawIDs() ([]string, error) {
+	root := filepath.Join(a.home, rawDirName)
+	years, err := readSubdirNames(root)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, year := range years {
+		months, merr := readSubdirNames(filepath.Join(root, year))
+		if merr != nil {
+			return nil, merr
+		}
+		for _, month := range months {
+			names, nerr := rawIDsInShard(filepath.Join(root, year, month))
+			if nerr != nil {
+				return nil, nerr
+			}
+			ids = append(ids, names...)
+		}
+	}
 	return ids, nil
 }
 

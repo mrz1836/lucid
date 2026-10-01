@@ -94,14 +94,45 @@ Envelope semantics, binding:
   past — this is what makes memory excavation (§8) an ordinary write.
 * **`logical_date` is the universal join key.** Engine day records,
   observations, enrichment, and raw entries all resolve to the same
-  logical day. Derivation, binding: when precision is `exact`, apply
-  the rollover boundary (engine §1) to `occurred_at`'s **own wall
-  clock in its own recorded offset** (never re-projected into the zone
-  current at write or read time); when precision is `approximate`, use
+  logical day. **The rollover rule, binding:** an instant `t` belongs
+  to logical day `D` when `D <rollover> ≤ t < D+1 <rollover>` — at the
+  default rollover, `D 04:00 ≤ t < D+1 04:00`. The boundary is
+  inclusive at the rollover: 03:59:59 still belongs to the previous
+  day, and 04:00:00 exactly begins the new one. The comparison is made
+  in the local timezone the instant was captured in — `occurred_at`'s
+  **own wall clock in its own recorded offset** (the host's local zone
+  at capture, [`mvp/data-model.md`](mvp/data-model.md) §"Time zone
+  rule"; Lucid has no separate timezone setting), never re-projected
+  into the zone current at write or read time. Derivation by
+  precision, binding: when precision is `exact`, apply the rollover
+  rule (engine §1); when precision is `approximate`, use
   the plain calendar date of `occurred_at` (no rollover — approximate
   times are placeholders, and a midnight-anchored "around September
-  2014" must not file under August 31); when precision is `range`, use
-  the calendar date of the range start. File placement follows
+  2014" must not file under August 31 — which is also why an explicit
+  `--day @D`, stored at `D`'s local midnight at `approximate`
+  precision, lands on `D` at any capture hour); when precision is
+  `range`, use the calendar date of the range start. **Where the
+  rollover comes from, binding:** the bare-capture default of `lucid
+  log` and the `lucid day` view (its raw-entry grouping and the day a
+  bare `lucid day` opens on) read the **top-level** `rollover` from
+  `engine/chain.json` — the `default` profile's clock
+  ([`mvp/engine-module.md`](mvp/engine-module.md) §`chain.json`).
+  Per-profile overrides (a `nights` profile's 12:00, say) are **not**
+  consulted on these paths; resolving the active profile there is a
+  deferred follow-up. When `chain.json` is absent, or its top-level
+  `rollover` is missing or not a valid `HH:MM`, the documented
+  fallback is **04:00**. Both paths resolve through the one shared,
+  precision-aware derivation, so a bare capture and the day view
+  cannot disagree: a bare `lucid log` at 00:33 on 2026-07-03 belongs
+  to 2026-07-02, and `lucid day 2026-07-02` — not `lucid day
+  2026-07-03` — lists it. Raw entries store no `logical_date`: they
+  stay filed under their creation-time id (`raw/YYYY/MM/raw_…`), and
+  `lucid day` derives each one's logical day from `occurred_at` +
+  precision at read time — never from the raw id's date or the
+  recorded date — so a `--day @D` entry recorded days later still
+  lists under `D`. The other capture paths (observation micro-logs and
+  the remaining `--day` verbs) still file under the 04:00 default; the
+  two agree while the top-level rollover is the default. File placement follows
   `logical_date` — a memory about 1999 lives in
   `observations/1999/05/…` and `/day 1999-05-01` shows what is known
   about that day, while `recorded_at` preserves when you actually said

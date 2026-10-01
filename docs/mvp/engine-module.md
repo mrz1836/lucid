@@ -387,7 +387,14 @@ and never changed thereafter; all gate math derives from it.
 file; profile *switching* is `/profile <name>` and lives in
 `profile.json`. The bell prompt, the mode deadline, the tripwire run,
 and logical-day math all read the clocks of the profile active for the
-day in question.
+day in question. **One bounded exception:** raw-entry day attribution
+— the logical day a bare `lucid log` reports, the day `lucid day`
+groups a raw entry under, and the day a bare `lucid day` opens on —
+reads only the **top-level** `rollover` (the `default` profile), with
+04:00 as the documented fallback when this file is absent or that
+value is invalid ([`../observations.md`](../observations.md) §2).
+Resolving the active profile on those paths is deferred; while the
+`default` profile is active the two agree.
 `survival_link` is what a Red day requires — note the deliberate
 alignment: when the survival link is the journal, the close-out's one
 line *is* the Red-day floor, so the worst day costs one sentence.

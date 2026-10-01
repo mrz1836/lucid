@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -74,7 +73,7 @@ func newLogCmd() *cobra.Command {
 
 			res, err := r.Log(router.LogRequest{
 				Text:      text,
-				Now:       time.Now(),
+				Now:       clockNow(),
 				DayArg:    day,
 				Source:    flagOrEnv(cmd, flagSource, envSource, sourceCLI),
 				Harness:   flagOrEnv(cmd, flagHarness, envHarness, sourceCLI),

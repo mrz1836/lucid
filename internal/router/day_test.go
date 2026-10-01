@@ -215,3 +215,143 @@ func TestMediaLine(t *testing.T) {
 	assert.Equal(t, "2026-07-05-x.png",
 		mediaLine(storage.MediaRecord{ID: "2026-07-05-x.png", Caption: "   "}))
 }
+
+// TestDayView_PostMidnightGroupsUnderLogicalDay: a bare `lucid log` at 00:33
+// and a `--day @2026-09-27` log at 00:35 — both recorded on 2026-09-28, before
+// the 04:00 rollover — list under 2026-09-27, the logical day of their
+// occurred_at, and not under 2026-09-28, the date their ids carry. A bare
+// `/day` at that moment opens on 2026-09-27 too. Synthetic text, injected
+// clock and zone.
+func TestDayView_PostMidnightGroupsUnderLogicalDay(t *testing.T) {
+	r := bootedObs(t)
+	require.NoError(t, r.Store().ScaffoldEngine())
+
+	bareAt := time.Date(2026, 9, 28, 0, 33, 0, 0, edt)
+	bare, err := r.Log(LogRequest{Text: "a late note about the day just lived", Now: bareAt})
+	require.NoError(t, err)
+	flagAt := time.Date(2026, 9, 28, 0, 35, 0, 0, edt)
+	flagged, err := r.Log(LogRequest{Text: "attributed on purpose", Now: flagAt, DayArg: "@2026-09-27"})
+	require.NoError(t, err)
+
+	prior, err := r.DayView("2026-09-27", flagAt)
+	require.NoError(t, err)
+	assert.False(t, prior.Empty)
+	assert.Contains(t, prior.Lines, "Entries: "+flagged.RawID+", "+bare.RawID,
+		"both entries list under their logical day, ordered by occurred_at")
+
+	today, err := r.DayView("", flagAt)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-09-27", today.Date, "a pre-rollover bare /day opens on the day just lived")
+	assert.Equal(t, prior.Lines, today.Lines)
+
+	next, err := r.DayView("2026-09-28", flagAt)
+	require.NoError(t, err)
+	assert.NotContains(t, next.View.RawEntryIDs, bare.RawID, "never grouped by the id's recorded date")
+	assert.NotContains(t, next.View.RawEntryIDs, flagged.RawID)
+	assert.True(t, next.Empty, "nothing belongs to 2026-09-28 yet")
+}
+
+// writeChain rewrites the Ledger's chain.json with edit applied.
+func writeChain(t *testing.T, r *Router, edit func(*engine.ChainConfig)) {
+	t.Helper()
+	chain, err := r.Chain()
+	require.NoError(t, err)
+	edit(&chain)
+	require.NoError(t, r.Store().WriteChainConfig(chain))
+}
+
+// TestLogicalRolloverMin_FallbackToDefault: when chain.json is absent,
+// unparseable, or its top-level rollover is missing or not a valid HH:MM, the
+// resolver falls back to the documented 04:00 — and a bare `lucid log` and the
+// day view both attribute on that same boundary (03:59:59 the day before,
+// 04:00 its own day).
+func TestLogicalRolloverMin_FallbackToDefault(t *testing.T) {
+	chainPath := func(r *Router) string { return filepath.Join(r.Store().Home(), "engine", "chain.json") }
+	cases := map[string]func(t *testing.T, r *Router){
+		"absent": func(t *testing.T, r *Router) {
+			require.NoError(t, os.Remove(chainPath(r)))
+		},
+		"unparseable": func(t *testing.T, r *Router) {
+			require.NoError(t, os.WriteFile(chainPath(r), []byte("{not json"), 0o600))
+		},
+		"missing rollover": func(t *testing.T, r *Router) {
+			writeChain(t, r, func(c *engine.ChainConfig) { c.Rollover = "" })
+		},
+		"invalid rollover": func(t *testing.T, r *Router) {
+			writeChain(t, r, func(c *engine.ChainConfig) { c.Rollover = "25:99" })
+		},
+	}
+	for name, breakChain := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := bootedObs(t)
+			require.NoError(t, r.Store().ScaffoldEngine())
+			breakChain(t, r)
+			assert.Equal(t, observations.DefaultRolloverMin, r.logicalRolloverMin())
+
+			before, err := r.Log(LogRequest{Text: "one second before the rollover", Now: time.Date(2026, 9, 28, 3, 59, 59, 0, edt)})
+			require.NoError(t, err)
+			assert.Equal(t, "2026-09-27", before.Day)
+			at, err := r.Log(LogRequest{Text: "exactly at the rollover", Now: time.Date(2026, 9, 28, 4, 0, 0, 0, edt)})
+			require.NoError(t, err)
+			assert.Equal(t, "2026-09-28", at.Day)
+		})
+	}
+
+	t.Run("day view agrees on the fallback boundary", func(t *testing.T) {
+		r := bootedObs(t)
+		require.NoError(t, r.Store().ScaffoldEngine())
+		writeChain(t, r, func(c *engine.ChainConfig) { c.Rollover = "25:99" })
+
+		lastSecond := time.Date(2026, 9, 28, 3, 59, 59, 0, edt)
+		before, err := r.Log(LogRequest{Text: "one second before the rollover", Now: lastSecond})
+		require.NoError(t, err)
+		atRollover := time.Date(2026, 9, 28, 4, 0, 0, 0, edt)
+		at, err := r.Log(LogRequest{Text: "exactly at the rollover", Now: atRollover})
+		require.NoError(t, err)
+
+		prior, err := r.DayView("", lastSecond)
+		require.NoError(t, err)
+		assert.Equal(t, "2026-09-27", prior.Date)
+		assert.Equal(t, before.Day, prior.Date, "the log and the day view name the same day")
+		assert.Equal(t, []string{before.RawID}, prior.View.RawEntryIDs)
+
+		own, err := r.DayView("", atRollover)
+		require.NoError(t, err)
+		assert.Equal(t, "2026-09-28", own.Date)
+		assert.Equal(t, at.Day, own.Date, "the log and the day view name the same day")
+		assert.Equal(t, []string{at.RawID}, own.View.RawEntryIDs)
+	})
+}
+
+// TestLogicalRolloverMin_TopLevelIgnoresProfiles: the resolver reads only the
+// top-level chain.json rollover — even with a profile that overrides it
+// active — and the day view groups and resolves "today" on that value.
+func TestLogicalRolloverMin_TopLevelIgnoresProfiles(t *testing.T) {
+	r := bootedObs(t)
+	require.NoError(t, r.Store().ScaffoldEngine())
+	writeChain(t, r, func(c *engine.ChainConfig) {
+		c.Rollover = "05:00"
+		c.Profiles = map[string]engine.ProfileClocks{
+			"nights": {BellTime: "08:30", TripwireTime: "17:00", Rollover: "12:00"},
+		}
+	})
+	require.NoError(t, r.Store().AppendProfileEvent(engine.ProfileSwitch{
+		At: "2026-09-01T09:00:00-04:00", From: engine.DefaultProfile, To: "nights", Effective: "2026-09-01",
+	}))
+
+	assert.Equal(t, 5*60, r.logicalRolloverMin(), "top-level rollover, not the active profile's 12:00")
+
+	at := time.Date(2026, 9, 28, 4, 30, 0, 0, edt) // after 04:00, before the 05:00 top-level rollover
+	logged, err := r.Log(LogRequest{Text: "between four and five", Now: at})
+	require.NoError(t, err)
+	assert.Equal(t, "2026-09-27", logged.Day, "the log attributes on the top-level rollover too")
+
+	res, err := r.DayView("", at)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-09-27", res.Date)
+	assert.Equal(t, []string{logged.RawID}, res.View.RawEntryIDs)
+
+	yd, err := r.DayView("yesterday", at)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-09-26", yd.Date)
+}

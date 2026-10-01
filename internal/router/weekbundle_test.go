@@ -156,7 +156,7 @@ func TestBuildWeekBundle_RichWeek(t *testing.T) {
 	// Projection parity: each day's counts equal len(ReadDayView(d)) — the bundle
 	// draws from the sanctioned `/day` join, not a recomputation.
 	for _, d := range b.Stats {
-		dv, derr := a.ReadDayView(d.Date, edt)
+		dv, derr := a.ReadDayView(d.Date, edt, observations.DefaultRolloverMin)
 		require.NoError(t, derr)
 		assert.Equalf(t, len(dv.RawEntryIDs), d.RawEntries, "raw parity for %s", d.Date)
 		assert.Equalf(t, len(dv.Obs.Events), d.Observations, "obs parity for %s", d.Date)
