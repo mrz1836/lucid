@@ -986,7 +986,7 @@ func TestGratitudeThankCLI(t *testing.T) {
 		Date      string `json:"date"`
 	}
 	require.NoError(t, dec.Decode(&view), "exactly the documented keys")
-	assert.Equal(t, "grat_2026_07_09_004", view.Receipt)
+	assert.Equal(t, "grat_2026_07_09_001", view.Receipt, "the first receipt for its logical date")
 	assert.Equal(t, id, view.ID)
 	assert.Equal(t, "coffee with Sam on the porch", view.Thing)
 	assert.Equal(t, 2, view.Count, "expressing gratitude never moves the tally")

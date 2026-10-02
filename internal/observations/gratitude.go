@@ -63,13 +63,14 @@ const (
 )
 
 // GratitudeEvent is one append-only entry in a gratitude record's typed history
-// (gratitude.md §2). Each event carries a receipt id unique within its entry
-// (the seq is minted per-entry: max over this entry's history + 1), a real write
-// timestamp At, a Type, and the type-specific fields the fold reads. The id is
-// NOT globally unique — two different referents tallied the same night both get
-// `grat_<date>_001` — which is sound because nothing looks a receipt up across
-// entries; a receipt is only ever read back within the entry that minted it.
-// Collection and per-type fields are omitempty so an occurrence line stays lean
+// (gratitude.md §2). Each event carries a receipt id unique across the whole
+// Ledger (the seq is a per-logical-date high-water mark across the whole
+// registry: one above the highest seq any entry already holds for that date —
+// see [NextGratitudeSeqForDate]), a real write timestamp At, a Type, and the
+// type-specific fields the fold reads. Two different referents tallied the same
+// night therefore get two different receipts. Ids minted before this rule used a
+// per-entry seq and may repeat across entries; they are never rewritten and stay
+// valid. Collection and per-type fields are omitempty so an occurrence line stays lean
 // and a seed line carries only its count/span. The receipt id encodes the
 // event's logical date, so a backdated occurrence's receipt reflects the logical
 // day, not the recording time.
@@ -301,8 +302,10 @@ func (e GratitudeEntry) Validate() error {
 
 // GratitudeReceiptID renders a receipt id for a gratitude event (gratitude.md §2
 // Ids: grat_<logical_date>_<seq>, the date in underscores, seq zero-padded to
-// three digits, wider values legal). It never collides with a stable entry key,
-// which is a word-slug (gratitude_<slug>).
+// three digits, wider values legal). The caller supplies seq from
+// [NextGratitudeSeqForDate], which makes the id unique across the whole Ledger.
+// It never collides with a stable entry key, which is a word-slug
+// (gratitude_<slug>).
 func GratitudeReceiptID(logicalDate string, seq int) string {
 	return fmt.Sprintf("grat_%s_%03d", strings.ReplaceAll(logicalDate, "-", "_"), seq)
 }
@@ -326,15 +329,56 @@ func ParseGratitudeReceiptSeq(id string) (seq int, ok bool) {
 	return n, true
 }
 
-// NextGratitudeSeq returns max-seq+1 over the entry's history (gratitude.md §2:
-// never a count, single-writer). A fresh entry starts at seq 1; an event whose
-// id is not a well-formed receipt is ignored, so a hand-edited line never
-// perturbs id assignment.
-func NextGratitudeSeq(history []GratitudeEvent) int {
+// ParseGratitudeReceiptID splits a receipt id (grat_<YYYY>_<MM>_<DD>_<seq>) into
+// the logical date it encodes, in the YYYY-MM-DD form [GratitudeReceiptID] takes,
+// and its numeric seq (via [ParseGratitudeReceiptSeq], so a wider seq is legal).
+// It returns ok=false for anything that is not a well-formed gratitude receipt —
+// a stable entry key, a wrong segment count, a non-digit date part, or a
+// non-numeric/negative seq — so the registry-wide seq derivation skips it.
+func ParseGratitudeReceiptID(id string) (date string, seq int, ok bool) {
+	parts := strings.Split(id, "_")
+	if len(parts) != 5 || parts[0] != "grat" {
+		return "", 0, false
+	}
+	if !allDigits(parts[1], 4) || !allDigits(parts[2], 2) || !allDigits(parts[3], 2) {
+		return "", 0, false
+	}
+	seq, ok = ParseGratitudeReceiptSeq(id)
+	if !ok {
+		return "", 0, false
+	}
+	return parts[1] + "-" + parts[2] + "-" + parts[3], seq, true
+}
+
+// allDigits reports whether s is exactly n ASCII digits.
+func allDigits(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// NextGratitudeSeqForDate returns the next receipt seq for logicalDate: one above
+// the highest seq any receipt already carries for that date across the whole
+// gratitude registry (gratitude.md §2 Ids: a per-logical-date high-water mark,
+// never a count, single-writer). entries is the full registry — live entries and
+// tombstones alike, since a tombstone's frozen history still holds minted ids.
+// Historical ids minted under the old per-entry rule count toward the mark, so a
+// new receipt can never duplicate one. A date with no receipt starts at seq 1;
+// an event whose id is not a well-formed receipt is ignored, so a hand-edited
+// line never perturbs id assignment.
+func NextGratitudeSeqForDate(entries []GratitudeEntry, logicalDate string) int {
 	maxSeq := 0
-	for _, ev := range history {
-		if s, ok := ParseGratitudeReceiptSeq(ev.ID); ok && s > maxSeq {
-			maxSeq = s
+	for _, entry := range entries {
+		for _, ev := range entry.History {
+			if d, s, ok := ParseGratitudeReceiptID(ev.ID); ok && d == logicalDate && s > maxSeq {
+				maxSeq = s
+			}
 		}
 	}
 	return maxSeq + 1

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,9 +20,10 @@ import (
 // (architecture P3). A gratitude entry is one JSON file per referent, keyed by
 // the salted registry key, carrying an append-only typed history. Every mutation
 // is a whole-file read-modify-write under the single-writer discipline — read
-// the entry, mint the next receipt id from its history, append one event, write
-// it back — so the count/first/last stay a pure fold over events that are never
-// rewritten.
+// the entry, mint the next receipt id from the per-logical-date high-water mark
+// across the whole registry, append one event, write it back — so receipts stay
+// unique across the Ledger and the count/first/last stay a pure fold over events
+// that are never rewritten.
 
 const gratitudeDirName = "gratitude"
 
@@ -109,11 +111,52 @@ func (a *Adapter) ReadGratitudeAll() ([]observations.GratitudeEntry, error) {
 	return out, nil
 }
 
+// nextGratitudeSeq returns the next receipt seq for logicalDate across the whole
+// gratitude registry (gratitude.md §2 Ids: a per-logical-date high-water mark,
+// never a count, single-writer) — the one seq funnel every gratitude mint shares.
+// It decodes every entry file, live and tombstoned (a tombstone's frozen history
+// still holds minted ids), and hands the set to
+// [observations.NextGratitudeSeqForDate]. Like [Adapter.nextObsSeq] skipping a
+// malformed line, an entry file that does not decode contributes no seq rather
+// than failing the write, so one corrupt record never blocks an unrelated add
+// (its ids are unreadable to every reader anyway). A missing tree starts at seq
+// 1; a read error is still an error.
+func (a *Adapter) nextGratitudeSeq(logicalDate string) (int, error) {
+	dirEntries, err := os.ReadDir(a.gratitudeDir())
+	if errors.Is(err, fs.ErrNotExist) {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("storage: read gratitude dir: %w", err)
+	}
+	var all []observations.GratitudeEntry
+	for _, de := range dirEntries {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(a.gratitudeDir(), de.Name())
+		b, rerr := os.ReadFile(path) //nolint:gosec // adapter-internal path derived from the resolved Ledger home
+		if errors.Is(rerr, fs.ErrNotExist) {
+			continue
+		}
+		if rerr != nil {
+			return 0, fmt.Errorf("storage: read gratitude %q: %w", strings.TrimSuffix(de.Name(), ".json"), rerr)
+		}
+		var entry observations.GratitudeEntry
+		if json.Unmarshal(b, &entry) != nil {
+			continue // undecodable entry: contributes no seq
+		}
+		all = append(all, entry)
+	}
+	return observations.NextGratitudeSeqForDate(all, logicalDate), nil
+}
+
 // AppendGratitudeEvent appends ev to the entry at key — creating a fresh entry
 // from displayName when none exists — mints ev's receipt id under the
-// single-writer discipline (seq = max over the entry's history + 1, never a
-// count), stamps ev.At with the real write time, and writes the file back. It
-// returns the stored entry and the appended event with its receipt id filled.
+// single-writer discipline (seq = max over that logical date across the whole
+// gratitude registry + 1, never a count), stamps ev.At with the real write
+// time, and writes the file back. It returns the stored entry and the appended
+// event with its receipt id filled.
 //
 // receiptDate is the logical date the receipt id encodes (an occurrence's own
 // date), so a backdated write's receipt encodes the logical day, not the
@@ -148,7 +191,10 @@ func (a *Adapter) AppendGratitudeEvent(
 	}
 	entry = entry.LinkPerson(ev.Person)
 
-	seq := observations.NextGratitudeSeq(entry.History)
+	seq, err := a.nextGratitudeSeq(receiptDate)
+	if err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
 	ev.ID = observations.GratitudeReceiptID(receiptDate, seq)
 	ev.At = nowStr
 	entry.History = append(slices.Clone(entry.History), ev)
@@ -168,7 +214,8 @@ func (a *Adapter) AppendGratitudeEvent(
 // person key onto the live entry at key (grow-only people[], a no-op when
 // already linked) and appends one tally-neutral `expressed` event naming them at
 // logicalDate, minting its receipt under the single-writer discipline exactly as
-// [Adapter.AppendGratitudeEvent] does. Unlike an add it never creates an entry
+// [Adapter.AppendGratitudeEvent] does (seq = max over that logical date across
+// the whole gratitude registry + 1). Unlike an add it never creates an entry
 // and never touches the wordings: a missing entry or a merge tombstone is a
 // clean error that writes nothing. It returns the stored entry and the appended
 // event with its receipt id filled.
@@ -197,10 +244,15 @@ func (a *Adapter) AppendGratitudeExpressed(
 		)
 	}
 
+	seq, err := a.nextGratitudeSeq(logicalDate)
+	if err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
+
 	nowStr := now.Format(time.RFC3339)
 	entry = entry.LinkPerson(personKey)
 	ev := observations.GratitudeEvent{
-		ID:     observations.GratitudeReceiptID(logicalDate, observations.NextGratitudeSeq(entry.History)),
+		ID:     observations.GratitudeReceiptID(logicalDate, seq),
 		At:     nowStr,
 		Type:   observations.GratitudeEventExpressed,
 		Date:   logicalDate,
@@ -299,10 +351,14 @@ func (a *Adapter) MergeGratitude(
 	}
 
 	// The whole source tally folds into the target as one auditable merge event,
-	// minted under the single-writer discipline. Its receipt encodes today's
+	// minted under the single-writer discipline (seq = max over that logical date
+	// across the whole gratitude registry + 1). Its receipt encodes today's
 	// logical date — the day the fold happened.
-	seq := observations.NextGratitudeSeq(target.History)
 	receiptDate := observations.DateString(observations.DateOf(now))
+	seq, err := a.nextGratitudeSeq(receiptDate)
+	if err != nil {
+		return observations.GratitudeEntry{}, observations.GratitudeEvent{}, err
+	}
 	ev := observations.GratitudeEvent{
 		ID:          observations.GratitudeReceiptID(receiptDate, seq),
 		At:          nowStr,
