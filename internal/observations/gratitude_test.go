@@ -168,18 +168,19 @@ func TestParseGratitudeReceiptSeq(t *testing.T) {
 	}
 }
 
-// TestNextGratitudeSeq: a fresh entry starts at 1, otherwise it is max-seq+1,
-// and a malformed id is ignored rather than counted.
-func TestNextGratitudeSeq(t *testing.T) {
-	assert.Equal(t, 1, NextGratitudeSeq(nil))
-	assert.Equal(t, 1, NextGratitudeSeq([]GratitudeEvent{}))
+// TestNextGratitudeSeqForDate: a date with no receipt starts at 1, otherwise it
+// is that date's max-seq+1, and a malformed id is ignored rather than counted.
+func TestNextGratitudeSeqForDate(t *testing.T) {
+	assert.Equal(t, 1, NextGratitudeSeqForDate(nil, "2026-03-12"))
+	assert.Equal(t, 1, NextGratitudeSeqForDate([]GratitudeEntry{{}}, "2026-03-12"))
 
-	history := []GratitudeEvent{
+	entries := []GratitudeEntry{{History: []GratitudeEvent{
 		{ID: "grat_2026_03_10_001"},
 		{ID: "grat_2026_03_12_005"},
 		{ID: "hand-edited-line"}, // ignored, not counted
-	}
-	assert.Equal(t, 6, NextGratitudeSeq(history), "max seq 5 + 1")
+	}}}
+	assert.Equal(t, 6, NextGratitudeSeqForDate(entries, "2026-03-12"), "max seq 5 + 1")
+	assert.Equal(t, 2, NextGratitudeSeqForDate(entries, "2026-03-10"), "max seq 1 + 1")
 }
 
 // TestGratitudeMatchTier_EventAttribution: an automatic landing's match_tier and

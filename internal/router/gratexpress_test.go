@@ -72,9 +72,9 @@ func TestGratitudeThank_LinksAndRecordsExpressed(t *testing.T) {
 	assert.Equal(t, "coffee with Sam on the porch", res.Thing)
 	assert.Equal(t, "2026-07-04", res.Date)
 	assert.Equal(t, 2, res.Count, "expressing gratitude never moves the tally")
-	assert.Equal(t, "grat_2026_07_04_003", res.Receipt)
+	assert.Equal(t, "grat_2026_07_04_001", res.Receipt, "the first receipt for its logical date")
 	assert.Equal(t,
-		"Noted that you told Sam Rivera about \"coffee with Sam on the porch\" (2026-07-04) as `grat_2026_07_04_003` — the tally stays ×2.",
+		"Noted that you told Sam Rivera about \"coffee with Sam on the porch\" (2026-07-04) as `grat_2026_07_04_001` — the tally stays ×2.",
 		res.Ack)
 
 	entry := gratitudeEntry(t, r, coffee.Key)

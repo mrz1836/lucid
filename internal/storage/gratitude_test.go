@@ -143,7 +143,7 @@ func TestAppendGratitudeExpressed_LinksAndIsTallyNeutral(t *testing.T) {
 
 	entry, ev, err := a.AppendGratitudeExpressed(key, "person_a-river", "2026-07-03", mergeNow())
 	require.NoError(t, err)
-	assert.Equal(t, "grat_2026_07_03_003", ev.ID, "the next seq, encoding the logical date")
+	assert.Equal(t, "grat_2026_07_03_001", ev.ID, "the first receipt for its logical date, encoding that date")
 	assert.Equal(t, observations.GratitudeEventExpressed, ev.Type)
 	assert.Equal(t, "person_a-river", ev.Person)
 	assert.Equal(t, "2026-07-03", ev.Date)
