@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,14 @@ func mergeNow() time.Time { return time.Date(2026, 7, 4, 21, 45, 0, 0, loc) }
 // date and returns the resolved stable entry key.
 func addGratitudeOccurrence(t *testing.T, a *Adapter, phrase, date string) string {
 	t.Helper()
+	key, _ := addGratitudeReceipt(t, a, phrase, date)
+	return key
+}
+
+// addGratitudeReceipt tallies one occurrence of phrase on the given logical date
+// and returns the resolved stable entry key and the receipt id the write minted.
+func addGratitudeReceipt(t *testing.T, a *Adapter, phrase, date string) (key, receipt string) {
+	t.Helper()
 	key, err := a.ResolveGratitudeKey(phrase)
 	require.NoError(t, err)
 	ev := observations.GratitudeEvent{
@@ -29,9 +38,52 @@ func addGratitudeOccurrence(t *testing.T, a *Adapter, phrase, date string) strin
 		Date:   date,
 		Source: observations.GratitudeSourceGratitude,
 	}
-	_, _, err = a.AppendGratitudeEvent(key, phrase, date, true, ev, mergeNow())
+	_, stored, err := a.AppendGratitudeEvent(key, phrase, date, true, ev, mergeNow())
 	require.NoError(t, err)
+	return key, stored.ID
+}
+
+// writeHistoricalGratitude writes an entry for phrase straight to disk with one
+// occurrence per receipt id given — bypassing the minting path, the way an entry
+// minted under the old per-entry seq sits in a Ledger today — and returns its
+// key. Each occurrence's date is the one its id encodes.
+func writeHistoricalGratitude(t *testing.T, a *Adapter, phrase string, ids ...string) string {
+	t.Helper()
+	require.NoError(t, a.ScaffoldGratitude())
+	key, err := a.ResolveGratitudeKey(phrase)
+	require.NoError(t, err)
+	entry := observations.NewGratitudeEntry(key, phrase, "2026-04-01T21:00:00-04:00")
+	for _, id := range ids {
+		date, _, ok := observations.ParseGratitudeReceiptID(id)
+		require.Truef(t, ok, "fixture id %q must be a well-formed receipt", id)
+		entry.History = append(entry.History, observations.GratitudeEvent{
+			ID:     id,
+			At:     date + "T21:00:00-04:00",
+			Type:   observations.GratitudeEventOccurrence,
+			Date:   date,
+			Source: observations.GratitudeSourceGratitude,
+		})
+	}
+	b, err := json.MarshalIndent(entry, "", "  ")
+	require.NoError(t, err)
+	path := filepath.Join(a.Home(), "registries", "gratitude", key+".json")
+	require.NoError(t, os.WriteFile(path, append(b, '\n'), 0o600))
 	return key
+}
+
+// registryReceiptCounts reads the whole gratitude registry — live entries and
+// tombstones — and counts how many times each receipt id appears.
+func registryReceiptCounts(t *testing.T, a *Adapter) map[string]int {
+	t.Helper()
+	all, err := a.ReadGratitudeAll()
+	require.NoError(t, err)
+	counts := map[string]int{}
+	for _, entry := range all {
+		for _, ev := range entry.History {
+			counts[ev.ID]++
+		}
+	}
+	return counts
 }
 
 // TestMergeGratitude_FoldsAndTombstones: MergeGratitude folds the source's whole
@@ -279,4 +331,180 @@ func TestGratitudeExpressed_MergeCarriesPeopleAndDates(t *testing.T) {
 	_, ev, err = a.MergeGratitude(other, quiet, mergeNow())
 	require.NoError(t, err)
 	assert.Nil(t, ev.SourceExpressed, "a source never told carries no source_expressed")
+}
+
+// TestGratitudeReceiptDistinctAcrossEntriesSameDate: gratitudes tallied into
+// different entries on the same logical date each return their own receipt — the
+// per-date seq runs across the whole registry, so the second and third entries
+// never repeat the first one's _001 (gratitude.md §2 Ids).
+func TestGratitudeReceiptDistinctAcrossEntriesSameDate(t *testing.T) {
+	a := newObsStore(t)
+	const date = "2026-08-15"
+
+	keyA, first := addGratitudeReceipt(t, a, "a warm loaf of bread", date)
+	keyB, second := addGratitudeReceipt(t, a, "a quiet walk by the river", date)
+	keyC, third := addGratitudeReceipt(t, a, "a letter from an old friend", date)
+	require.NotEqual(t, keyA, keyB, "distinct phrases land in distinct entries")
+	require.NotEqual(t, keyB, keyC, "distinct phrases land in distinct entries")
+	require.NotEqual(t, keyA, keyC, "distinct phrases land in distinct entries")
+
+	assert.NotEqual(t, first, second, "two entries on one date never share a receipt")
+	assert.NotEqual(t, second, third, "two entries on one date never share a receipt")
+	assert.NotEqual(t, first, third, "two entries on one date never share a receipt")
+	assert.Equal(t,
+		[]string{"grat_2026_08_15_001", "grat_2026_08_15_002", "grat_2026_08_15_003"},
+		[]string{first, second, third},
+		"the Nth receipt minted for the date across the registry")
+	for _, id := range []string{first, second, third} {
+		got, _, ok := observations.ParseGratitudeReceiptID(id)
+		require.Truef(t, ok, "%q is a well-formed grat_<date>_<seq> receipt", id)
+		assert.Equal(t, date, got, "the receipt encodes the logical date")
+	}
+}
+
+// TestGratitudeReceiptUniqueAcrossRegistry: across many writes — several
+// entries, several dates (some backdated), repeat bumps into one entry, and the
+// expressed and merge funnels — every receipt minted is unique, and so is every
+// id the registry holds afterwards, tombstone included.
+func TestGratitudeReceiptUniqueAcrossRegistry(t *testing.T) {
+	a := newObsStore(t)
+	phrases := []string{
+		"a warm loaf of bread",
+		"a quiet walk by the river",
+		"the smell of rain",
+		"a good night's sleep",
+	}
+	// Out of order so later writes backdate; 2026-07-04 is the merge fold day.
+	dates := []string{"2026-07-04", "2026-07-02", "2026-07-03"}
+
+	minted := map[string]string{}
+	record := func(id, what string) {
+		t.Helper()
+		prev, dup := minted[id]
+		require.Falsef(t, dup, "receipt %s minted twice: %s, then %s", id, prev, what)
+		minted[id] = what
+	}
+
+	keys := map[string]string{}
+	for _, d := range dates {
+		for _, p := range phrases {
+			for i := range 2 { // two bumps into the same entry on the same date
+				key, id := addGratitudeReceipt(t, a, p, d)
+				keys[p] = key
+				record(id, fmt.Sprintf("%q on %s #%d", p, d, i+1))
+			}
+		}
+	}
+
+	_, expressed, err := a.AppendGratitudeExpressed(keys[phrases[0]], "person_a-river", "2026-07-03", mergeNow())
+	require.NoError(t, err)
+	record(expressed.ID, "expressed")
+	assert.Equal(t, "grat_2026_07_03_009", expressed.ID, "the expressed funnel shares the per-date seq")
+
+	_, merge, err := a.MergeGratitude(keys[phrases[3]], keys[phrases[2]], mergeNow())
+	require.NoError(t, err)
+	record(merge.ID, "merge")
+	assert.Equal(t, "grat_2026_07_04_009", merge.ID, "the merge funnel shares the per-date seq")
+
+	assert.Len(t, minted, len(dates)*len(phrases)*2+2)
+
+	counts := registryReceiptCounts(t, a)
+	for id, n := range counts {
+		assert.Equalf(t, 1, n, "receipt %s appears %d times across the registry", id, n)
+	}
+	assert.Len(t, counts, len(minted), "the registry holds exactly the receipts minted")
+}
+
+// TestGratitudeReceiptFreshDateStartsAtOne: the first receipt on a brand-new
+// logical date is _001 — in an empty registry, on a registry already holding
+// receipts for other dates, and on an entry whose own history is long (the seq
+// is per date, never a running per-entry count).
+func TestGratitudeReceiptFreshDateStartsAtOne(t *testing.T) {
+	a := newObsStore(t)
+	_, first := addGratitudeReceipt(t, a, "the smell of rain", "2026-06-01")
+	assert.Equal(t, "grat_2026_06_01_001", first, "an empty registry starts at _001")
+
+	for _, d := range []string{"2026-06-01", "2026-06-02", "2026-06-03"} {
+		addGratitudeReceipt(t, a, "the smell of rain", d)
+		addGratitudeReceipt(t, a, "a good night's sleep", d)
+	}
+
+	_, id := addGratitudeReceipt(t, a, "the smell of rain", "2026-06-04")
+	assert.Equal(t, "grat_2026_06_04_001", id, "an entry with four prior events still starts a new date at _001")
+
+	_, id = addGratitudeReceipt(t, a, "a good night's sleep", "2026-06-04")
+	assert.Equal(t, "grat_2026_06_04_002", id, "the next receipt that date continues the count")
+
+	_, id = addGratitudeReceipt(t, a, "a warm loaf of bread", "2026-05-20")
+	assert.Equal(t, "grat_2026_05_20_001", id, "a backdated write to a date with no receipt starts at _001")
+}
+
+// TestGratitudeReceiptHistoricalCollisionsLoad: ids minted before receipts were
+// Ledger-unique used a per-entry seq, so two entries can hold the same receipt.
+// Such a Ledger still loads — every entry reads, validates, and keeps its
+// history verbatim — because a historical cross-entry collision is legitimate
+// append-only history, never a schema error (gratitude.md §2 Ids).
+func TestGratitudeReceiptHistoricalCollisionsLoad(t *testing.T) {
+	a := newObsStore(t)
+	const shared = "grat_2026_04_20_003"
+	keyA := writeHistoricalGratitude(t, a, "a warm loaf of bread",
+		"grat_2026_04_18_001", "grat_2026_04_19_002", shared)
+	keyB := writeHistoricalGratitude(t, a, "a quiet walk by the river",
+		"grat_2026_04_10_001", "grat_2026_04_15_002", shared)
+	require.NotEqual(t, keyA, keyB)
+
+	for _, key := range []string{keyA, keyB} {
+		entry, found, err := a.ReadGratitude(key)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NoError(t, entry.Validate(), "a historical entry still validates")
+		assert.Equal(t, 3, entry.Tally().Count)
+		require.Len(t, entry.History, 3)
+		assert.Equal(t, shared, entry.History[2].ID, "the colliding id is kept verbatim")
+	}
+
+	all, err := a.ReadGratitudeAll()
+	require.NoError(t, err)
+	require.Len(t, all, 2, "both colliding entries load")
+	for _, entry := range all {
+		require.NoError(t, entry.Validate(), "a cross-entry collision is not a schema error")
+	}
+	assert.Equal(t, 2, registryReceiptCounts(t, a)[shared], "the historical collision is left as written")
+}
+
+// TestGratitudeReceiptBackdatedAvoidsHistorical: a backdated write to a date
+// that already carries historical per-entry ids mints above that date's highest
+// seq across the registry, so it never reuses a historical id — not the colliding
+// _003, and not the _001 a per-entry count would have handed a fresh entry.
+func TestGratitudeReceiptBackdatedAvoidsHistorical(t *testing.T) {
+	a := newObsStore(t)
+	const date = "2026-04-20"
+	keyA := writeHistoricalGratitude(t, a, "a warm loaf of bread",
+		"grat_2026_04_18_001", "grat_2026_04_19_002", "grat_2026_04_20_003")
+	keyB := writeHistoricalGratitude(t, a, "a quiet walk by the river",
+		"grat_2026_04_10_001", "grat_2026_04_15_002", "grat_2026_04_20_003", "grat_2026_04_25_004")
+	keyC := writeHistoricalGratitude(t, a, "the smell of rain",
+		"grat_2026_04_20_001", "grat_2026_04_20_002")
+	historical := registryReceiptCounts(t, a)
+
+	keyD, id := addGratitudeReceipt(t, a, "a letter from an old friend", date)
+	require.NotContains(t, []string{keyA, keyB, keyC}, keyD, "the write lands in a different entry")
+	assert.Equal(t, "grat_2026_04_20_004", id, "above the date's historical max (003)")
+	assert.NotContains(t, historical, id, "a new receipt never duplicates a historical id")
+
+	_, id = addGratitudeReceipt(t, a, "a warm loaf of bread", date)
+	assert.Equal(t, "grat_2026_04_20_005", id, "a bump into a historical entry continues the date's mark")
+	assert.NotContains(t, historical, id)
+
+	_, id = addGratitudeReceipt(t, a, "a letter from an old friend", "2026-04-25")
+	assert.Equal(t, "grat_2026_04_25_005", id, "one entry's historical id sets that date's mark")
+	assert.NotContains(t, historical, id)
+
+	for rid, n := range registryReceiptCounts(t, a) {
+		want := 1
+		if rid == "grat_2026_04_20_003" {
+			want = 2 // the grandfathered historical collision, never rewritten
+		}
+		assert.Equalf(t, want, n, "receipt %s appears %d times across the registry", rid, n)
+	}
 }

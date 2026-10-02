@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -192,4 +193,54 @@ func TestValidateCLI_AfterPersonCreate(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, look, "Sam Rivera")
 	assert.Contains(t, look, "Mentioned in 0 entries")
+}
+
+// TestValidateCLI_HistoricalGratitudeCollisions: gratitude entries that share a
+// receipt id minted under the old per-entry seq still load, and `validate`
+// sweeps the Ledger clean — a historical cross-entry collision is append-only
+// history, never a finding. The next `gratitude add --into` on that date returns
+// a receipt above the shared one rather than repeating it.
+func TestValidateCLI_HistoricalGratitudeCollisions(t *testing.T) {
+	home := isolatedHome(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "init")
+	require.NoError(t, err)
+
+	a := storage.New(home)
+	require.NoError(t, a.ScaffoldObservations())
+	require.NoError(t, a.ScaffoldGratitude())
+	const shared = "grat_2026_04_20_001"
+	phrases := []string{"a warm loaf of bread", "a quiet walk by the river"}
+	keys := make([]string, 0, len(phrases))
+	for _, phrase := range phrases {
+		key, kerr := a.ResolveGratitudeKey(phrase)
+		require.NoError(t, kerr)
+		entry := observations.NewGratitudeEntry(key, phrase, "2026-04-20T21:00:00-04:00")
+		entry.History = append(entry.History, observations.GratitudeEvent{
+			ID:     shared,
+			At:     "2026-04-20T21:00:00-04:00",
+			Type:   observations.GratitudeEventOccurrence,
+			Date:   "2026-04-20",
+			Source: observations.GratitudeSourceGratitude,
+		})
+		b, merr := json.MarshalIndent(entry, "", "  ")
+		require.NoError(t, merr)
+		path := filepath.Join(home, "registries", "gratitude", key+".json")
+		require.NoError(t, os.WriteFile(path, append(b, '\n'), 0o600))
+		keys = append(keys, key)
+	}
+	require.NotEqual(t, keys[0], keys[1])
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate")
+	require.NoError(t, err)
+	assert.Contains(t, out, "validate: clean")
+	assert.NotContains(t, out, "skipped: schema check", "the schema sweep ran over the Ledger")
+
+	addOut, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"gratitude", "add", "fresh bread from the oven", "--into", keys[0], "--day", "2026-04-20", "--json")
+	require.NoError(t, err)
+	var payload struct {
+		Receipt string `json:"receipt"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(addOut), &payload))
+	assert.Equal(t, "grat_2026_04_20_002", payload.Receipt, "a new receipt lands above the shared historical id")
 }

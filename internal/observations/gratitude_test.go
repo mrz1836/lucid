@@ -183,6 +183,78 @@ func TestNextGratitudeSeqForDate(t *testing.T) {
 	assert.Equal(t, 2, NextGratitudeSeqForDate(entries, "2026-03-10"), "max seq 1 + 1")
 }
 
+// TestParseGratitudeReceiptID: a well-formed receipt splits into the logical
+// date it encodes (YYYY-MM-DD, the form GratitudeReceiptID takes) and its
+// numeric seq, round-tripping GratitudeReceiptID; anything else reports
+// ok=false so the registry-wide seq derivation skips it.
+func TestParseGratitudeReceiptID(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		date string
+		seq  int
+	}{
+		{"grat_2026_03_10_001", "2026-03-10", 1},
+		{"grat_2026_12_31_042", "2026-12-31", 42},
+		{"grat_2026_01_01_1000", "2026-01-01", 1000},
+	} {
+		date, seq, ok := ParseGratitudeReceiptID(tc.id)
+		require.Truef(t, ok, "%q is a well-formed receipt id", tc.id)
+		assert.Equal(t, tc.date, date)
+		assert.Equal(t, tc.seq, seq)
+		assert.Equal(t, tc.id, GratitudeReceiptID(date, seq), "parse round-trips the renderer")
+	}
+
+	for _, bad := range []string{
+		"",                    // empty
+		"gratitude_a-cedar",   // a stable entry key, not a receipt
+		"grat_",               // no date or seq
+		"grat_2026_03_10_",    // trailing underscore, empty seq
+		"grat_2026_03_10_abc", // non-numeric seq
+		"grat_2026_03_10_-1",  // negative seq
+		"grat_2026_03_001",    // missing a date segment
+		"grat_2026_03_10_0_1", // extra segment
+		"grat_26_03_10_001",   // short year
+		"grat_2026_3_10_001",  // unpadded month
+		"grat_2026_ab_10_001", // non-digit date part
+		"obs_2026_03_10_001",  // another receipt family
+	} {
+		_, _, ok := ParseGratitudeReceiptID(bad)
+		assert.Falsef(t, ok, "%q is not a well-formed receipt id", bad)
+	}
+}
+
+// TestNextGratitudeSeqForDate_HighWaterMarkAcrossEntries: the seq is one above
+// the highest seq any entry holds for the date — across the whole registry,
+// tombstones included — not a per-entry count. Historical per-entry ids that
+// collide across entries still count once toward the mark, other dates never
+// move it, and a merge event (no Date field) counts through its id's date.
+func TestNextGratitudeSeqForDate_HighWaterMarkAcrossEntries(t *testing.T) {
+	entries := []GratitudeEntry{
+		{Key: "gratitude_a-cedar", History: []GratitudeEvent{
+			{ID: "grat_2026_03_10_001"},
+			{ID: "grat_2026_03_10_003"}, // collides with the next entry
+			{ID: "grat_2026_03_11_009"}, // another date: never moves 03-10
+		}},
+		{Key: "gratitude_b-maple", History: []GratitudeEvent{
+			{ID: "grat_2026_03_10_001"}, // historical cross-entry duplicate
+			{ID: "grat_2026_03_10_002"},
+			{ID: "grat_2026_03_10_003"},
+		}},
+		{Key: "gratitude_c-birch", RedirectTo: "gratitude_a-cedar", History: []GratitudeEvent{
+			{ID: "grat_2026_03_12_004"}, // a tombstone's frozen ids still count
+		}},
+		{Key: "gratitude_d-alder", History: []GratitudeEvent{
+			{ID: "grat_2026_03_12_002", Type: GratitudeEventMerge}, // no Date; the id carries it
+			{ID: "grat_2026_03_10_999x"},                           // malformed: ignored
+		}},
+	}
+
+	assert.Equal(t, 4, NextGratitudeSeqForDate(entries, "2026-03-10"), "max across both entries (3) + 1")
+	assert.Equal(t, 10, NextGratitudeSeqForDate(entries, "2026-03-11"), "max 9 + 1")
+	assert.Equal(t, 5, NextGratitudeSeqForDate(entries, "2026-03-12"), "a tombstone's id sets the mark")
+	assert.Equal(t, 1, NextGratitudeSeqForDate(entries, "2026-03-13"), "a date with no receipt starts fresh")
+}
+
 // TestGratitudeMatchTier_EventAttribution: an automatic landing's match_tier and
 // match_score ride on the occurrence (gratitude.md §2, §7.7) and round-trip; an
 // occurrence with neither marshals exactly as the v1 shape (no match keys at
