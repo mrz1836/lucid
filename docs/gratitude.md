@@ -159,16 +159,33 @@ its own **receipt id**; they are never interchangeable:
   `gratitude_a-river`) — one per referent, stable across its whole life, shown
   by `list`, and the only thing `--into`, `merge`, and `thank` accept.
 * The **receipt id** is `grat_<logical_date>_<seq>` (e.g. `grat_2026_08_24_002`)
-  — one per appended event, minted under the storage adapter's single-writer
-  discipline (`seq` = max seq parsed from the entry's history plus one, never a
-  count). **Every** mutating verb — `add` (however it matched), `add --into`,
-  `merge`, `import`, `reconcile --apply` (one per fold), and `thank` — appends
-  an event and returns *that event's* receipt id, so two writes to the same
-  entry return two different receipts. A backdated event's receipt encodes the
-  *logical* date, not the recording time.
+  — one per appended event, and **unique across the whole Ledger**, like the
+  `raw_` and `obs_` ids. It is minted under the storage adapter's single-writer
+  discipline: `seq` is one above the highest seq already present for that
+  logical date **across the whole gratitude registry** (every entry's history,
+  historical ids included), never a per-entry count and never a line count. A
+  brand-new logical date therefore starts at `_001`, and the number reads as
+  "the Nth gratitude receipt minted for that date". The format carries no
+  version discriminator and never embeds the entry key. **Every** mutating
+  verb — `add` (however it matched), `add --into`, `merge`, `import`,
+  `reconcile --apply` (one per fold), and `thank` — appends an event and
+  returns *that event's* receipt id, so any two writes — to the same entry or to
+  different entries — return two different receipts. A backdated event's
+  receipt encodes the *logical* date, not the recording time.
 
 The two id shapes never collide: the entry key is a word-slug
 (`gratitude_a-river`), the receipt is date-and-sequence (`grat_2026_08_24_002`).
+
+**Historical receipt ids.** Receipt ids minted before this change used a
+per-entry sequence (max seq over the minting entry's history plus one), so two
+entries written on the same logical date could both hold, say,
+`grat_2026_08_24_001`. Those ids are **never rewritten** — the Ledger is
+append-only — and they remain valid and parseable; readers and `lucid validate`
+accept them, including cross-entry duplicates. New receipts cannot collide with
+them: because the high-water mark is taken over every id already present for
+the date, a backdated write to a date that carries historical ids mints a seq
+above the historical maximum (so the numbering on such a date may skip, which
+is the price of never colliding).
 
 **Versioning.** `schema` is versioned per record family, exactly as the
 observation envelope and the other registries are ([`observations.md`](observations.md)
@@ -640,8 +657,10 @@ the id of the one event it appended:
   receipt per fold: the id of that fold's `merge` event, which names the
   absorbed `source_key`.
 
-A receipt is unique within the entry that minted it (§2 Ids), so a receipt
-plus the entry it names always finds exactly one event. Nothing automatic is
+A receipt is unique across the whole Ledger (§2 Ids), so a receipt alone
+always finds exactly one event. (Historical receipts minted before that rule
+may repeat across entries; for those, the receipt plus the entry it names
+finds the one event.) Nothing automatic is
 ever unrecorded, and nothing is ever deleted.
 
 ### 7.8 Undo — correcting a wrong automatic match
