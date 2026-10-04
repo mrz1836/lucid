@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/mrz1836/go-flywheel v0.22.6
+	github.com/mrz1836/go-flywheel v0.23.0
 	github.com/mrz1836/go-foundation v0.9.0
 	github.com/mrz1836/go-selfupdate v0.1.4
 	github.com/spf13/cobra v1.10.2
