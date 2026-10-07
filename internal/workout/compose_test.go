@@ -332,6 +332,57 @@ func TestComposeReadsFullTrendWindow(t *testing.T) {
 	assert.Equal(t, defaultTrendWindowDays, obs.window)
 }
 
+// TestComposeFoldsWorkoutAmendments proves the read choke point folds workout
+// corrections before the recommender and the trend read the slice: a legs
+// session logged yesterday — which alone vetoes Monday's legs card — re-dated
+// ten days back and given an RPE counts as one session on its new day, so the
+// recovery guardrail (occurred_at) and the trend (logical_date) agree it is
+// outside the recovery window and in the prior week.
+func TestComposeFoldsWorkoutAmendments(t *testing.T) {
+	t.Parallel()
+
+	session := observations.Event{
+		ID: "obs_2026_07_19_001", Schema: observations.Schema, Kind: observations.KindWorkout,
+		RecordedAt: "2026-07-19T18:00:00Z", OccurredAt: "2026-07-19T18:00:00Z",
+		OccurredAtPrecision: observations.PrecisionExact, LogicalDate: "2026-07-19",
+		Payload: map[string]any{"type": "legs"},
+	}
+	rpe := observations.Event{
+		ID: "obs_2026_07_19_002", Schema: observations.Schema, Kind: observations.KindWorkout,
+		RecordedAt: "2026-07-19T20:00:00.1Z", OccurredAt: "2026-07-19T18:00:00Z",
+		OccurredAtPrecision: observations.PrecisionExact, LogicalDate: "2026-07-19",
+		Payload: map[string]any{"rpe": 8},
+		Refs:    map[string]any{observations.RefCorrects: session.ID},
+	}
+	redate := observations.Event{
+		ID: "obs_2026_07_10_001", Schema: observations.Schema, Kind: observations.KindWorkout,
+		RecordedAt: "2026-07-19T20:05:00.2Z", OccurredAt: "2026-07-10T00:00:00Z",
+		OccurredAtPrecision: observations.PrecisionApproximate, LogicalDate: "2026-07-10",
+		Payload: map[string]any{},
+		Refs:    map[string]any{observations.RefCorrects: session.ID, observations.RefRedate: true},
+	}
+
+	// Control: the session alone is inside legs' recovery window.
+	control := &provider.Fake{Script: []provider.Exchange{{Content: "note"}}}
+	base, err := New(baseDeps(t, &fakeObs{events: []observations.Event{session}}, fakeInjuries{}, control)).
+		Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+	require.NotEqual(t, "legs", base.Recommendation.Primary.ID, "unamended, yesterday's legs session vetoes legs")
+
+	// Storage order: sorted by id, so the re-date sorts first.
+	obs := &fakeObs{events: []observations.Event{redate, session, rpe}}
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: "note"}}}
+	res, err := New(baseDeps(t, obs, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+
+	assert.Equal(t, "legs", res.Recommendation.Primary.ID, "the re-dated session is outside the recovery window")
+	assert.Empty(t, res.Recommendation.Vetoes)
+	assert.Equal(t, 1, res.Trend.Sessions, "one session, not one per correction")
+	assert.Equal(t, 0, res.Trend.ThisWeek, "the session left this week")
+	assert.Equal(t, 1, res.Trend.PriorWeek, "and landed on its new day in the prior week")
+	assert.Equal(t, "2026-07-19", session.LogicalDate, "the reader's events are never mutated")
+}
+
 // TestComposeEnrichmentDegradesToCalendar proves a recent-observation read error
 // is non-fatal: the message still composes, EnrichmentDegraded is flagged, and the
 // recommendation follows the plain program calendar (the missing-data rule).

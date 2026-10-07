@@ -312,10 +312,10 @@ func clearedFields(refs map[string]any) []string {
 	}
 }
 
-// cloneForFold returns a deep-enough copy of a memory event for folding: the
-// payload, refs, and tags collections are cloned so overlaying an amendment
-// never mutates the caller's event. Nil collections become empty maps so a
-// subsequent set has somewhere to write.
+// cloneForFold returns a deep-enough copy of an event for folding (a memory or
+// a workout session): the payload, refs, and tags collections are cloned so
+// overlaying an amendment never mutates the caller's event. Nil collections
+// become empty maps so a subsequent set has somewhere to write.
 func cloneForFold(e Event) Event {
 	out := e
 	if e.Payload != nil {

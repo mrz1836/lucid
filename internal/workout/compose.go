@@ -238,6 +238,15 @@ func (c *Composer) readContext(now time.Time) (workouts, bodyState []observation
 // look-back, wide enough for both the recovery guardrail and the trend. A nil
 // reader (the seam simply unwired) yields empty slices and no degrade; a read
 // error yields empty slices and failed=true.
+//
+// It is the single read choke point for logged sessions, so it folds workout
+// corrections (`lucid workout amend`) onto their sessions before the split:
+// the recovery guardrail, the trend, and the `workout --json` projection all
+// see one session carrying its corrected fields and, after a re-date, its
+// moved date trio — never the correction events themselves. The fold sees the
+// read window only, so a re-date across the window's edge (a session moved to
+// more than the window's look-back before it was logged, or one from before
+// the window moved into it) folds as if not re-dated / not present.
 func (c *Composer) readRecent(now time.Time) (workouts, bodyState []observations.Event, failed bool) {
 	if c.observations == nil {
 		return nil, nil, false
@@ -246,7 +255,7 @@ func (c *Composer) readRecent(now time.Time) (workouts, bodyState []observations
 	if err != nil {
 		return nil, nil, true
 	}
-	for _, ev := range all {
+	for _, ev := range observations.FoldWorkoutAmendments(all) {
 		switch ev.Kind { //nolint:exhaustive // only the two workout-surface kinds are collected; every other kind is deliberately ignored
 		case observations.KindWorkout:
 			workouts = append(workouts, ev)

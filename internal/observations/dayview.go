@@ -35,15 +35,34 @@ func AssembleDayView(date string, dayEvents, rangeCandidates []Event, loc *time.
 	// base story and its amendments always land in the same day slice (and, for a
 	// range memory, in the same spanning-candidate set), and fold correctly with
 	// no cross-day read.
-	dv.Events = SortEventsByID(FoldMemoryAmendments(dayEvents))
+	//
+	// Workout corrections fold the same way (FoldWorkoutAmendments, likewise
+	// KindWorkout-only), so a session amended on its own day renders as one line
+	// carrying the corrected values. A workout correction files under the
+	// session's then-current day, and a `--day` re-date files under the new day —
+	// so the per-day view folds only the corrections filed on this day: a
+	// re-dated session still renders under its original day, and on its new day
+	// the re-date's base is absent and the correction is dropped. That is a known
+	// limit of a one-day read (mvp/data-model.md §"Workout amendments"); the
+	// window-wide consumers (the recommender, the trend, `workout --json`) read
+	// through the workout composer's readRecent and see the session where it now
+	// belongs.
+	dv.Events = SortEventsByID(foldAmendments(dayEvents))
 	var spanning []Event
-	for _, e := range FoldMemoryAmendments(rangeCandidates) {
+	for _, e := range foldAmendments(rangeCandidates) {
 		if IsRangeSpanning(e, date, loc) {
 			spanning = append(spanning, e)
 		}
 	}
 	dv.RangeEvents = SortEventsByID(spanning)
 	return dv
+}
+
+// foldAmendments applies every kind's read-time correction fold — memory
+// amendments and workout corrections. Each fold touches only its own kind, so
+// the order is immaterial.
+func foldAmendments(events []Event) []Event {
+	return FoldWorkoutAmendments(FoldMemoryAmendments(events))
 }
 
 // IsRangeSpanning reports whether a range event spans the day `date` from an

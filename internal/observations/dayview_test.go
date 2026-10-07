@@ -97,6 +97,67 @@ func TestAssembleDayView_FoldsMemoryAmendments(t *testing.T) {
 	assert.Equal(t, "hazy", base.Payload[MemoryFieldCertainty], "AssembleDayView folds on a copy, leaving the input untouched")
 }
 
+// TestAssembleDayView_FoldsWorkoutAmendments proves `/day` folds a logged
+// session and its same-day correction into one line carrying the corrected
+// values, alongside a memory amendment on the same day; and that a re-date —
+// filed under the new day — leaves the original day's view on the base dates
+// while the new day drops the correction whose base it cannot see (the
+// documented one-day-read limit).
+func TestAssembleDayView_FoldsWorkoutAmendments(t *testing.T) {
+	session := Event{
+		ID: "obs_2026_01_15_001", Schema: Schema, Kind: KindWorkout,
+		RecordedAt: "2026-01-15T19:05:00-05:00", OccurredAt: "2026-01-15T19:05:00-05:00",
+		OccurredAtPrecision: PrecisionExact, LogicalDate: "2026-01-15", Source: SourceMicrolog,
+		Payload: map[string]any{"type": "climbing", "duration_min": 60},
+	}
+	correction := Event{
+		ID: "obs_2026_01_15_002", Schema: Schema, Kind: KindWorkout,
+		RecordedAt: "2026-01-15T21:30:00.123456789-05:00", OccurredAt: "2026-01-15T19:05:00-05:00",
+		OccurredAtPrecision: PrecisionExact, LogicalDate: "2026-01-15", Source: SourceMicrolog,
+		Payload: map[string]any{"rpe": 4},
+		Refs:    map[string]any{RefCorrects: "obs_2026_01_15_001"},
+	}
+	memory := memoryEvent("obs_2026_01_15_003", "2026-01-15", map[string]any{MemoryFieldText: "old"}, nil)
+	memAmend := Event{
+		ID: "obs_2026_01_15_004", Schema: Schema, Kind: KindMemory,
+		RecordedAt: "2026-01-15T22:00:00-05:00", OccurredAt: memory.OccurredAt,
+		OccurredAtPrecision: PrecisionExact, LogicalDate: "2026-01-15", Source: SourceExcavation,
+		Payload: map[string]any{MemoryFieldText: "new"},
+		Refs:    map[string]any{RefCorrects: memory.ID},
+	}
+
+	dv := AssembleDayView("2026-01-15", []Event{session, correction, memory, memAmend}, nil, loc)
+
+	require.Len(t, dv.Events, 2, "one session line and one memory line — both corrections folded")
+	got := dv.Events[0]
+	assert.Equal(t, "obs_2026_01_15_001", got.ID)
+	assert.Equal(t, 4, got.Payload["rpe"], "the day view reflects the corrected rpe")
+	assert.Equal(t, 60, got.Payload["duration_min"], "an uncorrected field is intact")
+	assert.Equal(t, "new", dv.Events[1].Payload[MemoryFieldText], "memory amendments still fold")
+
+	line := strings.Join(dv.Lines(), "\n")
+	assert.Contains(t, line, "rpe=4")
+	assert.NotContains(t, line, "obs_2026_01_15_002", "the correction never renders as its own line")
+	_, mutated := session.Payload["rpe"]
+	assert.False(t, mutated, "AssembleDayView folds on a copy, leaving the input untouched")
+
+	t.Run("a re-date is a one-day-read limit", func(t *testing.T) {
+		redate := Event{
+			ID: "obs_2026_01_14_001", Schema: Schema, Kind: KindWorkout,
+			RecordedAt: "2026-01-15T21:31:00-05:00", OccurredAt: "2026-01-14T00:00:00-05:00",
+			OccurredAtPrecision: PrecisionApproximate, LogicalDate: "2026-01-14", Source: SourceMicrolog,
+			Payload: map[string]any{},
+			Refs:    map[string]any{RefCorrects: "obs_2026_01_15_001", RefRedate: true},
+		}
+		original := AssembleDayView("2026-01-15", []Event{session}, nil, loc)
+		require.Len(t, original.Events, 1)
+		assert.Equal(t, "2026-01-15", original.Events[0].LogicalDate, "the original day keeps the session on its base dates")
+
+		moved := AssembleDayView("2026-01-14", []Event{redate}, nil, loc)
+		assert.True(t, moved.Empty(), "the new day drops a re-date whose base it cannot see")
+	})
+}
+
 // TestDayView_Lines_ByteStableAndInventoryOnly: the render is deterministic
 // (byte-stable across reruns) and free of evaluative language (§0).
 func TestDayView_Lines_ByteStableAndInventoryOnly(t *testing.T) {
