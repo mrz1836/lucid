@@ -432,9 +432,6 @@ const (
 	workoutFieldBodyParts = "body_parts"
 	workoutFieldNote      = "note"
 
-	workoutFieldAnchor      = "anchor"
-	workoutFieldAnchorItems = "anchor_items"
-
 	// The date keys a re-dating amend reports in its changes.
 	workoutFieldOccurredAt  = "occurred_at"
 	workoutFieldLogicalDate = "logical_date"
@@ -610,7 +607,7 @@ func (r *Router) resolveWorkoutAmendTarget(obsID string) (string, observations.E
 		if ev.ID != baseID {
 			continue
 		}
-		if isAnchorOnly(ev) {
+		if observations.IsWorkoutAnchorOnly(ev) {
 			return "", observations.Event{}, fmt.Errorf(
 				"amend corrects logged sessions; anchors aren't amendable; nothing was saved",
 			)
@@ -618,27 +615,6 @@ func (r *Router) resolveWorkoutAmendTarget(obsID string) (string, observations.E
 		return baseID, ev, nil
 	}
 	return "", observations.Event{}, workoutNotFoundErr(obsID)
-}
-
-// isAnchorOnly reports whether a workout event is a daily-anchor capture with no
-// session on it: the anchor marker or items present and none of the session
-// fields — any one of which means there is a logged session for amend to
-// correct. A bare partial session ("I trained", no fields) is still a session.
-func isAnchorOnly(ev observations.Event) bool {
-	_, anchor := ev.Payload[workoutFieldAnchor]
-	_, items := ev.Payload[workoutFieldAnchorItems]
-	if !anchor && !items {
-		return false
-	}
-	for _, field := range []string{
-		workoutFieldType, workoutFieldMovements, workoutFieldDuration,
-		workoutFieldRPE, workoutFieldBodyParts, workoutFieldNote,
-	} {
-		if _, ok := ev.Payload[field]; ok {
-			return false
-		}
-	}
-	return true
 }
 
 // workoutAmendPayload validates the changed fields and builds the correction's

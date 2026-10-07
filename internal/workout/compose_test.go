@@ -337,7 +337,8 @@ func TestComposeReadsFullTrendWindow(t *testing.T) {
 // session logged yesterday — which alone vetoes Monday's legs card — re-dated
 // ten days back and given an RPE counts as one session on its new day, so the
 // recovery guardrail (occurred_at) and the trend (logical_date) agree it is
-// outside the recovery window and in the prior week.
+// outside the recovery window and in the prior week — and the sessions echo
+// shows that one folded session.
 func TestComposeFoldsWorkoutAmendments(t *testing.T) {
 	t.Parallel()
 
@@ -381,6 +382,17 @@ func TestComposeFoldsWorkoutAmendments(t *testing.T) {
 	assert.Equal(t, 0, res.Trend.ThisWeek, "the session left this week")
 	assert.Equal(t, 1, res.Trend.PriorWeek, "and landed on its new day in the prior week")
 	assert.Equal(t, "2026-07-19", session.LogicalDate, "the reader's events are never mutated")
+
+	// The --json sessions echo is built from the same folded slice: one
+	// session, its corrected RPE, and its moved date trio.
+	require.Len(t, res.Sessions, 1, "the echo lists the session once, never its corrections")
+	echo := res.Sessions[0]
+	assert.Equal(t, session.ID, echo.ID)
+	require.NotNil(t, echo.RPE)
+	assert.Equal(t, 8, *echo.RPE)
+	assert.Equal(t, "legs", echo.Type)
+	assert.Equal(t, "2026-07-10T00:00:00Z", echo.OccurredAt)
+	assert.Equal(t, "2026-07-10", echo.LogicalDate)
 }
 
 // TestComposeEnrichmentDegradesToCalendar proves a recent-observation read error

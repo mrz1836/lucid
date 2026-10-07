@@ -342,3 +342,36 @@ func TestFoldWorkoutAmendments_Passthrough(t *testing.T) {
 		assert.Equal(t, "2026-01-15", findEvent(t, FoldWorkoutAmendments(events), workoutBase).LogicalDate)
 	})
 }
+
+// TestIsWorkoutAnchorOnly pins which workout events are daily-anchor captures
+// with no session on them — the one rule amend's anchor refusal and the
+// `workout --json` sessions echo share: the marker or items with no session
+// field is anchor-only; any session field (even alongside the anchor) makes it
+// a session; a bare partial session is a session; another kind never is.
+func TestIsWorkoutAnchorOnly(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    Kind
+		payload map[string]any
+		want    bool
+	}{
+		{name: "bare anchor marker", kind: KindWorkout, payload: map[string]any{"anchor": true}, want: true},
+		{
+			name: "anchor items", kind: KindWorkout,
+			payload: map[string]any{"anchor": true, "anchor_items": []any{map[string]any{"name": "squats", "count": 55}}},
+			want:    true,
+		},
+		{name: "session that also logged the anchor", kind: KindWorkout, payload: map[string]any{"anchor": true, "type": "push"}},
+		{name: "anchor with a note", kind: KindWorkout, payload: map[string]any{"anchor": true, "note": "quick floor"}},
+		{name: "plain session", kind: KindWorkout, payload: map[string]any{"type": "climbing", "rpe": 4}},
+		{name: "bare partial session", kind: KindWorkout, payload: map[string]any{"parse": ParseMarkerPartial}},
+		{name: "another kind with an anchor key", kind: KindBodyState, payload: map[string]any{"anchor": true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := workoutSession(workoutBase, "2026-01-15", tc.payload)
+			ev.Kind = tc.kind
+			assert.Equal(t, tc.want, IsWorkoutAnchorOnly(ev))
+		})
+	}
+}

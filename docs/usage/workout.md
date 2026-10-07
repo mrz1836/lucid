@@ -108,7 +108,10 @@ identically with the provider down (then the note is simply absent). `--json` em
 the decided `{recommendation, trend, anchor, sessions}` projection instead of the
 rendered text, so a harness reads the same pick the message shows. `sessions` echoes
 the logged sessions the decision read (the four-week look-back) with any amendments
-already folded in, so a corrected value is directly readable there.
+already folded in, so a corrected value is directly readable there — one entry per
+session, newest first, never the corrections themselves. An anchor-only capture
+isn't a session, so it isn't listed: every id in `sessions` is one
+`workout amend` accepts.
 
 ```sh
 lucid workout          # today's recommendation, phrased

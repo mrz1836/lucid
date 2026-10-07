@@ -124,7 +124,9 @@ func New(d Deps) *Composer {
 // unreachable or returned nothing usable), so the caller can still note that only
 // warmth was lost. EnrichmentDegraded records that the recent-observation / injury
 // read failed, so the pick fell to the plain-calendar path. Recommendation, Trend,
-// and Anchor are the decided projection, surfaced verbatim for the --json output.
+// and Anchor are the decided projection, surfaced verbatim for the --json output;
+// Sessions echoes the logged sessions that decision read, corrections folded in
+// (see [BuildSessions]), so a corrected value is directly readable there.
 type Result struct {
 	Text               string
 	UsedLLM            bool
@@ -133,6 +135,7 @@ type Result struct {
 	Recommendation     Recommendation
 	Trend              Trend
 	Anchor             Anchor
+	Sessions           []SessionView
 }
 
 // Compose builds the on-demand workout message at now. It reads the configured
@@ -179,7 +182,13 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 		Loc:       loc,
 	})
 	anchor := BuildAnchor(prog, now, loc)
-	res := Result{Recommendation: rec, Trend: tr, Anchor: anchor, EnrichmentDegraded: degraded}
+	res := Result{
+		Recommendation:     rec,
+		Trend:              tr,
+		Anchor:             anchor,
+		Sessions:           BuildSessions(workouts, now, loc),
+		EnrichmentDegraded: degraded,
+	}
 
 	systemPrompt, err := composekit.ReadPromptFile(c.workout.SystemPrompt)
 	if err != nil {
@@ -243,10 +252,12 @@ func (c *Composer) readContext(now time.Time) (workouts, bodyState []observation
 // corrections (`lucid workout amend`) onto their sessions before the split:
 // the recovery guardrail, the trend, and the `workout --json` projection all
 // see one session carrying its corrected fields and, after a re-date, its
-// moved date trio — never the correction events themselves. The fold sees the
-// read window only, so a re-date across the window's edge (a session moved to
-// more than the window's look-back before it was logged, or one from before
-// the window moved into it) folds as if not re-dated / not present.
+// moved date trio — never the correction events themselves — and the
+// `workout --json` sessions echo is built from this same folded slice. The
+// fold sees the read window only, so a re-date across the window's edge (a
+// session moved to more than the window's look-back before it was logged, or
+// one from before the window moved into it) folds as if not re-dated / not
+// present.
 func (c *Composer) readRecent(now time.Time) (workouts, bodyState []observations.Event, failed bool) {
 	if c.observations == nil {
 		return nil, nil, false

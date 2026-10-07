@@ -7,12 +7,15 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/storage"
+	"github.com/mrz1836/lucid/internal/workout"
 )
 
 // workoutLogAckID pulls the session id out of a `workout log` acknowledgement
@@ -536,4 +539,147 @@ func TestWorkoutAmend_ConfigGate(t *testing.T) {
 		assert.Equal(t, logOut, amendOut, "amend prints the same enable hint log does")
 		assert.Empty(t, eventsOfKind(readObsEvents(t, home), observations.KindWorkout))
 	})
+}
+
+// amendMonday is the synthetic Monday noon (UTC) the integration tests below
+// pin the CLI clock to — the day the example program schedules its hard legs
+// card — so they decide the same pick on every run, whatever the wall clock
+// says.
+func amendMonday() time.Time { return time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC) }
+
+// workoutSurfaceJSON is the slice of the `lucid workout --json` projection the
+// integration tests read back.
+type workoutSurfaceJSON struct {
+	Recommendation workout.Recommendation `json:"recommendation"`
+	Trend          workout.Trend          `json:"trend"`
+	Sessions       []workout.SessionView  `json:"sessions"`
+}
+
+// readWorkoutJSON runs `lucid workout --json` and decodes the projection.
+func readWorkoutJSON(t *testing.T) workoutSurfaceJSON {
+	t.Helper()
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "--json")
+	require.NoError(t, err)
+	var payload workoutSurfaceJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	return payload
+}
+
+// enableAmendSurface sets up a fully configured workout home on the pinned
+// Monday with an offline provider that is always down — the deterministic pick
+// is identical either way, and --json never needs the model's note. It returns
+// the home path.
+func enableAmendSurface(t *testing.T) string {
+	t.Helper()
+	home := enableWorkoutSurface(t)
+	withClock(t, amendMonday())
+	withScriptedProvider(t).ExhaustErr = provider.ErrUnavailable
+	return home
+}
+
+// ledgerLine returns the exact Ledger line holding the event with the given id
+// from a byte snapshot, failing when no line carries it.
+func ledgerLine(t *testing.T, files map[string]string, id string) string {
+	t.Helper()
+	needle := `"id":"` + id + `"`
+	for _, content := range files {
+		for _, line := range strings.Split(content, "\n") {
+			if strings.Contains(line, needle) {
+				return line
+			}
+		}
+	}
+	t.Fatalf("no Ledger line carries %s", id)
+	return ""
+}
+
+// TestWorkoutAmend_EndToEnd is the whole correction cycle on a synthetic
+// Ledger, through the CLI only: a session logged without an RPE and then
+// amended to RPE 4 reads back through `workout --json` as exactly one session
+// carrying RPE 4 — not a second session — while the session's original Ledger
+// line stays byte-identical and the correction is appended after it.
+func TestWorkoutAmend_EndToEnd(t *testing.T) {
+	home := enableAmendSurface(t)
+	id := createWorkoutCLI(t, "--type", "climbing", "--duration", "60")
+
+	logged := readWorkoutJSON(t)
+	require.Len(t, logged.Sessions, 1)
+	assert.Nil(t, logged.Sessions[0].RPE, "the session was logged without an RPE")
+
+	before := observationsLedgerSnapshot(t, home)
+	original := ledgerLine(t, before, id)
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", id, "--rpe", "4")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	assert.Contains(t, out, "Amended workout `"+id+"`")
+
+	after := observationsLedgerSnapshot(t, home)
+	for path, content := range before {
+		assert.True(t, strings.HasPrefix(after[path], content), "append-only: every existing byte of %s stays put", path)
+	}
+	assert.Equal(t, original, ledgerLine(t, after, id), "the session's original line is byte-identical")
+	assert.Len(t, eventsOfKind(readObsEvents(t, home), observations.KindWorkout), 2,
+		"history keeps both the session and its correction")
+
+	amended := readWorkoutJSON(t)
+	require.Len(t, amended.Sessions, 1, "one session — the correction folds on, it never double-counts")
+	s := amended.Sessions[0]
+	assert.Equal(t, id, s.ID)
+	require.NotNil(t, s.RPE)
+	assert.Equal(t, 4, *s.RPE, "workout --json shows the amended RPE")
+	assert.Equal(t, "climbing", s.Type, "an unpassed field keeps its value")
+	require.NotNil(t, s.DurationMin)
+	assert.Equal(t, 60, *s.DurationMin, "an unpassed field keeps its value")
+	assert.Equal(t, 1, amended.Trend.Sessions, "the trend counts the one session day")
+	assert.Equal(t, 1, amended.Trend.ThisWeek)
+}
+
+// TestWorkoutAmend_Redate proves a `--day` re-date moves the session for every
+// reader at once. A hard legs session logged on Monday puts legs inside its
+// 48-hour recovery window, so Monday's legs card is vetoed; re-dated ten days
+// back, the recovery guardrail (which reads occurred_at) clears legs and the
+// trend (which reads logical_date) moves the session from this week to the
+// prior one — the two agree because the fold moves the date trio together.
+// The session's soreness reading is not relocated: v1 re-dates the workout
+// event only (the body-state follow-up closes that gap).
+func TestWorkoutAmend_Redate(t *testing.T) {
+	home := enableAmendSurface(t)
+	id := createWorkoutCLI(t, "--type", "legs", "--soreness", "forearms:3")
+
+	control := readWorkoutJSON(t)
+	require.NotEqual(t, "legs", control.Recommendation.Primary.ID,
+		"today's hard legs session puts legs inside its recovery window")
+	require.NotEmpty(t, control.Recommendation.Vetoes)
+	require.Equal(t, 1, control.Trend.ThisWeek)
+	require.Equal(t, 0, control.Trend.PriorWeek)
+
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", id, "--day", "2026-07-10")
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+
+	res := readWorkoutJSON(t)
+	// Recovery guardrail — reads occurred_at.
+	assert.Equal(t, "legs", res.Recommendation.Primary.ID, "re-dated ten days back, legs is clear again")
+	assert.Empty(t, res.Recommendation.Vetoes)
+	// Progress trend — reads logical_date.
+	assert.Equal(t, 1, res.Trend.Sessions, "still one session, not one per correction")
+	assert.Equal(t, 0, res.Trend.ThisWeek, "the session left this week")
+	assert.Equal(t, 1, res.Trend.PriorWeek, "and landed on its new day in the prior week")
+	// The echo shows the moved date trio on the one session.
+	require.Len(t, res.Sessions, 1)
+	s := res.Sessions[0]
+	assert.Equal(t, id, s.ID)
+	assert.Equal(t, "2026-07-10", s.LogicalDate)
+	assert.True(t, strings.HasPrefix(s.OccurredAt, "2026-07-10T"), "occurred_at moved with the day: %s", s.OccurredAt)
+	assert.Equal(t, "legs", s.Type, "a re-date changes no field")
+
+	// v1 limitation: the soreness reading the log wrote stays on the day it
+	// was recorded — a re-date moves the workout event only.
+	states := eventsOfKind(readObsEvents(t, home), observations.KindBodyState)
+	require.Len(t, states, 1)
+	assert.Equal(t, "2026-07-20", states[0].LogicalDate, "the body_state reading is not relocated")
+	require.Len(t, res.Trend.BodyResponse, 1)
+	assert.Equal(t, "forearms", res.Trend.BodyResponse[0].Part)
+	assert.Equal(t, "2026-07-20", res.Trend.BodyResponse[0].AsOf, "the trend still reads the reading on its original day")
 }

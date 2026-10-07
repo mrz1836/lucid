@@ -201,19 +201,22 @@ func renderWorkoutFire(out io.Writer, o workout.Outcome) error {
 // workoutRecommendationJSON is the --json projection of the on-demand surface:
 // the decided pick, the read-only trend, and today's daily anchor, exactly the
 // deterministic core's output so a harness reads the same recommendation the
-// message renders.
+// message renders — plus the logged sessions that decision read, each with its
+// `workout amend` corrections folded in, so a corrected value reads straight
+// back. Every key is additive; a reader skips the ones it doesn't know.
 type workoutRecommendationJSON struct {
 	Recommendation workout.Recommendation `json:"recommendation"`
 	Trend          workout.Trend          `json:"trend"`
 	Anchor         workout.Anchor         `json:"anchor"`
+	Sessions       []workout.SessionView  `json:"sessions"`
 }
 
 // runWorkout composes and prints the on-demand recommendation + trend. The
 // deterministic core owns the pick; the model only phrases it, and a provider
 // outage still renders the message deterministically. --json emits the decided
-// Recommendation/Trend projection instead of the rendered message; the degrade
-// notes (deterministic fallback, enrichment-degraded) go to stderr so the piped
-// stdout stays the clean message.
+// Recommendation/Trend/Anchor projection and the folded sessions echo instead of
+// the rendered message; the degrade notes (deterministic fallback,
+// enrichment-degraded) go to stderr so the piped stdout stays the clean message.
 func runWorkout(cmd *cobra.Command) error {
 	r, err := bootedRouter(cmd)
 	if err != nil {
@@ -236,6 +239,7 @@ func runWorkout(cmd *cobra.Command) error {
 			Recommendation: res.Recommendation,
 			Trend:          res.Trend,
 			Anchor:         res.Anchor,
+			Sessions:       res.Sessions,
 		})
 	}
 	if res.Fallback {

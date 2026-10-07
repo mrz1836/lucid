@@ -166,3 +166,28 @@ func applyWorkoutAmendment(base *Event, amend Event) {
 		base.LogicalDate = amend.LogicalDate
 	}
 }
+
+// IsWorkoutAnchorOnly reports whether a workout event is a daily-anchor
+// capture with no session on it: the anchor marker or anchor items present and
+// none of the session fields. Such a capture closes the day for the streak but
+// is not a session — amend refuses it, and the `workout --json` sessions echo
+// omits it. The session fields are the payload keys a logged session carries
+// (mvp/data-model.md §"Workout amendments"); any one of them means there is a
+// session on the event. A bare partial session ("I trained", no fields) is
+// still a session, and a non-workout event is never anchor-only.
+func IsWorkoutAnchorOnly(e Event) bool {
+	if e.Kind != KindWorkout {
+		return false
+	}
+	_, anchor := e.Payload["anchor"]
+	_, items := e.Payload["anchor_items"]
+	if !anchor && !items {
+		return false
+	}
+	for _, field := range []string{"type", "movements", "duration_min", "rpe", "body_parts", "note"} {
+		if _, ok := e.Payload[field]; ok {
+			return false
+		}
+	}
+	return true
+}

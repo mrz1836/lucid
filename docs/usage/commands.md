@@ -2507,8 +2507,11 @@ deterministically (only the phrasing warmth is lost). `--json` emits the decided
 text. `sessions[]` echoes the logged sessions in the four-week look-back the
 decision read — `{id, type, rpe, duration_min, body_parts, movements, note,
 occurred_at, logical_date}` each, with any [`workout amend`](#workout) corrections
-already folded in — so a corrected value is directly readable. Like every JSON
-projection it is additive: a reader skips keys it doesn't know.
+already folded in — so a corrected value is directly readable. It lists each
+session once (never its corrections), newest first; a field the session never
+recorded is omitted, an anchor-only capture is left out (it isn't a session), and
+an empty window is `[]`. Like every JSON projection it is additive: a reader skips
+keys it doesn't know.
 
 **`lucid workout log`** captures a completed session two ways — a spoken drop
 (extracted by the model, the voice-first default) or the structured flags
