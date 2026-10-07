@@ -558,6 +558,21 @@ follow, and both are deliberate:
   `body_parts`, so the recovery guardrail sees nothing to protect and the
   next day's card is unaffected. The daily floor is not a session.
 
+**A logged session is corrected by amendment, never by re-logging.**
+`lucid workout amend <obs-id>` appends one `KindWorkout` correction event
+whose `refs.corrects` names the session and whose payload carries only the
+changed fields (`--rpe --duration --type --movements --parts --notes
+--notes-file`; list flags replace), with `--day` re-dating the session
+(`refs.redate`, moving `occurred_at`, precision, and `logical_date`
+together). The original line stays byte-identical; the recommender and the
+trend read the folded session — latest correction per field — so a filled-in
+RPE or a moved day is counted once, where a re-log would double-count the
+day and open a second recovery window. Deterministic, flag-only, no model
+call. Soreness/pain readings and anchor-only captures are not amendable in
+this version, and a re-date does not move the session's `body_state`
+readings. Record shape: [`data-model.md`](data-model.md) §"Workout
+amendments"; refusals: [`error-states.md`](error-states.md) W-10…W-18.
+
 ## Surfaces — a configurable slot and an on-demand command
 
 * **The daily slot** — a config-gated periodic that fires once at
@@ -574,6 +589,8 @@ follow, and both are deliberate:
   (zero side effect), the same shape as `companion fire`. `lucid workout
   fire` drives a real or dry-run slot fire.
 * **`lucid workout log`** — the capture command above.
+* **`lucid workout amend <obs-id>`** — the append-only correction of a
+  logged session, above.
 
 The on-demand path composes the same way the slot does: deterministic
 pick, model phrasing over a bounded slice, deterministic render on
@@ -657,6 +674,12 @@ silent.
 | W-7 | Slot double-fire on a retry | Receipt idempotency (`ReadCompanionReceipt("workout")`): a retry whose message still reads back in the channel skips | Per-window receipt |
 | W-8 | Host asleep past the slot cutoff | Bounded catch-up with a `(late)` note within the window; past the cutoff the send is skipped and the miss is alerted, never a stale midday message hours late | None |
 | W-9 | Total miss (compose/deliver/read-back fails) | Loud best-effort alert to the user channel, then a loud job error into the supervised log — silence is the one outcome the slot never produces | None |
+
+`lucid workout amend` adds W-10…W-18, its strict-tier refusals (unknown or
+non-workout id, no fields, trailing words, a future or unreadable `--day`, an
+out-of-range or empty value, an anchor-only target, `--soreness`/`--pain`,
+`--notes` with `--notes-file`). Each rejects before any write; they are
+recorded in full in [`error-states.md`](error-states.md) §"Workout module".
 
 ## Acceptance criteria (build phases 13–17)
 

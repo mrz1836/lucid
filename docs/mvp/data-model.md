@@ -200,6 +200,56 @@ Folded, the story reads as `text` unchanged, `certainty: vivid`, filed under
 `era: wild-summer`, with no `follow_up` — while all three lines remain on disk as
 the audit trail.
 
+### Workout amendments — append-only correction of a logged session
+
+A logged session is one `KindWorkout` observation event, and it is corrected the
+same append-only way a story is: `lucid workout amend <obs-id>`
+([`../usage/workout.md`](../usage/workout.md#amending-a-logged-session)) appends a
+**new `KindWorkout` event** and never rewrites the original line. The record
+differs from a memory amendment in three deliberate ways:
+
+- **`refs.corrects` always names the base session.** An amend aimed at an earlier
+  correction resolves to the session that correction names (one hop — a
+  correction never targets another correction), so every correction in a chain
+  points straight at the base and any id in the chain is a valid amend target.
+- **A re-date moves the session.** An amend with `--day` carries
+  `refs.redate: true` and the session's new `occurred_at`,
+  `occurred_at_precision`, and `logical_date` (the reserved marker is defined in
+  [`../observations.md`](../observations.md) §2). Any other amendment reuses the
+  session's **current folded** dates, so it files in the same day file as the
+  session (or as its latest re-date).
+- **Ordered by `recorded_at`, not by id.** `recorded_at` is stamped at nanosecond
+  precision. A re-date files under the new logical day, so its id carries that day
+  and a later correction can sort lexically *before* an earlier one; the fold
+  orders a session's corrections by parsed `recorded_at`, with the event id as the
+  deterministic tie-break.
+
+The payload carries **only the changed fields** (`type`, `movements`,
+`duration_min`, `rpe`, `body_parts`, `note`); a list field carries the full
+replacement list. **Fold-on-read** overlays each correction's fields onto the base
+in order, the last to touch a field winning, and applies the date trio from the
+latest `redate`-marked correction. Correction events are dropped from the folded
+output (they are history, not sessions), and a correction whose base is absent
+from the read set is dropped rather than read as a session of its own — so a
+session is counted once however often it is amended. The recommender, the trend,
+`workout --json`, and `/day` all read the folded view; `/day` reads one day's file,
+so it folds the corrections filed on that day. Body-state readings are not part of
+this record: a re-date moves the session, not the soreness/pain readings logged
+with it.
+
+Synthetic example — a session logged without an RPE, then given one, then moved a
+day earlier:
+
+```jsonl
+{"id":"obs_2026_01_15_001","kind":"workout","recorded_at":"2026-01-15T19:05:00-05:00","occurred_at":"2026-01-15T19:05:00-05:00","occurred_at_precision":"exact","logical_date":"2026-01-15","payload":{"type":"climbing","duration_min":60},"refs":{}}
+{"id":"obs_2026_01_15_002","kind":"workout","recorded_at":"2026-01-15T21:30:00.123456789-05:00","occurred_at":"2026-01-15T19:05:00-05:00","occurred_at_precision":"exact","logical_date":"2026-01-15","payload":{"rpe":4},"refs":{"corrects":"obs_2026_01_15_001"}}
+{"id":"obs_2026_01_14_001","kind":"workout","recorded_at":"2026-01-15T21:31:00.987654321-05:00","occurred_at":"2026-01-14T00:00:00-05:00","occurred_at_precision":"approximate","logical_date":"2026-01-14","payload":{},"refs":{"corrects":"obs_2026_01_15_001","redate":true}}
+```
+
+Folded, the session reads as one `climbing` session of 60 minutes at RPE 4 on
+2026-01-14 — even though the re-date's id sorts first — while all three lines
+remain on disk as the audit trail.
+
 ### Naming conventions
 
 | Kind | Convention | Example |
