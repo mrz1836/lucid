@@ -27,8 +27,14 @@ const (
 	flagWAnchor     = "anchor"
 	flagWAnchorItem = "anchor-item"
 	flagWNotes      = "notes"
+	flagWNotesFile  = "notes-file"
 	flagWText       = "text"
 )
+
+// workoutAmendVerb prefixes every `lucid workout amend` refusal on stderr
+// (error-states.md W-10..W-18), so the reason always names the verb that
+// refused it, whether the CLI or the router decided it.
+const workoutAmendVerb = "lucid workout amend"
 
 // Flags on `lucid workout fire`. --deliver actually sends; the default is a
 // dry-run compose with zero side effect. --dry-run is accepted explicitly so a
@@ -46,7 +52,8 @@ const scaleMax = 10
 // newWorkoutCmd wires `lucid workout`: the config-gated workout companion's
 // command group. A bare `lucid workout` composes the on-demand recommendation
 // (deterministic pick, model-phrased delivery, deterministic fallback); the
-// `log` child captures a completed session; the `fire` child composes (and
+// `log` child captures a completed session; the `amend` child corrects a logged
+// session append-only; the `fire` child composes (and
 // optionally delivers) one daily-slot message on demand — the same idempotent,
 // read-back-verified path the scheduled daily slot takes.
 func newWorkoutCmd() *cobra.Command {
@@ -68,6 +75,7 @@ the model only phrases it, so the message still renders with the provider down.
 		},
 	}
 	cmd.AddCommand(newWorkoutLogCmd())
+	cmd.AddCommand(newWorkoutAmendCmd())
 	cmd.AddCommand(newWorkoutFireCmd())
 	return cmd
 }
@@ -193,19 +201,22 @@ func renderWorkoutFire(out io.Writer, o workout.Outcome) error {
 // workoutRecommendationJSON is the --json projection of the on-demand surface:
 // the decided pick, the read-only trend, and today's daily anchor, exactly the
 // deterministic core's output so a harness reads the same recommendation the
-// message renders.
+// message renders — plus the logged sessions that decision read, each with its
+// `workout amend` corrections folded in, so a corrected value reads straight
+// back. Every key is additive; a reader skips the ones it doesn't know.
 type workoutRecommendationJSON struct {
 	Recommendation workout.Recommendation `json:"recommendation"`
 	Trend          workout.Trend          `json:"trend"`
 	Anchor         workout.Anchor         `json:"anchor"`
+	Sessions       []workout.SessionView  `json:"sessions"`
 }
 
 // runWorkout composes and prints the on-demand recommendation + trend. The
 // deterministic core owns the pick; the model only phrases it, and a provider
 // outage still renders the message deterministically. --json emits the decided
-// Recommendation/Trend projection instead of the rendered message; the degrade
-// notes (deterministic fallback, enrichment-degraded) go to stderr so the piped
-// stdout stays the clean message.
+// Recommendation/Trend/Anchor projection and the folded sessions echo instead of
+// the rendered message; the degrade notes (deterministic fallback,
+// enrichment-degraded) go to stderr so the piped stdout stays the clean message.
 func runWorkout(cmd *cobra.Command) error {
 	r, err := bootedRouter(cmd)
 	if err != nil {
@@ -228,6 +239,7 @@ func runWorkout(cmd *cobra.Command) error {
 			Recommendation: res.Recommendation,
 			Trend:          res.Trend,
 			Anchor:         res.Anchor,
+			Sessions:       res.Sessions,
 		})
 	}
 	if res.Fallback {
@@ -244,7 +256,10 @@ func runWorkout(cmd *cobra.Command) error {
 // ways. A spoken drop (positional text or --text) is extracted by the Workout
 // Extraction agent — the voice-first default. The structured flags
 // (--type/--duration/--rpe/--parts/--soreness/--pain/--anchor/--anchor-item/
-// --notes) are the precise alternative for guided or backfill capture. The two
+// --notes/--notes-file) are the precise alternative for guided or backfill
+// capture. --notes-file reads the note off the command line (a path, or - for
+// stdin) through the shared free-text reader, so shell metacharacters stay
+// data; it is mutually exclusive with --notes. The two
 // forms are mutually exclusive so a mixed invocation never silently drops half
 // the input. The daily anchor rides this same verb (the top-level `lucid anchor`
 // is the milestone anchor, a different concept) so there is exactly one workout
@@ -263,7 +278,7 @@ func runWorkout(cmd *cobra.Command) error {
 //	lucid workout log --anchor --anchor-item squats:55 --anchor-item core:50
 func newWorkoutLogCmd() *cobra.Command {
 	var (
-		typ, notes, text                              string
+		typ, text                                     string
 		duration, rpe                                 int
 		parts, movements, soreness, pain, anchorItems []string
 		anchor                                        bool
@@ -287,9 +302,16 @@ func newWorkoutLogCmd() *cobra.Command {
 				}
 				return runWorkoutLogFromText(cmd, r, spoken)
 			}
+			// The note may arrive off the command line; it is read once, here,
+			// on the structured path only (a spoken drop with --notes-file was
+			// refused above as a mixed form).
+			note, err := resolveOptionalText(cmd, "workout log", "notes", flagWNotes, flagWNotesFile)
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			req, err := buildWorkoutLogRequest(cmd, workoutLogFlags{
 				typ: typ, movements: movements, duration: duration, rpe: rpe,
-				parts: parts, notes: notes, soreness: soreness, pain: pain,
+				parts: parts, notes: note, soreness: soreness, pain: pain,
 				anchor: anchor, anchorItems: anchorItems,
 			})
 			if err != nil {
@@ -313,7 +335,8 @@ func newWorkoutLogCmd() *cobra.Command {
 	f.StringSliceVar(&pain, flagWPain, nil, "Per-part pain as part:level, or a bare part to flag it")
 	f.BoolVar(&anchor, flagWAnchor, false, "Log today's daily anchor as done")
 	f.StringArrayVar(&anchorItems, flagWAnchorItem, nil, "Daily-anchor item as name:count, or a bare name (repeatable)")
-	f.StringVar(&notes, flagWNotes, "", "Free-text note kept verbatim on the record")
+	f.String(flagWNotes, "", "Free-text note kept verbatim on the record")
+	f.String(flagWNotesFile, "", "Read the note from this file (or - for stdin) instead of --notes, so shell metacharacters stay data")
 	f.StringVar(&text, flagWText, "", "Spoken drop to extract instead of structured flags")
 	registerProvenanceFlags(cmd)
 	registerDayFlag(cmd)
@@ -460,12 +483,248 @@ func workoutContentFlagsChanged(cmd *cobra.Command) bool {
 	for _, name := range []string{
 		flagWType, flagWMovements, flagWDuration, flagWRPE, flagWParts,
 		flagWSoreness, flagWPain, flagWAnchor, flagWAnchorItem, flagWNotes,
+		flagWNotesFile,
 	} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}
 	}
 	return false
+}
+
+// newWorkoutAmendCmd wires `lucid workout amend <obs-id> [flags]`: the
+// append-only correction of a logged session (usage/workout.md §"Amending a
+// logged session"). It never rewrites the session's line — it appends one new
+// workout event whose refs.corrects names the session, carrying only the
+// changed fields, and every read surface folds the corrections on. It is
+// dispatch-only over [router.AmendWorkout]: structured flags, no spoken form,
+// no model call.
+//
+// The CLI owns only what the router never sees: the positional shape (exactly
+// one id, no free text — W-13), the deferred --soreness/--pain flags (W-17),
+// the at-least-one-field guard (W-12, where --day counts), and the note's
+// sources (--notes or --notes-file, read once up front because stdin drains
+// once — W-18). Every value check (RPE range, non-negative duration, empty
+// values, the strict-tier --day) is the router's, so a rejected amend writes
+// nothing however it was reached.
+func newWorkoutAmendCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "amend <obs-id>",
+		Short: "Correct or fill in a logged session (append-only; the original is never rewritten)",
+		Long: `amend corrects a logged session after the fact — add the RPE you didn't have
+at the time, fix the duration, move the session to the day it actually happened —
+without logging it again (a second log writes a second session and double-counts
+the day). It never edits the original line: it appends one new workout event that
+names the session and carries only the fields you change, and every read surface
+folds the corrections onto the session, the latest winning per field. The values
+you first logged stay in the history.
+
+Only the flags you pass change; an omitted flag keeps its value, and an empty
+value is refused (amend corrects a field, it doesn't clear one). --movements and
+--parts replace the whole list. --day re-dates the session — its instant and
+logical day move together — and counts as a change on its own. Any id in the
+chain works: the id of an earlier correction amends the session it corrects.
+
+Soreness and pain readings aren't amendable yet, and an anchor-only capture
+isn't a session to correct. Every refusal says why on stderr and writes nothing.
+--json emits {event_id, target_id, logical_date, changes}.`,
+		Args: cobra.ArbitraryArgs,
+		Example: `  lucid workout amend obs_2026_01_15_001 --rpe 4
+  lucid workout amend obs_2026_01_15_001 --duration 50 --type climbing
+  lucid workout amend obs_2026_01_15_001 --parts fingers,forearms
+  lucid workout amend obs_2026_01_15_001 --notes-file ./session-notes.txt
+  lucid workout amend obs_2026_01_15_001 --day @yesterday --json`,
+		RunE: runWorkoutAmend,
+	}
+	f := cmd.Flags()
+	f.Int(flagWRPE, 0, "Set the session RPE 0-10")
+	f.Int(flagWDuration, 0, "Set the session duration in whole minutes")
+	f.String(flagWType, "", "Set the session type, e.g. push, pull, climbing")
+	f.StringSlice(flagWMovements, nil, "Replace the movements list (comma-separated)")
+	f.StringSlice(flagWParts, nil, "Replace the body parts trained (comma-separated)")
+	f.String(flagWNotes, "", "Replace the session note")
+	f.String(flagWNotesFile, "", "Replace the note with this file's contents (or - for stdin), so shell metacharacters stay data")
+	registerDayFlag(cmd)
+	// --soreness/--pain are parsed only so reaching for them earns the W-17
+	// reason instead of a bare "unknown flag"; hidden because they are not part
+	// of amend's surface yet.
+	f.StringSlice(flagWSoreness, nil, "Not amendable yet")
+	f.StringSlice(flagWPain, nil, "Not amendable yet")
+	_ = f.MarkHidden(flagWSoreness)
+	_ = f.MarkHidden(flagWPain)
+	return cmd
+}
+
+// runWorkoutAmend executes `lucid workout amend`: settle the CLI-side shape and
+// the note before booting (so a refusal touches nothing), then dispatch to the
+// append-only amend and render its receipt or --json view. Every error reaches
+// stderr prefixed `lucid workout amend:` because the root sets SilenceErrors.
+func runWorkoutAmend(cmd *cobra.Command, args []string) error {
+	req, err := buildWorkoutAmendRequest(cmd, args)
+	if err != nil {
+		return emitWorkoutAmendErr(cmd, err)
+	}
+	r, err := bootedRouter(cmd)
+	if err != nil {
+		return err
+	}
+	res, err := r.AmendWorkout(req)
+	if err != nil {
+		return emitWorkoutAmendErr(cmd, err)
+	}
+	return renderWorkoutAmend(cmd, res)
+}
+
+// buildWorkoutAmendRequest turns the amend invocation into a router request,
+// gating each field on cobra's Changed so an omitted flag leaves that field
+// untouched rather than setting it to the zero value. It refuses, before any
+// read of the Ledger: a missing id or trailing words (W-13), --soreness/--pain
+// (W-17), and an invocation with no field to change (W-12). The note is
+// resolved here, once.
+func buildWorkoutAmendRequest(cmd *cobra.Command, args []string) (router.WorkoutAmendRequest, error) {
+	switch {
+	case len(args) == 0:
+		return router.WorkoutAmendRequest{}, fmt.Errorf("an obs id is required; nothing was saved")
+	case len(args) > 1:
+		return router.WorkoutAmendRequest{}, fmt.Errorf(
+			"amend takes a single obs id; free text isn't a field — use flags; nothing was saved",
+		)
+	}
+	f := cmd.Flags()
+	if f.Changed(flagWSoreness) || f.Changed(flagWPain) {
+		return router.WorkoutAmendRequest{}, fmt.Errorf(
+			"soreness/pain aren't amendable yet; body-state amendment is a planned follow-up; nothing was saved",
+		)
+	}
+	if !workoutAmendFieldsChanged(cmd) {
+		return router.WorkoutAmendRequest{}, fmt.Errorf("no fields to amend; nothing was saved")
+	}
+	notes, notesChanged, err := resolveWorkoutAmendNotes(cmd)
+	if err != nil {
+		return router.WorkoutAmendRequest{}, err
+	}
+
+	req := router.WorkoutAmendRequest{
+		ObsID:        args[0],
+		Notes:        notes,
+		NotesChanged: notesChanged,
+		Now:          clockNow(),
+	}
+	req.DayArg, _ = f.GetString(flagDay)
+	if req.TypeChanged = f.Changed(flagWType); req.TypeChanged {
+		req.Type, _ = f.GetString(flagWType)
+	}
+	if req.MovementsChanged = f.Changed(flagWMovements); req.MovementsChanged {
+		req.Movements, _ = f.GetStringSlice(flagWMovements)
+	}
+	if req.DurationChanged = f.Changed(flagWDuration); req.DurationChanged {
+		req.DurationMin, _ = f.GetInt(flagWDuration)
+	}
+	if req.RPEChanged = f.Changed(flagWRPE); req.RPEChanged {
+		req.RPE, _ = f.GetInt(flagWRPE)
+	}
+	if req.BodyPartsChanged = f.Changed(flagWParts); req.BodyPartsChanged {
+		req.BodyParts, _ = f.GetStringSlice(flagWParts)
+	}
+	return req, nil
+}
+
+// workoutAmendFieldsChanged reports whether the invocation names anything to
+// change. --day is a field here, unlike on `log`: a re-date alone is a complete
+// amend (W-12). The deferred --soreness/--pain are refused before this runs.
+func workoutAmendFieldsChanged(cmd *cobra.Command) bool {
+	for _, name := range []string{
+		flagWRPE, flagWDuration, flagWType, flagWMovements, flagWParts,
+		flagWNotes, flagWNotesFile, flagDay,
+	} {
+		if cmd.Flags().Changed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveWorkoutAmendNotes resolves the replacement note from its one source:
+// --notes inline, or --notes-file through the shared free-text reader (a path,
+// or - for stdin) so shell metacharacters reach the Ledger as data. Both at once
+// is two sources for one field and refused; a missing, unreadable, or empty file
+// is refused too (W-18). changed reports whether a note source was given at all
+// — an omitted note leaves the session's note untouched.
+func resolveWorkoutAmendNotes(cmd *cobra.Command) (notes string, changed bool, err error) {
+	f := cmd.Flags()
+	inline, fromFile := f.Changed(flagWNotes), f.Changed(flagWNotesFile)
+	switch {
+	case inline && fromFile:
+		return "", false, fmt.Errorf(
+			"give the notes via --%s or --%s, not both; nothing was saved", flagWNotes, flagWNotesFile,
+		)
+	case fromFile:
+		path, _ := f.GetString(flagWNotesFile)
+		body, rerr := readBodyFile(flagWNotesFile, path, cmd.InOrStdin())
+		if rerr != nil {
+			return "", false, fmt.Errorf("%w; nothing was saved", rerr)
+		}
+		return body, true, nil
+	case inline:
+		v, _ := f.GetString(flagWNotes)
+		return v, true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+// emitWorkoutAmendErr prints an amend refusal to stderr prefixed with the verb
+// and returns it (wrapped, so a [router.DayRejectedError] stays matchable). The
+// router's reasons are bare sentences; the prefix is added only here, once.
+func emitWorkoutAmendErr(cmd *cobra.Command, err error) error {
+	return emitErr(cmd, fmt.Errorf("%s: %w", workoutAmendVerb, err))
+}
+
+// workoutFieldChangeView is one field's transition in the amend --json view:
+// the session's folded value just before this amend (null when it was unset)
+// and the value the amend recorded.
+type workoutFieldChangeView struct {
+	From any `json:"from"`
+	To   any `json:"to"`
+}
+
+// workoutAmendView is the machine-readable projection of a `lucid workout amend
+// --json` turn: the appended correction's id, the base session it corrects (the
+// base even when a later correction's id was passed), the logical day the
+// correction landed on, and one {from, to} entry per changed field keyed by
+// record name (rpe, duration_min, type, movements, body_parts, note; a re-date
+// adds occurred_at and logical_date). Built CLI-side with stable snake_case
+// names so a harness branches on fields, not prose — the workout counterpart of
+// memoryAmendView.
+type workoutAmendView struct {
+	EventID     string                            `json:"event_id"`
+	TargetID    string                            `json:"target_id"`
+	LogicalDate string                            `json:"logical_date"`
+	Changes     map[string]workoutFieldChangeView `json:"changes"`
+}
+
+// renderWorkoutAmend prints an amend result. A disabled workout kind prints the
+// enable hint and succeeds with nothing written, exactly as `workout log` does.
+// Otherwise --json emits the [workoutAmendView] (changes always a non-nil
+// object), and the human path is the shared receipt tail with the inventory ack.
+func renderWorkoutAmend(cmd *cobra.Command, res router.WorkoutAmendResult) error {
+	if res.Rejected {
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+		return nil
+	}
+	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+		changes := make(map[string]workoutFieldChangeView, len(res.Changes))
+		for field, c := range res.Changes {
+			changes[field] = workoutFieldChangeView{From: c.From, To: c.To}
+		}
+		return writeJSON(cmd.OutOrStdout(), workoutAmendView{
+			EventID:     res.EventID,
+			TargetID:    res.TargetID,
+			LogicalDate: res.LogicalDate,
+			Changes:     changes,
+		})
+	}
+	return emitReceipt(cmd, res.EventID, res.LogicalDate, res.Ack)
 }
 
 // parseBodyStateFlags folds the --soreness and --pain flag values into per-part

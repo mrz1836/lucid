@@ -219,6 +219,39 @@ honors the drop first (§0, P10).
 | W-8 | Host asleep past the slot cutoff | Bounded catch-up with a `(late)` note within the window; past the cutoff the send is skipped and the miss is alerted — never a stale midday message hours late. | The late-noted message, or the miss alert. | None. | (none — designed) |
 | W-9 | Total miss (compose / deliver / read-back fails) | Loud best-effort alert to the user channel, then a loud job error into the supervised log. Silence is the one outcome the slot never produces. | The loud miss alert. | None. | Restore the input; rerun the window or wait for the next fire. |
 
+**`workout amend` — the strict tier.** The rows below cover
+[`lucid workout amend <obs-id>`](../usage/workout.md#amending-a-logged-session),
+the append-only correction of a logged session. Unlike spoken capture (W-3/W-4),
+an amend is a deliberate correction, so it is on the **strict tier**: every
+rejection is decided *before* any write, the copy is fixed and model-free, the exit
+is non-zero, the reason goes to stderr prefixed `lucid workout amend:`, and every
+row ends with the nothing-was-saved clause of St-1. A refused amend appends
+nothing — the Ledger is byte-identical before and after.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| W-10 | `workout amend` names an id no event holds, or a token that isn't an `obs_…` id | Reject before any write; never guess a nearby session. | `lucid workout amend: workout "obs_2026_01_15_009" not found; nothing was saved.` | None. | Copy the id from the `workout log` acknowledgement. |
+| W-11 | `workout amend` names an event of another kind (a `body_state`, `memory`, … id) | Reject before any write — amend corrects workout sessions only. | `lucid workout amend: "obs_2026_01_15_002" is a body_state observation, not a workout session; nothing was saved.` | None. | Pass the session's own `workout` id. |
+| W-12 | `workout amend` with no field to change — none of `--rpe`, `--duration`, `--type`, `--movements`, `--parts`, `--notes`, `--notes-file`, `--day` | Reject — an empty amendment is never written. `--day` counts as a field, so a re-date alone is a complete amend. | `lucid workout amend: no fields to amend; nothing was saved.` | None. | Pass at least one field. |
+| W-13 | `workout amend` with no id, or with words after the id | Reject — amend takes exactly one id and corrects through flags; trailing words are never stored as a note. | `lucid workout amend: an obs id is required; nothing was saved.` / `lucid workout amend: amend takes a single obs id; free text isn't a field — use flags; nothing was saved.` | None. | Put prose in `--notes` / `--notes-file`. |
+| W-14 | `workout amend --day` with a day in the future, or a token the grammar cannot read | Reject before any write, exactly as B-2 / B-1 — a re-date is a deliberate flag. | The B-2 / B-1 reason, prefixed `lucid workout amend:` — the day has not happened yet, or the accepted forms are named; nothing was saved. | None. | Give a past day in the shared grammar. |
+| W-15 | `workout amend` with an out-of-range `--rpe`, a negative `--duration`, or an empty value (`--type ""`, `--parts ""`, …) | Reject as a usage error, the same bounds as the `workout log` flags — never clamped, never the partial path (W-4 is spoken capture's degrade, not a correction's). Amend corrects a field; it doesn't clear one. | `lucid workout amend: --rpe must be 0-10` / `… --duration must be zero or more` / `… --type needs a value — amend corrects a field, it doesn't clear it`, then "nothing was saved." | None. | Re-run with a value in range. |
+| W-16 | `workout amend` targeting an anchor-only capture (`anchor` / `anchor_items` and no session field — no `type`, `movements`, `duration_min`, `rpe`, `body_parts`, or `note`) | Reject — the daily anchor is not a session, so there is nothing for amend to correct. | `lucid workout amend: amend corrects logged sessions; anchors aren't amendable; nothing was saved.` | None. | (none — anchor correction is not part of this version) |
+| W-17 | `workout amend --soreness` / `--pain` | Reject — body-state readings aren't amendable in this version. The parser knows the flags only so the refusal says why instead of "unknown flag". | `lucid workout amend: soreness/pain aren't amendable yet; body-state amendment is a planned follow-up; nothing was saved.` | None. | (none — a planned follow-up) |
+| W-18 | `workout amend` with both `--notes` and `--notes-file`, or a `--notes-file` that is missing, unreadable, or empty | Reject — two sources for one field, or a file that supplies nothing, is a mistake rather than a request. The file is read once, before any write (stdin drains once). | `lucid workout amend: give the notes via --notes or --notes-file, not both` / `lucid workout amend: --notes-file: file is empty`, then "nothing was saved." | None. | Give exactly one note source. |
+
+Two `workout amend` paths are deliberately **not** refusals:
+
+- **An id that names a correction resolves to its session.** When the id passed
+  is itself a correction (its event already carries `refs.corrects`), amend
+  follows that ref to the base session and amends *it*, so any id in the chain
+  works and every correction folds onto the one session. This deliberately
+  differs from `memory amend`, which refuses an amendment id: a workout
+  correction never targets another correction, so the base is always one hop
+  away and resolving it is unambiguous. The `--json` `target_id` names the base.
+- **A disabled `workout` kind is W-5, not a failure.** Amend behaves exactly like
+  `log`: it prints the enable hint, writes nothing, and exits `0`.
+
 ### Life-archive (excavation — deterministic, agent-free)
 
 The life-archive verbs ([`life-archive.md`](life-archive.md)) are

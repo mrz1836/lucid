@@ -105,8 +105,13 @@ recommended* (and shows up in `--json`), it just doesn't argue its case at you.
 
 The model contributes only the leading note; everything else is Lucid's and renders
 identically with the provider down (then the note is simply absent). `--json` emits
-the decided `{recommendation, trend, anchor}` projection instead of the rendered
-text, so a harness reads the same pick the message shows.
+the decided `{recommendation, trend, anchor, sessions}` projection instead of the
+rendered text, so a harness reads the same pick the message shows. `sessions` echoes
+the logged sessions the decision read (the four-week look-back) with any amendments
+already folded in, so a corrected value is directly readable there — one entry per
+session, newest first, never the corrections themselves. An anchor-only capture
+isn't a session, so it isn't listed: every id in `sessions` is one
+`workout amend` accepts.
 
 ```sh
 lucid workout          # today's recommendation, phrased
@@ -149,6 +154,10 @@ soreness/pain flag (a bare `--pain knee` records an unquantified flag so the
 recommender can still protect it). Those readings are exactly what the recovery and
 pain guardrails read back on the next recommendation. Capture is inventory only —
 the acknowledgement names what was written and nothing more (no score, no grade).
+
+A note with shell metacharacters or several lines can come off the command line:
+`--notes-file <path>` reads it from a file, and `--notes-file -` from stdin, stored
+verbatim. Give `--notes` or `--notes-file`, not both.
 
 ### Logging a session you did on a prior day
 
@@ -193,6 +202,110 @@ flag, `--anchor` can't be combined with a spoken drop — it's spoken *or* struc
 
 An anchor is not a session: it writes no body parts, so it opens no recovery window
 and never changes tomorrow's card.
+
+### Amending a logged session
+
+```
+lucid workout amend <obs-id> [flags]
+```
+
+Logged a session and want to fix or fill it in afterwards — add the RPE you didn't
+have at the time, correct the duration, move it to the day it actually happened?
+Amend it; don't log it again. A second `workout log` writes a second session, which
+double-counts the day in the streak and frequency numbers and opens a second
+recovery window.
+
+```sh
+lucid workout amend obs_2026_01_15_001 --rpe 4
+lucid workout amend obs_2026_01_15_001 --duration 50 --type climbing
+lucid workout amend obs_2026_01_15_001 --parts fingers,forearms
+lucid workout amend obs_2026_01_15_001 --notes-file ./session-notes.txt
+lucid workout amend obs_2026_01_15_001 --day @yesterday
+```
+
+The id is the `obs_…` id the log acknowledgement printed. Amending is append-only,
+like every correction in the Ledger
+([`../observations.md`](../observations.md) §"Append-only, corrected by
+reference"): it **appends one new `workout` event** whose `refs.corrects` names the
+session, carrying only the fields you changed. The original line is never
+rewritten — it stays byte-identical, so the values you first logged remain in the
+history. Readers fold the corrections onto the session at read time, the latest
+correction winning per field, so the recommendation's recovery guardrail, the
+progress trend, and `lucid workout --json` all see **one** session with the
+corrected values.
+
+| Flag | Effect |
+|------|--------|
+| `--rpe <0-10>` | Set the session RPE. Same range as `workout log`. |
+| `--duration <minutes>` | Set the duration, in whole minutes (zero or more). |
+| `--type <text>` | Set the session type. |
+| `--movements <a,b,…>` | **Replace** the movements list. |
+| `--parts <a,b,…>` | **Replace** the body parts trained. |
+| `--notes <text>` | Replace the session note. |
+| `--notes-file <path\|->` | Replace the note with the contents of a file, or of stdin for `-`. |
+| `--day <date>` | Re-date the session (see below). |
+| `--json` | Emit the machine-readable amend view instead of the acknowledgement. |
+
+- **Only what you pass changes.** A field you leave off keeps the value it had —
+  amending the RPE alone leaves the duration and type exactly as they were.
+  Amend corrects a field; it doesn't clear one, so an empty value
+  (`--type ""`, `--parts ""`) is refused.
+- **Lists replace, they don't merge.** `--parts fingers,forearms` makes those two
+  the session's body parts; restate the full list to add one or drop one. Within
+  one call the list flags comma-split and repeat exactly the way `workout log`'s
+  do, so `--parts fingers --parts forearms` is the same list.
+- **Amend as often as you need.** Each amend is another event: the latest value
+  per field wins, and every earlier value stays in the history. Any id in the
+  chain works — passing the id of an earlier correction amends the same session
+  it corrected.
+- **Notes come off the command line when they need to.** `--notes-file` reads the
+  note through the same file reader the other free-text verbs use, so `$`,
+  backticks, `;`, `&`, quotes, and newlines are stored verbatim instead of being
+  parsed by your shell. Give `--notes` or `--notes-file`, not both. (`workout log`
+  takes `--notes-file` too.)
+
+**Re-dating.** `--day` moves the session to another day using the same grammar
+and strict tier as `workout log --day`
+([`commands.md`](commands.md#backdating-with---day)). The session's instant,
+precision, and logical day move together, so the trend (which reads the logical
+day) and the recovery guardrail (which reads the instant) agree about when you
+trained. A re-date is a complete amend on its own — `--day` is the one flag that
+needs no other. A bare day records the day at approximate precision, as it does
+on `log`; give a time (`--day "@yesterday 18:30"`) to keep an exact instant. A
+day the grammar can't read, or one in the future, is refused.
+
+Two things a re-date does **not** move, both known limits of this first version:
+
+- **Soreness and pain readings stay where they were.** The `body_state` readings
+  logged with the session keep their original day; re-dating moves the session,
+  not its readings.
+- **`/day` reads one day at a time.** It folds the corrections filed on the
+  session's own day, so a re-dated session still appears under its original day
+  in `/day`. The recommendation, the trend, and `workout --json` read across days
+  and always show the session where it now belongs.
+
+**What amend doesn't do.** Soreness and pain aren't amendable yet —
+`--soreness`/`--pain` are refused, and body-state correction is a planned
+follow-up. Daily anchors aren't amendable either: amend corrects logged sessions,
+so an anchor-only capture is refused. There is no way to amend through a spoken
+drop — amend takes flags only, with no model call.
+
+Every refusal — an unknown id, an id that isn't a workout session, no fields to
+change, words after the id, a future `--day`, an anchor-only target, a
+`--soreness`/`--pain` flag, `--notes` with `--notes-file` — exits non-zero, says
+why on stderr, and writes nothing. With the `workout` kind disabled, amend behaves
+exactly like `log`: it prints the enable hint and writes nothing. The full list is
+in [`../mvp/error-states.md`](../mvp/error-states.md) §"Workout module".
+
+The acknowledgement names the session and the new correction's id — inventory, as
+on `log`, with no score and no grade. `--json` emits
+`{event_id, target_id, logical_date, changes}`: the new correction's id, the
+session it corrects (the base session, even when you passed a later correction's
+id), the logical day the correction landed on, and one
+`{"from": …, "to": …}` entry per changed field — the value before this amend
+(`null` when it was unset) and the new one. Fields are keyed by their record
+names (`rpe`, `duration_min`, `type`, `movements`, `body_parts`, `note`); a
+re-date reports `occurred_at` and `logical_date`.
 
 ## The daily slot
 

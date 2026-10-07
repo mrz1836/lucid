@@ -54,7 +54,8 @@ works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
 the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
 flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 [`reframe add`](#reframe), [`focus add`](#focus), [`gratitude add`](#gratitude),
-[`gratitude thank`](#gratitude), [`workout log`](#workout), [`mode`](#mode),
+[`gratitude thank`](#gratitude), [`workout log`](#workout),
+[`workout amend`](#workout), [`mode`](#mode),
 [`storm`](#storm), and [`closeout`](#closeout).
 
 **The grammar.** A leading `@` is optional on every form.
@@ -139,8 +140,8 @@ registry now carries the future ceiling, so it is not on this list:
 
 **The closed write surface.** Every verb that stamps a logical day is named
 above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `gratitude add`,
-`gratitude thank`, `memory`, `workout log`, `era`, `injury`, `anchor`, `mode`,
-`storm`, `closeout`. Four write verbs are deliberately N/A —
+`gratitude thank`, `memory`, `workout log`, `workout amend` (a re-date), `era`,
+`injury`, `anchor`, `mode`, `storm`, `closeout`. Four write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
 id or window, rather than capturing a new one, [`self`](#self) records
@@ -2481,6 +2482,9 @@ lucid ask what did I decide about mornings --json
 ```
 lucid workout [--json]
 lucid workout log [drop...] [flags]
+lucid workout amend <obs-id> [--rpe <0-10>] [--duration <min>] [--type <text>]
+             [--movements <a,b>] [--parts <a,b>] [--notes <text> | --notes-file <path|->]
+             [--day <date>] [--json]
 ```
 
 The optional, **config-gated** workout companion — it recommends today's session,
@@ -2499,14 +2503,23 @@ program-week targets (dropped when the program defines no anchor), and a read-on
 progress panel (workout streak, frequency, skipped days, recent body response). The
 pick is never the model's: with the provider unreachable the message still renders
 deterministically (only the phrasing warmth is lost). `--json` emits the decided
-`{recommendation, trend, anchor}` projection instead of the rendered text.
+`{recommendation, trend, anchor, sessions}` projection instead of the rendered
+text. `sessions[]` echoes the logged sessions in the four-week look-back the
+decision read — `{id, type, rpe, duration_min, body_parts, movements, note,
+occurred_at, logical_date}` each, with any [`workout amend`](#workout) corrections
+already folded in — so a corrected value is directly readable. It lists each
+session once (never its corrections), newest first; a field the session never
+recorded is omitted, an anchor-only capture is left out (it isn't a session), and
+an empty window is `[]`. Like every JSON projection it is additive: a reader skips
+keys it doesn't know.
 
 **`lucid workout log`** captures a completed session two ways — a spoken drop
 (extracted by the model, the voice-first default) or the structured flags
-(`--type --duration --rpe --parts --soreness --pain --notes`) for guided or backfill
-capture. The two forms are mutually exclusive. Each writes a `workout` observation
-(plus one `body_state` reading per soreness/pain flag) to the Ledger; the readings
-are what the recommender reads back for the recovery and pain guardrails.
+(`--type --duration --rpe --parts --soreness --pain --notes --notes-file`) for
+guided or backfill capture. The two forms are mutually exclusive. Each writes a
+`workout` observation (plus one `body_state` reading per soreness/pain flag) to the
+Ledger; the readings are what the recommender reads back for the recovery and pain
+guardrails.
 `--anchor` (with optional repeatable `--anchor-item name:count`) logs the **daily
 anchor** through the same verb — a self-report is enough, counts are inventory when
 given, and an anchor writes no body parts so it opens no recovery window.
@@ -2514,6 +2527,42 @@ given, and an anchor writes no body parts so it opens no recovery window.
 | Flag | Effect |
 |------|--------|
 | `--day <date>` | Record the session on a prior logical day, using the shared grammar on the strict tier ([Backdating with --day](#backdating-with---day)). It is not a content flag, so it composes with **both** capture forms — the spoken drop and the structured flags. Every derived `body_state` reading inherits the same instant, precision, and logical day as the session itself, so the recovery guardrail (which reads `occurred_at`) and the progress trend (which reads `logical_date`) can never disagree about when the session happened. |
+| `--notes-file <path\|->` | Read the note from a file, or from stdin for `-`, through the shared free-text reader — shell metacharacters and newlines are stored verbatim. Mutually exclusive with `--notes`; an empty file is rejected. A structured flag, so it can't be combined with a spoken drop. |
+
+**`lucid workout amend <obs-id>`** corrects or fills in a logged session after the
+fact — add the RPE you didn't have at the time, fix the duration, move the session
+to the day it happened — without re-logging it (a re-log writes a second session
+and double-counts the day). It is append-only: it appends **one** new `workout`
+event whose `refs.corrects` names the session, carrying only the changed fields;
+the original Ledger line stays byte-identical. Readers fold corrections onto the
+session at read time, latest correction winning per field, so the recovery
+guardrail, the progress trend, and `workout --json` all see one corrected session.
+Structured flags only — no spoken form, no model call. Any id in the chain works:
+the id of an earlier correction resolves to the session it corrects.
+
+| Flag | Effect |
+|------|--------|
+| `--rpe <0-10>` | Set the session RPE (same range as `log`). |
+| `--duration <min>` | Set the duration in whole minutes, zero or more. |
+| `--type <text>` | Set the session type. |
+| `--movements <a,b>` | **Replace** the movements list (comma-split and repeatable, exactly like `log`). |
+| `--parts <a,b>` | **Replace** the body parts trained (comma-split and repeatable). |
+| `--notes <text>` / `--notes-file <path\|->` | Replace the session note — inline, or off the command line through the shared reader. Mutually exclusive. |
+| `--day <date>` | **Re-date** the session on the strict tier ([Backdating with --day](#backdating-with---day)): its `occurred_at`, precision, and `logical_date` move together, so the trend and the recovery guardrail agree. Counts as a change on its own. The session's existing soreness/pain (`body_state`) readings are **not** moved. |
+| `--json` | Emit `{event_id, target_id, logical_date, changes}` — the new correction id, the base session it corrects, the day the correction landed on, and one `{"from", "to"}` entry per changed field, keyed by record name (`rpe`, `duration_min`, `type`, `movements`, `body_parts`, `note`; a re-date reports `occurred_at` and `logical_date`). `from` is `null` when the field was unset. |
+
+Only the fields you pass change; an omitted flag leaves its value, and an empty
+value is refused (amend corrects a field, it doesn't clear one). Refused — non-zero
+exit, a `lucid workout amend:` reason on stderr, **nothing written**: an unknown id,
+an id that isn't a `workout` session, no fields to change, words after the id, a
+future or unreadable `--day`, an out-of-range `--rpe` or negative `--duration`, an
+anchor-only capture ("amend corrects logged sessions; anchors aren't amendable"),
+`--soreness`/`--pain` (body-state correction is a planned follow-up), and `--notes`
+with `--notes-file`. A disabled `workout` kind prints the enable hint and writes
+nothing (exit `0`), exactly like `log`. The ack is inventory — the session and the
+new correction id, no score. Full table:
+[`../mvp/error-states.md`](../mvp/error-states.md) §"Workout module"; guide:
+[`workout.md`](workout.md#amending-a-logged-session).
 
 **Provider-backed** for phrasing (the `provider` block), with a deterministic
 fallback; the recommendation itself and the capture parser are model-free.
@@ -2526,6 +2575,11 @@ lucid workout log --type legs --duration 45 --rpe 7 --soreness quads:5 --pain kn
 lucid workout log --type push --rpe 6 --day @yesterday   # yesterday's session
 lucid workout log "2 mile bike ride" --day @yesterday    # spoken, backdated
 lucid workout log --anchor --anchor-item squats:55   # today's daily anchor
+lucid workout amend obs_2026_01_15_001 --rpe 4       # add the RPE after the fact
+lucid workout amend obs_2026_01_15_001 --parts fingers,forearms --duration 50
+lucid workout amend obs_2026_01_15_001 --day @yesterday   # move it to the right day
+printf 'grip gave out on the last set; tape & chalk next time\n' \
+  | lucid workout amend obs_2026_01_15_001 --notes-file -
 ```
 
 ### Provider configuration (agentic verbs)

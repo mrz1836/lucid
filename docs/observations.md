@@ -89,6 +89,23 @@ Envelope semantics, binding:
   by prefix (`obs_`, `raw_`, `injury_`, …). New reserved keys may be
   added (tolerate-unknown applies); the semantics of existing keys are
   frozen.
+* **Workout re-dates carry `refs.redate`.** A `workout` correction
+  (`lucid workout amend`, [`usage/workout.md`](usage/workout.md#amending-a-logged-session))
+  is an ordinary `refs.corrects` event carrying only the changed payload
+  fields. When the correction moves the session to another day
+  (`--day`), it also carries the reserved marker `refs.redate: true` — a
+  boolean modifier on the correction rather than a link, so (like a
+  memory amendment's `refs.cleared` field list,
+  [`mvp/data-model.md`](mvp/data-model.md) §"Memory amendments") its
+  value is not an id — and its own `occurred_at`, precision, and
+  `logical_date` are the session's new time. Readers take
+  the corrected session's date trio **only** from `redate`-marked
+  corrections; any other correction files under the session's
+  then-current day but never re-dates it. A re-date files under the new
+  logical day, so its id carries that day: workout corrections fold in
+  `recorded_at` order (event id breaks a tie), never by id alone. A
+  reader that does not know `redate` ignores it (tolerate-unknown); no
+  new envelope field is involved.
 * **Bitemporal.** `recorded_at` is always now; `occurred_at` (with the
   same precision/range fields as raw entries) can be any time in the
   past — this is what makes memory excavation (§8) an ordinary write.

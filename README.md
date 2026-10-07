@@ -350,7 +350,8 @@ gate, `2` usage / flag-parse error.
 | `witness report` | `--deliver` `--dry-run` | Compose the weekly witness report now. Dry-run unless `--deliver`. |
 | `workout` | — | Compose today's training recommendation — a deterministic core decides, the model only phrases it. |
 | `workout fire` | `--deliver` `--dry-run` | Compose the daily workout message now. Dry-run unless `--deliver`. |
-| `workout log [drop…]` | `--type` `--duration` `--rpe` `--parts` `--movements` `--soreness` `--pain` `--notes` `--anchor` `--anchor-item` `--text` + `log`'s capture flags | Log a completed workout — structured flags, or a spoken drop via `--text`. |
+| `workout log [drop…]` | `--type` `--duration` `--rpe` `--parts` `--movements` `--soreness` `--pain` `--notes` `--notes-file` `--anchor` `--anchor-item` `--text` + `log`'s capture flags | Log a completed workout — structured flags, or a spoken drop via `--text`. |
+| `workout amend <obs_id>` | `--rpe` `--duration` `--type` `--movements` `--parts` `--notes` `--notes-file` `--day` `--json` | Correct or fill in a logged session after the fact (add the RPE, fix the duration, re-date it) without re-logging. Appends one **append-only** correction carrying only the changed fields — the original line is never rewritten; list flags replace; any id in the chain resolves to its session; anchors and soreness/pain aren't amendable. Corrections fold on every read surface (recovery, trend, `workout --json`). |
 | `storm <clause-label\|unwritten\|end>` | `--day` | Declare, renew, or end a storm (a grace window). |
 | `profile <name>` | — | Switch to a named clock profile. |
 

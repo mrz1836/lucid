@@ -81,8 +81,8 @@ func TestWorkout_CommandRegistered(t *testing.T) {
 // configured: the workout + body_state kinds enabled, a synthetic program and the
 // two opaque prompt files written to disk, and an enabled workout block in
 // lucid.json pointing at them — so the on-demand `lucid workout` command composes
-// against a real (empty) Ledger.
-func enableWorkoutSurface(t *testing.T) {
+// against a real (empty) Ledger. It returns the home path.
+func enableWorkoutSurface(t *testing.T) string {
 	t.Helper()
 	home := enableWorkoutKinds(t) // isolated home + workout/body_state kinds enabled
 
@@ -103,6 +103,7 @@ func enableWorkoutSurface(t *testing.T) {
 		Enabled: true, Program: prog, SlotTime: "12:00", SystemPrompt: sys, Template: tmpl,
 	}
 	require.NoError(t, a.SaveConfig(cfg))
+	return home
 }
 
 // TestWorkout_OnDemand_RendersRecommendation proves the bare `lucid workout` verb
@@ -122,7 +123,8 @@ func TestWorkout_OnDemand_RendersRecommendation(t *testing.T) {
 }
 
 // TestWorkout_OnDemand_JSON proves --json emits the decided Recommendation/Trend
-// projection rather than the rendered message (AC-8).
+// projection rather than the rendered message (AC-8), with the sessions echo
+// always present as an array.
 func TestWorkout_OnDemand_JSON(t *testing.T) {
 	enableWorkoutSurface(t)
 	withScriptedProvider(t, provider.Exchange{Content: "note"})
@@ -133,10 +135,12 @@ func TestWorkout_OnDemand_JSON(t *testing.T) {
 	var payload struct {
 		Recommendation workout.Recommendation `json:"recommendation"`
 		Trend          workout.Trend          `json:"trend"`
+		Sessions       json.RawMessage        `json:"sessions"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &payload))
 	assert.NotEmpty(t, payload.Recommendation.Primary.Name, "the decided pick is projected")
 	assert.NotEmpty(t, payload.Recommendation.Fallback.Name, "the easier door is projected")
+	assert.JSONEq(t, `[]`, string(payload.Sessions), "an empty Ledger echoes no sessions as an array, never null")
 }
 
 // TestWorkout_OnDemand_ProviderDownStillRenders proves the on-demand surface
