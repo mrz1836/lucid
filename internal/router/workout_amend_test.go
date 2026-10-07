@@ -363,6 +363,21 @@ func TestAmendWorkout_AnchorOnlyRefused(t *testing.T) {
 	assert.Contains(t, err.Error(), "amend corrects logged sessions; anchors aren't amendable")
 	assert.Equal(t, before, obsSnapshot(t, r), "a refused amend writes nothing")
 
+	// A stray correction an earlier version wrote against the anchor must not
+	// make it amendable: the refusal judges the anchor as logged.
+	base := foldedWorkout(t, r, noted.WorkoutID)
+	stray := observations.Event{
+		Kind: observations.KindWorkout, RecordedAt: base.RecordedAt, OccurredAt: base.OccurredAt,
+		OccurredAtPrecision: base.OccurredAtPrecision, LogicalDate: base.LogicalDate, Source: observations.SourceMicrolog,
+		Payload: map[string]any{"rpe": 3}, Refs: map[string]any{observations.RefCorrects: noted.WorkoutID},
+	}
+	_, err = r.Store().AppendObservation(stray)
+	require.NoError(t, err)
+	before = obsSnapshot(t, r)
+	_, err = r.AmendWorkout(WorkoutAmendRequest{ObsID: noted.WorkoutID, RPE: 2, RPEChanged: true, Now: nowEDT()})
+	require.Error(t, err, "a stray correction does not turn an anchor into a session")
+	assert.Equal(t, before, obsSnapshot(t, r), "a refused amend writes nothing")
+
 	withSession := seedWorkout(t, r, WorkoutLogRequest{Anchor: true, Type: "mobility"})
 	_, err = r.AmendWorkout(WorkoutAmendRequest{ObsID: withSession.WorkoutID, RPE: 3, RPEChanged: true, Now: nowEDT()})
 	require.NoError(t, err, "an anchor that rode along with a session does not block amending the session")

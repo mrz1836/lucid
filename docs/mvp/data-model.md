@@ -231,7 +231,10 @@ in order, the last to touch a field winning, and applies the date trio from the
 latest `redate`-marked correction. Correction events are dropped from the folded
 output (they are history, not sessions), and a correction whose base is absent
 from the read set is dropped rather than read as a session of its own — so a
-session is counted once however often it is amended. The recommender, the trend,
+session is counted once however often it is amended. A correction whose base is an
+anchor-only capture (judged on the base as logged) is dropped the same way: amend
+refuses anchors, so such a correction is a stray left by an earlier version, and
+folding it on would turn the anchor into a session. The recommender, the trend,
 `workout --json`, and `/day` all read the folded view; `/day` reads one day's file,
 so it folds the corrections filed on that day. Body-state readings are not part of
 this record: a re-date moves the session, not the soreness/pain readings logged

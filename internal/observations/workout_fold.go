@@ -34,7 +34,9 @@ const RefRedate = "redate"
 //
 // Corrections are dropped from the output (they are history, not sessions),
 // and a correction whose base session is absent from the input is dropped too,
-// so a session counts once however often it is amended. Every non-KindWorkout
+// so a session counts once however often it is amended. A correction whose
+// base is an anchor-only capture (judged on the base as logged) is dropped and
+// the anchor passes through unchanged. Every non-KindWorkout
 // event passes through untouched, so the fold is safe on a mixed slice. The
 // fold is pure — each base is folded onto a copy, so the input is never
 // mutated — and input order is preserved: a folded session keeps its base
@@ -55,7 +57,10 @@ func FoldWorkoutAmendments(events []Event) []Event {
 			continue
 		}
 		amendments := byTarget[e.ID]
-		if len(amendments) == 0 {
+		// An anchor-only base is never folded: amend refuses anchors (W-16),
+		// so a correction naming one is a stray from an earlier version, and
+		// overlaying its session fields would turn the anchor into a session.
+		if len(amendments) == 0 || IsWorkoutAnchorOnly(e) {
 			out = append(out, e)
 			continue
 		}
