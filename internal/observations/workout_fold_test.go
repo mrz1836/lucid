@@ -385,3 +385,20 @@ func TestIsWorkoutAnchorOnly(t *testing.T) {
 		})
 	}
 }
+
+// TestFoldWorkoutAmendments_AnchorBaseIgnoresStrayCorrection proves a
+// correction naming an anchor-only capture (a stray an earlier version let
+// through) is dropped and the anchor passes through as logged — still
+// anchor-only, so amend keeps refusing it and no session appears.
+func TestFoldWorkoutAmendments_AnchorBaseIgnoresStrayCorrection(t *testing.T) {
+	events := []Event{
+		workoutSession(workoutBase, "2026-01-15", map[string]any{"anchor": true, "note": "daily anchor"}),
+		workoutCorrection("obs_2026_01_15_002", workoutBase, "2026-01-15", "2026-01-15T21:30:00.123456789-05:00",
+			map[string]any{"rpe": 3}),
+	}
+	folded := FoldWorkoutAmendments(events)
+	require.Len(t, folded, 1, "the stray correction is dropped")
+	got := findEvent(t, folded, workoutBase)
+	assert.NotContains(t, got.Payload, "rpe", "a stray correction never lands on an anchor")
+	assert.True(t, IsWorkoutAnchorOnly(got), "the anchor stays anchor-only after the fold")
+}
