@@ -421,3 +421,366 @@ func trimStrings(in []string) []string {
 	}
 	return out
 }
+
+// Workout session payload keys — the record names a logged session carries and
+// `lucid workout amend` corrects (mvp/data-model.md §"Workout amendments").
+const (
+	workoutFieldType      = "type"
+	workoutFieldMovements = "movements"
+	workoutFieldDuration  = "duration_min"
+	workoutFieldRPE       = "rpe"
+	workoutFieldBodyParts = "body_parts"
+	workoutFieldNote      = "note"
+
+	workoutFieldAnchor      = "anchor"
+	workoutFieldAnchorItems = "anchor_items"
+
+	// The date keys a re-dating amend reports in its changes.
+	workoutFieldOccurredAt  = "occurred_at"
+	workoutFieldLogicalDate = "logical_date"
+)
+
+// workoutRPEMax is the top of the 0–10 RPE scale — the same bound `workout log`
+// enforces on --rpe — so an amend can never record a value log would refuse.
+const workoutRPEMax = 10
+
+// WorkoutAmendRequest carries one `lucid workout amend <obs-id>` turn
+// (usage/workout.md §"Amending a logged session"). ObsID names the session —
+// or any correction of it, which resolves to the session. Each amendable field
+// pairs a value with a Changed bool so an omitted flag leaves that field
+// untouched, distinct from an explicit set; amend corrects a field and never
+// clears one, so a changed field must carry a value. Movements and BodyParts
+// replace the session's whole list. Notes arrives already resolved (from --notes
+// or --notes-file) — the router never reads a path. DayArg, when non-blank,
+// re-dates the session through the shared strict-tier grammar; blank leaves the
+// session's day alone. A zero Now defaults to the wall clock.
+type WorkoutAmendRequest struct {
+	ObsID string
+
+	Type        string
+	TypeChanged bool
+
+	Movements        []string
+	MovementsChanged bool
+
+	DurationMin     int
+	DurationChanged bool
+
+	RPE        int
+	RPEChanged bool
+
+	BodyParts        []string
+	BodyPartsChanged bool
+
+	Notes        string
+	NotesChanged bool
+
+	DayArg string
+	Now    time.Time
+}
+
+// WorkoutFieldChange is one field's transition in a workout amend: From is the
+// session's folded value just before this amend (nil when the field was unset)
+// and To is the value the amend records. The `--json` view renders it as
+// {"from", "to"}.
+type WorkoutFieldChange struct {
+	From any
+	To   any
+}
+
+// WorkoutAmendResult reports what a workout amend appended: the correction
+// event's own id (EventID), the base session it corrects (TargetID — the base
+// even when a correction's id was passed), the logical day the correction filed
+// under, its refs (corrects, and redate on a re-date), the per-field Changes
+// keyed by record name, and the inventory ack. Rejected is set (with nothing
+// written and a nil error) when the workout kind is disabled — the same
+// graceful gate `workout log` takes.
+type WorkoutAmendResult struct {
+	EventID     string
+	TargetID    string
+	LogicalDate string
+	Refs        map[string]any
+	Changes     map[string]WorkoutFieldChange
+	Rejected    bool
+	Ack         string
+}
+
+// AmendWorkout corrects a logged session by appending one new KindWorkout event
+// that carries refs.corrects (always the base session) plus only the changed
+// fields — the session's own line is never rewritten, so it stays byte-identical
+// and its first-logged values remain in the history (mvp/data-model.md
+// §"Workout amendments"). Readers fold the correction on at read time
+// ([observations.FoldWorkoutAmendments]).
+//
+// A disabled workout kind is not a failure: like [Router.WorkoutLog] it returns
+// Rejected with the enable hint and a nil error, writing nothing. Every other
+// rejection is the strict tier (error-states.md W-10..W-16): decided before any
+// write, returned as a bare reason ending "nothing was saved" — the CLI prefixes
+// it `lucid workout amend:` — and a refused `--day` is a [DayRejectedError].
+//
+// The correction's dates come from the session's current folded state, not its
+// immutable first line: a plain amend files under the session's current day
+// (after any earlier re-date), while a `--day` amend carries refs.redate and the
+// new date trio resolved exactly as `workout log --day` resolves it, so the
+// trend (logical_date) and the recovery guardrail (occurred_at) move together.
+// recorded_at is stamped at nanosecond precision because corrections fold in
+// recorded_at order — a re-date's id carries its new day, so ids alone cannot
+// order them. It is deterministic and agent-free.
+func (r *Router) AmendWorkout(req WorkoutAmendRequest) (WorkoutAmendResult, error) {
+	now := whenOr(req.Now)
+	if err := r.prepareObservations(); err != nil {
+		return WorkoutAmendResult{}, err
+	}
+	cfg, err := r.store.ReadObservationsConfig()
+	if err != nil {
+		return WorkoutAmendResult{}, err
+	}
+	if !cfg.KindEnabled(observations.KindWorkout) {
+		return WorkoutAmendResult{
+			Rejected: true,
+			Ack:      observations.EnableHint(observations.KindWorkout),
+		}, nil
+	}
+
+	baseID, current, err := r.resolveWorkoutAmendTarget(strings.TrimSpace(req.ObsID))
+	if err != nil {
+		return WorkoutAmendResult{}, err
+	}
+	payload, changes, err := workoutAmendPayload(req, current)
+	if err != nil {
+		return WorkoutAmendResult{}, err
+	}
+
+	amendment, err := r.buildWorkoutAmendment(req, current, baseID, payload, changes, now)
+	if err != nil {
+		return WorkoutAmendResult{}, err
+	}
+	ev, err := r.store.AppendObservation(amendment)
+	if err != nil {
+		return WorkoutAmendResult{}, fmt.Errorf("could not save the amendment; nothing was saved: %w", err)
+	}
+
+	return WorkoutAmendResult{
+		EventID:     ev.ID,
+		TargetID:    baseID,
+		LogicalDate: ev.LogicalDate,
+		Refs:        ev.Refs,
+		Changes:     changes,
+		Ack:         fmt.Sprintf("Amended workout `%s`; recorded as `%s`.", baseID, ev.ID),
+	}, nil
+}
+
+// resolveWorkoutAmendTarget resolves an amend id to the base session it
+// corrects and that session's current folded state. An unparseable id or one no
+// event holds is W-10; an event of another kind is W-11. An id that names a
+// correction (refs.corrects) resolves one hop to the session it corrects rather
+// than being refused — a workout correction always names the base, so any id in
+// the chain is a valid target. The base is then located in the folded workout
+// series, so the returned event carries every earlier correction (its current
+// dates and the prior values the changes report); a base that is missing — or
+// is itself a correction — is "not found". An anchor-only capture is W-16:
+// there is no session on it to correct.
+func (r *Router) resolveWorkoutAmendTarget(obsID string) (string, observations.Event, error) {
+	if _, ok := observations.EventDate(obsID); !ok {
+		return "", observations.Event{}, workoutNotFoundErr(obsID)
+	}
+	target, found, err := r.store.ReadObservationByID(obsID)
+	if err != nil {
+		return "", observations.Event{}, fmt.Errorf("could not read the workout; nothing was saved: %w", err)
+	}
+	if !found {
+		return "", observations.Event{}, workoutNotFoundErr(obsID)
+	}
+	if target.Kind != observations.KindWorkout {
+		return "", observations.Event{}, fmt.Errorf(
+			"%q is a %s observation, not a workout session; nothing was saved", obsID, target.Kind,
+		)
+	}
+
+	baseID := obsID
+	if corrects, ok := target.Refs[observations.RefCorrects].(string); ok && corrects != "" {
+		baseID = corrects
+	}
+
+	workouts, err := r.store.ReadObservationsKind(observations.KindWorkout)
+	if err != nil {
+		return "", observations.Event{}, fmt.Errorf("could not read the workout; nothing was saved: %w", err)
+	}
+	for _, ev := range observations.FoldWorkoutAmendments(workouts) {
+		if ev.ID != baseID {
+			continue
+		}
+		if isAnchorOnly(ev) {
+			return "", observations.Event{}, fmt.Errorf(
+				"amend corrects logged sessions; anchors aren't amendable; nothing was saved",
+			)
+		}
+		return baseID, ev, nil
+	}
+	return "", observations.Event{}, workoutNotFoundErr(obsID)
+}
+
+// isAnchorOnly reports whether a workout event is a daily-anchor capture with no
+// session on it: the anchor marker or items present and none of the session
+// fields — any one of which means there is a logged session for amend to
+// correct. A bare partial session ("I trained", no fields) is still a session.
+func isAnchorOnly(ev observations.Event) bool {
+	_, anchor := ev.Payload[workoutFieldAnchor]
+	_, items := ev.Payload[workoutFieldAnchorItems]
+	if !anchor && !items {
+		return false
+	}
+	for _, field := range []string{
+		workoutFieldType, workoutFieldMovements, workoutFieldDuration,
+		workoutFieldRPE, workoutFieldBodyParts, workoutFieldNote,
+	} {
+		if _, ok := ev.Payload[field]; ok {
+			return false
+		}
+	}
+	return true
+}
+
+// workoutAmendPayload validates the changed fields and builds the correction's
+// payload (only the changed keys, each list the full replacement) plus the
+// per-field changes against the session's current folded values. It rejects,
+// before any write, an out-of-range RPE, a negative duration, a changed field
+// with no value (amend corrects a field, it doesn't clear it — W-15), and an
+// amend that changes nothing at all (W-12; a re-date alone is a change).
+func workoutAmendPayload(req WorkoutAmendRequest, current observations.Event) (map[string]any, map[string]WorkoutFieldChange, error) {
+	payload := map[string]any{}
+	if err := setAmendText(payload, workoutFieldType, "type", req.Type, req.TypeChanged); err != nil {
+		return nil, nil, err
+	}
+	if err := setAmendList(payload, workoutFieldMovements, "movements", req.Movements, req.MovementsChanged); err != nil {
+		return nil, nil, err
+	}
+	if err := setAmendNumbers(payload, req); err != nil {
+		return nil, nil, err
+	}
+	if err := setAmendList(payload, workoutFieldBodyParts, "parts", req.BodyParts, req.BodyPartsChanged); err != nil {
+		return nil, nil, err
+	}
+	if err := setAmendText(payload, workoutFieldNote, "notes", req.Notes, req.NotesChanged); err != nil {
+		return nil, nil, err
+	}
+	if len(payload) == 0 && strings.TrimSpace(req.DayArg) == "" {
+		return nil, nil, fmt.Errorf("no fields to amend; nothing was saved")
+	}
+
+	changes := make(map[string]WorkoutFieldChange, len(payload)+2)
+	for field, to := range payload {
+		changes[field] = WorkoutFieldChange{From: current.Payload[field], To: to}
+	}
+	return payload, changes, nil
+}
+
+// setAmendText records a changed free-text field, trimmed; a changed field left
+// blank is refused rather than recorded as a clear.
+func setAmendText(payload map[string]any, field, flag, value string, changed bool) error {
+	if !changed {
+		return nil
+	}
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return emptyAmendFieldErr(flag)
+	}
+	payload[field] = v
+	return nil
+}
+
+// setAmendList records a changed list field as its full replacement list (blank
+// entries dropped, exactly as `workout log` drops them); a list left with no
+// entries is refused rather than recorded as a clear.
+func setAmendList(payload map[string]any, field, flag string, values []string, changed bool) error {
+	if !changed {
+		return nil
+	}
+	list := trimStrings(values)
+	if len(list) == 0 {
+		return emptyAmendFieldErr(flag)
+	}
+	payload[field] = list
+	return nil
+}
+
+// setAmendNumbers records a changed duration and RPE under the same bounds
+// `workout log` enforces: duration zero or more, RPE on the 0–10 scale.
+func setAmendNumbers(payload map[string]any, req WorkoutAmendRequest) error {
+	if req.DurationChanged {
+		if req.DurationMin < 0 {
+			return fmt.Errorf("--duration must be zero or more; nothing was saved")
+		}
+		payload[workoutFieldDuration] = req.DurationMin
+	}
+	if req.RPEChanged {
+		if req.RPE < 0 || req.RPE > workoutRPEMax {
+			return fmt.Errorf("--rpe must be 0-%d; nothing was saved", workoutRPEMax)
+		}
+		payload[workoutFieldRPE] = req.RPE
+	}
+	return nil
+}
+
+// emptyAmendFieldErr is the W-15 refusal for a changed field given no value.
+func emptyAmendFieldErr(flag string) error {
+	return fmt.Errorf("--%s needs a value — amend corrects a field, it doesn't clear it; nothing was saved", flag)
+}
+
+// buildWorkoutAmendment assembles the append-only correction: refs.corrects keyed
+// to the base session and the changed payload. A re-date (non-blank DayArg)
+// resolves the new day on the strict tier — the same resolver and the same
+// envelope derivation `workout log --day` uses — stamps refs.redate, and records
+// the occurred_at/logical_date move in changes. Any other amend reuses the
+// session's current folded dates (copying the range end by value, never aliasing
+// it), so it files in the session's current day file. recorded_at is stamped at
+// nanosecond precision for the fold's chronological order.
+func (r *Router) buildWorkoutAmendment(
+	req WorkoutAmendRequest, current observations.Event, baseID string,
+	payload map[string]any, changes map[string]WorkoutFieldChange, now time.Time,
+) (observations.Event, error) {
+	refs := map[string]any{observations.RefCorrects: baseID}
+
+	if strings.TrimSpace(req.DayArg) != "" {
+		when, err := resolveCaptureWhen(req.DayArg, now)
+		if err != nil {
+			return observations.Event{}, err
+		}
+		refs[observations.RefRedate] = true
+		ev := r.buildEvent(observations.ParseResult{
+			Kind:        observations.KindWorkout,
+			OccurredAt:  when.OccurredAt,
+			Precision:   when.Precision,
+			OccurredEnd: when.End,
+			Payload:     payload,
+			Refs:        refs,
+		}, now, nil, observations.SourceMicrolog)
+		ev.RecordedAt = now.Format(time.RFC3339Nano)
+		changes[workoutFieldOccurredAt] = WorkoutFieldChange{From: current.OccurredAt, To: ev.OccurredAt}
+		changes[workoutFieldLogicalDate] = WorkoutFieldChange{From: current.LogicalDate, To: ev.LogicalDate}
+		return ev, nil
+	}
+
+	ev := observations.Event{
+		Schema:              observations.Schema,
+		Kind:                observations.KindWorkout,
+		RecordedAt:          now.Format(time.RFC3339Nano),
+		OccurredAt:          current.OccurredAt,
+		OccurredAtPrecision: current.OccurredAtPrecision,
+		LogicalDate:         current.LogicalDate,
+		Source:              observations.SourceMicrolog,
+		Payload:             payload,
+		Refs:                refs,
+	}
+	if current.OccurredAtEnd != nil {
+		end := *current.OccurredAtEnd
+		ev.OccurredAtEnd = &end
+	}
+	return ev, nil
+}
+
+// workoutNotFoundErr is the W-10 refusal: the id names no workout session to
+// amend (unparseable, absent, or a correction whose session is missing).
+func workoutNotFoundErr(obsID string) error {
+	return fmt.Errorf("workout %q not found; nothing was saved", obsID)
+}

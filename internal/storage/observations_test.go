@@ -149,6 +149,38 @@ func TestAppendObservation_CorrectionLeavesOriginalByteIdentical(t *testing.T) {
 		"the correction is appended, never a rewrite")
 }
 
+// TestAppendObservation_WorkoutCorrectionLeavesOriginalByteIdentical: a workout
+// amend (`lucid workout amend`, mvp/data-model.md §"Workout amendments") is a
+// new appended KindWorkout event carrying refs.corrects and only the changed
+// field — the logged session's own line is never rewritten.
+func TestAppendObservation_WorkoutCorrectionLeavesOriginalByteIdentical(t *testing.T) {
+	a := newObsStore(t)
+	orig, err := a.AppendObservation(microEvent(observations.KindWorkout, "2026-07-03",
+		map[string]any{"type": "climbing", "duration_min": 60}))
+	require.NoError(t, err)
+
+	before := a.dayFileBytes(t, "2026-07-03")
+	firstLine := strings.SplitN(string(before), "\n", 2)[0]
+
+	correction := microEvent(observations.KindWorkout, "2026-07-03", map[string]any{"rpe": 4})
+	correction.RecordedAt = "2026-07-03T22:10:00.123456789-04:00"
+	correction.Refs = map[string]any{observations.RefCorrects: orig.ID}
+	amended, err := a.AppendObservation(correction)
+	require.NoError(t, err)
+	assert.NotEqual(t, orig.ID, amended.ID, "the correction gets its own id")
+
+	after := a.dayFileBytes(t, "2026-07-03")
+	assert.Equal(t, firstLine, strings.SplitN(string(after), "\n", 2)[0],
+		"the logged session's original line stays byte-identical")
+	assert.True(t, bytes.HasPrefix(after, before),
+		"the workout correction is appended, never a rewrite")
+
+	workouts, err := a.ReadObservationsKind(observations.KindWorkout)
+	require.NoError(t, err)
+	require.Len(t, workouts, 2, "both the session and its correction remain on disk")
+	assert.Equal(t, orig.ID, workouts[1].Refs[observations.RefCorrects])
+}
+
 func TestReadObservationsRangeAndKind(t *testing.T) {
 	a := newObsStore(t)
 	_, err := a.AppendObservation(microEvent(observations.KindPain, "2026-07-01", map[string]any{"intensity": 3}))
