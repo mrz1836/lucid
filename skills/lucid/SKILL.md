@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.32.0"
+min_lucid_version: "0.34.0"
 ---
 
 # Lucid
@@ -93,7 +93,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid link` | Point a stored media attachment at a subject it is about — a person, injury, day, anchor, or thread — through the append-only link ledger; a retroactive curation verb reached by its CLI form. |
 | `lucid unlink` | Retire a media↔subject association by appending an unlink event — nothing is destroyed, the pair just stops being live. |
 | `lucid annotate` | Attach a free-text note to a media↔subject association without changing whether it is linked. |
-| `lucid workout` | Recommend, log, and review your training (config-gated). |
+| `lucid workout` | Recommend, log, and review your training (config-gated). `workout amend <obs_id>` corrects or fills in a logged session after the fact (`--rpe`/`--duration`/`--type`/`--movements`/`--parts`/`--notes`/`--notes-file`, or `--day` to re-date it) by appending one append-only correction — the original line is never rewritten, and reads fold the correction in. Use it instead of re-logging, which double-counts the session. Only the passed fields change; list flags replace; anchors and soreness/pain aren't amendable. |
 | `lucid structure` | Structure a raw entry you did not just capture, or a window of them. |
 | `lucid self` | Read and record durable facts about yourself. |
 | `lucid person create` | Deliberately record a known person with **no** model call — the deterministic import/backfill primitive (people otherwise appear only as `lucid structure` extracts a mention). Idempotent on an already-recorded name (an "already recorded" no-op, never a fork); accepts the `person set` durable-field flags (`--dob`/`--relationship`/`--note`, plus `-file` siblings) to create-and-enrich in one call. Reached by its CLI form, not chat-mapped — `/person <name>` above stays a read. |
@@ -119,8 +119,8 @@ per-verb precision tiers are specified once in the command reference —
 never re-decided here. In brief:
 
 * **Which verbs carry it.** `log`, `obs`, `attach`, `mode`, `storm`, `memory`,
-  `workout log`, and `closeout` (where `--day` is an alias onto `closeout
-  backfill`). `obs` also accepts an inline `@yesterday` token in its value stream.
+  `workout log`, `workout amend` (a re-date of the logged session), and
+  `closeout` (where `--day` is an alias onto `closeout backfill`). `obs` also accepts an inline `@yesterday` token in its value stream.
 * **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
   04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
   literally), a partial `2014` or `2014-09` (snaps to the period's first day),
