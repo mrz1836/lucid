@@ -5,12 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/observations"
+	"github.com/mrz1836/lucid/internal/storage"
 )
 
 // workoutLogAckID pulls the session id out of a `workout log` acknowledgement
@@ -253,5 +255,285 @@ func TestWorkout_Log_NotesFile(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not both")
 		assert.Empty(t, readObsEvents(t, home))
+	})
+}
+
+// observationsLedgerSnapshot reads every observations day file under home byte
+// for byte, keyed by path, so a refusal test proves the Ledger is untouched —
+// nothing appended and nothing rewritten — not merely the same event count.
+func observationsLedgerSnapshot(t *testing.T, home string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(filepath.Join(home, "observations"), func(p string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".jsonl") {
+			return nil
+		}
+		b, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		files[p] = string(b)
+		return nil
+	})
+	require.NoError(t, err)
+	return files
+}
+
+// setObservationKindEnabled flips one kind on or off in the home's
+// observations config, so a test can mint records under an enabled kind and
+// then exercise the config gate with it disabled.
+func setObservationKindEnabled(t *testing.T, home string, kind observations.Kind, enabled bool) {
+	t.Helper()
+	a := storage.New(home)
+	cfg, err := a.ReadObservationsConfig()
+	require.NoError(t, err)
+	kinds := make([]observations.Kind, 0, len(cfg.KindsEnabled)+1)
+	for _, k := range cfg.KindsEnabled {
+		if k != kind {
+			kinds = append(kinds, k)
+		}
+	}
+	if enabled {
+		kinds = append(kinds, kind)
+	}
+	cfg.KindsEnabled = kinds
+	require.NoError(t, a.SaveObservationsConfig(cfg))
+}
+
+// TestWorkoutAmend_Refusals pins every user-facing amend refusal
+// (error-states.md W-10..W-18): each exits non-zero, prints nothing to stdout,
+// names its reason on stderr prefixed `lucid workout amend:` and ending
+// "nothing was saved", and leaves the Ledger byte-identical. The ids refused as
+// "not a workout" are real events of other kinds — the body_state reading the
+// session's own log wrote, and a memory — so the kind check is what refuses
+// them, not a failed lookup.
+func TestWorkoutAmend_Refusals(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	setObservationKindEnabled(t, home, observations.KindMemory, true)
+
+	id := createWorkoutCLI(t, "--type", "climbing", "--duration", "60", "--soreness", "forearms:4")
+	states := eventsOfKind(readObsEvents(t, home), observations.KindBodyState)
+	require.Len(t, states, 1, "the session's log wrote one body_state reading")
+	bodyStateID := states[0].ID
+	memoryID := createMemoryCLI(t, "a synthetic memory to aim amend at")
+
+	notesPath := filepath.Join(t.TempDir(), "notes.txt")
+	require.NoError(t, os.WriteFile(notesPath, []byte("from the file\n"), 0o600))
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "unknown id",
+			args: []string{"obs_2026_01_15_009", "--rpe", "4"},
+			want: `workout "obs_2026_01_15_009" not found`,
+		},
+		{
+			name: "token that isn't an obs id",
+			args: []string{"last-climb", "--rpe", "4"},
+			want: `workout "last-climb" not found`,
+		},
+		{
+			name: "body_state id",
+			args: []string{bodyStateID, "--rpe", "4"},
+			want: `"` + bodyStateID + `" is a body_state observation, not a workout session`,
+		},
+		{
+			name: "memory id",
+			args: []string{memoryID, "--rpe", "4"},
+			want: `"` + memoryID + `" is a memory observation, not a workout session`,
+		},
+		{
+			name: "no content flags",
+			args: []string{id},
+			want: "no fields to amend",
+		},
+		{
+			name: "no id",
+			args: []string{"--rpe", "4"},
+			want: "an obs id is required",
+		},
+		{
+			name: "positional free text after the id",
+			args: []string{id, "felt", "strong", "--rpe", "4"},
+			want: "amend takes a single obs id; free text isn't a field — use flags",
+		},
+		{
+			name: "future day",
+			args: []string{id, "--day", "2099-01-01"},
+			want: "cannot capture against 2099-01-01 — that day has not happened yet",
+		},
+		{
+			name: "unreadable day",
+			args: []string{id, "--day", "@yesterdya"},
+			want: `could not read the day "@yesterdya"`,
+		},
+		{
+			name: "soreness passed",
+			args: []string{id, "--soreness", "forearms:6"},
+			want: "soreness/pain aren't amendable yet; body-state amendment is a planned follow-up",
+		},
+		{
+			name: "pain passed",
+			args: []string{id, "--rpe", "4", "--pain", "elbow"},
+			want: "soreness/pain aren't amendable yet; body-state amendment is a planned follow-up",
+		},
+		{
+			name: "notes and notes-file together",
+			args: []string{id, "--notes", "inline", "--notes-file", notesPath},
+			want: "give the notes via --notes or --notes-file, not both",
+		},
+		{
+			name: "empty value",
+			args: []string{id, "--type", ""},
+			want: "--type needs a value — amend corrects a field, it doesn't clear it",
+		},
+		{
+			name: "negative duration",
+			args: []string{id, "--duration=-5"},
+			want: "--duration must be zero or more",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := observationsLedgerSnapshot(t, home)
+
+			args := append([]string{"workout", "amend"}, tc.args...)
+			stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
+			require.Errorf(t, err, "lucid %s", strings.Join(args, " "))
+			assert.Empty(t, stdout, "a refusal prints no receipt")
+			assert.Contains(t, stderr, "lucid workout amend: "+tc.want, "the reason reaches stderr, prefixed")
+			assert.Contains(t, stderr, "nothing was saved")
+			assert.Equal(t, before, observationsLedgerSnapshot(t, home), "a refused amend writes nothing")
+		})
+	}
+
+	folded := foldedCLIWorkout(t, home, id)
+	assert.NotContains(t, folded.Payload, "rpe", "no refused amend reached the session")
+	assert.Len(t, eventsOfKind(readObsEvents(t, home), observations.KindWorkout), 1,
+		"the session and no correction")
+}
+
+// TestWorkoutAmend_CorrectionResolvesToBase proves any id in the chain is a
+// valid target: amending a correction's own id resolves to the session it
+// corrects, so the second correction also names the base (never the first
+// correction), both fold onto the one session in order, and the --json view
+// reports the base as the target with the first correction's value as `from`.
+func TestWorkoutAmend_CorrectionResolvesToBase(t *testing.T) {
+	home := enableWorkoutKinds(t)
+	base := createWorkoutCLI(t, "--type", "climbing", "--duration", "60")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", base, "--rpe", "4", "--json")
+	require.NoError(t, err)
+	var first workoutAmendView
+	require.NoError(t, json.Unmarshal([]byte(out), &first))
+	require.Equal(t, base, first.TargetID)
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", first.EventID,
+		"--rpe", "5", "--notes", "second pass", "--json")
+	require.NoError(t, err)
+	assert.Empty(t, stderr, "a correction id is a valid target, not a refusal")
+	var second workoutAmendView
+	require.NoError(t, json.Unmarshal([]byte(out), &second))
+	assert.Equal(t, base, second.TargetID, "the correction's id resolves to its base session")
+	assert.NotEqual(t, first.EventID, second.EventID)
+	require.Contains(t, second.Changes, "rpe")
+	assert.EqualValues(t, 4, second.Changes["rpe"].From, "from is the folded value after the first correction")
+	assert.EqualValues(t, 5, second.Changes["rpe"].To)
+
+	workouts := eventsOfKind(readObsEvents(t, home), observations.KindWorkout)
+	require.Len(t, workouts, 3, "the session plus both corrections stay in history")
+	for _, w := range workouts {
+		if w.ID == base {
+			assert.NotContains(t, w.Refs, observations.RefCorrects, "the session itself corrects nothing")
+			continue
+		}
+		assert.Equal(t, base, w.Refs[observations.RefCorrects],
+			"every correction names the base session, never another correction")
+	}
+
+	foldedAll := eventsOfKind(observations.FoldWorkoutAmendments(readObsEvents(t, home)), observations.KindWorkout)
+	require.Len(t, foldedAll, 1, "both corrections fold onto one session")
+	folded := foldedAll[0]
+	assert.Equal(t, base, folded.ID)
+	assert.EqualValues(t, 5, folded.Payload["rpe"], "the later correction wins")
+	assert.Equal(t, "second pass", folded.Payload["note"])
+	assert.Equal(t, "climbing", folded.Payload["type"], "an unpassed field keeps its value")
+	assert.EqualValues(t, 60, folded.Payload["duration_min"], "an unpassed field keeps its value")
+}
+
+// TestWorkoutAmend_AnchorRefused proves an anchor-only capture (W-16) is not a
+// session amend can correct — whether the anchor is a bare marker or carries
+// items — and the refusal writes nothing; while a session that also recorded
+// the anchor is still a session, and amends normally.
+func TestWorkoutAmend_AnchorRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		log  []string
+	}{
+		{name: "bare anchor", log: []string{"--anchor"}},
+		{name: "anchor items", log: []string{"--anchor-item", "squats:55", "--anchor-item", "core:50"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := enableWorkoutKinds(t)
+			id := createWorkoutCLI(t, tc.log...)
+			before := observationsLedgerSnapshot(t, home)
+
+			stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", id, "--rpe", "4")
+			require.Error(t, err)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr,
+				"lucid workout amend: amend corrects logged sessions; anchors aren't amendable; nothing was saved")
+			assert.Equal(t, before, observationsLedgerSnapshot(t, home), "a refused amend writes nothing")
+		})
+	}
+
+	t.Run("session that also logged the anchor", func(t *testing.T) {
+		home := enableWorkoutKinds(t)
+		id := createWorkoutCLI(t, "--type", "push", "--anchor")
+
+		_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", id, "--rpe", "4")
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		folded := foldedCLIWorkout(t, home, id)
+		assert.EqualValues(t, 4, folded.Payload["rpe"])
+		assert.Equal(t, true, folded.Payload["anchor"], "the anchor marker rides along untouched")
+	})
+}
+
+// TestWorkoutAmend_ConfigGate proves a disabled workout kind gates amend
+// exactly as it gates `workout log`: the enable hint on stdout, nothing on
+// stderr, exit 0, and nothing written — even for a session that was logged
+// while the kind was on.
+func TestWorkoutAmend_ConfigGate(t *testing.T) {
+	t.Run("kind disabled after logging", func(t *testing.T) {
+		home := enableWorkoutKinds(t)
+		id := createWorkoutCLI(t, "--type", "climbing")
+		setObservationKindEnabled(t, home, observations.KindWorkout, false)
+		before := observationsLedgerSnapshot(t, home)
+
+		stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", id, "--rpe", "4")
+		require.NoError(t, err, "a disabled kind is a graceful skip, not a failure")
+		assert.Contains(t, stdout, "isn't enabled")
+		assert.NotContains(t, stdout, "Amended", "no receipt for an amend that wrote nothing")
+		assert.Empty(t, stderr)
+		assert.Equal(t, before, observationsLedgerSnapshot(t, home), "a gated amend writes nothing")
+	})
+
+	t.Run("fresh ledger matches workout log", func(t *testing.T) {
+		home := isolatedHome(t)
+
+		logOut, _, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "log", "--type", "push")
+		require.NoError(t, err)
+		amendOut, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "workout", "amend", "obs_2026_01_15_001", "--rpe", "4")
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		assert.Equal(t, logOut, amendOut, "amend prints the same enable hint log does")
+		assert.Empty(t, eventsOfKind(readObsEvents(t, home), observations.KindWorkout))
 	})
 }
