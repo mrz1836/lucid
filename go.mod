@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/mrz1836/go-flywheel v0.23.0
-	github.com/mrz1836/go-foundation v0.9.0
+	github.com/mrz1836/go-flywheel v0.24.0
+	github.com/mrz1836/go-foundation v0.10.1
 	github.com/mrz1836/go-selfupdate v0.1.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -24,12 +24,14 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.11.0 // indirect
-	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jackc/puddle/v2 v2.2.3 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
+	github.com/mrz1836/go-sanitize v1.5.7 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
@@ -37,6 +39,7 @@ require (
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gorm.io/datatypes v1.2.7 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.3 // indirect
