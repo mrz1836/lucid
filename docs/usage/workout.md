@@ -287,7 +287,8 @@ Two things a re-date does **not** move, both known limits of this first version:
 **What amend doesn't do.** Soreness and pain aren't amendable yet —
 `--soreness`/`--pain` are refused, and body-state correction is a planned
 follow-up. Daily anchors aren't amendable either: amend corrects logged sessions,
-so an anchor-only capture is refused. There is no way to amend through a spoken
+so an anchor-only capture is refused — including one that carries a note, since
+a note describes the anchor and doesn't turn it into a session. There is no way to amend through a spoken
 drop — amend takes flags only, with no model call.
 
 Every refusal — an unknown id, an id that isn't a workout session, no fields to

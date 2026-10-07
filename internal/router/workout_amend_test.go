@@ -337,8 +337,9 @@ func TestAmendWorkout_PartialSessionAmendable(t *testing.T) {
 }
 
 // TestAmendWorkout_AnchorOnlyRefused: an anchor-only capture is not a session,
-// so amend refuses it with the documented reason and writes nothing — while a
-// capture that logged a session alongside the anchor stays amendable.
+// so amend refuses it with the documented reason and writes nothing — even when
+// it carries a note — while a capture that logged a session alongside the
+// anchor stays amendable.
 func TestAmendWorkout_AnchorOnlyRefused(t *testing.T) {
 	r := bootedWorkout(t, observations.KindWorkout)
 	anchor := seedWorkout(t, r, WorkoutLogRequest{Anchor: true, AnchorItems: []AnchorCount{{Name: "squats", Count: 55, HasCount: true}}})
@@ -348,6 +349,18 @@ func TestAmendWorkout_AnchorOnlyRefused(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "amend corrects logged sessions; anchors aren't amendable")
 	assert.Contains(t, err.Error(), "nothing was saved")
+	assert.Equal(t, before, obsSnapshot(t, r), "a refused amend writes nothing")
+
+	// The common real-world anchor carries a note describing it; the note does
+	// not make it a session, so it is refused the same way (W-16).
+	noted := seedWorkout(t, r, WorkoutLogRequest{
+		Anchor: true, AnchorItems: []AnchorCount{{Name: "squats", Count: 40, HasCount: true}},
+		Notes: "daily anchor, counts up from last week",
+	})
+	before = obsSnapshot(t, r)
+	_, err = r.AmendWorkout(WorkoutAmendRequest{ObsID: noted.WorkoutID, RPE: 3, RPEChanged: true, Now: nowEDT()})
+	require.Error(t, err, "an anchor with a note is still anchor-only")
+	assert.Contains(t, err.Error(), "amend corrects logged sessions; anchors aren't amendable")
 	assert.Equal(t, before, obsSnapshot(t, r), "a refused amend writes nothing")
 
 	withSession := seedWorkout(t, r, WorkoutLogRequest{Anchor: true, Type: "mobility"})

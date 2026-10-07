@@ -346,8 +346,9 @@ func TestFoldWorkoutAmendments_Passthrough(t *testing.T) {
 // TestIsWorkoutAnchorOnly pins which workout events are daily-anchor captures
 // with no session on them — the one rule amend's anchor refusal and the
 // `workout --json` sessions echo share: the marker or items with no session
-// field is anchor-only; any session field (even alongside the anchor) makes it
-// a session; a bare partial session is a session; another kind never is.
+// field is anchor-only (a note alone included — it describes the anchor); any
+// session field (even alongside the anchor) makes it a session; a bare partial
+// session is a session; another kind never is.
 func TestIsWorkoutAnchorOnly(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -362,7 +363,16 @@ func TestIsWorkoutAnchorOnly(t *testing.T) {
 			want:    true,
 		},
 		{name: "session that also logged the anchor", kind: KindWorkout, payload: map[string]any{"anchor": true, "type": "push"}},
-		{name: "anchor with a note", kind: KindWorkout, payload: map[string]any{"anchor": true, "note": "quick floor"}},
+		{name: "anchor with a note", kind: KindWorkout, payload: map[string]any{"anchor": true, "note": "quick floor"}, want: true},
+		{
+			name: "anchor items with a note", kind: KindWorkout,
+			payload: map[string]any{
+				"anchor": true, "note": "daily anchor, counts up",
+				"anchor_items": []any{map[string]any{"name": "squats", "count": 55}},
+			},
+			want: true,
+		},
+		{name: "anchor with a note and a session field", kind: KindWorkout, payload: map[string]any{"anchor": true, "note": "then climbed", "duration_min": 45}},
 		{name: "plain session", kind: KindWorkout, payload: map[string]any{"type": "climbing", "rpe": 4}},
 		{name: "bare partial session", kind: KindWorkout, payload: map[string]any{"parse": ParseMarkerPartial}},
 		{name: "another kind with an anchor key", kind: KindBodyState, payload: map[string]any{"anchor": true}},
