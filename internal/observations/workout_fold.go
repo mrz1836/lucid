@@ -171,9 +171,11 @@ func applyWorkoutAmendment(base *Event, amend Event) {
 // capture with no session on it: the anchor marker or anchor items present and
 // none of the session fields. Such a capture closes the day for the streak but
 // is not a session — amend refuses it, and the `workout --json` sessions echo
-// omits it. The session fields are the payload keys a logged session carries
-// (mvp/data-model.md §"Workout amendments"); any one of them means there is a
-// session on the event. A bare partial session ("I trained", no fields) is
+// omits it. The session fields are the structured payload keys a logged session
+// carries; any one of them means there is a session on the event. A note is not
+// one of them: an anchor capture routinely carries a note describing the anchor
+// itself, and a note alone must not turn that capture into an amendable session
+// (mvp/error-states.md W-16). A bare partial session ("I trained", no fields) is
 // still a session, and a non-workout event is never anchor-only.
 func IsWorkoutAnchorOnly(e Event) bool {
 	if e.Kind != KindWorkout {
@@ -184,7 +186,7 @@ func IsWorkoutAnchorOnly(e Event) bool {
 	if !anchor && !items {
 		return false
 	}
-	for _, field := range []string{"type", "movements", "duration_min", "rpe", "body_parts", "note"} {
+	for _, field := range []string{"type", "movements", "duration_min", "rpe", "body_parts"} {
 		if _, ok := e.Payload[field]; ok {
 			return false
 		}
