@@ -115,9 +115,9 @@ func TestCronOfMinutes(t *testing.T) {
 
 	// Mark.Cron delegates to CronOfMinutes, so the two agree for every mark.
 	for h := range 24 {
-		for min := range 60 {
-			m := Mark{hour: h, minute: min}
-			assert.Equalf(t, CronOfMinutes(m.Minutes()), m.Cron(), "Cron vs CronOfMinutes for %02d:%02d", h, min)
+		for mm := range 60 {
+			m := Mark{hour: h, minute: mm}
+			assert.Equalf(t, CronOfMinutes(m.Minutes()), m.Cron(), "Cron vs CronOfMinutes for %02d:%02d", h, mm)
 		}
 	}
 }
@@ -136,11 +136,11 @@ func TestMark_ZeroValueIsMidnight(t *testing.T) {
 // valid mark: Parse(m.String()) recovers m.
 func TestParse_RoundTrip(t *testing.T) {
 	for h := range 24 {
-		for min := range 60 {
-			want := Mark{hour: h, minute: min}
+		for mm := range 60 {
+			want := Mark{hour: h, minute: mm}
 			got, err := Parse(want.String())
 			require.NoErrorf(t, err, "String()=%q should re-parse", want.String())
-			assert.Equalf(t, want, got, "round-trip of %02d:%02d", h, min)
+			assert.Equalf(t, want, got, "round-trip of %02d:%02d", h, mm)
 		}
 	}
 }
