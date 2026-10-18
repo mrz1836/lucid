@@ -101,8 +101,8 @@ func TestSchedulerRun_MissingTokenErrors(t *testing.T) {
 
 // TestSchedulerRun_CancelledContextReturnsPromptly is the graceful start/stop
 // smoke: an already-canceled context must not hang the daemon loop — the whole
-// wiring (storage → notifier → schedrun) runs and returns quickly rather than
-// blocking on the node.
+// wiring (storage → notifier → schedrun) runs and drains to a clean nil quickly
+// rather than blocking on the node.
 func TestSchedulerRun_CancelledContextReturnsPromptly(t *testing.T) {
 	setSchedulerEnv(t)
 	dbPath := filepath.Join(t.TempDir(), "flywheel.db")
@@ -115,9 +115,9 @@ func TestSchedulerRun_CancelledContextReturnsPromptly(t *testing.T) {
 	go func() { done <- runScheduler(ctx, &stderr, dbPath) }()
 
 	select {
-	case <-done:
-		// Returned promptly — either a clean drain or a fast startup abort on
-		// the dead context; the assertion is only that it did not block.
+	case err := <-done:
+		require.NoError(t, err, "an already-canceled daemon drains cleanly")
+		assert.Empty(t, stderr.String(), "a clean drain writes no error line")
 	case <-time.After(10 * time.Second):
 		t.Fatal("scheduler run did not return on an already-canceled context")
 	}
@@ -142,8 +142,8 @@ func TestSchedulerRun_ThroughTreeParsesDBFlag(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- root.ExecuteContext(ctx) }()
 	select {
-	case <-done:
-		// Returned promptly through the full tree — RunE wiring exercised.
+	case err := <-done:
+		require.NoError(t, err, "the full tree drains cleanly — RunE wiring exercised")
 	case <-time.After(10 * time.Second):
 		t.Fatal("scheduler run did not return through the command tree")
 	}

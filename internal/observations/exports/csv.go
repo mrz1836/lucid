@@ -54,10 +54,9 @@ func BuildSeriesRows(painEvents, moodEvents []observations.Event, capacityByDate
 			r.Mood = maxPtr(r.Mood, v)
 		}
 	}
-	for date, cap := range capacityByDate {
-		if cap > 0 {
-			c := cap
-			get(date).Capacity = &c
+	for date, capacity := range capacityByDate {
+		if capacity > 0 {
+			get(date).Capacity = &capacity
 		}
 	}
 	rows := make([]SeriesRow, 0, len(byDate))
