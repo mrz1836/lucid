@@ -656,7 +656,7 @@ func TestCompose_NilObservationsReader_NotDegraded(t *testing.T) {
 // into the delivered message), and RoutineDegraded stays false.
 func TestCompose_RoutineInjected(t *testing.T) {
 	comp := writePrompts(t)
-	routine := filepath.Join(t.TempDir(), "morning-routine.md")
+	routine := filepath.Join(t.TempDir(), "morning-plan.md")
 	require.NoError(t, os.WriteFile(routine, []byte("MORNING ROUTINE ANCHOR\n"), 0o600))
 	comp.MorningRoutine = routine
 	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("grounded", "step")}}}

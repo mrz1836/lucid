@@ -411,7 +411,7 @@ func TestReflectWeekFlags_EachResolvesItsWindow(t *testing.T) {
 		{"default is the catch-up window", nil, "2026-05-06", "2026-05-09", 4, "2026-W19"},
 		// --week restores the pre-catch-up bounds verbatim, Sunday end included.
 		{"week restores the ISO week", []string{"--week"}, "2026-05-04", "2026-05-10", 7, "2026-W19"},
-		{"since runs from an explicit day", []string{"--since", "2026-05-07"}, "2026-05-07", "2026-05-09", 3, "2026-W19"},
+		{"since runs from an explicit day", []string{"--since", "2026-05-05"}, "2026-05-05", "2026-05-09", 5, "2026-W19"},
 		{"days covers the trailing span", []string{"--days", "2"}, "2026-05-08", "2026-05-09", 2, "2026-W19"},
 	}
 

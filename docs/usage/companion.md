@@ -51,8 +51,8 @@ prompt files:
   "morning_template": "/home/you/lucid-prompts/morning.md",
   "night_template": "/home/you/lucid-prompts/night.md",
   "system_prompt": "/home/you/lucid-prompts/system.md",
-  "morning_routine": "/home/you/lucid-prompts/morning-routine.md",
-  "night_routine": "/home/you/lucid-prompts/night-routine.md",
+  "morning_routine": "/home/you/lucid-prompts/morning-plan.md",
+  "night_routine": "/home/you/lucid-prompts/night-plan.md",
   "birthdate": "1990-01-31",
   "life_horizon_age": 90,
   "model": ""
