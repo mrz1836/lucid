@@ -116,6 +116,33 @@ func TestWriteArtifacts_WritesWithoutLoading(t *testing.T) {
 	require.NoError(t, supErr)
 }
 
+// TestWriteArtifacts_EnforcesModes: both artifacts land at their documented
+// modes even when a previous install left them at other modes, which is the same
+// gap a strict umask opens on a fresh write.
+func TestWriteArtifacts_EnforcesModes(t *testing.T) {
+	agents := t.TempDir()
+	superviseCfg := filepath.Join(t.TempDir(), "supervisors", "lucid-scheduler.toml")
+	plist := filepath.Join(agents, "com.lucid.scheduler.plist")
+	require.NoError(t, os.MkdirAll(filepath.Dir(superviseCfg), 0o700))
+	require.NoError(t, os.WriteFile(superviseCfg, []byte("old"), 0o600))
+	require.NoError(t, os.Chmod(superviseCfg, 0o644)) // simulate a loose prior install
+	require.NoError(t, os.WriteFile(plist, []byte("old"), 0o600))
+	swapLaunchctl(t, func(_ context.Context, _ ...string) error { return nil })
+
+	_, err := WriteArtifacts(ApplyParams{
+		Label: "com.lucid.scheduler", PlistBody: "<plist/>", SuperviseBody: "s",
+		SuperviseConfigPath: superviseCfg, LaunchAgentsDir: agents,
+	})
+	require.NoError(t, err)
+
+	supInfo, err := os.Stat(superviseCfg)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), supInfo.Mode().Perm(), "the supervise config is tightened back to owner-only")
+	plistInfo, err := os.Stat(plist)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o644), plistInfo.Mode().Perm(), "the plist is set to its documented mode")
+}
+
 // TestApply_AlreadyLoadedRefused: an already-loaded job is refused without
 // --force, and nothing is booted out.
 func TestApply_AlreadyLoadedRefused(t *testing.T) {
