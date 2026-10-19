@@ -47,10 +47,10 @@ github.com/mattn/go-sqlite3 v1.14.47 h1:jOBI62gS7nKeZv+as1oGEy0+1qISgXwH/QBlR6Kb
 github.com/mattn/go-sqlite3 v1.14.47/go.mod h1:6JTjA44L93a0QCyJef5YvlPoKXntQPjzWv5gtm9sB6w=
 github.com/microsoft/go-mssqldb v1.7.2 h1:CHkFJiObW7ItKTJfHo1QX7QBBD1iV+mn1eOyRP3b/PA=
 github.com/microsoft/go-mssqldb v1.7.2/go.mod h1:kOvZKUdrhhFQmxLZqbwUV0rHkNkZpthMITIb2Ko1IoA=
-github.com/mrz1836/go-flywheel v0.38.0 h1:gajtYy2weZ6vRq/IwUqXIgvYV2flFx8Ei0272FXdPrM=
-github.com/mrz1836/go-flywheel v0.38.0/go.mod h1:FtGM0uP/JeT7eFpHyILmEZ8l0uFFla659Ioh7k0Egk4=
-github.com/mrz1836/go-foundation v0.13.0 h1:mraE7tnbjvZY/Cj803wtEt4601zY0cb+r5N43+8fiUU=
-github.com/mrz1836/go-foundation v0.13.0/go.mod h1:JM4eRrzOVYYGNX0mu4aAmy+1v+omo2ssJPDrlbxJHTk=
+github.com/mrz1836/go-flywheel v0.38.1 h1:FsGSA4cyflB7OyySzQSBxbvG4Xys21M32mZ+ULcv+SE=
+github.com/mrz1836/go-flywheel v0.38.1/go.mod h1:sSWgthpqWB9rWQyd3rY22JsgVO6Znx1SygxxefUDJIo=
+github.com/mrz1836/go-foundation v0.13.1 h1:2RE6pUUDGOsCA2ojktAO+7LRF4ZSb1c+8+24/wBxxhU=
+github.com/mrz1836/go-foundation v0.13.1/go.mod h1:9kHr3tXzgAd5bngqdDVWt0Y3rmFlw66lw+JgRFDuxkg=
 github.com/mrz1836/go-sanitize v1.6.0 h1:LPBKj0776BP7FnXHOdoV95pEv+j6ihriWUwz1nlfVE4=
 github.com/mrz1836/go-sanitize v1.6.0/go.mod h1:dJMz2bAJXH7/zR7t1gh+07+1VMD5exMOWvrU1P4txFk=
 github.com/mrz1836/go-selfupdate v0.1.4 h1:WXlZShndYe7GROnVufKJOeFPvnQrNyU5fTTdUQFGGpQ=
