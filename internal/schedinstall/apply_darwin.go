@@ -86,13 +86,14 @@ func WriteArtifacts(p ApplyParams) (ApplyResult, error) {
 }
 
 // writeArtifacts writes the supervise config (owner-only, parents 0o700) and the
-// launchd plist (0o644 — launchd reads it; it carries no secret). Split out to
-// fit the funlen budget.
+// launchd plist (0o644 — launchd reads it; it carries no secret), each at exactly
+// that mode whatever the process umask or a replaced file's old mode. Split out
+// to fit the funlen budget.
 func writeArtifacts(plistFile string, p ApplyParams) error {
 	if err := os.MkdirAll(filepath.Dir(p.SuperviseConfigPath), superviseDirPerm); err != nil {
 		return fmt.Errorf("schedinstall: create supervise dir: %w", err)
 	}
-	if err := os.WriteFile(p.SuperviseConfigPath, []byte(p.SuperviseBody), superviseFilePerm); err != nil {
+	if err := writeFileExact(p.SuperviseConfigPath, []byte(p.SuperviseBody), superviseFilePerm); err != nil {
 		return fmt.Errorf("schedinstall: write supervise config: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(plistFile), launchAgentsDirPerm); err != nil {
@@ -100,10 +101,21 @@ func writeArtifacts(plistFile string, p ApplyParams) error {
 	}
 	// The launchd plist is world-readable by design (launchd reads it); it names
 	// the token but carries no value (ADR-0005).
-	if err := os.WriteFile(plistFile, []byte(p.PlistBody), launchAgentsPerm); err != nil {
+	if err := writeFileExact(plistFile, []byte(p.PlistBody), launchAgentsPerm); err != nil {
 		return fmt.Errorf("schedinstall: write plist: %w", err)
 	}
 	return nil
+}
+
+// writeFileExact writes data to path, then sets perm explicitly. os.WriteFile
+// applies perm only when it creates the file, and only through the process
+// umask, so a strict umask (077) or a replaced file would otherwise leave a
+// different mode on disk than the one the install promises.
+func writeFileExact(path string, data []byte, perm os.FileMode) error {
+	if err := os.WriteFile(path, data, perm); err != nil {
+		return err
+	}
+	return os.Chmod(path, perm)
 }
 
 // loadAgent loads the job: if it is already loaded, refuse unless Force (in which
