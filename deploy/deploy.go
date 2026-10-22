@@ -127,11 +127,15 @@ func DefaultSuperviseParams() SuperviseParams {
 		WorkingDir:         "/usr/local/var/lucid",
 		// Non-secret env the child inherits: the base process env plus the two
 		// logical-channel IDs the notifier resolves "user"/"witness" against and
-		// the optional job-store path override. These are env-var NAMES only —
-		// the real channel IDs and the harness token (scope, above) live in the
-		// vault, never in this repo (ADR-0005, S-7).
+		// the optional job-store path override. USER and LOGNAME are the
+		// credential-lookup identity of the `claude` CLI the scheduler spawns to
+		// compose: without them `claude -p` cannot find its keychain credential,
+		// reports "Not logged in", and every compose falls back. These are
+		// env-var NAMES only, never values — the real channel IDs and the harness
+		// token (scope, above) live in the vault, never in this repo (ADR-0005,
+		// S-7).
 		EnvPassthrough: []string{
-			"PATH", "HOME", "SHELL", "LUCID_HOME",
+			"PATH", "HOME", "SHELL", "USER", "LOGNAME", "LUCID_HOME",
 			"LUCID_USER_CHANNEL_ID", "LUCID_WITNESS_CHANNEL_ID", "LUCID_SCHEDULER_DB",
 		},
 		DaemonLabel: "Lucid Scheduler",

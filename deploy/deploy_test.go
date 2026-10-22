@@ -149,6 +149,42 @@ func TestRenderSupervise_PassesChannelEnvThrough(t *testing.T) {
 	require.NoError(t, LintSupervise(out))
 }
 
+// TestRenderSupervise_PassesKeychainIdentityEnvThrough guards the scheduler's
+// compose path: the `claude` CLI the scheduler spawns needs USER and LOGNAME to
+// find its keychain credential. When the supervise config's env_passthrough
+// filtered them out, `claude -p` reported "Not logged in" and every scheduled
+// compose silently fell back to its deterministic message. The two names render
+// in env_passthrough (never scope), the seven pre-existing entries are
+// unchanged, and the harness token stays the only secret. Names only — no value
+// renders (ADR-0005, S-7).
+func TestRenderSupervise_PassesKeychainIdentityEnvThrough(t *testing.T) {
+	p := DefaultSuperviseParams()
+	assert.Equal(t, []string{
+		"PATH", "HOME", "SHELL", "USER", "LOGNAME", "LUCID_HOME",
+		"LUCID_USER_CHANNEL_ID", "LUCID_WITNESS_CHANNEL_ID", "LUCID_SCHEDULER_DB",
+	}, p.EnvPassthrough, "USER/LOGNAME follow SHELL; the existing entries are unchanged")
+	assert.Equal(t, []string{"LUCID_HARNESS_TOKEN"}, p.Scope, "the token is still the only secret in scope")
+
+	out, err := RenderSupervise(p)
+	require.NoError(t, err)
+
+	// Both names render inside the env_passthrough block.
+	start := strings.Index(out, "env_passthrough = [")
+	require.GreaterOrEqual(t, start, 0, "rendered config has an env_passthrough block")
+	end := strings.Index(out[start:], "]")
+	require.Positive(t, end, "the env_passthrough block is closed")
+	passthrough := out[start : start+end]
+	assert.Contains(t, passthrough, `"USER"`)
+	assert.Contains(t, passthrough, `"LOGNAME"`)
+
+	// They are not secrets, so they never appear in the scope array.
+	scopeBlock := out[strings.Index(out, "scope = ["):strings.Index(out, "[child]")]
+	assert.NotContains(t, scopeBlock, `"USER"`)
+	assert.NotContains(t, scopeBlock, `"LOGNAME"`)
+
+	require.NoError(t, LintSupervise(out))
+}
+
 // TestRenderSupervise_CarriesNoSecretValue is the S-7 property at the artifact
 // level: the rendered supervise config names a secret but carries no value —
 // no token-shaped material appears in the output.
