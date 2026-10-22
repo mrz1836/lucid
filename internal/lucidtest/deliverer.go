@@ -27,9 +27,10 @@ type EmbedRecord struct {
 // structural typing lets it satisfy all three. It captures every text delivery
 // (Sends), every embed delivery (Embeds), every loud alert (Alerts), and every
 // read-back id (Verifies), and lets a test steer the failure branches: SendErr
-// fails delivery, VerifyErr fails every read-back, and VerifyErrFor fails one
-// specific message id (the "receipt's message is gone" case). It needs no token
-// or socket.
+// fails delivery, VerifyErr fails every read-back, VerifyErrFor fails one
+// specific message id (the "receipt's message is gone" case), and AlertErr fails
+// every loud alert (the "alert channel unreachable" case). It needs no token or
+// socket.
 type FakeDeliverer struct {
 	Sends        []SendRecord
 	Embeds       []EmbedRecord
@@ -38,6 +39,7 @@ type FakeDeliverer struct {
 	SendErr      error
 	VerifyErr    error
 	VerifyErrFor map[string]error
+	AlertErr     error
 	idSeq        int
 }
 
@@ -76,9 +78,10 @@ func (f *FakeDeliverer) VerifyPresent(_ context.Context, _, messageID string) er
 	return f.VerifyErr
 }
 
-// Send records a loud alert. It never fails: a failed alert would mask the
-// original error the caller is already surfacing.
+// Send records a loud alert, then returns AlertErr (nil by default), so a test
+// can prove a failed alert is logged without ever masking the original error the
+// caller is already surfacing.
 func (f *FakeDeliverer) Send(_ context.Context, channel, text string) error {
 	f.Alerts = append(f.Alerts, SendRecord{channel, text})
-	return nil
+	return f.AlertErr
 }

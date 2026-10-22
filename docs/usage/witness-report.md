@@ -303,10 +303,18 @@ Monday is visible, not a quiet gap.
 - **Provider unreachable** (timeout / unavailable) or a **malformed model reply**:
   the worker renders the deterministic metrics-only report — the honest numbers,
   the watch-outs, and the auto-drafted asks — marked as a fallback. Only the
-  narrative warmth is lost; the report still lands.
+  narrative warmth is lost; the report still lands. The fallback is never quiet:
+  the scheduler logs a `compose fell back` warning (reason, provider error),
+  marks the run's job record `compose_fallback` (reason `provider_outage` or
+  `unusable_reply`) while still counting it delivered, and sends the same
+  once-a-day note to your user channel the companion uses (see
+  [`companion.md`](companion.md#when-things-go-wrong)).
 - **Witness-safe scan tripped**: the model's prose is discarded, the
   metrics-only report is delivered instead, and you are alerted to review why the
-  scan fired. The flagged prose never reaches the channel.
+  scan fired. The flagged prose never reaches the channel. The run is also logged
+  and marked `compose_fallback` with reason `safety_tripped`; the review alert
+  stays the only alert — there is no second ping. Fallback pings, like every
+  alert on this page, go to your **user** channel, never the witness channel.
 - **Host asleep at the Monday mark** (bounded catch-up): on wake the missed week
   fires one late attempt. Past the missed-fire cut-off (the scheduled mark plus 48
   hours — a report still un-fired by Wednesday morning), the send is **skipped and

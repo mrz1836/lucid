@@ -136,6 +136,20 @@ type Result struct {
 	Trend              Trend
 	Anchor             Anchor
 	Sessions           []SessionView
+	// FallbackReason records why the deterministic fallback fired —
+	// composekit.FallbackProviderOutage (the model was unreachable) or
+	// composekit.FallbackUnusableReply (it answered with nothing usable). It is
+	// "" on a model-phrased message. Compose only records it; the scheduled
+	// worker logs it, marks the job run, and decides whether to ping.
+	FallbackReason string
+	// FallbackError is the provider error string behind an outage fallback, ""
+	// otherwise. It is for the operator's log line and the job-run marker.
+	FallbackError string
+	// FallbackDetail is the backend's own reported reason behind an outage
+	// fallback (provider.ReportedReason — e.g. the CLI's "Not logged in · Please
+	// run /login"), "" when it gave none. It is the only part of the failure a
+	// user-channel ping ever names; the Go error chain never reaches it.
+	FallbackDetail string
 }
 
 // Compose builds the on-demand workout message at now. It reads the configured
@@ -211,9 +225,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 	})
 	if err != nil {
 		if provider.IsOutage(err) {
-			res.Text = Render(rec, tr, anchor, now)
-			res.Fallback = true
-			return res, nil
+			return deterministicFallback(res, now, composekit.FallbackProviderOutage, err), nil
 		}
 		return Result{}, fmt.Errorf("workout: compose daily: %w", err)
 	}
@@ -222,13 +234,28 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Result, error) {
 	if note == "" {
 		// The model returned nothing usable — render the deterministic scaffold
 		// rather than deliver an empty phrasing slot.
-		res.Text = Render(rec, tr, anchor, now)
-		res.Fallback = true
-		return res, nil
+		return deterministicFallback(res, now, composekit.FallbackUnusableReply, nil), nil
 	}
 	res.Text = renderWithNote(note, rec, tr, anchor, now)
 	res.UsedLLM = true
 	return res, nil
+}
+
+// deterministicFallback renders the already-decided pick as the deterministic
+// scaffold and marks the result a fallback — the pick stands, and only the
+// leading coach's note is lost, never the send. It records why on the result:
+// reason is the composekit fallback reason, and cause (the provider error on an
+// outage, nil otherwise) supplies FallbackError and the backend-reported
+// FallbackDetail. Nothing is logged here — compose stays log-free.
+func deterministicFallback(res Result, now time.Time, reason string, cause error) Result {
+	res.Text = Render(res.Recommendation, res.Trend, res.Anchor, now)
+	res.Fallback = true
+	res.FallbackReason = reason
+	if cause != nil {
+		res.FallbackError = cause.Error()
+		res.FallbackDetail = provider.ReportedReason(cause)
+	}
+	return res
 }
 
 // readContext reads the bounded recent workout/body-state slice and the active

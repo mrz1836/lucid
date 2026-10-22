@@ -3,6 +3,7 @@ package companion
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/provider"
@@ -153,4 +155,50 @@ func TestSectionsDigest_SkipsEmptySection(t *testing.T) {
 	digest := sectionsDigest(sections)
 	assert.Contains(t, digest, "Body & state (as logged 2026-07-19): mood 7 — steady")
 	assert.NotContains(t, digest, "Commitments", "a section with no lines is skipped")
+}
+
+// TestCompose_OutageRecordsFallbackReason: an outage fallback records why it
+// fell back — the provider_outage reason, the provider error string, and the
+// backend's own reported reason — so the scheduled worker can log, mark, and
+// ping it. Compose itself only records; it never logs.
+func TestCompose_OutageRecordsFallbackReason(t *testing.T) {
+	cause := provider.WithReason(fmt.Errorf("synthetic backend: %w", provider.ErrUnavailable), "synthetic reason")
+	p := &provider.Fake{Script: []provider.Exchange{{Err: cause}}}
+	c, _ := newComposer(t, writePrompts(t), defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.True(t, res.Fallback)
+	assert.Equal(t, composekit.FallbackProviderOutage, res.FallbackReason)
+	assert.Equal(t, cause.Error(), res.FallbackError)
+	assert.Equal(t, "synthetic reason", res.FallbackDetail)
+}
+
+// TestCompose_UnusableReplyRecordsFallbackReason: a reply with nothing usable
+// records the unusable_reply reason and no provider error or detail — the model
+// answered, so there is no failure to name.
+func TestCompose_UnusableReplyRecordsFallbackReason(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{{Content: "   \n  "}}}
+	c, _ := newComposer(t, writePrompts(t), defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.True(t, res.Fallback)
+	assert.Equal(t, composekit.FallbackUnusableReply, res.FallbackReason)
+	assert.Empty(t, res.FallbackError)
+	assert.Empty(t, res.FallbackDetail)
+}
+
+// TestCompose_ModelReplyRecordsNoFallbackReason: a model-composed message
+// carries no fallback reason at all.
+func TestCompose_ModelReplyRecordsNoFallbackReason(t *testing.T) {
+	p := &provider.Fake{Script: []provider.Exchange{{Content: slotReply("Steady.", "Start small.")}}}
+	c, _ := newComposer(t, writePrompts(t), defaultProvider(), sampleNumbers(), fakeVerdict{}, fakeChain{}, p)
+
+	res, err := c.Compose(context.Background(), ModeMorning, time.Now())
+	require.NoError(t, err)
+	assert.False(t, res.Fallback)
+	assert.Empty(t, res.FallbackReason)
+	assert.Empty(t, res.FallbackError)
+	assert.Empty(t, res.FallbackDetail)
 }

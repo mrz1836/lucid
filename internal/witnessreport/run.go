@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	flywheel "github.com/mrz1836/go-flywheel"
@@ -87,6 +88,10 @@ type Runner struct {
 	mode    string // preview → user channel, auto → witness channel
 	weekday int    // cron weekday of the scheduled mark (0=Sunday..6=Saturday)
 	markHM  string // "HH:MM" local scheduled mark
+	// log receives the runner's own warn lines (a failed alert). It is nil in
+	// production — [Runner.logger] then uses slog.Default(), which lands in the
+	// supervised daemon log — and injected by tests to capture the lines.
+	log *slog.Logger
 }
 
 // NewRunner wires a Runner over the compose dependencies (from the witness_report
@@ -119,16 +124,21 @@ func NewRunner(o Options) *Runner {
 // stale-week refusal). Fallback records the deterministic path fired (only the
 // warmth was lost); SafetyTripped records the witness-safe scan discarded the
 // model prose (the metrics-only report still delivered, and the operator was
-// alerted to review).
+// alerted to review). FallbackReason, FallbackError, and FallbackDetail carry
+// the composer's record of why a fallback fired (see [Report]) up to the
+// scheduled worker, which reports it.
 type Outcome struct {
-	Week          string
-	Delivered     bool
-	MessageID     string
-	Channel       string
-	Fallback      bool
-	SafetyTripped bool
-	Skipped       bool
-	SkipReason    string
+	Week           string
+	Delivered      bool
+	MessageID      string
+	Channel        string
+	Fallback       bool
+	SafetyTripped  bool
+	Skipped        bool
+	SkipReason     string
+	FallbackReason string
+	FallbackError  string
+	FallbackDetail string
 }
 
 // Fire composes and delivers this week's report at `now`, honoring the whole
@@ -221,15 +231,72 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 	}
 
 	return Outcome{
-		Week:          week,
-		Delivered:     fired.Delivered,
-		MessageID:     fired.MessageID,
-		Channel:       fired.Channel,
-		Fallback:      fired.Payload.Fallback,
-		SafetyTripped: fired.Payload.SafetyTripped,
-		Skipped:       fired.Skipped,
-		SkipReason:    fired.SkipReason,
+		Week:           week,
+		Delivered:      fired.Delivered,
+		MessageID:      fired.MessageID,
+		Channel:        fired.Channel,
+		Fallback:       fired.Payload.Fallback,
+		SafetyTripped:  fired.Payload.SafetyTripped,
+		Skipped:        fired.Skipped,
+		SkipReason:     fired.SkipReason,
+		FallbackReason: fired.Payload.FallbackReason,
+		FallbackError:  fired.Payload.FallbackError,
+		FallbackDetail: fired.Payload.FallbackDetail,
 	}, nil
+}
+
+// fallbackDaemon names the weekly report in a fallback report's log line,
+// job-run marker, and once-a-day ping receipt; fallbackKind names the message
+// in the user-channel ping.
+const (
+	fallbackDaemon = "witness"
+	fallbackKind   = "weekly witness report"
+)
+
+// reportFallback makes a delivered scheduled fallback loud. It runs only in the
+// scheduled worker, after Fire returned delivered with its receipt persisted —
+// never inside the shared fire path — so nothing here can delay, fail, or
+// unwind the send.
+//
+// A model-composed send or a skipped fire returns the empty result (no
+// compose_fallback marker). A delivered fallback is handed to
+// [flynode.ReportFallback] as daemon witness: it always logs the warn line and
+// returns the marker. An outage or unusable-reply fallback also pings once per
+// local day across every daemon, claimed through the store's ping receipt —
+// always through [Runner.alert], so the ping lands in the user channel even in
+// auto mode, never the witness channel. A safety-tripped fallback carries no
+// ping: the PostSend safety-trip alert already fired and stays the only alert.
+func (r *Runner) reportFallback(ctx context.Context, logger *slog.Logger, out Outcome, now time.Time) flywheel.Result {
+	if !out.Delivered || !out.Fallback {
+		return flywheel.Result{}
+	}
+	return flynode.ReportFallback(ctx, logger, flynode.FallbackReport{
+		Daemon: fallbackDaemon,
+		Reason: out.FallbackReason,
+		Error:  out.FallbackError,
+		Day:    engine.DateString(engine.DateOf(now)),
+		Ping:   composekit.FallbackPing(fallbackKind, out.FallbackReason, out.FallbackDetail),
+		Claim: func(fr flynode.FallbackReport) (bool, error) {
+			return r.store.ClaimComposeFallbackPing(storage.ComposeFallbackPing{
+				Date:     fr.Day,
+				Daemon:   fr.Daemon,
+				Reason:   fr.Reason,
+				PingedAt: now.Format(time.RFC3339),
+			})
+		},
+		Alert: func(text string) { r.alert(ctx, text) },
+	})
+}
+
+// loggerOf returns the attempt's job logger (flywheel's, carrying job_id / kind
+// / run_id), or nil when the job or its logger is unset — which
+// [flynode.ReportFallback] resolves to slog.Default(), so a bare job never
+// panics.
+func loggerOf(job *flywheel.Job[weeklyArgs]) *slog.Logger {
+	if job == nil {
+		return nil
+	}
+	return job.Logger
 }
 
 // alertTimeout bounds a detached best-effort alert: it sits above the notifier's
@@ -242,7 +309,9 @@ const alertTimeout = 30 * time.Second
 // silent" floor. It is deliberately best-effort: if the channel itself is
 // unreachable the returned error from [Runner.Fire] is the loud signal (it fails
 // the job and lands in the supervised daemon log), and a failed alert must not
-// mask that original error.
+// mask that original error. A failed alert is itself logged at warn ("alert
+// send failed") rather than silently dropped, and still never replaces the
+// error the caller returns.
 //
 // The alert runs on a context DETACHED from the run's cancellation
 // (context.WithoutCancel): a stop signal mid-send (error-states Sc-6) cancels
@@ -253,7 +322,18 @@ const alertTimeout = 30 * time.Second
 func (r *Runner) alert(ctx context.Context, text string) {
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), alertTimeout)
 	defer cancel()
-	_ = r.deliver.Send(actx, engine.ChannelUser, text)
+	if err := r.deliver.Send(actx, engine.ChannelUser, text); err != nil {
+		r.logger().WarnContext(ctx, "alert send failed", "daemon", "witness", "error", err)
+	}
+}
+
+// logger returns the runner's injected logger, or slog.Default() when none was
+// set (production).
+func (r *Runner) logger() *slog.Logger {
+	if r.log != nil {
+		return r.log
+	}
+	return slog.Default()
 }
 
 // markFor builds the scheduled-mark instant for the ISO week containing `now`:
@@ -330,12 +410,16 @@ type weeklyWorker struct {
 // Kind names the worker dispatched for kindWeekly.
 func (weeklyWorker) Kind() string { return kindWeekly }
 
-// Work composes and delivers the weekly report for `now`.
-func (w weeklyWorker) Work(ctx context.Context, _ *flywheel.Job[weeklyArgs]) (flywheel.Result, error) {
-	if _, err := w.r.Fire(ctx, w.clock.Now(ctx)); err != nil {
+// Work composes and delivers the weekly report for `now`, then reports a
+// delivered fallback (log, job-run marker, and — for an outage or unusable
+// reply — the deduped ping).
+func (w weeklyWorker) Work(ctx context.Context, job *flywheel.Job[weeklyArgs]) (flywheel.Result, error) {
+	now := w.clock.Now(ctx)
+	out, err := w.r.Fire(ctx, now)
+	if err != nil {
 		return flywheel.Result{}, err
 	}
-	return flywheel.Result{}, nil
+	return w.r.reportFallback(ctx, loggerOf(job), out, now), nil
 }
 
 // Run opens the disposable job DB, migrates it, registers the weekly worker,

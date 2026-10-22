@@ -263,6 +263,20 @@ type Result struct {
 	// EnrichmentDegraded it is non-fatal and surfaced by the dry-run — a set path
 	// that silently reads as unconfigured would hide a misconfiguration.
 	RoutineDegraded bool
+	// FallbackReason records why the deterministic fallback fired —
+	// composekit.FallbackProviderOutage (the model was unreachable) or
+	// composekit.FallbackUnusableReply (it answered with nothing usable). It is
+	// "" on a model-composed message. Compose only records it; the scheduled
+	// worker logs it, marks the job run, and decides whether to ping.
+	FallbackReason string
+	// FallbackError is the provider error string behind an outage fallback, ""
+	// otherwise. It is for the operator's log line and the job-run marker.
+	FallbackError string
+	// FallbackDetail is the backend's own reported reason behind an outage
+	// fallback (provider.ReportedReason — e.g. the CLI's "Not logged in · Please
+	// run /login"), "" when it gave none. It is the only part of the failure a
+	// user-channel ping ever names; the Go error chain never reaches it.
+	FallbackDetail string
 }
 
 // Compose builds the companion message for one window at `now`. It reads the two
@@ -343,7 +357,7 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 	})
 	if err != nil {
 		if provider.IsOutage(err) {
-			return c.deterministicFallback(res, brief)
+			return c.deterministicFallback(res, brief, composekit.FallbackProviderOutage, err)
 		}
 		return Result{}, fmt.Errorf("companion: compose %s: %w", mode, err)
 	}
@@ -352,7 +366,7 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 	if strings.TrimSpace(interp) == "" && len(actions) == 0 {
 		// The model returned nothing usable — render the deterministic scaffold
 		// rather than deliver an empty interpretation.
-		return c.deterministicFallback(res, brief)
+		return c.deterministicFallback(res, brief, composekit.FallbackUnusableReply, nil)
 	}
 
 	brief.Interpretation = interp
@@ -365,8 +379,11 @@ func (c *Composer) Compose(ctx context.Context, mode Mode, now time.Time) (Resul
 // deterministicFallback fills the fallback interpretation + action into the
 // already-built scaffold and renders it, marking the result a fallback. The
 // panel, the context sections, and any miss-day verdict all still land — only
-// the warmth is lost, never the send.
-func (c *Composer) deterministicFallback(res Result, brief Briefing) (Result, error) {
+// the warmth is lost, never the send. It records why on the result: reason is
+// the composekit fallback reason, and cause (the provider error on an outage,
+// nil otherwise) supplies FallbackError and the backend-reported
+// FallbackDetail. Nothing is logged here — compose stays log-free.
+func (c *Composer) deterministicFallback(res Result, brief Briefing, reason string, cause error) (Result, error) {
 	brief.Interpretation = fallbackInterpretation(brief.Mode)
 	actions, err := c.fallbackActions(brief.Mode)
 	if err != nil {
@@ -376,6 +393,11 @@ func (c *Composer) deterministicFallback(res Result, brief Briefing) (Result, er
 	res.Text = Render(brief)
 	res.Fallback = true
 	res.UsedLLM = false
+	res.FallbackReason = reason
+	if cause != nil {
+		res.FallbackError = cause.Error()
+		res.FallbackDetail = provider.ReportedReason(cause)
+	}
 	return res, nil
 }
 

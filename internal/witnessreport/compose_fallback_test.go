@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/composekit"
 	"github.com/mrz1836/lucid/internal/provider"
 )
 
@@ -103,4 +104,61 @@ func TestCompose_UnreadableCuratedAsksDegradesQuietly(t *testing.T) {
 	require.NoError(t, err)
 	// The model's refined asks apply (signal present, no curated override took).
 	assert.Equal(t, []string{"Check in on me Wednesday.", "Ask how the back half went."}, r.Asks)
+}
+
+// TestCompose_OutageRecordsFallbackReason: an outage fallback records why it
+// fell back — the provider_outage reason, the provider error string, and the
+// backend's own reported reason — so the scheduled worker can log, mark, and
+// ping it. Compose itself only records; it never logs.
+func TestCompose_OutageRecordsFallbackReason(t *testing.T) {
+	cause := provider.WithReason(fmt.Errorf("synthetic backend: %w", provider.ErrUnavailable), "synthetic reason")
+	c, _ := composerDeps(t, "miss-heavy-week.json", "", provider.Exchange{Err: cause})
+
+	r, err := c.Compose(context.Background(), reportNow())
+	require.NoError(t, err)
+	assert.True(t, r.Fallback)
+	assert.Equal(t, composekit.FallbackProviderOutage, r.FallbackReason)
+	assert.Equal(t, cause.Error(), r.FallbackError)
+	assert.Equal(t, "synthetic reason", r.FallbackDetail)
+}
+
+// TestCompose_UnusableReplyRecordsFallbackReason: a reply with no usable slot
+// records the unusable_reply reason and no provider error or detail.
+func TestCompose_UnusableReplyRecordsFallbackReason(t *testing.T) {
+	c, _ := composerDeps(t, "quiet-week.json", "", provider.Exchange{Content: "   \n"})
+
+	r, err := c.Compose(context.Background(), reportNow())
+	require.NoError(t, err)
+	assert.True(t, r.Fallback)
+	assert.Equal(t, composekit.FallbackUnusableReply, r.FallbackReason)
+	assert.Empty(t, r.FallbackError)
+	assert.Empty(t, r.FallbackDetail)
+}
+
+// TestCompose_SafetyTripRecordsFallbackReason: a tripped witness-safe scan
+// records the safety_tripped reason alongside SafetyTripped.
+func TestCompose_SafetyTripRecordsFallbackReason(t *testing.T) {
+	reply := "%%NARRATIVE%%\nThis ties back to [[synthetic-note]]."
+	c, _ := composerDeps(t, "miss-heavy-week.json", "", provider.Exchange{Content: reply})
+
+	r, err := c.Compose(context.Background(), reportNow())
+	require.NoError(t, err)
+	assert.True(t, r.SafetyTripped)
+	assert.True(t, r.Fallback)
+	assert.Equal(t, composekit.FallbackSafetyTripped, r.FallbackReason)
+	assert.Empty(t, r.FallbackError)
+	assert.Empty(t, r.FallbackDetail)
+}
+
+// TestCompose_ModelReplyRecordsNoFallbackReason: a model-composed report
+// carries no fallback reason at all.
+func TestCompose_ModelReplyRecordsNoFallbackReason(t *testing.T) {
+	c, _ := composerDeps(t, "miss-heavy-week.json", "", provider.Exchange{Content: wellFormedReply})
+
+	r, err := c.Compose(context.Background(), reportNow())
+	require.NoError(t, err)
+	assert.False(t, r.Fallback)
+	assert.Empty(t, r.FallbackReason)
+	assert.Empty(t, r.FallbackError)
+	assert.Empty(t, r.FallbackDetail)
 }

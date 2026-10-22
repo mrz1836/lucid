@@ -2,7 +2,9 @@
 // message daemons' composers share verbatim: reading an operator's explicit
 // prompt file, applying a per-feature model override onto the base provider
 // config, the shared [ProviderBuilder] backend-constructor type, and the
-// bullet-stripping [StripBullet] each reply parser trims lines with. It is
+// bullet-stripping [StripBullet] each reply parser trims lines with, and the
+// deterministic-fallback reason vocabulary plus its user-channel ping copy
+// ([FallbackPing]). It is
 // deliberately separate from internal/flynode — flynode is provider-free by
 // construction, and these helpers name config.ProviderConfig and
 // provider.Provider — and it owns nothing of the daemons' distinct

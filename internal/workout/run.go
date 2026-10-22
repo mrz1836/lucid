@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -114,6 +115,10 @@ type Runner struct {
 	deliver Deliverer
 	store   *storage.Adapter
 	slot    string
+	// log receives the runner's own warn lines (a failed alert). It is nil in
+	// production — [Runner.logger] then uses slog.Default(), which lands in the
+	// supervised daemon log — and injected by tests to capture the lines.
+	log *slog.Logger
 }
 
 // NewRunner wires a Runner over the compose dependencies, the delivery
@@ -129,15 +134,20 @@ func NewRunner(d Deps, deliver Deliverer, store *storage.Adapter) *Runner {
 // fire, Late), or Skipped (SkipReason "already-delivered" for the idempotent
 // path, "past-cutoff" for the stale-window refusal). Fallback records the
 // deterministic path fired (the provider was unreachable — only warmth was
-// lost); Text carries the delivered body for logging.
+// lost); Text carries the delivered body for logging. FallbackReason,
+// FallbackError, and FallbackDetail carry the composer's record of why a
+// fallback fired (see [Result]) up to the scheduled worker, which reports it.
 type Outcome struct {
-	Delivered  bool
-	MessageID  string
-	Late       bool
-	Fallback   bool
-	Skipped    bool
-	SkipReason string
-	Text       string
+	Delivered      bool
+	MessageID      string
+	Late           bool
+	Fallback       bool
+	Skipped        bool
+	SkipReason     string
+	Text           string
+	FallbackReason string
+	FallbackError  string
+	FallbackDetail string
 }
 
 // Fire composes and delivers the day's workout message at `now`, honoring the
@@ -215,14 +225,69 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 	}
 
 	return Outcome{
-		Delivered:  fired.Delivered,
-		MessageID:  fired.MessageID,
-		Late:       fired.Late,
-		Skipped:    fired.Skipped,
-		SkipReason: fired.SkipReason,
-		Fallback:   fired.Payload.Fallback,
-		Text:       fired.Payload.Text,
+		Delivered:      fired.Delivered,
+		MessageID:      fired.MessageID,
+		Late:           fired.Late,
+		Skipped:        fired.Skipped,
+		SkipReason:     fired.SkipReason,
+		Fallback:       fired.Payload.Fallback,
+		Text:           fired.Payload.Text,
+		FallbackReason: fired.Payload.FallbackReason,
+		FallbackError:  fired.Payload.FallbackError,
+		FallbackDetail: fired.Payload.FallbackDetail,
 	}, nil
+}
+
+// fallbackDaemon names the workout slot in a fallback report's log line, job-run
+// marker, and once-a-day ping receipt; fallbackKind names the message in the
+// user-channel ping.
+const (
+	fallbackDaemon = "workout"
+	fallbackKind   = "workout card"
+)
+
+// reportFallback makes a delivered scheduled fallback loud. It runs only in the
+// scheduled worker, after Fire returned delivered with its receipt persisted —
+// never inside the shared fire path — so the on-demand `lucid workout fire`
+// keeps its printed note and never pings, and nothing here can delay, fail, or
+// unwind the send.
+//
+// A model-phrased send or a skipped fire returns the empty result (no
+// compose_fallback marker). A delivered fallback is handed to
+// [flynode.ReportFallback] as daemon workout: it always logs the warn line and
+// returns the marker, and pings the user channel once per local day across
+// every daemon, claimed through the store's ping receipt.
+func (r *Runner) reportFallback(ctx context.Context, logger *slog.Logger, out Outcome, now time.Time) flywheel.Result {
+	if !out.Delivered || !out.Fallback {
+		return flywheel.Result{}
+	}
+	return flynode.ReportFallback(ctx, logger, flynode.FallbackReport{
+		Daemon: fallbackDaemon,
+		Reason: out.FallbackReason,
+		Error:  out.FallbackError,
+		Day:    engine.DateString(engine.DateOf(now)),
+		Ping:   composekit.FallbackPing(fallbackKind, out.FallbackReason, out.FallbackDetail),
+		Claim: func(fr flynode.FallbackReport) (bool, error) {
+			return r.store.ClaimComposeFallbackPing(storage.ComposeFallbackPing{
+				Date:     fr.Day,
+				Daemon:   fr.Daemon,
+				Reason:   fr.Reason,
+				PingedAt: now.Format(time.RFC3339),
+			})
+		},
+		Alert: func(text string) { r.alert(ctx, text) },
+	})
+}
+
+// loggerOf returns the attempt's job logger (flywheel's, carrying job_id / kind
+// / run_id), or nil when the job or its logger is unset — which
+// [flynode.ReportFallback] resolves to slog.Default(), so a bare job never
+// panics.
+func loggerOf(job *flywheel.Job[workoutArgs]) *slog.Logger {
+	if job == nil {
+		return nil
+	}
+	return job.Logger
 }
 
 // alertTimeout bounds a detached best-effort alert: it sits above the notifier's
@@ -234,7 +299,9 @@ const alertTimeout = 30 * time.Second
 // cannot deliver its real message — the "never silent" floor. It is deliberately
 // best-effort: if the channel itself is unreachable the returned error from
 // [Runner.Fire] is the loud signal (it fails the job and lands in the supervised
-// daemon log), and a failed alert must not mask that original error.
+// daemon log), and a failed alert must not mask that original error. A failed
+// alert is itself logged at warn ("alert send failed") rather than silently
+// dropped, and still never replaces the error the caller returns.
 //
 // The alert runs on a context DETACHED from the run's cancellation
 // (context.WithoutCancel): a stop signal mid-send (error-states Sc-6) cancels
@@ -245,7 +312,18 @@ const alertTimeout = 30 * time.Second
 func (r *Runner) alert(ctx context.Context, text string) {
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), alertTimeout)
 	defer cancel()
-	_ = r.deliver.Send(actx, engine.ChannelUser, text)
+	if err := r.deliver.Send(actx, engine.ChannelUser, text); err != nil {
+		r.logger().WarnContext(ctx, "alert send failed", "daemon", "workout", "error", err)
+	}
+}
+
+// logger returns the runner's injected logger, or slog.Default() when none was
+// set (production).
+func (r *Runner) logger() *slog.Logger {
+	if r.log != nil {
+		return r.log
+	}
+	return slog.Default()
 }
 
 // Options configures a workout daemon run. Store, Notifier, and Metrics are
@@ -282,12 +360,15 @@ type dailyWorker struct {
 // Kind names the worker dispatched for kindDaily.
 func (dailyWorker) Kind() string { return kindDaily }
 
-// Work composes and delivers the workout recommendation for `now`.
-func (w dailyWorker) Work(ctx context.Context, _ *flywheel.Job[workoutArgs]) (flywheel.Result, error) {
-	if _, err := w.r.Fire(ctx, w.clock.Now(ctx)); err != nil {
+// Work composes and delivers the workout recommendation for `now`, then reports
+// a delivered fallback (log, job-run marker, deduped ping).
+func (w dailyWorker) Work(ctx context.Context, job *flywheel.Job[workoutArgs]) (flywheel.Result, error) {
+	now := w.clock.Now(ctx)
+	out, err := w.r.Fire(ctx, now)
+	if err != nil {
 		return flywheel.Result{}, err
 	}
-	return flywheel.Result{}, nil
+	return w.r.reportFallback(ctx, loggerOf(job), out, now), nil
 }
 
 // Run opens the disposable job DB, migrates it, registers the daily worker,

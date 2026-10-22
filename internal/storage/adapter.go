@@ -73,6 +73,10 @@ type Adapter struct {
 	// day. rawOccMu guards it.
 	rawOccMu       sync.Mutex
 	rawOccurrences map[string]rawWhen
+	// composeFallbackMu serializes [Adapter.ClaimComposeFallbackPing]'s
+	// read-compare-write, so the scheduler's message daemons — which share one
+	// adapter — can never both claim the same local day's fallback ping.
+	composeFallbackMu sync.Mutex
 }
 
 // New returns an adapter rooted at an explicit home directory. Tests

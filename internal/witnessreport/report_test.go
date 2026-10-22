@@ -281,3 +281,36 @@ func TestDeterministicCore_NoProviderImport(t *testing.T) {
 		}
 	}
 }
+
+// TestReport_JSONOmitsFallbackDiagnostics pins the `lucid witness report --json`
+// shape: the fallback diagnostics the scheduled worker reads (reason, provider
+// error, CLI-reported detail) never serialize, while fallback and
+// safety_tripped serialize exactly as before.
+func TestReport_JSONOmitsFallbackDiagnostics(t *testing.T) {
+	r := Report{
+		ISOWeek:        "2026-W29",
+		Fallback:       true,
+		SafetyTripped:  true,
+		FallbackReason: "safety_tripped",
+		FallbackError:  "synthetic provider error",
+		FallbackDetail: "synthetic detail",
+	}
+	raw, err := json.Marshal(r)
+	require.NoError(t, err)
+	out := string(raw)
+
+	for _, key := range []string{"fallback_reason", "FallbackReason", "fallback_error", "FallbackError", "fallback_detail", "FallbackDetail"} {
+		assert.NotContains(t, out, `"`+key+`"`, "diagnostics never reach --json")
+	}
+	assert.NotContains(t, out, "synthetic provider error")
+	assert.NotContains(t, out, "synthetic detail")
+	assert.Contains(t, out, `"fallback":true`)
+	assert.Contains(t, out, `"safety_tripped":true`)
+
+	// With the diagnostics zeroed the encoding is byte-identical: they add nothing.
+	bare := r
+	bare.FallbackReason, bare.FallbackError, bare.FallbackDetail = "", "", ""
+	rawBare, err := json.Marshal(bare)
+	require.NoError(t, err)
+	assert.Equal(t, string(rawBare), out)
+}

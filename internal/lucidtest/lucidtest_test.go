@@ -80,4 +80,14 @@ func TestFakeDeliverer(t *testing.T) {
 		require.ErrorIs(t, g.VerifyPresent(ctx, "chan", "msg-1"), oneGone, "the named id fails")
 		require.NoError(t, g.VerifyPresent(ctx, "chan", "msg-2"), "an unnamed id still reads back")
 	})
+
+	t.Run("AlertErr fails the alert but still records it", func(t *testing.T) {
+		want := errors.New("alert channel down")
+		f := &lucidtest.FakeDeliverer{AlertErr: want}
+		require.ErrorIs(t, f.Send(ctx, "chan", "alert!"), want)
+		assert.Equal(t, []lucidtest.SendRecord{{Channel: "chan", Text: "alert!"}}, f.Alerts, "the attempt is still recorded")
+		id, err := f.SendReturningID(ctx, "chan", "text")
+		require.NoError(t, err, "AlertErr never fails a real delivery")
+		assert.Equal(t, "msg-1", id)
+	})
 }
