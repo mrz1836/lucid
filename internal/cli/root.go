@@ -154,7 +154,7 @@ append-only Ledger under ~/.lucid/.`,
 	// Self-update (alias: upgrade) plus the passive "a new version is available"
 	// notice. Wired last so the banner chains onto the root's run hooks; the
 	// resolved build version tells a real release apart from a development build.
-	attachUpdateCommand(root, bi.Version)
+	attachUpdateCommand(root, newUpdateConfig(bi.Version))
 
 	return root
 }
