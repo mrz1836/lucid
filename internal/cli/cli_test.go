@@ -106,9 +106,10 @@ func TestIsUsageError(t *testing.T) {
 }
 
 func TestUnknownCommand_IsUsageError(t *testing.T) {
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "does-not-exist")
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "does-not-exist")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assertUsageErrorOnce(t, stderr, "lucid")
 }
 
 func TestRootNoArgs_PrintsHelpNoError(t *testing.T) {

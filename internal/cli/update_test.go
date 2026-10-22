@@ -201,28 +201,35 @@ func TestUpdateCmd_UpToDateWritesNoStderr(t *testing.T) {
 }
 
 // TestUpdateCmd_UsageErrorAddsNoUpdateLine asserts a usage error on update
-// keeps the usage exit code and adds no update report: cobra rejects it before
-// the command runs, so the library's error reporting never sees it and the
-// release source is never consulted. The production command tree is checked
-// too, so the root's own wiring cannot add a line either.
+// keeps the usage exit code and is reported once by the root, as the standard
+// usage line and --help hint under the canonical `lucid update` path, with no
+// update report: cobra rejects it before the command runs, so the library's
+// error reporting never sees it and the release source is never consulted.
+// The production command tree is checked too, so the root's own wiring cannot
+// add a line either.
 func TestUpdateCmd_UsageErrorAddsNoUpdateLine(t *testing.T) {
-	for _, args := range [][]string{{"update", "--bogus"}, {"update", "extra"}, {"upgrade", "--bogus"}} {
+	cases := [][]string{{"update", "--bogus"}, {"update", "extra"}, {"upgrade", "--bogus"}}
+	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			cfg, _, calls := newTestUpdateConfig(t, "v9.9.9", "")
 			_, stderr, code := runUpdateCmd(t, cfg, args...)
 
 			assert.Equal(t, ExitUsage, code)
+			assertUsageErrorOnce(t, stderr, "lucid update")
+			assert.Contains(t, stderr, "Run 'lucid update --help' for usage.")
 			assert.Equal(t, 0, strings.Count(stderr, "lucid: update:"), "stderr = %q", stderr)
 			assert.Equal(t, 0, *calls, "the release source was consulted")
 		})
 	}
 
-	for _, args := range [][]string{{"update", "--bogus"}, {"update", "extra"}} {
+	for _, args := range cases {
 		t.Run("production "+strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("LUCID_NO_UPDATE_CHECK", "1")
 			_, stderr, err := runRoot(t, BuildInfo{Version: "0.36.6"}, args...)
 
 			assert.Equal(t, ExitUsage, exitCodeForError(err))
+			assertUsageErrorOnce(t, stderr, "lucid update")
+			assert.Contains(t, stderr, "Run 'lucid update --help' for usage.")
 			assert.Equal(t, 0, strings.Count(stderr, "lucid: update:"), "stderr = %q", stderr)
 		})
 	}

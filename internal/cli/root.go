@@ -101,6 +101,13 @@ daily practice with real accountability), both writing one user-owned,
 append-only Ledger under ~/.lucid/.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Same idiom as `secret`: a bare `lucid` prints help and exits 0, while
+		// a stray word is rejected here as an unknown command so it is typed
+		// and reported like any other usage error.
+		Args: rootArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
 	root.PersistentFlags().Bool(jsonFlag, false, "Emit machine-readable JSON output where supported")
 
