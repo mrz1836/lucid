@@ -1411,6 +1411,11 @@ clear error naming it. A binary owned by another installer (`go install`'s
 `~/go/bin`, or a Homebrew prefix) is refused rather than overwritten. Also
 available as `lucid upgrade`.
 
+When an update fails (a release lookup, download or checksum failure, a refused
+install, or an install directory that isn't writable), `update` prints one line
+to stderr, `lucid: update: <reason>`, carrying the updater's own message, and
+exits 1. A usage error (an unknown flag or a stray argument) exits 2.
+
 | Flag | Effect |
 |------|--------|
 | `--check` | Report whether a newer release is available; install nothing. |
