@@ -142,10 +142,12 @@ func TestStats_CLI_LastAndRangeMutuallyExclusive(t *testing.T) {
 	isolatedHome(t)
 	withClock(t, afternoon())
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "stats", "--last", "2", "--from", "2026-07-01")
+	stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "stats", "--last", "2", "--from", "2026-07-01")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assert.Empty(t, stdout)
+	assertUsageErrorOnce(t, stderr, "lucid stats")
 }
 
 // TestStats_CLI_FromAloneDefaultsToToday: `--from` without `--to` defaults `--to`
@@ -169,10 +171,12 @@ func TestStats_CLI_LastZeroUsageError(t *testing.T) {
 	isolatedHome(t)
 	withClock(t, afternoon())
 
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "stats", "--last", "0")
+	stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "stats", "--last", "0")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assert.Empty(t, stdout)
+	assertUsageErrorOnce(t, stderr, "lucid stats")
 }
 
 // TestStats_CLI_JSONDenseByKind: `--json` emits a dense observations_by_kind —

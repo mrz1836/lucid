@@ -150,10 +150,12 @@ func TestWheelSelfRatingRequired_CLI(t *testing.T) {
 	assert.Contains(t, stderr,
 		`required flag(s) "career", "finances", "growth", "fun", "environment", "contribution" not set`)
 	assert.Contains(t, stderr, "nothing was saved")
+	assertUsageErrorOnce(t, stderr, "lucid wheel add")
 
-	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "wheel", "add")
+	_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "wheel", "add")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assertUsageErrorOnce(t, stderr, "lucid wheel add")
 	assertNoWheel(t, home)
 }
 
@@ -172,6 +174,7 @@ func TestWheelScaleRejects_CLI(t *testing.T) {
 		require.Errorf(t, err, "--fun %q", bad)
 		assert.Equalf(t, ExitUsage, exitCodeForError(err), "--fun %q", bad)
 		assert.Containsf(t, stderr, `for "--fun" flag: fun/recreation needs a whole number from 1 to 10`, "--fun %q", bad)
+		assertUsageErrorOnce(t, stderr, "lucid wheel add")
 	}
 	assertNoWheel(t, home)
 }
@@ -197,6 +200,7 @@ func TestWheelAddCLI_PairFlagErrors(t *testing.T) {
 		assert.Equalf(t, ExitUsage, exitCodeForError(err), "%v", extra)
 		assert.Containsf(t, stderr, want, "%v", extra)
 		assert.Containsf(t, stderr, "nothing was saved", "%v", extra)
+		assertUsageErrorOnce(t, stderr, "lucid wheel add")
 	}
 	assertNoWheel(t, home)
 }
@@ -341,6 +345,7 @@ func TestWheelAddCLI_InputStrict(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
 	assert.Contains(t, stderr, "so --health, --month cannot be given with it")
+	assertUsageErrorOnce(t, stderr, "lucid wheel add")
 
 	_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "wheel", "add", "--input", filepath.Join(t.TempDir(), "absent.json"))
 	require.Error(t, err)

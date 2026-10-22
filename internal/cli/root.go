@@ -64,10 +64,10 @@ type ExitCoder interface {
 
 // exitCodeForError maps a returned error to a process exit code. An error that
 // carries its own code (an [ExitCoder], e.g. the `scheduler status` verdict) wins
-// so a graded command owns its tiered exit; a typed usage error maps to
-// [ExitUsage], as do the cobra usage errors not yet typed, which are still
-// recognized by their text; everything else (a runtime failure, or a breached
-// `validate` gate) maps to [ExitErr].
+// so a graded command owns its tiered exit; a usage error maps to [ExitUsage],
+// found by its type and never by its text, so a runtime failure whose message
+// happens to read like misuse is not mistaken for one; everything else (a
+// runtime failure, or a breached `validate` gate) maps to [ExitErr].
 func exitCodeForError(err error) int {
 	if err == nil {
 		return ExitOK
@@ -78,9 +78,6 @@ func exitCodeForError(err error) int {
 	}
 	var ue *usageError
 	if errors.As(err, &ue) {
-		return ExitUsage
-	}
-	if isUsageError(err) {
 		return ExitUsage
 	}
 	return ExitErr
@@ -170,27 +167,4 @@ append-only Ledger under ~/.lucid/.`,
 	installUsageErrors(root)
 
 	return root
-}
-
-// isUsageError reports whether err looks like a cobra flag-parse or
-// unknown-command error, which should map to [ExitUsage] rather than a
-// generic runtime failure.
-func isUsageError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	// The "accepts" / "requires at least" fragments catch cobra's positional-arg
-	// validators (ExactArgs, MinimumNArgs, MaximumNArgs, RangeArgs), whose
-	// messages read "accepts N arg(s), received M" / "requires at least N
-	// arg(s), only received M" — a bare `lucid storm` is a usage error (exit 2),
-	// not a runtime failure. "none of the others can be" catches
-	// MarkFlagsMutuallyExclusive (`reflect week --week --days 3`): passing an
-	// impossible flag combination is a misuse, not a failed run.
-	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "invalid argument", "flag needs an argument", "required flag", "accepts", "requires at least", "none of the others can be"} {
-		if containsFold(msg, p) {
-			return true
-		}
-	}
-	return false
 }

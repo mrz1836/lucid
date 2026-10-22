@@ -5,13 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/lucid/internal/provider"
 )
 
 // assertUsageErrorOnce asserts stderr holds exactly one rendered usage error
@@ -185,9 +190,11 @@ func TestUsageError_JSONKeepsStdoutEmpty(t *testing.T) {
 	}{
 		{args: []string{"status", "--json", "--bogus"}, path: "lucid status"},
 		{args: []string{"update", "--json", "extra"}, path: "lucid update"},
+		{args: []string{"stats", "--json", "--last", "0"}, path: "lucid stats"},
 	}
 	for _, tc := range cases {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			withClock(t, afternoon())
 			stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, tc.args...)
 
 			assert.Equal(t, ExitUsage, exitCodeForError(err))
@@ -551,6 +558,111 @@ func TestUsageError_NilArgsUntouched(t *testing.T) {
 			assert.Equal(t, ExitOK, exitCodeForError(err))
 			assert.Contains(t, stdout, "Usage:")
 			assert.Empty(t, stderr)
+		})
+	}
+}
+
+// TestUsageError_RuntimeEINVALIsNotUsage asserts a runtime failure whose text
+// happens to read like misuse — a rename refused with EINVAL renders as
+// "rename a b: invalid argument" — stays a runtime failure: it exits 1 and
+// gets no usage line or --help hint, because usage errors are found by type.
+func TestUsageError_RuntimeEINVALIsNotUsage(t *testing.T) {
+	isolatedHome(t)
+	t.Setenv("LUCID_NO_UPDATE_CHECK", "1")
+
+	root := newRootCmd(BuildInfo{Version: "dev"})
+	root.AddCommand(&cobra.Command{
+		Use:  "einval-probe",
+		Args: cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return &os.LinkError{Op: "rename", Old: "a", New: "b", Err: syscall.EINVAL}
+		},
+	})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+
+	code, err := run(context.Background(), root, []string{"einval-probe"})
+
+	require.Error(t, err)
+	assert.Equal(t, ExitErr, code)
+	assert.Contains(t, err.Error(), "invalid argument")
+	require.ErrorIs(t, err, syscall.EINVAL)
+	var ue *usageError
+	assert.NotErrorAs(t, err, &ue, "a runtime failure is never typed as a usage error")
+	assert.NotContains(t, errBuf.String(), "for usage.")
+	assert.NotContains(t, errBuf.String(), "lucid einval-probe: ")
+}
+
+// TestUsageError_CommandLevelChecks asserts the checks a command makes itself
+// once its flags parse — a stats window the flags cannot describe, a bad
+// reflect week start date, a structure invocation naming neither or both
+// modes, and a wheel missing its ratings or mixing --input with other flags —
+// exit with the usage code, leave stdout empty, and are reported once with the
+// command's --help hint, the reason itself never printed twice.
+func TestUsageError_CommandLevelChecks(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		stdin  string
+		at     time.Time
+		path   string
+		reason string
+		want   string
+	}{
+		{
+			name: "stats last zero", args: []string{"stats", "--last", "0"}, at: afternoon(),
+			path: "lucid stats", reason: "--last must be a positive number of days",
+			want: "lucid stats: invalid argument: --last must be a positive number of days\n" +
+				"Run 'lucid stats --help' for usage.\n",
+		},
+		{
+			name: "stats last with from", args: []string{"stats", "--last", "2", "--from", "2026-07-01"}, at: afternoon(),
+			path: "lucid stats", reason: "--last cannot be combined with --from/--to",
+		},
+		{
+			name: "reflect week bad since", args: []string{"reflect", "week", "--since", "nope"}, at: reflectNow(),
+			path: "lucid reflect week", reason: `invalid argument "nope" for "--since" flag`,
+		},
+		{
+			name: "structure until without since", args: []string{"structure", "--until", "2026-01-01"}, at: structureNow(),
+			path: "lucid structure", reason: "it closes a window opened by --since",
+		},
+		{
+			name: "structure bare", args: []string{"structure"}, at: structureNow(),
+			path: "lucid structure", reason: "requires at least a raw entry id",
+			want: "lucid structure: requires at least a raw entry id or --since <YYYY-MM-DD>\n" +
+				"Run 'lucid structure --help' for usage.\n",
+		},
+		{
+			name: "wheel add missing pillars", args: []string{"wheel", "add"}, at: wheelClock(),
+			path: "lucid wheel add", reason: "every pillar needs your own",
+		},
+		{
+			name: "wheel add input with flags", args: []string{"wheel", "add", "--input", "-", "--health", "5"},
+			stdin: syntheticWheelDoc, at: wheelClock(),
+			path: "lucid wheel add", reason: "cannot be given with it",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatedHome(t)
+			t.Setenv("LUCID_NO_UPDATE_CHECK", "1")
+			withClock(t, tc.at)
+			fake := &provider.Fake{}
+			withServeProvider(t, fake)
+
+			stdout, stderr, err := runRootWithStdin(t, tc.stdin, tc.args...)
+
+			require.Error(t, err)
+			assert.Equal(t, ExitUsage, exitCodeForError(err))
+			assert.Empty(t, stdout)
+			assertUsageErrorOnce(t, stderr, tc.path)
+			assert.Equal(t, 1, strings.Count(stderr, tc.reason), "reason not printed exactly once: %q", stderr)
+			if tc.want != "" {
+				assert.Equal(t, tc.want, stderr)
+			}
+			assert.Equal(t, 0, fake.Calls(), "a rejected invocation never reaches the model")
 		})
 	}
 }

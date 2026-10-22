@@ -278,9 +278,11 @@ func TestStructure_UsageErrors(t *testing.T) {
 			fake := &provider.Fake{}
 			withServeProvider(t, fake)
 
-			_, _, err := runStructureCmd(t, tc.args...)
+			stdout, stderr, err := runStructureCmd(t, tc.args...)
 			require.Error(t, err)
 			assert.Equal(t, ExitUsage, exitCodeForError(err))
+			assert.Empty(t, stdout)
+			assertUsageErrorOnce(t, stderr, "lucid structure")
 			assert.Equal(t, 0, fake.Calls(), "a rejected invocation never reaches the model")
 		})
 	}
@@ -291,9 +293,11 @@ func TestStructure_UsageErrors(t *testing.T) {
 func TestStructure_TooManyArgs(t *testing.T) {
 	isolatedHome(t)
 	withServeProvider(t, &provider.Fake{})
-	_, _, err := runStructureCmd(t, "raw_a", "raw_b")
+	stdout, stderr, err := runStructureCmd(t, "raw_a", "raw_b")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assert.Empty(t, stdout)
+	assertUsageErrorOnce(t, stderr, "lucid structure")
 }
 
 // TestStructure_MissingEntryIsRuntimeError proves a read fault on a single

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -28,12 +27,6 @@ func writeJSON(w io.Writer, v any) error {
 		return fmt.Errorf("lucid: encode json: %w", err)
 	}
 	return nil
-}
-
-// containsFold reports whether substr is contained in s,
-// case-insensitively.
-func containsFold(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // emitErr prints a command error to stderr and returns it unchanged. The root

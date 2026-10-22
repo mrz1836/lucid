@@ -290,8 +290,8 @@ func TestStats_JSONShapeAndDenseOrder(t *testing.T) {
 
 // TestStats_RangeResolution covers the flag policy the router owns (AC-2, AC-3,
 // AC-4): the default window, --last N inclusive of today, --from/--to defaults,
-// mutual exclusion, and the usage errors (each carries "invalid argument" so the
-// CLI maps it to the usage exit code).
+// mutual exclusion, and the usage errors (each wraps ErrStatsRangeRejected, which
+// the CLI types as a usage error, and keeps its "invalid argument" wording).
 func TestStats_RangeResolution(t *testing.T) {
 	r, _ := statsRouter(t)
 	now := time.Date(2026, 7, 11, 21, 0, 0, 0, edt) // logical day 2026-07-11
@@ -328,26 +328,33 @@ func TestStats_RangeResolution(t *testing.T) {
 	_, err = r.Stats(StatsOptions{LastSet: true, Last: 1, From: "2026-07-01"}, now)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
+	require.ErrorIs(t, err, ErrStatsRangeRejected)
 
 	// --last 0 → usage error.
 	_, err = r.Stats(StatsOptions{LastSet: true, Last: 0}, now)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
+	require.ErrorIs(t, err, ErrStatsRangeRejected)
+	assert.Equal(t, "invalid argument: --last must be a positive number of days", err.Error(),
+		"the sentinel leaves the wording unchanged")
 
 	// from > to → usage error.
 	_, err = r.Stats(StatsOptions{From: "2026-07-12", To: "2026-07-10"}, now)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
+	require.ErrorIs(t, err, ErrStatsRangeRejected)
 
 	// Malformed --from → usage error.
 	_, err = r.Stats(StatsOptions{From: "2026-13-40"}, now)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
+	require.ErrorIs(t, err, ErrStatsRangeRejected)
 
 	// Malformed --to → usage error.
 	_, err = r.Stats(StatsOptions{To: "not-a-date"}, now)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid argument")
+	require.ErrorIs(t, err, ErrStatsRangeRejected)
 }
 
 // TestLogicalDayRange covers the shared day-enumeration helper directly: an

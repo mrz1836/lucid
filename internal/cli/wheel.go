@@ -161,10 +161,10 @@ func wheelAddRequest(cmd *cobra.Command) (router.AddWheelRequest, error) {
 	}
 	path, _ := cmd.Flags().GetString(wheelInputFlag)
 	if others := wheelFlagsBesideInput(cmd); len(others) > 0 {
-		return router.AddWheelRequest{}, fmt.Errorf(
+		return router.AddWheelRequest{}, newUsageError(cmd, fmt.Errorf(
 			"invalid argument %q for %q flag: it reads the whole wheel, so %s cannot be given with it; nothing was saved",
 			path, "--"+wheelInputFlag, strings.Join(others, ", "),
-		)
+		))
 	}
 	data, err := readRawInput(wheelInputFlag, path, cmd.InOrStdin())
 	if err != nil {
@@ -192,10 +192,11 @@ func wheelFlagsBesideInput(cmd *cobra.Command) []string {
 
 // wheelRequestFromFlags builds the add request from the flag form. All eight
 // rating flags are required — a missing one is a usage error naming every
-// missing pillar, in cobra's own required-flag dialect so it maps to exit 2 —
-// and each must be a plain whole number 1–10. --note and --suggested pairs name
-// a pillar each; a pillar named twice in one flag is refused rather than
-// silently overwritten.
+// missing pillar, worded in cobra's own required-flag dialect — and each must
+// be a plain whole number 1–10. --note and --suggested pairs name a pillar
+// each; a pillar named twice in one flag is refused rather than silently
+// overwritten. Each of these refusals is typed as a usage error, so it exits 2
+// with the command's --help hint.
 func wheelRequestFromFlags(cmd *cobra.Command) (router.AddWheelRequest, error) {
 	flags := cmd.Flags()
 	var missing []string
@@ -205,10 +206,10 @@ func wheelRequestFromFlags(cmd *cobra.Command) (router.AddWheelRequest, error) {
 		}
 	}
 	if len(missing) > 0 {
-		return router.AddWheelRequest{}, fmt.Errorf(
+		return router.AddWheelRequest{}, newUsageError(cmd, fmt.Errorf(
 			"required flag(s) %s not set — every pillar needs your own %d–%d rating; nothing was saved",
 			strings.Join(missing, ", "), observations.WheelScoreMin, observations.WheelScoreMax,
-		)
+		))
 	}
 
 	pillars := make(map[string]observations.PillarScore, len(observations.WheelPillarKeys()))
@@ -216,21 +217,21 @@ func wheelRequestFromFlags(cmd *cobra.Command) (router.AddWheelRequest, error) {
 		raw, _ := flags.GetString(p.Key)
 		score, ok := observations.ParseWheelScore(raw)
 		if !ok {
-			return router.AddWheelRequest{}, fmt.Errorf(
+			return router.AddWheelRequest{}, newUsageError(cmd, fmt.Errorf(
 				"invalid argument %q for %q flag: %s needs a whole number from %d to %d; nothing was saved",
 				raw, "--"+p.Key, p.Label, observations.WheelScoreMin, observations.WheelScoreMax,
-			)
+			))
 		}
 		pillars[p.Key] = observations.PillarScore{Score: score}
 	}
 
 	notes, _ := flags.GetStringArray(wheelNoteFlag)
 	if err := applyWheelPairs(wheelNoteFlag, notes, pillars, setWheelNote); err != nil {
-		return router.AddWheelRequest{}, err
+		return router.AddWheelRequest{}, newUsageError(cmd, err)
 	}
 	suggested, _ := flags.GetStringArray(wheelSuggestedFlag)
 	if err := applyWheelPairs(wheelSuggestedFlag, suggested, pillars, setWheelSuggested); err != nil {
-		return router.AddWheelRequest{}, err
+		return router.AddWheelRequest{}, newUsageError(cmd, err)
 	}
 
 	reflection, err := resolveOptionalText(cmd, wheelAddVerb, "vision reflection",
@@ -254,7 +255,8 @@ type wheelPairSetter func(p *observations.PillarScore, value string) error
 
 // applyWheelPairs applies a repeatable <pillar>=<value> flag's pairs onto
 // pillars. A pair without `=`, an unknown pillar, a pillar named twice, or a
-// value its setter refuses is a usage error in cobra's invalid-argument dialect.
+// value its setter refuses is refused in cobra's invalid-argument dialect; the
+// caller types the refusal as a usage error.
 func applyWheelPairs(
 	flag string, pairs []string, pillars map[string]observations.PillarScore, set wheelPairSetter,
 ) error {
