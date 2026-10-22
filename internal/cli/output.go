@@ -40,9 +40,11 @@ func containsFold(s, substr string) bool {
 // sets SilenceErrors, so a returned error otherwise only sets the exit code with
 // no explanation; the data-ops verbs (backup, restore) name their own remedy, so
 // the message and the exit code must travel together — mirroring the scheduler
-// verbs' "lucid: scheduler: <message>" stderr line.
+// verbs' "lucid: scheduler: <message>" stderr line. A usage error is left to
+// the root, which renders it once with the command's --help hint.
 func emitErr(cmd *cobra.Command, err error) error {
-	if err != nil {
+	var ue *usageError
+	if err != nil && !errors.As(err, &ue) {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err)
 	}
 	return err

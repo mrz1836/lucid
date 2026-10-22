@@ -526,8 +526,7 @@ func runRootWithStdin(t *testing.T, stdin string, args ...string) (stdout, stder
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
 	root.SetIn(strings.NewReader(stdin))
-	root.SetArgs(args)
-	err = root.ExecuteContext(context.Background())
+	_, err = run(context.Background(), root, args)
 	return out.String(), errBuf.String(), err
 }
 

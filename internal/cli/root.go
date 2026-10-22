@@ -42,16 +42,13 @@ type BuildInfo struct {
 }
 
 // Execute builds the root command, dispatches the subcommand matching
-// os.Args, and returns the resolved process exit code. The caller
+// os.Args, and returns the resolved process exit code. It delegates to the
+// shared run seam, which renders a usage error once on stderr. The caller
 // (cmd/lucid/main.go) owns os.Exit; Execute performs none so tests can
 // exercise it directly.
 func Execute(ctx context.Context, bi BuildInfo) int {
-	root := newRootCmd(bi)
-	root.SetArgs(os.Args[1:])
-	if err := root.ExecuteContext(ctx); err != nil {
-		return exitCodeForError(err)
-	}
-	return ExitOK
+	code, _ := run(ctx, newRootCmd(bi), os.Args[1:])
+	return code
 }
 
 // ExitCoder is an error that carries its own process exit code. A command whose
@@ -67,9 +64,10 @@ type ExitCoder interface {
 
 // exitCodeForError maps a returned error to a process exit code. An error that
 // carries its own code (an [ExitCoder], e.g. the `scheduler status` verdict) wins
-// so a graded command owns its tiered exit; flag/usage errors from cobra map to
-// [ExitUsage]; everything else (a runtime failure, or a breached `validate` gate)
-// maps to [ExitErr].
+// so a graded command owns its tiered exit; a typed usage error maps to
+// [ExitUsage], as do the cobra usage errors not yet typed, which are still
+// recognized by their text; everything else (a runtime failure, or a breached
+// `validate` gate) maps to [ExitErr].
 func exitCodeForError(err error) int {
 	if err == nil {
 		return ExitOK
@@ -77,6 +75,10 @@ func exitCodeForError(err error) int {
 	var coder ExitCoder
 	if errors.As(err, &coder) {
 		return coder.ExitCode()
+	}
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return ExitUsage
 	}
 	if isUsageError(err) {
 		return ExitUsage
@@ -155,6 +157,10 @@ append-only Ledger under ~/.lucid/.`,
 	// notice. Wired last so the banner chains onto the root's run hooks; the
 	// resolved build version tells a real release apart from a development build.
 	attachUpdateCommand(root, newUpdateConfig(bi.Version))
+
+	// Type usage errors across the finished tree, including the library-built
+	// update command, so the root can render each one once with a --help hint.
+	installUsageErrors(root)
 
 	return root
 }

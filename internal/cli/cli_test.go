@@ -26,16 +26,16 @@ func TestExecute_DispatchesOSArgs(t *testing.T) {
 	assert.Equal(t, ExitUsage, Execute(context.Background(), BuildInfo{Version: "dev"}))
 }
 
-// runRoot executes the full cobra tree with args, capturing stdout and
-// stderr. It returns the captured streams and the command error.
+// runRoot executes the full cobra tree with args through the same run seam
+// Execute uses, capturing stdout and stderr, so a usage error renders exactly
+// as a user sees it. It returns the captured streams and the command error.
 func runRoot(t *testing.T, bi BuildInfo, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	root := newRootCmd(bi)
 	var out, errBuf bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
-	root.SetArgs(args)
-	err = root.ExecuteContext(context.Background())
+	_, err = run(context.Background(), root, args)
 	return out.String(), errBuf.String(), err
 }
 

@@ -81,8 +81,9 @@ func newTestUpdateConfig(t *testing.T, tag, dir string) (selfupdate.Config, stri
 
 // runUpdateCmd executes args against a minimal root that mirrors production's
 // silencing (SilenceUsage and SilenceErrors) and persistent --json flag, with
-// the update command attached from cfg, then maps the error exactly as Execute
-// does — so "printed once" holds for the whole pipeline.
+// the update command attached from cfg, through the same run seam Execute uses
+// — which installs the usage-error wiring, renders a usage error, and maps the
+// exit code — so "printed once" holds for the whole pipeline.
 func runUpdateCmd(t *testing.T, cfg selfupdate.Config, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	root := &cobra.Command{Use: "lucid", SilenceUsage: true, SilenceErrors: true}
@@ -92,9 +93,8 @@ func runUpdateCmd(t *testing.T, cfg selfupdate.Config, args ...string) (stdout, 
 	var out, errBuf bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
-	root.SetArgs(args)
-	err := root.ExecuteContext(context.Background())
-	return out.String(), errBuf.String(), exitCodeForError(err)
+	code, _ = run(context.Background(), root, args)
+	return out.String(), errBuf.String(), code
 }
 
 // skipInstallOnWindows skips cases that reach the install path, which the
@@ -120,6 +120,8 @@ func TestUpdateCmd_ReportsChecksumFailureOnce(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(stderr, "failed to fetch checksums file"), "stderr = %q", stderr)
 	assert.True(t, strings.HasPrefix(stderr, "lucid: update: go-selfupdate: failed to fetch checksums file"), "stderr = %q", stderr)
 	assert.Equal(t, 1, strings.Count(stderr, "\n"), "stderr is not one line: %q", stderr)
+	assert.NotContains(t, stderr, "for usage.")
+	assert.NotContains(t, stderr, "lucid update: ")
 	assert.NotContains(t, stdout, "failed to fetch")
 
 	body, err := os.ReadFile(target)
@@ -139,6 +141,8 @@ func TestUpdateCmd_UpgradeAliasReportsAsUpdate(t *testing.T) {
 	assert.True(t, strings.HasPrefix(stderr, "lucid: update: "), "stderr = %q", stderr)
 	assert.Equal(t, 1, strings.Count(stderr, "lucid: update: "), "stderr = %q", stderr)
 	assert.Equal(t, 1, strings.Count(stderr, "\n"), "stderr is not one line: %q", stderr)
+	assert.NotContains(t, stderr, "for usage.")
+	assert.NotContains(t, stderr, "lucid update: ")
 }
 
 // TestUpdateCmd_ReportsCheckLookupFailure asserts --check reports a failed
@@ -150,6 +154,8 @@ func TestUpdateCmd_ReportsCheckLookupFailure(t *testing.T) {
 
 	assert.Equal(t, ExitErr, code)
 	assert.Equal(t, "lucid: update: go-selfupdate: GitHub API request failed: boom\n", stderr)
+	assert.NotContains(t, stderr, "for usage.")
+	assert.NotContains(t, stderr, "lucid update: ")
 }
 
 // TestUpdateCmd_InstallDirNotWritableExitErr asserts the preflight refusal is
