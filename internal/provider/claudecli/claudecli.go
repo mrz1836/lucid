@@ -91,8 +91,11 @@ func New(model string, opts ...Option) *Provider {
 }
 
 // defaultRunner spawns `claude` under ctx, feeds stdin, and returns stdout.
-// cmd.Output surfaces a non-zero exit as *exec.ExitError (carrying stderr),
-// which Complete maps to the transport sentinels.
+// cmd.Output surfaces a non-zero exit as *exec.ExitError (carrying stderr)
+// while still returning whatever the process wrote to stdout — the CLI
+// reports its own failures (e.g. "Not logged in") as an is_error envelope on
+// stdout and exits 1, so Complete reads that stdout before mapping the error
+// to the transport sentinels.
 func defaultRunner(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is the fixed "claude" binary and args are constructed locally from the pinned invocation contract (ADR-0006)
 	if len(stdin) > 0 {
@@ -116,6 +119,13 @@ type envelope struct {
 // non-zero exit, unparseable/`is_error` envelope, or an empty result maps
 // to [provider.ErrUnavailable] (the designed "no model reachable"
 // degradation, ADR-0006 §Consequences).
+//
+// When the CLI reports `is_error: true` — whether it exits 0 or non-zero
+// with the envelope on stdout — the envelope's `result` text (collapsed to
+// one line and capped, see [cliReason]) is kept in the error message and
+// attached with [provider.WithReason], so logs show the CLI's own words and
+// [provider.ReportedReason] recovers them without parsing the chain. The
+// outage classification is unchanged.
 func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider.Response, error) {
 	if p.timeout > 0 {
 		var cancel context.CancelFunc
@@ -140,6 +150,13 @@ func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return provider.Response{}, fmt.Errorf("claudecli: %w", ctxErr)
 		}
+		// A non-zero exit can still carry the CLI's is_error envelope on
+		// stdout (the "Not logged in" shape exits 1); keep its result text
+		// rather than discarding stdout. Anything else keeps the spawn wording.
+		var env envelope
+		if json.Unmarshal(stdout, &env) == nil && env.IsError {
+			return provider.Response{}, isErrorf(err, env.Result)
+		}
 		return provider.Response{}, fmt.Errorf("claudecli: spawn/exit failed: %w: %w", err, provider.ErrUnavailable)
 	}
 
@@ -148,12 +165,49 @@ func (p *Provider) Complete(ctx context.Context, req provider.Request) (provider
 		return provider.Response{}, fmt.Errorf("claudecli: unparseable envelope: %w: %w", jsonErr, provider.ErrUnavailable)
 	}
 	if env.IsError {
-		return provider.Response{}, fmt.Errorf("claudecli: cli reported is_error: %w", provider.ErrUnavailable)
+		return provider.Response{}, isErrorf(nil, env.Result)
 	}
 	if env.Result == "" {
 		return provider.Response{}, fmt.Errorf("claudecli: empty result: %w", provider.ErrUnavailable)
 	}
 	return provider.Response{Content: env.Result}, nil
+}
+
+// maxReasonRunes caps the CLI-reported reason kept in an is_error error, so
+// a runaway result can never flood a log line or a user-facing note.
+const maxReasonRunes = 200
+
+// isErrorf builds the ErrUnavailable error for a CLI-reported is_error
+// envelope. runErr is the runner's exit error (nil on an exit-0 envelope)
+// and is named in the message; the result text, when non-empty after
+// [cliReason], is quoted into the message and attached with
+// [provider.WithReason].
+func isErrorf(runErr error, result string) error {
+	reason := cliReason(result)
+	var err error
+	switch {
+	case runErr != nil && reason != "":
+		err = fmt.Errorf("claudecli: cli reported is_error (%w): %q: %w", runErr, reason, provider.ErrUnavailable)
+	case runErr != nil:
+		err = fmt.Errorf("claudecli: cli reported is_error (%w): %w", runErr, provider.ErrUnavailable)
+	case reason != "":
+		err = fmt.Errorf("claudecli: cli reported is_error: %q: %w", reason, provider.ErrUnavailable)
+	default:
+		err = fmt.Errorf("claudecli: cli reported is_error: %w", provider.ErrUnavailable)
+	}
+	return provider.WithReason(err, reason)
+}
+
+// cliReason normalizes the CLI's result text into a one-line reason:
+// surrounding whitespace trimmed, internal whitespace runs (newlines
+// included) collapsed to single spaces, and the result capped at
+// maxReasonRunes runes with a trailing ellipsis.
+func cliReason(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > maxReasonRunes {
+		s = string(r[:maxReasonRunes]) + "…"
+	}
+	return s
 }
 
 // flatten renders the authorized Messages slice as role-prefixed lines fed

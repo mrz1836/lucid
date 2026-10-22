@@ -292,12 +292,29 @@ The companion degrades in layers and is designed to **never fall silent** — a 
   deterministic interpretation, and a deterministic next action (the evening Bell
   on a normal night) — so a well-formed, useful message still lands. Only the
   model's warmth is lost; the send is never skipped, and on a missed day the
-  verdict is still appended byte-for-byte.
+  verdict is still appended byte-for-byte. On a **scheduled** send the fallback
+  is never quiet, either:
+  - a `compose fell back` warning lands in the supervised daemon log, naming the
+    daemon, the reason, and the provider error (including the CLI's own words,
+    e.g. *Not logged in · Please run /login*);
+  - the run's job record carries a `compose_fallback` marker with reason
+    `provider_outage` and the provider error — the run still counts as
+    delivered, so nothing retries or re-sends;
+  - a short note lands in your user channel naming the message and, when the CLI
+    gave one, its reason — at most **once per local day across all scheduled
+    messages**. A later fallback that day is still logged and marked, just not
+    pinged.
+
+  The on-demand `lucid companion fire` keeps its printed fallback note and never
+  pings.
 - **Malformed model reply** (missing slot delimiters, no usable text): the same
-  deterministic-scaffold fallback fires. A reply that has prose but no
-  `%%INTERPRETATION%%` delimiter is **not** a failure — the whole reply becomes
-  the interpretation slot (see [the two model slots](#the-two-model-slots)), and
-  the scaffold renders normally.
+  deterministic-scaffold fallback fires — only the model's warmth is lost; the
+  send is never skipped. A scheduled send is logged, marked (reason
+  `unusable_reply`, no provider error), and pinged exactly as above. A reply that
+  has prose but no `%%INTERPRETATION%%` delimiter is **not** a failure — the
+  whole reply becomes the interpretation slot (see
+  [the two model slots](#the-two-model-slots)), and the scaffold renders
+  normally.
 - **Routine file unreadable** (a `morning_routine` / `night_routine` path set but
   missing or unreadable): non-fatal — the routine grounding is dropped from that
   message and the miss is recorded, never a failed send. Enrichment never kills
@@ -326,8 +343,10 @@ The companion degrades in layers and is designed to **never fall silent** — a 
   read-back, an indeterminate idempotency probe, a **receipt that could not be
   written after a verified send**, or a past-cut-off skip fires a best-effort alert
   to the user channel. If even that channel is unreachable, the job returns a loud
-  error that fails the scheduled job and lands in the supervised daemon log.
-  Silence is the one outcome the companion never produces. The guarantee is *never
+  error that fails the scheduled job and lands in the supervised daemon log; a
+  failed alert send is itself logged at warn (`alert send failed`, with the
+  error) and never masks the original failure. Silence is the one outcome the
+  companion never produces. The guarantee is *never
   a silent miss*, not exactly-once: if the process dies in the narrow window
   between a verified send and its receipt write, the next run — seeing no receipt —
   re-sends, a bounded at-most-one-extra post (which is why that receipt-write

@@ -38,10 +38,17 @@ hold in **that** environment:
   exposes, or add its directory to the harness's exec `PATH`.
 - **`HOME` is passed through** so `~/.lucid/` resolves — or set **`LUCID_HOME`**
   explicitly for the agent.
+- **`USER` and `LOGNAME` are passed through** whenever the default `claude_cli`
+  model backend is in use — for any process that runs a `lucid` compose, both the
+  harness child and the supervised scheduler. The `claude` CLI uses them to locate
+  its keychain credential; without them `claude -p` answers
+  "Not logged in · Please run /login", and every compose degrades to its
+  deterministic fallback (now logged, marked, and pinged — see
+  [`companion.md`](companion.md#when-things-go-wrong)).
 
 > Gotcha: a supervised gateway often runs with a minimal environment. Confirm
-> `PATH` and `HOME` (or `LUCID_HOME`) actually reach the child process, not just
-> your login shell.
+> `PATH`, `HOME` (or `LUCID_HOME`), `USER`, and `LOGNAME` actually reach the child
+> process, not just your login shell.
 
 ## 3. Load the skill and identity into an agent
 
@@ -88,7 +95,10 @@ syntax: [`commands.md`](commands.md).
   (pillar B): a standalone `lucid` scheduler posting the bell/tripwire needs a
   channel-post token, vaulted and injected per
   [`../../deploy/hush/supervise.tmpl`](../../deploy/hush/supervise.tmpl) and
-  [ADR-0005](../adr/0005-secrets-management.md). Not required for Path A.
+  [ADR-0005](../adr/0005-secrets-management.md). Not required for Path A. The
+  rendered scheduler config also passes `USER` and `LOGNAME` through to the
+  child, so the `claude` CLI it spawns to compose can find its keychain
+  credential (see step 2).
 
 ## 6. Boundary rules (non-negotiable)
 

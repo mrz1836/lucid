@@ -3,6 +3,7 @@ package workout
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -472,3 +473,52 @@ func TestComposeNilBuildDefaultsFactory(t *testing.T) {
 // assertAnError returns a non-nil error for the degrade tests without importing a
 // sentinel — any error drives the non-fatal path.
 func assertAnError() error { return os.ErrClosed }
+
+// TestCompose_OutageRecordsFallbackReason: an outage fallback records why it
+// fell back — the provider_outage reason, the provider error string, and the
+// backend's own reported reason — so the scheduled worker can log, mark, and
+// ping it. Compose itself only records; it never logs.
+func TestCompose_OutageRecordsFallbackReason(t *testing.T) {
+	t.Parallel()
+
+	cause := provider.WithReason(fmt.Errorf("synthetic backend: %w", provider.ErrUnavailable), "synthetic reason")
+	fake := &provider.Fake{Script: []provider.Exchange{{Err: cause}}}
+	res, err := New(baseDeps(t, &fakeObs{}, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+
+	assert.True(t, res.Fallback)
+	assert.Equal(t, composekit.FallbackProviderOutage, res.FallbackReason)
+	assert.Equal(t, cause.Error(), res.FallbackError)
+	assert.Equal(t, "synthetic reason", res.FallbackDetail)
+}
+
+// TestCompose_UnusableReplyRecordsFallbackReason: an empty reply records the
+// unusable_reply reason and no provider error or detail — the model answered,
+// so there is no failure to name.
+func TestCompose_UnusableReplyRecordsFallbackReason(t *testing.T) {
+	t.Parallel()
+
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: "  \n "}}}
+	res, err := New(baseDeps(t, &fakeObs{}, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+
+	assert.True(t, res.Fallback)
+	assert.Equal(t, composekit.FallbackUnusableReply, res.FallbackReason)
+	assert.Empty(t, res.FallbackError)
+	assert.Empty(t, res.FallbackDetail)
+}
+
+// TestCompose_ModelReplyRecordsNoFallbackReason: a model-phrased message
+// carries no fallback reason at all.
+func TestCompose_ModelReplyRecordsNoFallbackReason(t *testing.T) {
+	t.Parallel()
+
+	fake := &provider.Fake{Script: []provider.Exchange{{Content: "Steady work today."}}}
+	res, err := New(baseDeps(t, &fakeObs{}, fakeInjuries{}, fake)).Compose(context.Background(), mustTime(t, mondayNoon))
+	require.NoError(t, err)
+
+	assert.False(t, res.Fallback)
+	assert.Empty(t, res.FallbackReason)
+	assert.Empty(t, res.FallbackError)
+	assert.Empty(t, res.FallbackDetail)
+}

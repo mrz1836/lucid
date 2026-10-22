@@ -64,6 +64,9 @@ command = [
 working_dir     = "{{ .WorkingDir }}"
 # Non-secret env inherited by the child. The harness token is NOT listed here
 # — it flows through `scope` above and is injected by hush at spawn.
+# USER and LOGNAME are passed so the `claude` CLI the scheduler spawns to
+# compose can find its keychain credential; without them `claude -p` reports
+# "Not logged in" and every compose falls back to its deterministic message.
 env_passthrough = [
 {{- range .EnvPassthrough }}
   "{{ . }}",

@@ -6,7 +6,10 @@
 // until ctx is canceled) and — for the three that deliver a message — a
 // byte-identical send-path reliability sequence ([Fire]). flynode owns that
 // scaffolding once so each daemon carries only what actually differs: its
-// workers, its periodics, and its per-window delivery policy.
+// workers, its periodics, and its per-window delivery policy. [ReportFallback]
+// is the shared post-send report a scheduled worker hands a delivered
+// deterministic fallback to: a warn log line, a compose_fallback job-run marker,
+// and a once-a-day best-effort user-channel ping.
 //
 // It is delivery-transport- and model-free by construction: it names no
 // notifier, provider, or agent type — send, verify, compose, and alert are

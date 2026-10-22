@@ -172,8 +172,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
 	})
 	if err != nil {
 		if provider.IsOutage(err) {
-			r.Fallback = true
-			return r, nil
+			return deterministicFallback(r, composekit.FallbackProviderOutage, err), nil
 		}
 		return Report{}, fmt.Errorf("witnessreport: compose narrative: %w", err)
 	}
@@ -182,8 +181,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
 	if slots.empty() {
 		// The model returned nothing usable — deliver the deterministic report
 		// rather than an empty narrative.
-		r.Fallback = true
-		return r, nil
+		return deterministicFallback(r, composekit.FallbackUnusableReply, nil), nil
 	}
 
 	// 5. witness-safe output scan (defense-in-depth behind the structural input
@@ -193,8 +191,7 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
 	// flagged prose.
 	if !witnessSafe(slots.Faults, slots.Progress, slots.Narrative, strings.Join(slots.Asks, "\n")) {
 		r.SafetyTripped = true
-		r.Fallback = true
-		return r, nil
+		return deterministicFallback(r, composekit.FallbackSafetyTripped, nil), nil
 	}
 
 	// 6. Accept the composed prose. Refined asks are taken only when the week
@@ -209,6 +206,22 @@ func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
 	}
 	r.UsedLLM = true
 	return r, nil
+}
+
+// deterministicFallback marks the deterministic metrics-only report a fallback
+// — the numbers land, only the warmth is lost, never the report. It records why
+// on the report: reason is the composekit fallback reason, and cause (the
+// provider error on an outage, nil otherwise) supplies FallbackError and the
+// backend-reported FallbackDetail. Nothing is logged here — compose stays
+// log-free.
+func deterministicFallback(r Report, reason string, cause error) Report {
+	r.Fallback = true
+	r.FallbackReason = reason
+	if cause != nil {
+		r.FallbackError = cause.Error()
+		r.FallbackDetail = provider.ReportedReason(cause)
+	}
+	return r
 }
 
 // signalGrounded reports whether the deterministic asks were drafted from a real

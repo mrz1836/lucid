@@ -73,6 +73,17 @@ type Report struct {
 	UsedLLM       bool `json:"used_llm,omitempty"`
 	Fallback      bool `json:"fallback,omitempty"`
 	SafetyTripped bool `json:"safety_tripped,omitempty"`
+
+	// Fallback diagnostics — why the deterministic path fired, for the scheduled
+	// worker's log line, job-run marker, and ping only. FallbackReason is the
+	// composekit fallback reason (provider_outage / unusable_reply /
+	// safety_tripped, "" on a model-composed report); FallbackError is the
+	// provider error string behind an outage; FallbackDetail is the backend's
+	// own reported reason (e.g. the CLI's "Not logged in"). They are never
+	// serialized, so `lucid witness report --json` keeps its exact shape.
+	FallbackReason string `json:"-"`
+	FallbackError  string `json:"-"`
+	FallbackDetail string `json:"-"`
 }
 
 // NumbersReader is the honest-numbers seam: the derived metrics projection and

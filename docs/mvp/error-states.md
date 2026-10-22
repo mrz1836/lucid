@@ -182,6 +182,8 @@ non-zero exit.
 The companion's full degrade layering — provider-unreachable fallback,
 host-asleep catch-up, idempotency, read-back, and the loud total-miss alert —
 lives in [`../usage/companion.md`](../usage/companion.md) §"When things go wrong".
+A scheduled send that takes the provider-unreachable or unusable-reply fallback
+is no longer quiet: it is logged, marked, and pinged (rows Cf-1–Cf-6 below).
 The rows below record the degrade paths this page owns: the ones that keep an
 enrichment or a slot from failing the life-critical daily send. The dividing
 principle is deterministic — **enrichment reads degrade quietly; the prompt,
@@ -192,9 +194,30 @@ half-built.
 |---|---------|-----------------|----------------------|------------------|----------|
 | C-1 | A routine path (`morning_routine` / `night_routine`) is set but missing or unreadable | Non-fatal: omit the routine grounding from the compose context and record the miss; the message still composes and sends. Enrichment never kills the daily send. | (none — the message sends without the routine grounding) | None. | Fix or clear the routine path; the next window picks it up. |
 | C-2 | The recent-observation read fails | Same non-fatal degrade: omit the affected context sections and compose from the status panel + slots. A dry run surfaces the omission so it is never invisible. | (none) | None. | Transient reads recover next window; a persistent failure surfaces in `scheduler status`. |
-| C-3 | Model reply is missing the slot delimiters, or returns no usable text | Tolerant parse: a reply with prose but no `%%INTERPRETATION%%` delimiter becomes the whole interpretation slot with no actions; a reply with no usable text takes the deterministic-scaffold fallback (panel + sections + deterministic interpretation + deterministic action). Still a valid, well-formed scaffold. | The rendered scaffold. | None (or the per-window receipt on delivery). | (none — the fallback is the recovery) |
+| C-3 | Model reply is missing the slot delimiters, or returns no usable text | Tolerant parse: a reply with prose but no `%%INTERPRETATION%%` delimiter becomes the whole interpretation slot with no actions; a reply with no usable text takes the deterministic-scaffold fallback (panel + sections + deterministic interpretation + deterministic action). Still a valid, well-formed scaffold. A scheduled send is logged, marked, and pinged (Cf-2). | The rendered scaffold (plus, on a scheduled send, the once-a-day fallback note — Cf-2). | None (or the per-window receipt on delivery). | (none — the fallback is the recovery) |
 | C-4 | Ledger context older than the staleness threshold | Never silently mixed in: every Ledger-derived line carries an "as logged &lt;date&gt;" stamp, and a section whose newest event is older than the threshold (default 2 days) gets a `stale` flag on its meta. Live Engine numbers are always current and carry no stamp. | The scaffold with the freshness label. | None. | (none — labeling is the designed behavior) |
 | C-5 | A prompt file, the tripwire verdict, or a live-numbers read fails | Loud, unlike the enrichment reads above: the compose returns an error rather than an empty or half-built send, so the total-miss alert path (companion.md) fires. | The loud total-miss alert. | None. | Restore the file / projection; rerun the window or wait for the next fire. |
+
+### Scheduled compose fallbacks (companion, workout slot, weekly witness report)
+
+Every scheduled message — the companion's morning and night windows, the
+workout slot, and the weekly witness report — composes with a deterministic
+fallback, so a model miss never skips a send. What keeps that fallback from being
+a silent quality drop is the rows below: every fallback send is **logged and
+marked**, and the outage and unusable-reply fallbacks also send a short note to
+your user channel, **at most once per local day across all scheduled messages**.
+The run still counts as delivered (outcome `success`), so nothing retries or
+re-sends. The on-demand verbs (`lucid companion fire`, `lucid workout`,
+`lucid witness report`) keep their printed fallback note and never ping.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| Cf-1 | Provider outage (timeout / unavailable) at a scheduled compose | Deterministic send, then a `compose fell back` warn line in the supervised daemon log (daemon, reason, provider error) and a `compose_fallback` marker on the run's job record (reason `provider_outage`, the provider error). Then the once-a-day user-channel note, fired after the send's receipt is written so it can never delay or unwind the send. | The deterministic message, then the note naming the message and, when the CLI gave one, its reason (e.g. *Not logged in · Please run /login*). | The run's job record carries the marker; the ping receipt (Cf-4). | Restore model access (the CLI's own reason names what is missing); the next compose picks it up. |
+| Cf-2 | Unusable model reply (no usable text) at a scheduled compose | Same as Cf-1, with reason `unusable_reply` and an empty provider error. | The deterministic message, then the note naming the message. | Same as Cf-1. | (none — a later compose with a usable reply is the recovery) |
+| Cf-3 | Witness-safe scan tripped on the weekly report | Metrics-only report delivered; logged and marked `compose_fallback` with reason `safety_tripped`. The existing review alert stays the only alert — no second ping. | The metrics-only report, then the single review alert in your user channel. | The run's job record carries the marker. | Review why the scan fired; see [`../usage/witness-report.md`](../usage/witness-report.md) §"When things go wrong". |
+| Cf-4 | A later Cf-1 / Cf-2 fallback on the same local day (any scheduled message) | Logged and marked, not pinged — the day's one note already went out. | The deterministic message only. | `engine/compose_fallback/ping.json`, the once-a-day ping receipt (written only through the binary). | (none — the next local day pings again if the outage persists) |
+| Cf-5 | The ping receipt is unreadable or unwritable | A warn line in the supervised daemon log; the ping fails open (sends anyway). The delivered send is unaffected. | The deterministic message and the note (possibly one extra that day). | The receipt may be left stale. | Restore read/write access under `~/.lucid/engine/`; the next fallback rewrites it. |
+| Cf-6 | The alert or ping send itself fails | A warn line `alert send failed` (with the error) in the supervised daemon log; the delivered send stands and the original failure is never masked. | (none — the note did not land) | None. | Restore the user channel; the log line is the record. |
 
 ### Workout module (config-gated — Mirror-side, model-allowed)
 
@@ -213,7 +236,7 @@ honors the drop first (§0, P10).
 | W-3 | Workout extraction returns malformed fields | Retry once stricter, then degrade: store the drop as a `workout` event with `payload.parse: "partial"` and the verbatim note. | "Logged." (with the id) | Event written (partial). | The structured `lucid workout log` flag form is the precise path. |
 | W-4 | Out-of-range scale (`rpe` / `pain` / `soreness` beyond bounds) | Partial path — stored with the invoked kind, never silently clamped. | (ack, id) | Event written (partial). | (none — automatic) |
 | W-5 | Disabled kind used (`workout` / `body_state` not in `kinds_enabled`) | Reject with the enable hint, exactly like every observation kind. | "`workout` isn't enabled — add it to observations/config.json." | None. | Enable the kind. |
-| W-6 | Provider unreachable at the slot / on-demand | Deterministic `Render` of the already-decided recommendation; only the model's warmth is lost — the pick and the safety line stand. | The deterministic scaffold. | None (or the slot receipt on delivery). | (none — the fallback is the recovery) |
+| W-6 | Provider unreachable at the slot / on-demand | Deterministic `Render` of the already-decided recommendation; only the model's warmth is lost — the pick and the safety line stand. At the scheduled slot the fallback is logged, marked, and pinged (Cf-1 / Cf-2); on demand it is printed with its fallback note. | The deterministic scaffold (plus, at the slot, the once-a-day fallback note — Cf-1). | None (or the slot receipt on delivery). | (none — the fallback is the recovery) |
 | W-7 | Slot double-fire on a retry | Receipt idempotency (`ReadCompanionReceipt("workout")`): the retry reads the receipt's message back and acts on the verdict — **still present** → skip; **provably gone** (a clean 404) → send a fresh one so the slot is never silently empty; **indeterminate** (a transient 5xx/429/blip, presence unknown) → do *not* re-post, alert and let the supervised retry re-probe. Re-posting on an unknown would risk a real duplicate. | (none on a skip; the miss/indeterminate alert otherwise) | Per-window receipt. | (none — automatic) |
 | W-7a | A slot delivered and verified but the receipt could not be written | Loud: return the error (fails the job into the supervised log) **and** fire a best-effort alert — this is the one failure that leaves the delivery invisible to the idempotency guard, so a retry could re-post it. The guarantee is *never a silent miss*, not exactly-once: the residual re-post is bounded (at most one extra) and always announced. | The receipt-write alert. | The message is delivered; no receipt was written. | Restore write access; the next fire reconciles. A bounded double-post is the accepted cost of never-a-silent-miss. |
 | W-8 | Host asleep past the slot cutoff | Bounded catch-up with a `(late)` note within the window; past the cutoff the send is skipped and the miss is alerted — never a stale midday message hours late. | The late-noted message, or the miss alert. | None. | (none — designed) |

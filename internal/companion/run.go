@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	flywheel "github.com/mrz1836/go-flywheel"
@@ -117,6 +118,10 @@ type Runner struct {
 	compose MessageComposer
 	deliver Deliverer
 	store   *storage.Adapter
+	// log receives the runner's own warn lines (a failed alert). It is nil in
+	// production — [Runner.logger] then uses slog.Default(), which lands in the
+	// supervised daemon log — and injected by tests to capture the lines.
+	log *slog.Logger
 }
 
 // NewRunner wires a Runner over the compose dependencies, the delivery
@@ -130,16 +135,21 @@ func NewRunner(d Deps, deliver Deliverer, store *storage.Adapter) *Runner {
 // fire, Late), or Skipped (SkipReason "already-delivered" for the idempotent
 // path, "past-cutoff" for the stale-window refusal). Fallback records the
 // deterministic path fired (the provider was unreachable — only warmth was
-// lost); Text carries the delivered body for logging.
+// lost); Text carries the delivered body for logging. FallbackReason,
+// FallbackError, and FallbackDetail carry the composer's record of why a
+// fallback fired (see [Result]) up to the scheduled worker, which reports it.
 type Outcome struct {
-	Mode       Mode
-	Delivered  bool
-	MessageID  string
-	Late       bool
-	Fallback   bool
-	Skipped    bool
-	SkipReason string
-	Text       string
+	Mode           Mode
+	Delivered      bool
+	MessageID      string
+	Late           bool
+	Fallback       bool
+	Skipped        bool
+	SkipReason     string
+	Text           string
+	FallbackReason string
+	FallbackError  string
+	FallbackDetail string
 }
 
 // Fire composes and delivers one window's message at `now`, honoring the whole
@@ -259,15 +269,62 @@ func (r *Runner) fire(ctx context.Context, mode Mode, now time.Time, note string
 	}
 
 	return Outcome{
-		Mode:       mode,
-		Delivered:  fired.Delivered,
-		MessageID:  fired.MessageID,
-		Late:       fired.Late,
-		Skipped:    fired.Skipped,
-		SkipReason: fired.SkipReason,
-		Fallback:   fired.Payload.Fallback,
-		Text:       fired.Payload.Text,
+		Mode:           mode,
+		Delivered:      fired.Delivered,
+		MessageID:      fired.MessageID,
+		Late:           fired.Late,
+		Skipped:        fired.Skipped,
+		SkipReason:     fired.SkipReason,
+		Fallback:       fired.Payload.Fallback,
+		Text:           fired.Payload.Text,
+		FallbackReason: fired.Payload.FallbackReason,
+		FallbackError:  fired.Payload.FallbackError,
+		FallbackDetail: fired.Payload.FallbackDetail,
 	}, nil
+}
+
+// reportFallback makes a delivered scheduled fallback loud. It runs only in the
+// scheduled workers, after Fire / FireBackstop returned delivered with its
+// receipt persisted — never inside the shared fire path — so the on-demand
+// `lucid companion fire` keeps its printed note and never pings, and nothing
+// here can delay, fail, or unwind the send.
+//
+// A model-composed send or a skipped fire returns the empty result (no
+// compose_fallback marker). A delivered fallback is handed to
+// [flynode.ReportFallback] as daemon companion-<mode>: it always logs the warn
+// line and returns the marker, and pings the user channel once per local day
+// across every daemon, claimed through the store's ping receipt.
+func (r *Runner) reportFallback(ctx context.Context, logger *slog.Logger, out Outcome, mode Mode, now time.Time) flywheel.Result {
+	if !out.Delivered || !out.Fallback {
+		return flywheel.Result{}
+	}
+	return flynode.ReportFallback(ctx, logger, flynode.FallbackReport{
+		Daemon: "companion-" + string(mode),
+		Reason: out.FallbackReason,
+		Error:  out.FallbackError,
+		Day:    engine.DateString(engine.DateOf(now)),
+		Ping:   composekit.FallbackPing(string(mode)+" companion", out.FallbackReason, out.FallbackDetail),
+		Claim: func(fr flynode.FallbackReport) (bool, error) {
+			return r.store.ClaimComposeFallbackPing(storage.ComposeFallbackPing{
+				Date:     fr.Day,
+				Daemon:   fr.Daemon,
+				Reason:   fr.Reason,
+				PingedAt: now.Format(time.RFC3339),
+			})
+		},
+		Alert: func(text string) { r.alert(ctx, text) },
+	})
+}
+
+// loggerOf returns the attempt's job logger (flywheel's, carrying job_id / kind
+// / run_id), or nil when the job or its logger is unset — which
+// [flynode.ReportFallback] resolves to slog.Default(), so a bare job never
+// panics.
+func loggerOf(job *flywheel.Job[companionArgs]) *slog.Logger {
+	if job == nil {
+		return nil
+	}
+	return job.Logger
 }
 
 // alertTimeout bounds a detached best-effort alert: it sits above the notifier's
@@ -280,6 +337,8 @@ const alertTimeout = 30 * time.Second
 // deliberately best-effort: if the channel itself is unreachable the returned
 // error from [Runner.Fire] is the loud signal (it fails the job and lands in the
 // supervised daemon log), and a failed alert must not mask that original error.
+// A failed alert is itself logged at warn ("alert send failed") rather than
+// silently dropped, and still never replaces the error the caller returns.
 //
 // The alert runs on a context DETACHED from the run's cancellation
 // (context.WithoutCancel): a stop signal mid-send (error-states Sc-6) cancels
@@ -290,7 +349,18 @@ const alertTimeout = 30 * time.Second
 func (r *Runner) alert(ctx context.Context, text string) {
 	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), alertTimeout)
 	defer cancel()
-	_ = r.deliver.Send(actx, engine.ChannelUser, text)
+	if err := r.deliver.Send(actx, engine.ChannelUser, text); err != nil {
+		r.logger().WarnContext(ctx, "alert send failed", "daemon", "companion", "error", err)
+	}
+}
+
+// logger returns the runner's injected logger, or slog.Default() when none was
+// set (production).
+func (r *Runner) logger() *slog.Logger {
+	if r.log != nil {
+		return r.log
+	}
+	return slog.Default()
 }
 
 // window is the per-mode scheduling metadata: the periodic identity, the
@@ -364,12 +434,15 @@ type morningWorker struct {
 // Kind names the worker dispatched for kindMorning.
 func (morningWorker) Kind() string { return kindMorning }
 
-// Work composes and delivers the morning companion for `now`.
-func (w morningWorker) Work(ctx context.Context, _ *flywheel.Job[companionArgs]) (flywheel.Result, error) {
-	if _, err := w.r.Fire(ctx, ModeMorning, w.clock.Now(ctx)); err != nil {
+// Work composes and delivers the morning companion for `now`, then reports a
+// delivered fallback (log, job-run marker, deduped ping).
+func (w morningWorker) Work(ctx context.Context, job *flywheel.Job[companionArgs]) (flywheel.Result, error) {
+	now := w.clock.Now(ctx)
+	out, err := w.r.Fire(ctx, ModeMorning, now)
+	if err != nil {
 		return flywheel.Result{}, err
 	}
-	return flywheel.Result{}, nil
+	return w.r.reportFallback(ctx, loggerOf(job), out, ModeMorning, now), nil
 }
 
 // nightWorker fires the night companion.
@@ -381,12 +454,15 @@ type nightWorker struct {
 // Kind names the worker dispatched for kindNight.
 func (nightWorker) Kind() string { return kindNight }
 
-// Work composes and delivers the night companion for `now`.
-func (w nightWorker) Work(ctx context.Context, _ *flywheel.Job[companionArgs]) (flywheel.Result, error) {
-	if _, err := w.r.Fire(ctx, ModeNight, w.clock.Now(ctx)); err != nil {
+// Work composes and delivers the night companion for `now`, then reports a
+// delivered fallback (log, job-run marker, deduped ping).
+func (w nightWorker) Work(ctx context.Context, job *flywheel.Job[companionArgs]) (flywheel.Result, error) {
+	now := w.clock.Now(ctx)
+	out, err := w.r.Fire(ctx, ModeNight, now)
+	if err != nil {
 		return flywheel.Result{}, err
 	}
-	return flywheel.Result{}, nil
+	return w.r.reportFallback(ctx, loggerOf(job), out, ModeNight, now), nil
 }
 
 // morningBackstopWorker re-fires the morning companion an hour after its mark,
@@ -401,8 +477,9 @@ type morningBackstopWorker struct {
 func (morningBackstopWorker) Kind() string { return kindMorningBackstop }
 
 // Work re-runs the morning card unless the window has gone stale, in which case
-// it stands down without a word.
-func (w morningBackstopWorker) Work(ctx context.Context, _ *flywheel.Job[companionArgs]) (flywheel.Result, error) {
+// it stands down without a word. A delivered fallback is reported as the
+// morning companion's (daemon companion-morning) — it is the same card.
+func (w morningBackstopWorker) Work(ctx context.Context, job *flywheel.Job[companionArgs]) (flywheel.Result, error) {
 	now := w.clock.Now(ctx)
 	cutoffAt, err := atClock(now, morningCutoff)
 	if err != nil {
@@ -416,10 +493,11 @@ func (w morningBackstopWorker) Work(ctx context.Context, _ *flywheel.Job[compani
 	if !now.Before(cutoffAt) {
 		return flywheel.Result{}, nil
 	}
-	if _, err := w.r.FireBackstop(ctx, now); err != nil {
+	out, err := w.r.FireBackstop(ctx, now)
+	if err != nil {
 		return flywheel.Result{}, err
 	}
-	return flywheel.Result{}, nil
+	return w.r.reportFallback(ctx, loggerOf(job), out, ModeMorning, now), nil
 }
 
 // Run opens the disposable job DB, migrates it, registers the morning, night,

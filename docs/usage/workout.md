@@ -317,7 +317,10 @@ pick, model phrasing, deterministic fallback — and delivers one idempotent,
 read-back-verified message with the same never-silent degrade layering the
 companion uses. It never inherits the chain marks; its time is your choice. See
 [`../mvp/workout-module.md`](../mvp/workout-module.md) §"Surfaces" for the delivery
-contract.
+contract. A scheduled slot that falls back to the deterministic card (provider
+unreachable, or no usable reply) is logged, marked `compose_fallback` on its job
+record, and pinged to your user channel at most once a day, exactly like the
+companion — see [`companion.md`](companion.md#when-things-go-wrong).
 
 ## Operational notes
 

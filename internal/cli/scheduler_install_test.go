@@ -236,6 +236,29 @@ func TestSchedulerInstall_OverrideFlags(t *testing.T) {
 	assert.Contains(t, p.Supervise, "client_machine_index      = 3")
 }
 
+// TestSuperviseParamsFor_KeepsKeychainIdentityEnv: the install path layers its
+// resolved inputs onto the deploy supervise defaults without overriding the
+// env_passthrough list, so fresh installs and re-renders inherit USER and
+// LOGNAME — the identity the `claude` CLI needs to find its keychain credential.
+func TestSuperviseParamsFor_KeepsKeychainIdentityEnv(t *testing.T) {
+	p := superviseParamsFor(installInputs{
+		userHome:     "/usr/local/var/lucid",
+		ledgerHome:   "/usr/local/var/lucid",
+		lucidBin:     "/usr/local/bin/lucid",
+		hushBin:      "/usr/local/bin/hush",
+		hushPresent:  true,
+		schedulerDB:  "/usr/local/var/lucid/flywheel.db",
+		hushServer:   "http://10.0.0.1:7000/h/x",
+		machineIndex: 2,
+	})
+
+	assert.Contains(t, p.EnvPassthrough, "USER")
+	assert.Contains(t, p.EnvPassthrough, "LOGNAME")
+	assert.Equal(t, deploy.DefaultSuperviseParams().EnvPassthrough, p.EnvPassthrough,
+		"the install path never overrides the default passthrough list")
+	assert.Equal(t, []string{"/usr/local/bin/lucid", "scheduler", "run"}, p.ChildCommand)
+}
+
 // TestReportApply_Renders drives the post-apply success report directly (its
 // real caller runs only on a macOS host install), covering the host-probe
 // rendering on any platform.
