@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/router"
@@ -45,6 +47,10 @@ is ever exposed.`,
 				To:      to,
 			}
 			res, err := r.Stats(opts, clockNow())
+			if errors.Is(err, router.ErrStatsRangeRejected) {
+				// A window the flags cannot describe is the caller's to fix.
+				return newUsageError(cmd, err)
+			}
 			if err != nil {
 				return err
 			}

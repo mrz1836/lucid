@@ -273,7 +273,8 @@ structured shape and write verbs emit a receipt (`log`, `closeout`, `obs`,
 `reframe add`, and `focus add` / `retire` emit a bare `{receipt_id,
 logical_date}` object; `mode` emits `{mode}`) — and `-h` / `--help` works at
 every level. Exit codes are stable: `0` success, `1` runtime error or breached
-gate, `2` usage / flag-parse error.
+gate, `2` usage / flag-parse error. Usage errors print on stderr as
+`<command path>: <reason>` plus a `Run '<command path> --help' for usage.` hint.
 
 <br/>
 

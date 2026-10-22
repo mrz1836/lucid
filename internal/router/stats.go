@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -9,6 +10,13 @@ import (
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
 )
+
+// ErrStatsRangeRejected marks a `lucid stats` window the flags cannot describe:
+// --last combined with --from/--to, a non-positive --last, an unparseable date,
+// or a --from after its --to. Every rejection wraps it, so the CLI can type the
+// error as a usage error with errors.Is; its text keeps cobra's familiar
+// "invalid argument" wording at the front of each message.
+var ErrStatsRangeRejected = errors.New("invalid argument")
 
 // StatsOptions carries the resolved `lucid stats` flag intent. The CLI fills it
 // from the cobra flags plus their Changed bits (LastSet is `--last`'s Changed
@@ -170,21 +178,21 @@ func (r *Router) Stats(opts StatsOptions, now time.Time) (StatsResult, error) {
 // with `--to` defaulting to today and `--from` defaulting to `--to` (a single
 // day). `--last` is mutually exclusive with `--from/--to`. "today" resolves
 // through the same rollover the day view uses (observations.LogicalBaseDate),
-// so stats' today is byte-identical to `lucid day`'s. Every rejection carries
-// "invalid argument" so the CLI maps it to the usage exit code.
+// so stats' today is byte-identical to `lucid day`'s. Every rejection wraps
+// [ErrStatsRangeRejected], which the CLI types as a usage error.
 func resolveStatsRange(opts StatsOptions, now time.Time) (from, to time.Time, err error) {
 	loc := now.Location()
 	today := observations.LogicalBaseDate(now, observations.DefaultRolloverMin)
 	hasRange := opts.From != "" || opts.To != ""
 
 	if opts.LastSet && hasRange {
-		return time.Time{}, time.Time{}, fmt.Errorf("invalid argument: --last cannot be combined with --from/--to")
+		return time.Time{}, time.Time{}, fmt.Errorf("%w: --last cannot be combined with --from/--to", ErrStatsRangeRejected)
 	}
 
 	switch {
 	case opts.LastSet:
 		if opts.Last < 1 {
-			return time.Time{}, time.Time{}, fmt.Errorf("invalid argument: --last must be a positive number of days")
+			return time.Time{}, time.Time{}, fmt.Errorf("%w: --last must be a positive number of days", ErrStatsRangeRejected)
 		}
 		to = today
 		from = engine.AddDays(today, -(opts.Last - 1))
@@ -192,7 +200,7 @@ func resolveStatsRange(opts StatsOptions, now time.Time) (from, to time.Time, er
 		if opts.To != "" {
 			to, err = observations.ParseDate(opts.To, loc)
 			if err != nil {
-				return time.Time{}, time.Time{}, fmt.Errorf("invalid argument: --to %q is not a YYYY-MM-DD date", opts.To)
+				return time.Time{}, time.Time{}, fmt.Errorf("%w: --to %q is not a YYYY-MM-DD date", ErrStatsRangeRejected, opts.To)
 			}
 		} else {
 			to = today
@@ -200,13 +208,13 @@ func resolveStatsRange(opts StatsOptions, now time.Time) (from, to time.Time, er
 		if opts.From != "" {
 			from, err = observations.ParseDate(opts.From, loc)
 			if err != nil {
-				return time.Time{}, time.Time{}, fmt.Errorf("invalid argument: --from %q is not a YYYY-MM-DD date", opts.From)
+				return time.Time{}, time.Time{}, fmt.Errorf("%w: --from %q is not a YYYY-MM-DD date", ErrStatsRangeRejected, opts.From)
 			}
 		} else {
 			from = to
 		}
 		if engine.DateOf(from).After(engine.DateOf(to)) {
-			return time.Time{}, time.Time{}, fmt.Errorf("invalid argument: --from %s is after --to %s",
+			return time.Time{}, time.Time{}, fmt.Errorf("%w: --from %s is after --to %s", ErrStatsRangeRejected,
 				engine.DateString(from), engine.DateString(to))
 		}
 	default:

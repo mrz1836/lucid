@@ -42,16 +42,13 @@ type BuildInfo struct {
 }
 
 // Execute builds the root command, dispatches the subcommand matching
-// os.Args, and returns the resolved process exit code. The caller
+// os.Args, and returns the resolved process exit code. It delegates to the
+// shared run seam, which renders a usage error once on stderr. The caller
 // (cmd/lucid/main.go) owns os.Exit; Execute performs none so tests can
 // exercise it directly.
 func Execute(ctx context.Context, bi BuildInfo) int {
-	root := newRootCmd(bi)
-	root.SetArgs(os.Args[1:])
-	if err := root.ExecuteContext(ctx); err != nil {
-		return exitCodeForError(err)
-	}
-	return ExitOK
+	code, _ := run(ctx, newRootCmd(bi), os.Args[1:])
+	return code
 }
 
 // ExitCoder is an error that carries its own process exit code. A command whose
@@ -67,9 +64,10 @@ type ExitCoder interface {
 
 // exitCodeForError maps a returned error to a process exit code. An error that
 // carries its own code (an [ExitCoder], e.g. the `scheduler status` verdict) wins
-// so a graded command owns its tiered exit; flag/usage errors from cobra map to
-// [ExitUsage]; everything else (a runtime failure, or a breached `validate` gate)
-// maps to [ExitErr].
+// so a graded command owns its tiered exit; a usage error maps to [ExitUsage],
+// found by its type and never by its text, so a runtime failure whose message
+// happens to read like misuse is not mistaken for one; everything else (a
+// runtime failure, or a breached `validate` gate) maps to [ExitErr].
 func exitCodeForError(err error) int {
 	if err == nil {
 		return ExitOK
@@ -78,7 +76,8 @@ func exitCodeForError(err error) int {
 	if errors.As(err, &coder) {
 		return coder.ExitCode()
 	}
-	if isUsageError(err) {
+	var ue *usageError
+	if errors.As(err, &ue) {
 		return ExitUsage
 	}
 	return ExitErr
@@ -99,6 +98,13 @@ daily practice with real accountability), both writing one user-owned,
 append-only Ledger under ~/.lucid/.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Same idiom as `secret`: a bare `lucid` prints help and exits 0, while
+		// a stray word is rejected here as an unknown command so it is typed
+		// and reported like any other usage error.
+		Args: rootArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
 	root.PersistentFlags().Bool(jsonFlag, false, "Emit machine-readable JSON output where supported")
 
@@ -156,28 +162,9 @@ append-only Ledger under ~/.lucid/.`,
 	// resolved build version tells a real release apart from a development build.
 	attachUpdateCommand(root, newUpdateConfig(bi.Version))
 
-	return root
-}
+	// Type usage errors across the finished tree, including the library-built
+	// update command, so the root can render each one once with a --help hint.
+	installUsageErrors(root)
 
-// isUsageError reports whether err looks like a cobra flag-parse or
-// unknown-command error, which should map to [ExitUsage] rather than a
-// generic runtime failure.
-func isUsageError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	// The "accepts" / "requires at least" fragments catch cobra's positional-arg
-	// validators (ExactArgs, MinimumNArgs, MaximumNArgs, RangeArgs), whose
-	// messages read "accepts N arg(s), received M" / "requires at least N
-	// arg(s), only received M" — a bare `lucid storm` is a usage error (exit 2),
-	// not a runtime failure. "none of the others can be" catches
-	// MarkFlagsMutuallyExclusive (`reflect week --week --days 3`): passing an
-	// impossible flag combination is a misuse, not a failed run.
-	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand", "invalid argument", "flag needs an argument", "required flag", "accepts", "requires at least", "none of the others can be"} {
-		if containsFold(msg, p) {
-			return true
-		}
-	}
-	return false
+	return root
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -26,16 +27,16 @@ func TestExecute_DispatchesOSArgs(t *testing.T) {
 	assert.Equal(t, ExitUsage, Execute(context.Background(), BuildInfo{Version: "dev"}))
 }
 
-// runRoot executes the full cobra tree with args, capturing stdout and
-// stderr. It returns the captured streams and the command error.
+// runRoot executes the full cobra tree with args through the same run seam
+// Execute uses, capturing stdout and stderr, so a usage error renders exactly
+// as a user sees it. It returns the captured streams and the command error.
 func runRoot(t *testing.T, bi BuildInfo, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	root := newRootCmd(bi)
 	var out, errBuf bytes.Buffer
 	root.SetOut(&out)
 	root.SetErr(&errBuf)
-	root.SetArgs(args)
-	err = root.ExecuteContext(context.Background())
+	_, err = run(context.Background(), root, args)
 	return out.String(), errBuf.String(), err
 }
 
@@ -86,29 +87,20 @@ func TestExitCodeForError(t *testing.T) {
 	assert.Equal(t, ExitOK, exitCodeForError(nil))
 	assert.Equal(t, ExitErr, exitCodeForError(errValidationFailed))
 	assert.Equal(t, ExitErr, exitCodeForError(errors.New("boom")))
-	assert.Equal(t, ExitUsage, exitCodeForError(errors.New("unknown flag: --nope")))
-	assert.Equal(t, ExitUsage, exitCodeForError(errors.New("unknown command \"nope\" for \"lucid\"")))
-}
-
-func TestIsUsageError(t *testing.T) {
-	assert.False(t, isUsageError(nil))
-	assert.False(t, isUsageError(errors.New("some runtime failure")))
-	assert.True(t, isUsageError(errors.New("required flag(s) \"x\" not set")))
-	assert.True(t, isUsageError(errors.New("flag needs an argument: --channel")))
-	// cobra positional-arg validator messages map to a usage error.
-	assert.True(t, isUsageError(errors.New("accepts 1 arg(s), received 0")))
-	assert.True(t, isUsageError(errors.New("requires at least 1 arg(s), only received 0")))
-	// cobra's MarkFlagsMutuallyExclusive message — an impossible flag
-	// combination is a misuse, not a failed run.
-	assert.True(t, isUsageError(errors.New(
-		"if any flags in the group [week since days] are set none of the others can be; [days week] were all set",
-	)))
+	// Text alone never classifies: an untyped error that reads like misuse is a
+	// runtime failure, and only a typed usage error maps to ExitUsage — directly
+	// or wrapped.
+	assert.Equal(t, ExitErr, exitCodeForError(errors.New("unknown flag: --nope")))
+	usage := newUsageError(nil, errors.New("unknown flag: --nope"))
+	assert.Equal(t, ExitUsage, exitCodeForError(usage))
+	assert.Equal(t, ExitUsage, exitCodeForError(fmt.Errorf("x: %w", usage)))
 }
 
 func TestUnknownCommand_IsUsageError(t *testing.T) {
-	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "does-not-exist")
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "does-not-exist")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assertUsageErrorOnce(t, stderr, "lucid")
 }
 
 func TestRootNoArgs_PrintsHelpNoError(t *testing.T) {
@@ -123,12 +115,6 @@ func TestWriteJSON(t *testing.T) {
 	require.NoError(t, writeJSON(&buf, map[string]int{"a": 1}))
 	assert.JSONEq(t, `{"a":1}`, buf.String())
 	assert.True(t, strings.HasSuffix(buf.String(), "\n"))
-}
-
-func TestContainsFold(t *testing.T) {
-	assert.True(t, containsFold("Unknown Flag", "unknown flag"))
-	assert.True(t, containsFold("abc", "ABC"))
-	assert.False(t, containsFold("abc", "xyz"))
 }
 
 // Guard: newRootCmd builds fresh state each call (no shared mutable

@@ -40,7 +40,25 @@ this reference stays the precise baseline.
   |------|---------|
   | `0` | success |
   | `1` | runtime error, a breached gate (`validate` found errors, `mode` was rejected), or a deferred choice (`gratitude add` in the ambiguous band wrote nothing and returned a suggestion, or its question was canceled) |
-  | `2` | usage / flag-parse error (unknown command, bad flag) |
+  | `2` | usage error — an unknown command or flag, a missing or extra argument, a missing required flag, conflicting flags, or a flag value the command rejects (see Usage errors) |
+
+- **Usage errors** print on stderr — never stdout, even under `--json` — as one
+  line naming the command, followed by a pointer to its help:
+  `<command path>: <reason>` followed by `Run '<command path> --help' for usage.`
+  The error is printed exactly once.
+
+  ```
+  lucid status: unknown flag: --bogus
+  Run 'lucid status --help' for usage.
+  ```
+
+  The path is the command's canonical name, so an alias reports under the name
+  it stands for: `lucid upgrade --bogus` reports as `lucid update`. A top-level
+  error reads `lucid: <reason>` with `Run 'lucid --help' for usage.`, and an
+  unknown command adds cobra's "Did you mean this?" suggestions when there are
+  any. Every usage error exits `2` — including a flag value a command rejects
+  itself, such as `stats --last 0`, `reflect week --since nope`, or
+  `structure --until` without `--since`.
 
 - **Ledger location** is `~/.lucid/`, overridable with the `LUCID_HOME`
   environment variable (see [Environment variables](#environment-variables)).
@@ -1195,8 +1213,9 @@ rollover basis `lucid day` uses:
 
 `--last` and `--from`/`--to` are **mutually exclusive** — passing both is a usage
 error. A malformed `--from`/`--to`, a `from` later than `to`, or `--last < 1` is
-likewise a usage error (exit `2`). A read never breaches a gate, so a resolved
-query exits `0`.
+likewise a usage error (exit `2`), and the reason is reported on stderr as
+`lucid stats: invalid argument: …` plus the `--help` hint. A read never
+breaches a gate, so a resolved query exits `0`.
 
 **Output fields.** Both surfaces report the resolved date range, the logical-day
 basis, `raw_entries`, `observations`, `observations_by_kind`, `total_events`
@@ -1414,7 +1433,9 @@ available as `lucid upgrade`.
 When an update fails (a release lookup, download or checksum failure, a refused
 install, or an install directory that isn't writable), `update` prints one line
 to stderr, `lucid: update: <reason>`, carrying the updater's own message, and
-exits 1. A usage error (an unknown flag or a stray argument) exits 2.
+exits 1. A usage error (an unknown flag or a stray argument) exits 2 and prints
+the standard [usage-error](#global-conventions) line and hint
+(`lucid update: unknown flag: --bogus`), never a `lucid: update:` line.
 
 | Flag | Effect |
 |------|--------|
@@ -2439,7 +2460,9 @@ reflection, frames one calm hypothesis through your active lens, and creates no
 record. The window is a **catch-up** window, not a fixed calendar week: a skipped
 week is read on the next run rather than dropped. The three range flags are
 mutually exclusive — `--week` restores the ISO-week-only behavior, `--since` runs
-from an explicit day, and `--days` covers the last `N` logical days. The default
+from an explicit day, and `--days` covers the last `N` logical days. An
+unparseable `--since` is a usage error (exit `2`), reported on stderr as
+`lucid reflect week: invalid argument …` plus the `--help` hint. The default
 window is capped at `reflect_week_max_days` (35); when the cap bites the output
 says how many days it deferred, and `--since` reads the full span. `--json` adds
 `window_start`, `window_end`, `days_covered`, `capped`, and `uncovered_days`
@@ -2951,7 +2974,8 @@ it never modifies the raw entry it read.
 structures every raw entry in an inclusive civil-date window, with `--until`
 defaulting to today. The two forms are mutually exclusive: passing both, passing
 neither, passing `--until` without `--since`, or giving a `--since` later than
-`--until` is a usage error (exit `2`).
+`--until` is a usage error (exit `2`), reported once on stderr as
+`lucid structure: <reason>` plus the `--help` hint.
 
 **Every entry, no filtering.** The ranged mode covers every raw entry in the
 window whatever command produced it — [`log`](#log) and [`closeout`](#closeout)

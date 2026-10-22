@@ -160,13 +160,13 @@ func reflectWindowOptions(cmd *cobra.Command, now time.Time) (router.ReflectWind
 		// clock's own location, so a start date means the day the user meant.
 		day, err := observations.ParseDate(strings.TrimSpace(raw), now.Location())
 		if err != nil {
-			// Phrased in cobra's own invalid-argument dialect so a bad date reads
-			// like every other flag-parse failure and maps to ExitUsage rather
-			// than to a runtime failure.
-			return router.ReflectWindowOptions{}, fmt.Errorf(
+			// A bad date is typed as a usage error, so it exits with ExitUsage and
+			// is reported with the command's --help hint rather than as a runtime
+			// failure; the wording follows cobra's own invalid-argument dialect.
+			return router.ReflectWindowOptions{}, newUsageError(cmd, fmt.Errorf(
 				"invalid argument %q for %q flag: needs a %s date",
 				raw, "--"+reflectWeekFlagSince, reflectWeekSinceLayout,
-			)
+			))
 		}
 		return router.ReflectWindowOptions{Mode: router.ReflectWindowSince, Since: day}, nil
 	}
