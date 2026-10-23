@@ -13,10 +13,11 @@ const timeLayout = "2006-01-02 15:04 MST"
 // TextLines renders the report as the calm, human-first output the command
 // prints by default. It leads with the one-word verdict, then one short section
 // per group (companion, provider, chain, engine periodics, companion periodics,
-// receipts, recent runs, host). A healthy report stays terse; every warning or
-// error is repeated in a closing issues block so a reader sees exactly what to
-// act on without re-scanning. The JSON form (the marshaled [Report]) carries the
-// same data for automation.
+// job stores, receipts, recent runs, recent compose fallbacks, host). A healthy
+// report stays terse; every warning or error is repeated in a closing issues
+// block so a reader sees exactly what to act on without re-scanning. Compose
+// fallbacks are informational and never reach that block. The JSON form (the
+// marshaled [Report]) carries the same data for automation.
 func (r Report) TextLines() []string {
 	var out []string
 	add := func(format string, args ...any) { out = append(out, fmt.Sprintf(format, args...)) }
@@ -63,6 +64,10 @@ func (r Report) TextLines() []string {
 			add("  %s: %s %s", orDash(f.Kind), orDash(f.ErrorClass), f.Message)
 		}
 	}
+
+	// Recent compose fallbacks — delivered but degraded sends (see
+	// composeFallbackLines).
+	out = append(out, composeFallbackLines(r.ComposeFallbacks)...)
 
 	// Host / supervisor.
 	add("Host:")
@@ -131,6 +136,34 @@ func jobStoreLines(stores []JobStorePath) []string {
 	}
 	for _, s := range stores {
 		out = append(out, fmt.Sprintf("  %-16s %s  (%s)", s.Name, orDash(s.Path), orDash(s.Env)))
+	}
+	return out
+}
+
+// composeFallbackLines renders the informational recent-compose-fallback
+// section: a header counting the entries in the scan window, one
+// `<time>  <kind>  <reason>` line per entry, then one `note:` line per store that
+// could not be scanned. It classifies nothing and never lowers the verdict.
+//
+// A fallback run succeeded — the deterministic message did go out — so no
+// failure view lists it, yet the send was degraded. This section is the one
+// place a reader asking "is the scheduler healthy?" sees that. The marker's
+// provider error detail is deliberately left to the JSON form: the reason alone
+// answers the reader's question. The header counts the entries it lists, so it
+// can never claim more than it shows.
+func composeFallbackLines(cf ComposeFallbacks) []string {
+	out := make([]string, 0, 1+len(cf.Entries)+len(cf.Notes))
+	window := composeFallbackWindowText()
+	if len(cf.Entries) == 0 {
+		out = append(out, "Recent compose fallbacks: none in the last "+window)
+	} else {
+		out = append(out, fmt.Sprintf("Recent compose fallbacks: %d in the last %s", len(cf.Entries), window))
+	}
+	for _, e := range cf.Entries {
+		out = append(out, fmt.Sprintf("  %s  %s  %s", fmtTime(e.At), orDash(e.Kind), orDash(e.Reason)))
+	}
+	for _, note := range cf.Notes {
+		out = append(out, "  note: "+note)
 	}
 	return out
 }

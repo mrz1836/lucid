@@ -16,7 +16,9 @@
 package schedstatus
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/mrz1836/lucid/internal/clockmark"
@@ -76,6 +78,17 @@ const staleCursorGrace = 24 * time.Hour
 // (YYYY-MM-DD), the same basis the miss check compares an elapsed window's
 // expected date against.
 const dateLayout = "2006-01-02"
+
+// composeFallbackDays and composeFallbackWindow bound the recent-compose-fallback
+// section to runs finalized in the last seven days — the shortest window that
+// always covers a full weekly witness-report cycle, so no scheduled kind's
+// fallback goes unseen for most of its period. composeFallbackLimit caps the
+// section across every scanned store, mirroring the recent-failure bound.
+const (
+	composeFallbackDays   = 7
+	composeFallbackWindow = composeFallbackDays * 24 * time.Hour
+	composeFallbackLimit  = 10
+)
 
 // Check is one classified health signal: a stable machine name, its state, and
 // a plain-language detail a human can act on. Every non-[Ok] check contributes
@@ -198,17 +211,61 @@ type JobStorePath struct {
 	Env  string `json:"env"`
 }
 
+// ComposeFallback is one scheduled send that was delivered but degraded: its
+// compose step could not use the model's reply, so the deterministic fallback
+// went out instead and the run's output carries the compose_fallback marker.
+// The run itself still succeeded, which is why no failure view shows it.
+//
+// Kind is the daemon name the supervised log uses (companion-morning,
+// companion-night, workout, witness), so an entry greps straight to its log
+// line; JobKind is the raw job kind, which tells a morning backstop apart from
+// the primary send; Store is the job store it was read from, named as in
+// job_stores. FinishedAt is the finalize time in RFC3339 UTC for the machine
+// contract, while At carries the same instant in local time for ordering and the
+// text render — it is never marshaled. Error is the provider error chain the
+// marker recorded; it is reported in JSON only.
+type ComposeFallback struct {
+	Kind       string    `json:"kind"`
+	JobKind    string    `json:"job_kind"`
+	Store      string    `json:"store"`
+	FinishedAt string    `json:"finished_at"`
+	Reason     string    `json:"reason"`
+	Error      string    `json:"error,omitempty"`
+	At         time.Time `json:"-"`
+}
+
+// FallbackInput is the gathered compose-fallback scan, handed to [Assemble]:
+// every fallback entry found across the scanned stores, plus one note per store
+// that exists but could not be read. A missing store contributes neither.
+type FallbackInput struct {
+	Entries []ComposeFallback
+	Notes   []string
+}
+
+// ComposeFallbacks is the bounded recent-compose-fallback section as reported:
+// the scan window, the number of entries listed, the entries themselves (newest
+// first, at most [composeFallbackLimit]), and any unreadable-store notes. Entries
+// is never nil, so the JSON always carries an array; Notes is omitted when empty,
+// which is how a consumer tells a real "none" from a store that was not scanned.
+type ComposeFallbacks struct {
+	Window  string            `json:"window"`
+	Count   int               `json:"count"`
+	Entries []ComposeFallback `json:"entries"`
+	Notes   []string          `json:"notes,omitempty"`
+}
+
 // Inputs is everything the impure CLI layer gathers, ready for pure
 // classification. [Assemble] consumes it plus the current time and returns a
 // classified [Report]; nothing in this struct requires I/O to interpret.
 type Inputs struct {
-	Companion     CompanionInfo
-	Chain         ChainMarks
-	Engine        DBInput
-	CompanionJobs DBInput
-	JobStores     []JobStorePath
-	Receipts      []ReceiptStatus
-	Host          []Check
+	Companion        CompanionInfo
+	Chain            ChainMarks
+	Engine           DBInput
+	CompanionJobs    DBInput
+	JobStores        []JobStorePath
+	ComposeFallbacks FallbackInput
+	Receipts         []ReceiptStatus
+	Host             []Check
 }
 
 // DBReport is one job DB as classified for output: its resolved path, whether it
@@ -224,20 +281,23 @@ type DBReport struct {
 // Report is the fully-classified status document. Verdict is the rolled-up
 // health (`ok`/`warn`/`error`) and mirrors [Report.ExitCode]; Checks is the flat
 // list of every classification that fed the verdict (host checks live in Host,
-// not here); the remaining fields carry the display sections. JobStores is
-// informational only — it is copied through untouched and contributes no check.
-// The JSON tags are the stable machine contract.
+// not here); the remaining fields carry the display sections. JobStores and
+// ComposeFallbacks are informational only — the job stores are copied through
+// untouched and the fallbacks only bounded to the recent window — and neither
+// contributes a check, so neither can move the verdict or the exit code. The
+// JSON tags are the stable machine contract.
 type Report struct {
-	Verdict       string          `json:"verdict"`
-	Companion     CompanionInfo   `json:"companion"`
-	Chain         ChainMarks      `json:"chain"`
-	Engine        DBReport        `json:"engine"`
-	CompanionJobs DBReport        `json:"companion_jobs"`
-	JobStores     []JobStorePath  `json:"job_stores"`
-	Receipts      []ReceiptStatus `json:"receipts"`
-	Runs          RunSummary      `json:"runs"`
-	Host          []Check         `json:"host"`
-	Checks        []Check         `json:"checks"`
+	Verdict          string           `json:"verdict"`
+	Companion        CompanionInfo    `json:"companion"`
+	Chain            ChainMarks       `json:"chain"`
+	Engine           DBReport         `json:"engine"`
+	CompanionJobs    DBReport         `json:"companion_jobs"`
+	JobStores        []JobStorePath   `json:"job_stores"`
+	Receipts         []ReceiptStatus  `json:"receipts"`
+	Runs             RunSummary       `json:"runs"`
+	ComposeFallbacks ComposeFallbacks `json:"compose_fallbacks"`
+	Host             []Check          `json:"host"`
+	Checks           []Check          `json:"checks"`
 }
 
 // ExitCode maps the verdict to the 3-tier process exit code the command returns,
@@ -297,10 +357,15 @@ func worst(groups ...[]Check) CheckState {
 //   - host: daemon down / not supervised                   -> error (from probe)
 //   - host: on-disk build newer than running daemon        -> warn  (from probe)
 //   - host: launchd/Hush uninspectable                     -> unknown (from probe)
+//   - recent compose fallback (a delivered-but-degraded
+//     scheduled send), or an unreadable fallback store     -> informational, never a check
 //
 // Host checks arrive already classified from the best-effort probe (so the
 // platform-specific logic stays out of this pure core); Assemble folds them into
-// the verdict via [worst], where Unknown host checks are inert.
+// the verdict via [worst], where Unknown host checks are inert. Compose
+// fallbacks are bounded to the recent window and reported, but — like the job
+// stores — nothing about them is classified, so the verdict a health cron or any
+// other exit-code gate keys on is the same with or without them.
 func Assemble(in Inputs, now time.Time) Report {
 	r := Report{
 		Companion: in.Companion,
@@ -312,6 +377,7 @@ func Assemble(in Inputs, now time.Time) Report {
 			Failures:     appendFailures(in.Engine.Failures, in.CompanionJobs.Failures),
 			FailureCount: len(in.Engine.Failures) + len(in.CompanionJobs.Failures),
 		},
+		ComposeFallbacks: recentComposeFallbacks(in.ComposeFallbacks, now),
 	}
 
 	var checks []Check
@@ -729,4 +795,59 @@ func appendFailures(a, b []RunFailure) []RunFailure {
 	out = append(out, a...)
 	out = append(out, b...)
 	return out
+}
+
+// recentComposeFallbacks bounds the gathered fallback scan for the report: it
+// keeps only entries finalized within [composeFallbackWindow] of now, orders them
+// newest first, and caps the list at [composeFallbackLimit]. The window is
+// re-applied here even though the gatherer already filters by it, because the
+// job store compares finalize times in whatever zone each row was written in;
+// re-checking against one clock keeps the edge exact.
+//
+// Equal finalize times fall back to store, then job kind, then the RFC3339
+// string, so the order is deterministic. The input is never mutated, Entries is
+// always non-nil (an empty section marshals as []), and Notes is copied as is.
+func recentComposeFallbacks(in FallbackInput, now time.Time) ComposeFallbacks {
+	cutoff := now.Add(-composeFallbackWindow)
+	entries := make([]ComposeFallback, 0, len(in.Entries))
+	for _, e := range in.Entries {
+		if e.At.Before(cutoff) {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	slices.SortStableFunc(entries, compareComposeFallbacks)
+	if len(entries) > composeFallbackLimit {
+		entries = entries[:composeFallbackLimit]
+	}
+	return ComposeFallbacks{
+		Window:  composeFallbackWindowJSON(),
+		Count:   len(entries),
+		Entries: entries,
+		Notes:   slices.Clone(in.Notes),
+	}
+}
+
+// compareComposeFallbacks orders fallbacks newest first, breaking a tie on the
+// finalize time by store, then job kind, then the RFC3339 finish string.
+func compareComposeFallbacks(a, b ComposeFallback) int {
+	return cmp.Or(
+		b.At.Compare(a.At),
+		cmp.Compare(a.Store, b.Store),
+		cmp.Compare(a.JobKind, b.JobKind),
+		cmp.Compare(a.FinishedAt, b.FinishedAt),
+	)
+}
+
+// composeFallbackWindowJSON renders the scan window as the JSON contract states
+// it, in whole hours ("168h") — time.Duration's own String would add a "0m0s"
+// tail that no consumer should have to parse around.
+func composeFallbackWindowJSON() string {
+	return fmt.Sprintf("%dh", int(composeFallbackWindow/time.Hour))
+}
+
+// composeFallbackWindowText renders the scan window as the text header reads it
+// ("7d").
+func composeFallbackWindowText() string {
+	return fmt.Sprintf("%dd", composeFallbackDays)
 }
