@@ -1,7 +1,10 @@
 package schedstatus
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/scheduler"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -35,29 +39,80 @@ const (
 	recentFailuresLimit = 10
 )
 
+// The job kinds whose successful runs can carry a compose-fallback marker,
+// mirrored from internal/companion, internal/workout and internal/witnessreport.
+// Like the Slug* constants they are duplicated rather than imported, so this
+// package never depends on a daemon package (and, through one, on a model or a
+// provider). A drift test in each daemon package pins its own kind to the
+// constant here, so a renamed kind fails a test instead of silently hiding that
+// kind's fallbacks from the report.
+const (
+	KindCompanionMorning         = "lucid_companion_morning"
+	KindCompanionNight           = "lucid_companion_night"
+	KindCompanionMorningBackstop = "lucid_companion_morning_backstop"
+	KindWorkoutDaily             = "lucid_workout_daily"
+	KindWitnessReportWeekly      = "lucid_witness_report_weekly"
+)
+
+// The daemon names a delivered fallback is logged under, so a status entry greps
+// straight to its supervised log line ([FallbackDaemon]).
+const (
+	daemonCompanionMorning = "companion-morning"
+	daemonCompanionNight   = "companion-night"
+	daemonWorkout          = "workout"
+	daemonWitness          = "witness"
+)
+
+// The job stores the compose-fallback scan reads, named as job_stores names
+// them so an entry's store matches the path printed for it.
+const (
+	storeCompanion     = "companion"
+	storeWorkout       = "workout"
+	storeWitnessReport = "witness-report"
+)
+
+// fallbackScanLimit bounds how many succeeded jobs of one kind the scan reads
+// from one store. A daily kind finalizes about seven jobs in the window, so this
+// is ample headroom while keeping each read a short index scan; the report
+// itself lists at most [composeFallbackLimit] across every store.
+const fallbackScanLimit = 50
+
+// errDirectoryNotDB is the read failure for a job-store path that names a
+// directory: it is never opened as a database.
+var errDirectoryNotDB = errors.New("path is a directory, not a database file")
+
 // GatherParams carries everything the impure gather step needs: the booted config
 // (the companion/provider block), the Ledger store (chain marks + receipts), the
-// two resolved disposable job-DB paths this report actually inspects, the full
-// set of job-store paths to name for legibility, and the best-effort host probe.
-// The CLI layer resolves every path (flag → env → default, via each daemon's own
-// DefaultDBPath) and boots the router before calling Gather, so this package does
-// no path resolution or router booting itself.
+// two resolved disposable job-DB paths this report fully inspects, the workout
+// and witness-report job-store paths read only by the compose-fallback scan, the
+// full set of job-store paths to name for legibility, the best-effort host
+// probe, and the instant the fallback window ends at. The CLI layer resolves
+// every path (flag → env → default, via each daemon's own DefaultDBPath) and
+// boots the router before calling Gather, so this package does no path
+// resolution or router booting itself.
 type GatherParams struct {
 	Config      config.Config
 	Store       *storage.Adapter
 	SchedulerDB string
 	CompanionDB string
-	JobStores   []JobStorePath
-	Probe       HostProbe
+	// WorkoutDB and WitnessReportDB are opened read-only for the compose-fallback
+	// scan only — never for periodics or failures. A blank path is skipped.
+	WorkoutDB       string
+	WitnessReportDB string
+	JobStores       []JobStorePath
+	Probe           HostProbe
+	// Now anchors the compose-fallback window; the zero value means time.Now().
+	Now time.Time
 }
 
 // Gather reads all local scheduler state read-only and returns the [Inputs] the
 // pure [Assemble] consumes. It performs no writes and never panics on absent
 // state: a missing job DB or a never-fired window's missing receipt is captured
 // as a not-present input, not an error (their classification is [Assemble]'s
-// job). Only a genuinely unreadable chain config — the one piece every scaffolded
-// Ledger has — is returned as an error, so the command surfaces it as a runtime
-// failure rather than a bogus health verdict.
+// job), and the compose-fallback scan never fails at all. Only a genuinely
+// unreadable chain config — the one piece every scaffolded Ledger has — is
+// returned as an error, so the command surfaces it as a runtime failure rather
+// than a bogus health verdict.
 func Gather(ctx context.Context, p GatherParams) (Inputs, error) {
 	chain, err := GatherChain(p.Store)
 	if err != nil {
@@ -67,14 +122,19 @@ func Gather(ctx context.Context, p GatherParams) (Inputs, error) {
 	if p.Probe != nil {
 		host = p.Probe.Probe()
 	}
+	now := p.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 	return Inputs{
-		Companion:     GatherCompanion(p.Config),
-		Chain:         chain,
-		Engine:        GatherDB(ctx, p.SchedulerDB),
-		CompanionJobs: GatherDB(ctx, p.CompanionDB),
-		JobStores:     p.JobStores,
-		Receipts:      GatherReceipts(p.Store),
-		Host:          host,
+		Companion:        GatherCompanion(p.Config),
+		Chain:            chain,
+		Engine:           GatherDB(ctx, p.SchedulerDB),
+		CompanionJobs:    GatherDB(ctx, p.CompanionDB),
+		JobStores:        p.JobStores,
+		ComposeFallbacks: GatherComposeFallbacks(ctx, now, fallbackStores(p)),
+		Receipts:         GatherReceipts(p.Store),
+		Host:             host,
 	}, nil
 }
 
@@ -178,7 +238,7 @@ func GatherDB(ctx context.Context, path string) DBInput {
 		return in
 	}
 	if info.IsDir() {
-		in.Err = "path is a directory, not a database file"
+		in.Err = errDirectoryNotDB.Error()
 		return in
 	}
 
@@ -238,6 +298,208 @@ func runFailures(views []flywheel.FailureView) []RunFailure {
 		out = append(out, f)
 	}
 	return out
+}
+
+// FallbackStore is one job store the compose-fallback scan reads: its name (as
+// job_stores names it), its resolved path, and the fallback-capable job kinds it
+// holds.
+type FallbackStore struct {
+	Name  string
+	Path  string
+	Kinds []string
+}
+
+// fallbackStores lists the job stores the compose-fallback scan reads and the
+// kinds each one holds. The companion store is opened a second time for the scan
+// — a read-only open is cheap — so [GatherDB] keeps its single purpose, and the
+// workout and witness-report stores are read for nothing else.
+func fallbackStores(p GatherParams) []FallbackStore {
+	return []FallbackStore{
+		{
+			Name:  storeCompanion,
+			Path:  p.CompanionDB,
+			Kinds: []string{KindCompanionMorning, KindCompanionNight, KindCompanionMorningBackstop},
+		},
+		{Name: storeWorkout, Path: p.WorkoutDB, Kinds: []string{KindWorkoutDaily}},
+		{Name: storeWitnessReport, Path: p.WitnessReportDB, Kinds: []string{KindWitnessReportWeekly}},
+	}
+}
+
+// FallbackDaemon maps a fallback-capable job kind to the daemon name its
+// fallback is logged under, so a status entry greps straight to its supervised
+// log line. The morning backstop reports as companion-morning, exactly as the
+// companion daemon logs it. An unknown kind is returned verbatim, so a kind this
+// mirror has not learned yet still reads legibly rather than blank.
+func FallbackDaemon(jobKind string) string {
+	switch jobKind {
+	case KindCompanionMorning, KindCompanionMorningBackstop:
+		return daemonCompanionMorning
+	case KindCompanionNight:
+		return daemonCompanionNight
+	case KindWorkoutDaily:
+		return daemonWorkout
+	case KindWitnessReportWeekly:
+		return daemonWitness
+	default:
+		return jobKind
+	}
+}
+
+// GatherComposeFallbacks scans each store for scheduled sends that were
+// delivered as the deterministic fallback within the recent window ending at
+// now. It reads only through the public job-store read API: the succeeded jobs of
+// each fallback-capable kind, then each job's successful attempt, listing the job
+// when that attempt's output carries the compose_fallback marker.
+//
+// It never fails and never writes. A store whose path is blank or does not exist
+// (the feature was never enabled) contributes nothing, silently. A store that
+// exists but cannot be read contributes exactly one note and none of its
+// entries, so a partial read never passes for a complete one. A job whose runs
+// cannot be read, or whose output is empty, truncated, or not a marker, is
+// skipped on its own. Bounding and ordering are [Assemble]'s.
+func GatherComposeFallbacks(ctx context.Context, now time.Time, stores []FallbackStore) FallbackInput {
+	since := now.Add(-composeFallbackWindow).UTC()
+	var in FallbackInput
+	for _, s := range stores {
+		entries, err := scanFallbackStore(ctx, since, s)
+		if err != nil {
+			in.Notes = append(in.Notes, unreadableStoreNote(s, err))
+			continue
+		}
+		in.Entries = append(in.Entries, entries...)
+	}
+	return in
+}
+
+// scanFallbackStore reads one store's fallback entries finalized at or after
+// since. A blank or missing path yields nothing and no error; a directory, an
+// unopenable file, or a failed job listing yields the error that becomes the
+// store's note.
+func scanFallbackStore(ctx context.Context, since time.Time, s FallbackStore) ([]ComposeFallback, error) {
+	if strings.TrimSpace(s.Path) == "" {
+		return nil, nil
+	}
+	info, err := os.Stat(s.Path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, errDirectoryNotDB
+	}
+
+	db, err := openReadOnly(s.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer closeDB(db)
+
+	var entries []ComposeFallback
+	for _, kind := range s.Kinds {
+		found, kerr := scanFallbackKind(ctx, db, s.Name, kind, since)
+		if kerr != nil {
+			return nil, kerr
+		}
+		entries = append(entries, found...)
+	}
+	return entries, nil
+}
+
+// scanFallbackKind lists one kind's succeeded jobs finalized at or after since
+// and keeps those whose successful attempt carries the fallback marker. Only the
+// job listing can fail the store; a per-job read failure skips that job.
+func scanFallbackKind(ctx context.Context, db *gorm.DB, store, kind string, since time.Time) ([]ComposeFallback, error) {
+	jobs, err := flywheel.ListFinished(ctx, db, flywheel.ListFinishedParams{
+		States: []flywheel.JobState{flywheel.StateSucceeded},
+		Kind:   kind,
+		Since:  since,
+		Limit:  fallbackScanLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var entries []ComposeFallback
+	for i := range jobs {
+		if e, ok := fallbackEntry(ctx, db, store, jobs[i]); ok {
+			entries = append(entries, e)
+		}
+	}
+	return entries, nil
+}
+
+// fallbackEntry reads a succeeded job's successful attempt and, when its output
+// carries the compose_fallback marker, returns the job as a report entry. The
+// finalize time keys the entry's time, window, and order. A failed run read, a
+// missing finalize time, or an output that is not a marker skips the job.
+func fallbackEntry(ctx context.Context, db *gorm.DB, store string, job flywheel.JobView) (ComposeFallback, bool) {
+	if job.FinalizedAt == nil {
+		return ComposeFallback{}, false
+	}
+	runs, err := flywheel.ListRuns(ctx, db, job.ID, flywheel.ListRunsParams{Limit: max(job.Attempt, 1)})
+	if err != nil {
+		return ComposeFallback{}, false
+	}
+	run, ok := successfulRun(runs)
+	if !ok {
+		return ComposeFallback{}, false
+	}
+	reason, errText, ok := parseFallbackMarker(run)
+	if !ok {
+		return ComposeFallback{}, false
+	}
+	finalized := *job.FinalizedAt
+	return ComposeFallback{
+		Kind:       FallbackDaemon(job.Kind),
+		JobKind:    job.Kind,
+		Store:      store,
+		FinishedAt: finalized.UTC().Format(time.RFC3339),
+		Reason:     reason,
+		Error:      errText,
+		At:         finalized.Local(), //nolint:gosmopolitan // the text report prints run times in the host's local zone
+	}, true
+}
+
+// successfulRun returns the attempt that finalized a succeeded job: the newest
+// run (the runs arrive newest first) whose outcome is success and whose finalize
+// was applied rather than superseded. Earlier failed attempts are the failure
+// views' business, not this scan's.
+func successfulRun(runs []flywheel.JobRunView) (flywheel.JobRunView, bool) {
+	for i := range runs {
+		if runs[i].Outcome == string(flywheel.OutcomeSuccess) && !runs[i].Superseded {
+			return runs[i], true
+		}
+	}
+	return flywheel.JobRunView{}, false
+}
+
+// parseFallbackMarker decodes a run's output as the compose-fallback marker and
+// returns its reason and error detail. It reports ok=false — the run is not
+// listed — for an output the job store truncated, an empty or blank output (a
+// model-composed send returns none), anything that does not decode into the
+// marker (not JSON, a wrong-typed field, a top-level array), and a marker whose
+// compose_fallback is false or absent. An unknown reason is returned verbatim.
+func parseFallbackMarker(run flywheel.JobRunView) (reason, errText string, ok bool) {
+	if run.OutputTruncated {
+		return "", "", false
+	}
+	raw := bytes.TrimSpace(run.Output)
+	if len(raw) == 0 {
+		return "", "", false
+	}
+	var marker flynode.FallbackMarker
+	if err := json.Unmarshal(raw, &marker); err != nil || !marker.ComposeFallback {
+		return "", "", false
+	}
+	return marker.Reason, marker.Error, true
+}
+
+// unreadableStoreNote is the one-line note an unreadable store contributes to
+// the compose-fallback section, worded like the job-store read failure the
+// verdict reports for the two inspected stores.
+func unreadableStoreNote(s FallbackStore, err error) string {
+	return fmt.Sprintf("%s job store at %s is unreadable — compose fallbacks not scanned (%s)", s.Name, s.Path, err)
 }
 
 // openReadOnly opens an existing sqlite job DB in read-only mode. It builds a
