@@ -85,9 +85,12 @@ func unknownHost() []schedstatus.Check {
 // seedScheduler points LUCID_HOME at a fresh scaffolded Ledger, writes a
 // lucid.json whose companion block is enabled/disabled per the flag with three
 // real prompt files (bodies set to promptBody so a redaction test can plant a
-// sentinel), points the two disposable job-DB env overrides at temp paths so the
-// command never resolves the real OS user-config dir, and returns the home plus
-// those paths for the caller to seed.
+// sentinel), points the four disposable job-DB env overrides at temp paths so the
+// command never resolves the real OS user-config dir — the witness-report and
+// workout stores are read by the compose-fallback scan, so leaving them at their
+// defaults would read this host's real stores — and returns the home plus the
+// Engine and companion paths for the caller to seed. The witness-report and
+// workout paths do not exist, so the scan skips them silently.
 func seedScheduler(t *testing.T, companionEnabled bool, promptBody string) (home, schedulerDB, companionDB string) {
 	t.Helper()
 	home = isolatedHome(t)
@@ -119,6 +122,8 @@ func seedScheduler(t *testing.T, companionEnabled bool, promptBody string) (home
 	companionDB = filepath.Join(t.TempDir(), "companion.db")
 	t.Setenv("LUCID_SCHEDULER_DB", schedulerDB)
 	t.Setenv("LUCID_COMPANION_DB", companionDB)
+	t.Setenv("LUCID_WITNESS_REPORT_DB", filepath.Join(t.TempDir(), "witness-report.db"))
+	t.Setenv("LUCID_WORKOUT_DB", filepath.Join(t.TempDir(), "workout.db"))
 	return home, schedulerDB, companionDB
 }
 
@@ -272,10 +277,12 @@ func TestSchedulerStatus_CompanionDisabled_Warn(t *testing.T) {
 // hard error (exit 2) (AC-6).
 func TestSchedulerStatus_NeverRun_Error_NoPanic(t *testing.T) {
 	isolatedHome(t)
-	// Point the DB overrides at nonexistent temp paths so the never-run command
-	// never resolves the real OS user-config dir.
+	// Point all four DB overrides at nonexistent temp paths so the never-run
+	// command never resolves the real OS user-config dir.
 	t.Setenv("LUCID_SCHEDULER_DB", filepath.Join(t.TempDir(), "never.db"))
 	t.Setenv("LUCID_COMPANION_DB", filepath.Join(t.TempDir(), "never.db"))
+	t.Setenv("LUCID_WITNESS_REPORT_DB", filepath.Join(t.TempDir(), "never.db"))
+	t.Setenv("LUCID_WORKOUT_DB", filepath.Join(t.TempDir(), "never.db"))
 	withClock(t, statusMorning())
 	withHostProbe(t, unknownHost()...)
 
@@ -328,8 +335,8 @@ func TestSchedulerStatus_NamesEveryJobStore(t *testing.T) {
 	withClock(t, statusMorning())
 	withHostProbe(t, unknownHost()...)
 
-	// Pin the two stores the report does not inspect so the assertion is about
-	// wiring rather than about this host's user-config dir.
+	// Pin the two stores read only by the compose-fallback scan to fresh paths so
+	// the assertion is about wiring rather than about this host's user-config dir.
 	witnessDB := filepath.Join(t.TempDir(), "witness-report.db")
 	workoutDB := filepath.Join(t.TempDir(), "workout.db")
 	t.Setenv("LUCID_WITNESS_REPORT_DB", witnessDB)
@@ -450,6 +457,12 @@ func TestSchedulerStatus_NeverLeaksSecrets_Redaction(t *testing.T) {
 // ExitCoder verdict seam (AC-4).
 func TestSchedulerStatus_RuntimeFailure_ExitErr(t *testing.T) {
 	unscaffoldableHome(t) // bootedRouter cannot scaffold under a regular file
+	// Keep every job-store resolution off the real OS user-config dir, even
+	// though the runtime failure fires before any store is resolved.
+	t.Setenv("LUCID_SCHEDULER_DB", filepath.Join(t.TempDir(), "never.db"))
+	t.Setenv("LUCID_COMPANION_DB", filepath.Join(t.TempDir(), "never.db"))
+	t.Setenv("LUCID_WITNESS_REPORT_DB", filepath.Join(t.TempDir(), "never.db"))
+	t.Setenv("LUCID_WORKOUT_DB", filepath.Join(t.TempDir(), "never.db"))
 	withHostProbe(t, unknownHost()...)
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "status")

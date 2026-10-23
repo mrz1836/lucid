@@ -46,7 +46,10 @@ var newHostProbe = schedstatus.NewHostProbe
 // job DBs' periodics and recent failures, the companion delivery receipts, and a
 // best-effort host/supervisor probe, classifies each against the documented
 // verdict thresholds, and renders a calm human report by default or a stable
-// `--json` document under the inherited persistent --json flag.
+// `--json` document under the inherited persistent --json flag. It also lists
+// the recent compose fallbacks — scheduled sends delivered as the deterministic
+// fallback — read from the companion, workout, and witness-report job stores;
+// they are informational and never move the verdict or the exit code.
 //
 // It is deliberately credential-dumb: it reads local config/state/DB/process/log
 // metadata only and never constructs the Discord notifier
@@ -65,7 +68,10 @@ scheduler. It reports the companion enabled/disabled state and its provider and
 prompt paths, the chain bell and tripwire times, the Engine and companion
 periodics (with their next run and last enqueue), the last companion delivery
 receipt per window, a bounded recent-run summary, and a best-effort
-host/supervisor probe — then rolls the checks into one verdict.
+host/supervisor probe — then rolls the checks into one verdict. It also lists
+the recent compose fallbacks (scheduled sends from the last 7 days that were
+delivered as the deterministic fallback), which are informational and never
+change the verdict or the exit code.
 
 It never sends, never renews a secret, and never reads a prompt body: it inspects
 local config, the disposable job stores, delivery receipts, and process metadata
@@ -93,9 +99,10 @@ only a positively detected problem does.`,
 
 // runSchedulerStatus is the impure gathering the cobra layer delegates to: boot
 // the router (for the companion/provider config and the same Ledger the daemon
-// reads), resolve the two disposable job-DB paths exactly as the daemon does
-// (flag -> env -> default), gather all local state read-only, run the best-effort
-// host probe, classify, and render. It returns nil for an ok verdict or an
+// reads), resolve the two inspected disposable job-DB paths exactly as the
+// daemon does (flag -> env -> default) and the workout and witness-report paths
+// through their own resolvers, gather all local state read-only, run the
+// best-effort host probe, classify, and render. It returns nil for an ok verdict or an
 // [ExitCoder] error for warn/error — always after rendering, so the report is
 // emitted whatever the verdict. A genuine runtime failure (an unresolvable
 // Ledger, or an unreadable chain config every scaffold writes) is returned
@@ -127,19 +134,33 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 		return err
 	}
 
+	// The witness-report and workout stores have no flags: they are read only
+	// for the compose-fallback scan. Each is resolved once, so the path the scan
+	// reads is exactly the path the job-store block prints; a resolver that
+	// cannot answer blanks both (the scan skips a blank path).
+	witnessReportDB := resolvedPathOrBlank(witnessreport.DefaultDBPath)
+	workoutDB := resolvedPathOrBlank(workout.DefaultDBPath)
+
+	// One instant anchors both the compose-fallback scan window and the
+	// classification, so the two can never disagree about "recent".
+	now := clockNow()
+
 	inputs, err := schedstatus.Gather(cmd.Context(), schedstatus.GatherParams{
-		Config:      r.Config(),
-		Store:       r.Store(),
-		SchedulerDB: schedulerDB,
-		CompanionDB: companionDB,
-		JobStores:   jobStorePaths(schedulerDB, companionDB),
-		Probe:       newHostProbe(schedulerDB),
+		Config:          r.Config(),
+		Store:           r.Store(),
+		SchedulerDB:     schedulerDB,
+		CompanionDB:     companionDB,
+		WorkoutDB:       workoutDB,
+		WitnessReportDB: witnessReportDB,
+		JobStores:       jobStorePaths(schedulerDB, companionDB, witnessReportDB, workoutDB),
+		Probe:           newHostProbe(schedulerDB),
+		Now:             now,
 	})
 	if err != nil {
 		return err
 	}
 
-	report := schedstatus.Assemble(inputs, clockNow())
+	report := schedstatus.Assemble(inputs, now)
 
 	if err := emit(cmd, report, report.TextLines()); err != nil {
 		return err
@@ -155,9 +176,11 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 
 // jobStorePaths lists every disposable job store the supervised scheduler
 // writes to, resolved through each daemon's own DefaultDBPath so a printed path
-// is exactly the file that daemon opens. The Engine and companion paths are
-// already resolved above — they are the two stores this report inspects — and
-// are reused rather than resolved a second time.
+// is exactly the file that daemon opens. All four paths are resolved once by the
+// caller and reused here: the Engine and companion stores are the two this
+// report fully inspects, and the witness-report and workout stores are the two
+// read only by the compose-fallback scan — so each printed path is exactly the
+// one that was read.
 //
 // The report names all four because only the Engine store is pinned into the
 // launchd plist (`LUCID_SCHEDULER_DB`); the witness-report and workout stores,
@@ -169,12 +192,12 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 // A resolver that cannot answer blanks its own row (rendered as a dash) instead
 // of failing the command: `status` is what you run when things are already
 // broken, so it must not become the next broken thing.
-func jobStorePaths(schedulerDB, companionDB string) []schedstatus.JobStorePath {
+func jobStorePaths(schedulerDB, companionDB, witnessReportDB, workoutDB string) []schedstatus.JobStorePath {
 	return []schedstatus.JobStorePath{
 		{Name: "engine", Path: schedulerDB, Env: envSchedulerDB},
 		{Name: "companion", Path: companionDB, Env: envCompanionDB},
-		{Name: "witness-report", Path: resolvedPathOrBlank(witnessreport.DefaultDBPath), Env: envWitnessReportDB},
-		{Name: "workout", Path: resolvedPathOrBlank(workout.DefaultDBPath), Env: envWorkoutDB},
+		{Name: "witness-report", Path: witnessReportDB, Env: envWitnessReportDB},
+		{Name: "workout", Path: workoutDB, Env: envWorkoutDB},
 	}
 }
 

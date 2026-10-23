@@ -1,6 +1,8 @@
 package schedstatus
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -150,14 +152,20 @@ func periodicFor(r Report, slug string) (PeriodicStatus, bool) {
 	return PeriodicStatus{}, false
 }
 
-func TestAssembleVerdictMatrix(t *testing.T) {
-	now := fixedNow()
+// verdictCase is one scenario of the verdict matrix: a name, a builder for its
+// inputs, and the verdict those inputs must roll up to.
+type verdictCase struct {
+	name    string
+	build   func() Inputs
+	verdict CheckState
+}
 
-	cases := []struct {
-		name    string
-		build   func() Inputs
-		verdict CheckState
-	}{
+// verdictMatrixCases is the verdict matrix — every threshold Assemble applies,
+// as synthetic inputs at now. It is shared so a property that must hold for
+// every verdict (compose fallbacks never move it) runs over the same scenarios
+// the matrix itself proves.
+func verdictMatrixCases(now time.Time) []verdictCase {
+	return []verdictCase{
 		{
 			name:    "healthy enabled",
 			build:   func() Inputs { return healthyEnabled(now) },
@@ -359,8 +367,12 @@ func TestAssembleVerdictMatrix(t *testing.T) {
 			verdict: Ok,
 		},
 	}
+}
 
-	for _, tc := range cases {
+func TestAssembleVerdictMatrix(t *testing.T) {
+	now := fixedNow()
+
+	for _, tc := range verdictMatrixCases(now) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := Assemble(tc.build(), now)
 			require.Equal(t, string(tc.verdict), r.Verdict, "verdict mismatch")
@@ -737,4 +749,179 @@ func TestAssembleJobStoresAreInformational(t *testing.T) {
 	blank.JobStores = []JobStorePath{{Name: "workout", Env: "LUCID_WORKOUT_DB"}}
 	require.Equal(t, bare.Verdict, Assemble(blank, now).Verdict)
 	require.Equal(t, bare.Checks, Assemble(blank, now).Checks)
+}
+
+// ── compose fallbacks ────────────────────────────────────────────────────────
+
+// fallbackAt builds one synthetic compose-fallback entry finalized at the given
+// instant, in the shape the gatherer hands Assemble: the instant itself for
+// ordering and the text render, and the same instant as an RFC3339 UTC string
+// for the machine contract.
+func fallbackAt(store, jobKind, kind, reason string, at time.Time) ComposeFallback {
+	return ComposeFallback{
+		Kind:       kind,
+		JobKind:    jobKind,
+		Store:      store,
+		FinishedAt: at.UTC().Format(time.RFC3339),
+		Reason:     reason,
+		At:         at,
+	}
+}
+
+// sampleFallbacks is a small in-window scan result — three fallbacks, one of them
+// carrying a provider error — plus one unreadable-store note: enough for a case
+// to prove the section is carried while nothing else moves.
+func sampleFallbacks(now time.Time) FallbackInput {
+	morning := fallbackAt("companion", "lucid_companion_morning", "companion-morning", "provider_outage", now.Add(-1*time.Hour))
+	morning.Error = "synthetic provider timeout"
+	return FallbackInput{
+		Entries: []ComposeFallback{
+			morning,
+			fallbackAt("companion", "lucid_companion_night", "companion-night", "unusable_reply", now.Add(-17*time.Hour)),
+			fallbackAt("workout", "lucid_workout_daily", "workout", "safety_tripped", now.Add(-50*time.Hour)),
+		},
+		Notes: []string{
+			"witness-report job store at /tmp/synthetic/witness-report.db is unreadable — compose fallbacks not scanned (file is not a database)",
+		},
+	}
+}
+
+// fallbackKey renders an entry as "<finished> <store> <job kind>", so an ordering
+// assertion reads as the sequence it expects.
+func fallbackKey(e ComposeFallback) string {
+	return e.FinishedAt + " " + e.Store + " " + e.JobKind
+}
+
+// TestAssembleComposeFallbacks_WindowCapNewestFirst locks the section's bounds:
+// only runs finalized in the last seven days, at most ten across every store,
+// newest first — and a tie on the finalize time broken by store, then job kind,
+// so two runs of the same report never trade places.
+func TestAssembleComposeFallbacks_WindowCapNewestFirst(t *testing.T) {
+	now := fixedNow()
+	day := 24 * time.Hour
+	tie := now.Add(-3 * time.Hour)
+
+	// Twelve in-window entries across the three stores, interleaved so nothing
+	// leans on input order, plus one a minute outside the window.
+	in := healthyEnabled(now)
+	in.ComposeFallbacks.Entries = []ComposeFallback{
+		fallbackAt("companion", "lucid_companion_night", "companion-night", "unusable_reply", now.Add(-6*day)),
+		fallbackAt("workout", "lucid_workout_daily", "workout", "provider_outage", tie),
+		fallbackAt("witness-report", "lucid_witness_report_weekly", "witness", "safety_tripped", now.Add(-4*day)),
+		fallbackAt("workout", "lucid_workout_daily", "workout", "unusable_reply", now.Add(-7*day-time.Minute)),
+		fallbackAt("companion", "lucid_companion_morning", "companion-morning", "provider_outage", now.Add(-1*time.Hour)),
+		fallbackAt("companion", "lucid_companion_night", "companion-night", "unusable_reply", tie),
+		fallbackAt("workout", "lucid_workout_daily", "workout", "unusable_reply", now.Add(-5*day)),
+		fallbackAt("companion", "lucid_companion_morning", "companion-morning", "provider_outage", now.Add(-7*day+time.Minute)),
+		fallbackAt("companion", "lucid_companion_morning_backstop", "companion-morning", "provider_outage", tie),
+		fallbackAt("companion", "lucid_companion_night", "companion-night", "unusable_reply", now.Add(-2*day)),
+		fallbackAt("witness-report", "lucid_witness_report_weekly", "witness", "safety_tripped", now.Add(-2*time.Hour)),
+		fallbackAt("companion", "lucid_companion_morning", "companion-morning", "provider_outage", now.Add(-3*day)),
+		fallbackAt("workout", "lucid_workout_daily", "workout", "provider_outage", now.Add(-1*day)),
+	}
+	before := slices.Clone(in.ComposeFallbacks.Entries)
+
+	cf := Assemble(in, now).ComposeFallbacks
+	require.Equal(t, "168h", cf.Window)
+	require.Equal(t, 10, cf.Count)
+	require.Len(t, cf.Entries, 10)
+
+	keys := make([]string, 0, len(cf.Entries))
+	for _, e := range cf.Entries {
+		keys = append(keys, fallbackKey(e))
+	}
+	require.Equal(t, []string{
+		"2026-07-16T11:00:00Z companion lucid_companion_morning",
+		"2026-07-16T10:00:00Z witness-report lucid_witness_report_weekly",
+		"2026-07-16T09:00:00Z companion lucid_companion_morning_backstop",
+		"2026-07-16T09:00:00Z companion lucid_companion_night",
+		"2026-07-16T09:00:00Z workout lucid_workout_daily",
+		"2026-07-15T12:00:00Z workout lucid_workout_daily",
+		"2026-07-14T12:00:00Z companion lucid_companion_night",
+		"2026-07-13T12:00:00Z companion lucid_companion_morning",
+		"2026-07-12T12:00:00Z witness-report lucid_witness_report_weekly",
+		"2026-07-11T12:00:00Z workout lucid_workout_daily",
+	}, keys, "newest first, ties by store then job kind, capped at ten")
+	require.Equal(t, before, in.ComposeFallbacks.Entries, "the gathered input is never reordered in place")
+
+	// The window holds on its own, independent of the cap: a run a minute
+	// outside it is dropped, while one exactly at the edge and one a minute
+	// inside it are kept.
+	edge := healthyEnabled(now)
+	edge.ComposeFallbacks.Entries = []ComposeFallback{
+		fallbackAt("workout", "lucid_workout_daily", "workout", "provider_outage", now.Add(-7*day-time.Minute)),
+		fallbackAt("companion", "lucid_companion_night", "companion-night", "unusable_reply", now.Add(-7*day)),
+		fallbackAt("witness-report", "lucid_witness_report_weekly", "witness", "safety_tripped", now.Add(-7*day+time.Minute)),
+	}
+	cf = Assemble(edge, now).ComposeFallbacks
+	require.Equal(t, 2, cf.Count)
+	require.Equal(t, "2026-07-09T12:01:00Z witness-report lucid_witness_report_weekly", fallbackKey(cf.Entries[0]))
+	require.Equal(t, "2026-07-09T12:00:00Z companion lucid_companion_night", fallbackKey(cf.Entries[1]))
+}
+
+// TestAssembleComposeFallbacks_NeverChangesVerdict is the property that makes the
+// section safe to add: fallbacks are reported, never classified. For every
+// scenario the verdict matrix proves — ok, warn, and error alike — the same
+// inputs with three fallbacks and an unreadable-store note roll up to exactly the
+// same verdict, checks, exit code, and run summary. A health cron or a
+// post-deploy check may gate on that exit code alone.
+func TestAssembleComposeFallbacks_NeverChangesVerdict(t *testing.T) {
+	now := fixedNow()
+	seen := make(map[CheckState]bool)
+
+	for _, tc := range verdictMatrixCases(now) {
+		seen[tc.verdict] = true
+		t.Run(tc.name, func(t *testing.T) {
+			without := Assemble(tc.build(), now)
+
+			in := tc.build()
+			in.ComposeFallbacks = sampleFallbacks(now)
+			with := Assemble(in, now)
+
+			require.Equal(t, 3, with.ComposeFallbacks.Count, "the fallbacks are carried, so the comparison is not vacuous")
+			require.Len(t, with.ComposeFallbacks.Notes, 1)
+
+			require.Equal(t, string(tc.verdict), with.Verdict)
+			require.Equal(t, without.Verdict, with.Verdict)
+			require.Equal(t, without.Checks, with.Checks, "no check is derived from a fallback or a note")
+			require.Equal(t, without.ExitCode(), with.ExitCode())
+			require.Equal(t, without.Runs, with.Runs, "a fallback run is a success, never a failure")
+			require.Equal(t, issueLines(without), issueLines(with))
+		})
+	}
+
+	require.True(t, seen[Ok], "the matrix covers an ok verdict")
+	require.True(t, seen[Warn], "the matrix covers a warn verdict")
+	require.True(t, seen[Error], "the matrix covers an error verdict")
+}
+
+// TestAssembleComposeFallbacks_EmptyShape locks the empty section's contract: the
+// window is still named, the count is zero, and entries is an empty array rather
+// than null — so a consumer never has to special-case a missing list — while
+// notes is omitted entirely.
+func TestAssembleComposeFallbacks_EmptyShape(t *testing.T) {
+	now := fixedNow()
+	r := Assemble(healthyEnabled(now), now) // a zero FallbackInput
+
+	cf := r.ComposeFallbacks
+	require.Equal(t, "168h", cf.Window)
+	require.Zero(t, cf.Count)
+	require.NotNil(t, cf.Entries, "entries is never nil")
+	require.Empty(t, cf.Entries)
+	require.Nil(t, cf.Notes)
+
+	raw, err := json.Marshal(r)
+	require.NoError(t, err)
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	require.JSONEq(t, `{"window":"168h","count":0,"entries":[]}`, string(doc["compose_fallbacks"]))
+	require.Contains(t, string(doc["compose_fallbacks"]), `"entries":[]`)
+	require.NotContains(t, string(doc["compose_fallbacks"]), `"notes"`)
+
+	// An empty-but-non-nil notes list is omitted just the same.
+	in := healthyEnabled(now)
+	in.ComposeFallbacks.Notes = []string{}
+	raw, err = json.Marshal(Assemble(in, now))
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), `"notes"`)
 }

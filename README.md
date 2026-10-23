@@ -343,7 +343,7 @@ gate, `2` usage / flag-parse error. Usage errors print on stderr as
 | Command | Flags | What it does |
 |---------|-------|--------------|
 | `scheduler run` | `--db` | The send daemon — evening bell + morning tripwire on the chain's clocks; blocks until interrupted. Deterministic and agent-free. |
-| `scheduler status` | `--scheduler-db` `--companion-db` | Read-only health verdict: what fires next, what happened last, what is broken. Exits `0` ok / `1` warn / `2` error. |
+| `scheduler status` | `--scheduler-db` `--companion-db` | Read-only health verdict: what fires next, what happened last (including recent compose fallbacks), what is broken. Exits `0` ok / `1` warn / `2` error. |
 | `scheduler reconcile` | `--slug` `--no-fire` `--db` | Re-arm a parked scheduled send — the sanctioned repair. Idempotent, and sends nothing itself. |
 | `scheduler install` | `--apply` `--out` `--force` `--lucid` `--hush` `--hush-server` `--machine-index` `--scheduler-db` `--supervise-config` | Render and lint the supervised launchd + `hush` artifacts. Prints by default, `--out` writes them, `--apply` performs the host install (macOS). |
 | `scheduler uninstall` | `--dry-run` `--label` | Bootout and remove the supervised launchd job (idempotent). |
