@@ -1633,10 +1633,12 @@ companion enabled/disabled state and its provider backend/model, each configured
 prompt path (existence only), the chain bell and tripwire marks, the Engine and
 companion periodics (cron, active flag, next run, last enqueue, and — for one that
 is deliberately off — the reason), the last companion
-delivery receipt per window, a bounded recent-run failure summary, and a
-best-effort host/supervisor probe — then rolls every check into one **verdict** and
-exits on it. Run it before the morning (`06:00`) and night (`19:00`) windows to
-confirm the next send will fire, and after them to confirm it did.
+delivery receipt per window, a bounded recent-run failure summary, the recent
+compose fallbacks (scheduled sends that were delivered as the deterministic
+fallback), and a best-effort host/supervisor probe — then rolls every check into
+one **verdict** and exits on it. Run it before the morning (`06:00`) and night
+(`19:00`) windows to confirm the next send will fire, and after them to confirm it
+did.
 
 **Every fault it reports names its remedy.** A periodic that is *intended active*
 but found parked — inactive, or with its next run stuck in the past — is reported
@@ -1657,7 +1659,7 @@ The command resolves the two disposable job-store paths exactly as the daemon do
 (flag → env → OS-user-config default) and **always prints the resolved paths**, so
 an environment / launchd path drift is visible rather than silently green.
 
-**It names all four job stores, not just the two it inspects.** The scheduler runs
+**It names all four job stores, not just the two it fully inspects.** The scheduler runs
 **four** independent disposable job stores — one each for the Engine, the companion,
 the weekly witness report, and the workout companion — and only the Engine store is
 pinned into the launchd plist as `LUCID_SCHEDULER_DB`. The other three resolve their
@@ -1680,8 +1682,92 @@ The block is **informational**: it is reported in both the text and `--json`
 output (as a `job_stores` array), classifies nothing, and never lowers the verdict.
 A path that cannot be resolved keeps its row and shows a dash rather than failing
 the command — `status` is what you reach for when something is already broken.
-Only the Engine and companion stores have inspection flags (`--scheduler-db`,
-`--companion-db`); the other two are named, not read.
+The Engine and companion stores — the two with inspection flags
+(`--scheduler-db`, `--companion-db`) — are fully inspected. The witness-report and
+workout stores have no flags: they are read only for the compose-fallback scan
+below, opened read-only at the path printed here, and relocated only by
+`LUCID_WITNESS_REPORT_DB` / `LUCID_WORKOUT_DB`. Their periodics and failures are
+not inspected.
+
+**Recent compose fallbacks.** A scheduled compose — the morning and night
+companion, the daily workout, the weekly witness report — that cannot use the
+model's reply still sends: it falls back to the deterministic message (see
+[`../mvp/error-states.md`](../mvp/error-states.md), rows Cf-1 to Cf-3). That send
+was delivered but degraded. The run still **succeeded**, so no failure view shows
+it, and its job record carries a `compose_fallback` marker naming the reason.
+`status` lists those runs in a *Recent compose fallbacks* section, directly after
+*Recent runs*:
+
+- **Scope.** The companion, workout, and witness-report job stores, each opened
+  **read-only** for this scan only.
+- **Bounds.** Runs finalized in the last 7 days, at most 10 entries across all
+  three stores, newest first.
+- **Line format.** `<time>  <kind>  <reason>`, the time in the report's usual
+  local, minute-resolution format. Kinds are the daemon names the supervised log
+  uses: `companion-morning` (the morning backstop reports as this too),
+  `companion-night`, `workout`, and `witness`. Reasons are `provider_outage`,
+  `unusable_reply`, and `safety_tripped`; an unknown reason is shown verbatim. The
+  provider error detail is never printed in text — it is in `--json` only.
+- **Empty state.** `Recent compose fallbacks: none in the last 7d`.
+- **Missing and unreadable stores.** A store that does not exist (that feature was
+  never enabled) is skipped silently. One that exists but cannot be read prints a
+  single `note:` line under the section, naming the store and its path, and its
+  fallbacks are not scanned.
+- **Informational.** The section never adds a check, so the verdict and exit code
+  are exactly what they would be without it, and a fallback run still counts as a
+  success everywhere else. A health cron that wants to notice fallbacks reads
+  `compose_fallbacks` in `--json`.
+
+```
+Recent runs: no recent failures
+Recent compose fallbacks: 2 in the last 7d
+  2026-01-06 07:30 UTC  companion-morning  provider_outage
+  2026-01-04 18:00 UTC  witness  safety_tripped
+```
+
+In `--json` the same data is a top-level `compose_fallbacks` object, part of the
+stable JSON contract:
+
+```json
+"compose_fallbacks": {
+  "window": "168h",
+  "count": 2,
+  "entries": [
+    {
+      "kind": "companion-morning",
+      "job_kind": "lucid_companion_morning",
+      "store": "companion",
+      "finished_at": "2026-01-06T07:30:00Z",
+      "reason": "provider_outage",
+      "error": "provider timed out"
+    },
+    {
+      "kind": "witness",
+      "job_kind": "lucid_witness_report_weekly",
+      "store": "witness-report",
+      "finished_at": "2026-01-04T18:00:00Z",
+      "reason": "safety_tripped"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `window` | The scan window as a duration, `"168h"` (7 days). |
+| `count` | The number of entries listed (`len(entries)`). |
+| `entries` | Always an array (`[]` when there are none), newest first, at most 10. |
+| `entries[].kind` | The daemon name: `companion-morning`, `companion-night`, `workout`, or `witness`. |
+| `entries[].job_kind` | The raw job kind, e.g. `lucid_companion_morning_backstop`, which tells the morning backstop apart from the primary morning send. |
+| `entries[].store` | The job store it was read from: `companion`, `workout`, or `witness-report` — the same names as `job_stores`. |
+| `entries[].finished_at` | When the run was finalized, RFC3339 in UTC. |
+| `entries[].reason` | `provider_outage`, `unusable_reply`, `safety_tripped`, or an unknown reason verbatim. |
+| `entries[].error` | The provider error chain the fallback recorded (never a prompt or message body). JSON only; omitted when empty. |
+| `notes` | One string per unreadable store, the same text as its `note:` line; omitted when empty. |
+
+The existing `runs` object (`failures`, `failure_count`) is unchanged: it still
+covers the Engine and companion stores' discarded jobs, and a fallback run never
+appears in it.
 
 **Exit-code contract (a deliberate override of the [global table](#global-conventions)).**
 `scheduler status` is a *graded* command: its exit code is the health verdict,
@@ -1713,6 +1799,7 @@ verdict is the most severe check — `error` beats `warn` beats `ok`, and an
 | A companion periodic (`lucid-companion-morning`, `lucid-companion-night`, `lucid-companion-morning-backstop`) parked — inactive, or its next run stuck a full day behind | `error` — the line names `lucid scheduler reconcile` |
 | Latest companion receipt present but unverified | `warn` |
 | Most-recent already-elapsed window has no receipt, or only a stale one | `error` |
+| A recent compose fallback (a delivered but degraded scheduled send) | informational, never lowers the verdict |
 | On-disk build newer than the running supervised daemon (stale daemon) | `warn` |
 | Daemon not running / not supervised | `error` |
 | Supervisor uninspectable on this platform | `unknown` (never lowers the verdict) |
@@ -3087,5 +3174,5 @@ replaced the retired monthly heartbeat) run beside them. See
 | `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2 escalation, weekly witness report). Injected, never committed. |
 | `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable Engine job-store path; `--db` (on `run` and `reconcile`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
 | `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status` and `lucid scheduler reconcile`; the `--companion-db` flag on either command overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
-| `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |
-| `LUCID_WORKOUT_DB` | Optional override for the workout companion's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). |
+| `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). Also read (read-only) by `lucid scheduler status` for its compose-fallback scan. |
+| `LUCID_WORKOUT_DB` | Optional override for the workout companion's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). Also read (read-only) by `lucid scheduler status` for its compose-fallback scan. |

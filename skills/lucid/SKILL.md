@@ -280,6 +280,13 @@ error, identical in text and `--json`. It **sends nothing, renews no secret, and
 reads no prompt body**, so it is safe to run any time. Relay the verdict plus the
 relevant failing check; never paraphrase it into false confidence.
 
+The report also lists **recent compose fallbacks**: scheduled sends from the last
+7 days that were delivered as the deterministic fallback because the model's reply
+could not be used (a *Recent compose fallbacks* section in text, a top-level
+`compose_fallbacks` object in `--json`, each entry naming the kind, time, and
+reason). They are informational and never change the verdict or exit code. Relay
+them when asked why a message felt generic or whether sends were degraded.
+
 ## Witness wiring (Ring 0)
 
 The witness sees exactly one thing: the L2 escalation template, which carries
