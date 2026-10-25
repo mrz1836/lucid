@@ -292,3 +292,59 @@ func TestResolveSubject_UnresolvedKeyNamesTheProblem(t *testing.T) {
 	assert.True(t, strings.Contains(msg, "injury") && strings.Contains(msg, "injury_missing"),
 		"the refusal names the kind and the key: %q", msg)
 }
+
+// TestLinkAnchorSubjectEveryKind: a kind lives in the event store, never on
+// the anchor's identity, so anchor:<id> resolves and links exactly the same for
+// an anchor of every kind. The event ids those kinds are recorded under are a
+// separate namespace and never resolve as an anchor.
+func TestLinkAnchorSubjectEveryKind(t *testing.T) {
+	a := newEngineAdapter(t)
+	at := fixedTime().Format(time.RFC3339)
+	cases := []struct {
+		kind, id, label string
+		event           *engine.AnchorEvent // nil: a milestone is the absence of a kind event
+	}{
+		{engine.AnchorKindMilestone, "anchor_2026_07_05_a", "first-gate", nil},
+		{engine.AnchorKindQuit, "anchor_2026_07_05_b", "sobriety", &engine.AnchorEvent{
+			ID: "anchorev_2026_07_05_a", Kind: engine.AnchorKindQuit,
+		}},
+		{engine.AnchorKindLimit, "anchor_2026_07_05_c", "late-night-snacks", &engine.AnchorEvent{
+			ID: "anchorev_2026_07_05_b", Kind: engine.AnchorKindLimit, Allowance: 4, WindowDays: 90,
+		}},
+		{engine.AnchorKindHabit, "anchor_2026_07_05_d", "morning-walk", &engine.AnchorEvent{
+			ID: "anchorev_2026_07_05_c", Kind: engine.AnchorKindHabit,
+		}},
+	}
+	for _, c := range cases {
+		require.NoError(t, a.AppendAnchor(engine.Anchor{ID: c.id, Label: c.label, Date: "2026-07-01", RecordedAt: at}))
+		if c.event != nil {
+			e := *c.event
+			e.AnchorID, e.Type, e.Day, e.RecordedAt = c.id, engine.AnchorEventKind, "2026-07-05", at
+			require.NoError(t, a.AppendAnchorEvent(e))
+		}
+	}
+
+	events, err := a.ReadAnchorEvents()
+	require.NoError(t, err)
+	anchors, err := a.ReadAnchors()
+	require.NoError(t, err)
+	facts := engine.FoldAnchorEvents(events, anchors)
+
+	for _, c := range cases {
+		t.Run(c.kind, func(t *testing.T) {
+			require.Equal(t, c.kind, facts[c.id].Kind, "the seeded anchor carries its kind")
+			require.NoError(t, a.ResolveSubject("anchor", c.id))
+
+			media := "2026-07-05-" + c.kind + ".jpg"
+			_, linkErr := a.AppendLinkEvent(syntheticLinkEvent(media, "anchor", c.id))
+			require.NoError(t, linkErr)
+			views, viewErr := a.LinksForSubject("anchor", c.id)
+			require.NoError(t, viewErr)
+			require.Len(t, views, 1)
+			assert.Equal(t, media, views[0].MediaID)
+		})
+	}
+
+	err = a.ResolveSubject("anchor", "anchorev_2026_07_05_a")
+	require.Error(t, err, "an event id is never an anchor subject")
+}

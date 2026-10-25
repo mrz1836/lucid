@@ -93,7 +93,7 @@ type AnchorPairIntent struct {
 	Compat Anchor      `json:"compat"`
 }
 
-// AnchorEventLog is anchor_events.json: the schema version, the append-only
+// AnchorEventLog is the anchor event store: the schema version, the append-only
 // events, and the append-only pair intents (absent when unused).
 type AnchorEventLog struct {
 	Version     int                `json:"version"`
