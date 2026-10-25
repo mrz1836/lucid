@@ -31,7 +31,10 @@ this reference stays the precise baseline.
   `retro park`) keep their own existing keys unchanged. `wheel add`, which
   records a calendar month rather than a logical day, emits its own
   `{receipt_id, entry_id, month, amended, scores}` receipt
-  ([`wheel`](#wheel)). In every case stdout
+  ([`wheel`](#wheel)). The anchor event verbs (`anchor kind`, `slip`, `use`,
+  `miss`, `void`) extend the receipt to `{receipt_id, logical_date, label,
+  event}` — plus `compat` when a definition record was appended alongside —
+  where `receipt_id` is the event id ([`anchor`](#anchor)). In every case stdout
   carries JSON only — diagnostics stay on stderr — so a `--json` stream is
   always parseable.
 - **Exit codes** (stable, so scripts and supervised ops can branch on them):
@@ -74,7 +77,10 @@ flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 [`reframe add`](#reframe), [`focus add`](#focus), [`gratitude add`](#gratitude),
 [`gratitude thank`](#gratitude), [`workout log`](#workout),
 [`workout amend`](#workout), [`mode`](#mode),
-[`storm`](#storm), and [`closeout`](#closeout).
+[`storm`](#storm), [`closeout`](#closeout), and the anchor event verbs
+[`anchor slip`](#anchor-slip), [`anchor use`](#anchor-use), and
+[`anchor miss`](#anchor-miss); [`anchor confirm`](#anchor-confirm) reads the
+same grammar through its `--through` and `--from` flags.
 
 **The grammar.** A leading `@` is optional on every form.
 
@@ -92,8 +98,8 @@ flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 **Two tiers, one rule each.**
 
 - **Strict — a date you typed on purpose.** `--day`, the registry's `--start`,
-  `--end`, and `--onset`, `anchor add`'s positional date, and [`self
-  set`](#self)'s `--since`. A token the grammar cannot read, or a day in the
+  `--end`, and `--onset`, `anchor add`'s positional date, `anchor confirm`'s
+  `--through` and `--from`, and [`self set`](#self)'s `--since`. A token the grammar cannot read, or a day in the
   future, is a clean error: the command exits non-zero, names the accepted forms,
   and **nothing is written**. A deliberate flag is an assertion, so a typo fails
   loudly instead of quietly landing on today.
@@ -143,7 +149,7 @@ Unifying the grammar moved six shipped behaviors. Each is deliberate:
 
 ### Deliberate divergences
 
-Seven behaviors sit outside the strict tier on purpose. Nothing else does — the
+Eight behaviors sit outside the strict tier on purpose. Nothing else does — the
 registry now carries the future ceiling, so it is not on this list:
 
 | Divergence | Why |
@@ -151,6 +157,7 @@ registry now carries the future ceiling, so it is not on this list:
 | `obs`'s inline prose token stays permissive | Capture is total (P10) — a date token parsed out of a sentence must never cost you the capture. This covers the colon-less `HHMM` reading above. |
 | `anchor add` still accepts a future date | An anchor may be a forward commitment — a date you count *toward*, not only since. |
 | `anchor add` rejects a partial date | An anchor renders a precise day count, and counting from a guessed January 1st would be a confident wrong number. |
+| The anchor event verbs reject a partial date, and `--day` / `--from` reject a day before the anchor's start | `anchor slip` / `use` / `miss --day` and `anchor confirm --through` / `--from` land an event on one real day, so a snapped January 1st would invent a slip, a use or a kept day you never had; and an event can never predate the anchor it belongs to. (A `--through` before a habit's start is not an error — that habit's span is simply empty.) |
 | `closeout --day` carries backfill semantics | It is an alias onto `closeout backfill`, so it keeps that path's `backfill_window_days` window and rejects today as well as the future. |
 | The registry stores a partial date as typed | `--onset 2014-09` stores `"2014-09"`, not the snapped day — the registry is where the *degree* of imprecision is itself the record. |
 | `self set` accepts a partial `--since`, stored as typed | The mirror image of `anchor add`'s rejection: no day count is derived from a self fact, so `1985` is an honest origin where a snapped `1985-01-01` would be a fabricated one. |
@@ -459,9 +466,34 @@ Read-only **practice-quality** rollup — the honest numbers of the committed
 chain, computed by the Engine and never recomputed downstream: current and
 longest **streak**, **adherence** over a trailing 30-day window (co-presented
 with its honest co-numbers, never a bare percent), **misses** in that window
-against the isolated-miss budget, **error-budget** burn, and a **days-since**
-count for each recorded anchor (see [`anchor`](#anchor)). It writes nothing
-beyond the silent engine scaffold. `--json` emits the metrics projection:
+against the isolated-miss budget, **error-budget** burn, and one line per active
+anchor **in its kind's language** (see [`anchor`](#anchor)). It writes nothing
+beyond the silent engine scaffold.
+
+**Anchor lines.** Each active anchor renders as one line, its label verbatim
+(synthetic examples, one per kind):
+
+```text
+Days since first gate: 40.
+Days since sobriety: 102 (longest 140, 1 slip).
+Late-night snacks: 1 of 4 in the last 90 days (1 planned, 0 slips); 7 days since last.
+Morning walk: kept 29 of 30 accounted days, 1 miss; confirmed through 2026-01-24.
+```
+
+| Kind | Line | Variants |
+|------|------|----------|
+| `milestone` | `Days since <label>: <days>.` — exactly today's line | — |
+| `quit` | `Days since <label>: <current run> (longest <longest run>, <n> slip[s]).` | No slips yet: `Days since <label>: <days> (no slips).` |
+| `limit` | `<label>: <used> of <allowance> in the last <window> days (<p> planned, <s> slip[s]); <d> day[s] since last.` | No use yet: `…; no uses yet.` Over the allowance: `… since last — over allowance.` |
+| `habit` | `<label>: kept <k> of <a> accounted day[s], <m> miss[es]; confirmed through <date>.` | Never confirmed: `…; not confirmed yet.` Nothing accounted: `<label>: no accounted days yet; …`. A miss run at the alarm: `…; missed <n> days in a row.` Eligible to graduate: `…; eligible to graduate.` |
+
+A count takes its singular at exactly 1 (`1 slip`, `1 miss`, `1 day since
+last`) and its plural otherwise (`0 slips`). A habit never reads as a hollow
+100%: a day nobody confirmed is unaccounted, not kept. A milestone line is
+byte-for-byte what it has always been, so a Ledger with no kinds prints exactly
+what it printed before.
+
+`--json` emits the metrics projection:
 
 | Field | Meaning |
 |-------|---------|
@@ -470,19 +502,92 @@ beyond the silent engine scaffold. `--json` emits the metrics projection:
 | `misses_in_window` | Decided-but-not-completed days in the 30-day window. |
 | `error_budget` | `{budget, burn, remaining, exceeded}` against the isolated-miss budget. |
 | `gates[]` | One `{length, adherence}` per gate window (30, 60, 90) — every gate number, so the harness recomputes nothing. |
-| `anchors[]` | One `{id, label, date, days_since, note}` per **active** anchor, sorted by label. Sunset anchors are not here. |
-| `anchors_sunset[]` | One `{id, label, date, note, sunset_at}` per retired anchor. `date` is the milestone date the anchor counted from; `note` is the sunset reason when one was given; `sunset_at` is when the retirement was recorded. A retired milestone stops counting but never leaves the ledger. |
+| `anchors[]` | One `{id, label, date, days_since, note}` per **active** anchor, sorted by label, plus `kind` and one kind object (`quit`, `limit` or `habit`, below) for an anchor of that kind. **Both are omitted for a milestone**, so an absent `kind` means milestone — the same convention `state` uses. `date` and `days_since` keep their meaning for every kind: the anchor's folded date and the days since it. For a quit after a slip that is the re-dated date, exactly what an older `lucid` shows. Sunset and graduated anchors are not here. |
+| `anchors_sunset[]` | One `{id, label, date, note, sunset_at}` per retired anchor. `date` is the date the anchor counted from; `note` is the sunset reason when one was given; `sunset_at` is when the retirement was recorded. A retired anchor stops counting but never leaves the ledger. |
+| `anchors_graduated[]` | One `{id, label, date, note, sunset_at}` per anchor retired with `anchor sunset --graduated` — the same shape as `anchors_sunset[]`, kept separate because "this became who I am" is not an abandonment. A graduated anchor is in this array and **not** in `anchors_sunset[]`. Omitted when empty. |
 | `ref` | The latest recorded logical day the windows anchor to, or `null` when no day is decided yet. |
 
-A **label may appear in both arrays**: a retired run and a later run of the same
-name are distinct anchors with distinct ids, so a reader that assumes label
-uniqueness across the two would be wrong. The `id` is the address; the label is
-a display name (see [`anchor`](#anchor)).
+**The kind objects.** "Today" is the current logical day; a "use-day" is a day
+with at least one quit slip or limit use (several on one day are one use-day);
+voided events never count. Dates are civil `YYYY-MM-DD`.
+
+`quit`:
+
+| Field | Meaning |
+|-------|---------|
+| `current_run` | Days since the later of the quit's start and its latest use-day. With no slips, exactly a milestone's count. |
+| `longest_run` | The longest clean run, counted from the start, the current run included. |
+| `slips` | Use-days after the start — the quit's slips, plus any uses logged while it was a limit. |
+| `slips_7d` | Days in the last seven logical days, today included — the witness report's week — that carry a slip: a `slip` event, or a use logged `--slip` before a conversion. A planned use never counts here. A count, never a date or a note. |
+| `last_slip` | The latest use-day. Omitted when there is none. |
+
+`limit`:
+
+| Field | Meaning |
+|-------|---------|
+| `allowance` / `window_days` | The latest `kind` event's parameters — N use-days per rolling W days. |
+| `used` | Use-days in the window: the `window_days` logical days ending today, clipped at the anchor date. Planned and slip uses both spend allowance. |
+| `remaining` | `allowance − used`, never below 0. |
+| `planned` / `slips` | `used` split by intent, so `planned + slips = used`. A day logged with both intents counts as a slip day, the honest direction; quit slips from before a conversion count as slips. |
+| `slips_7d` | Days in the last seven logical days, today included, that carry a slip (a `--slip` use, or a quit slip from before a conversion). A count, never a date or a note. |
+| `last_use` / `days_since_last_use` | The latest use-day ever logged (not only in the window), and the days since it. Both omitted when there is none. |
+| `over_allowance` | `true` when `used` > `allowance`. Spending exactly the allowance is fine. |
+
+`habit`:
+
+| Field | Meaning |
+|-------|---------|
+| `window_days` | The rolling window (default 30), ending today and clipped at the anchor date. |
+| `habit_since` | The day the anchor became a habit — its latest `habit` `kind` event. |
+| `accounted` | Days in the window that are confirmed or carry a logged miss, never before the anchor date. |
+| `kept` | `accounted` minus the miss days. An unconfirmed day is never kept. |
+| `misses` | Miss days in the window. A miss always wins over a confirm on the same day. |
+| `current_miss_run` | Consecutive calendar miss days ending at the latest accounted day. |
+| `alarm` | `true` when `current_miss_run` reaches `anchors.miss_alarm` (default 2). A single isolated miss never alarms. |
+| `miss_run_7d` | The longest run of consecutive calendar miss days that touches the last seven logical days, counted at its full length even when it began earlier; `0` when none. The witness report's habit watch-out reads it, so a slide mid-week is not hidden by a recovery before the report. |
+| `last_confirmed` | The through-day of the latest confirm. Omitted when never confirmed. |
+| `next_confirm_from` | The first day the next [`anchor confirm`](#anchor-confirm) claims by default: the later of the day after `last_confirmed` and `habit_since`. The span to ask about runs from here through yesterday. |
+| `graduation_eligible` | `true` once the accounted days since the last alarm run ended — or since `habit_since`, if it never alarmed — reach `anchors.graduation_days` (default 90). Surfaced only; graduating is always your call. |
+
+A synthetic `anchors[]` for a "today" of 2026-01-25, matching the four lines
+above:
+
+```json
+"anchors": [
+  {"id": "anchor_2025_09_02_a", "label": "Late-night snacks", "date": "2025-09-02",
+   "days_since": 145, "kind": "limit",
+   "limit": {"allowance": 4, "window_days": 90, "used": 1, "remaining": 3,
+             "planned": 1, "slips": 0, "slips_7d": 0, "last_use": "2026-01-18",
+             "days_since_last_use": 7, "over_allowance": false}},
+  {"id": "anchor_2025_11_03_a", "label": "Morning walk", "date": "2025-11-03",
+   "days_since": 83, "kind": "habit",
+   "habit": {"window_days": 30, "habit_since": "2025-11-03", "accounted": 30,
+             "kept": 29, "misses": 1, "current_miss_run": 1, "alarm": false,
+             "miss_run_7d": 1, "last_confirmed": "2026-01-24", "next_confirm_from": "2026-01-25",
+             "graduation_eligible": false}},
+  {"id": "anchor_2025_12_16_a", "label": "first gate", "date": "2025-12-16",
+   "days_since": 40},
+  {"id": "anchor_2025_05_28_a", "label": "sobriety", "date": "2025-10-15",
+   "days_since": 102, "kind": "quit",
+   "quit": {"current_run": 102, "longest_run": 140, "slips": 1, "slips_7d": 0,
+            "last_slip": "2025-10-15"}}
+]
+```
+
+The two thresholds come from an optional `anchors` block in `lucid.json` —
+`miss_alarm` (default 2, at least 2, so one isolated miss can never alarm) and
+`graduation_days` (default 90, at least 1). Any other value is a config error
+naming the field; an older `lucid` ignores the block.
+
+A **label may appear in more than one array**: a retired run and a later run of
+the same name are distinct anchors with distinct ids, so a reader that assumes
+label uniqueness across them would be wrong. The `id` is the address; the label
+is a display name (see [`anchor`](#anchor)).
 
 Days-since counts whole logical days from the anchor date, **anchor day = 0**
 (recorded today reads `0`, tomorrow `1`), incrementing at the chain's rollover
-boundary — not naive midnight. A read never breaches a gate, so `metrics` exits
-`0` on success.
+boundary — not naive midnight. Every kind's day counts use the same rule. A read
+never breaches a gate, so `metrics` exits `0` on success.
 
 ```sh
 lucid metrics
@@ -535,47 +640,167 @@ when the owner runs hush directly in a terminal; Lucid is never in that loop.
 ### anchor
 
 ```
-lucid anchor add <label> <date> [note...]
-lucid anchor sunset <label> [reason...]
+lucid anchor add <label> <date> [note...] [--kind <kind>] [--allowance N --window D] [--note-file <path>]
+lucid anchor kind <label> <kind> [--allowance N --window D] [--note-file <path>]
+lucid anchor slip <label> [--day <grammar>] [--note-file <path>]
+lucid anchor use <label> (--planned | --slip) [--day <grammar>] [--note-file <path>]
+lucid anchor miss <label> [--day <grammar>] [--note-file <path>]
+lucid anchor confirm [<label>...] [--through <grammar>] [--from <grammar>]
+lucid anchor void <event-id> [--reason-file <path>]
+lucid anchor sunset <label> [reason...] [--reason-file <path>] [--graduated]
 lucid anchor rename <label> <new-label>
 lucid anchor backfill-ids [--dry-run] [--json]
 ```
 
-A **milestone anchor** is a recorded date the Engine counts a running "days
-since" from — a cessation, a gate cleared, any date you want a running day count
-from. Every record is appended to a dedicated, append-only anchors store in the
-engine tree (`engine/anchors.json`); it is never hand-edited, deterministic, no
-model in the path. All three verbs *append* — nothing is ever deleted or
-rewritten.
+An **anchor** is a dated thing you want an honest number for. Every anchor has a
+**kind** — a plain, everyday noun that answers "what is this?" — and each kind
+gets its own number. Pick the kind by the question it answers:
+
+| Kind | Ask yourself | The honest number | What you log |
+|------|--------------|-------------------|--------------|
+| `milestone` | "Is it a date that matters — a start, a gate, a countdown?" | Days since (or toward) the date | Nothing — there is nothing to slip |
+| `quit` | "Is it something I stopped?" | Days since the last slip, the longest clean run, the slip count | [`anchor slip`](#anchor-slip) when it happens |
+| `limit` | "Is it something I do rarely, and on purpose?" | Use-days spent of an allowance of N per rolling W days, planned vs slip | [`anchor use`](#anchor-use) each time, with its intent |
+| `habit` | "Is it something I do often?" | Kept days out of *accounted* days in a rolling window | Only [`anchor miss`](#anchor-miss); a weekly [`anchor confirm`](#anchor-confirm) |
+
+**An anchor with no kind recorded is a `milestone`** — exactly what every anchor
+was before kinds existed, so nothing about an existing anchor changes until you
+reclassify it. A normal day costs nothing on every kind: a quit logs only its
+slips, a limit only its uses, and a habit only its misses plus one weekly
+confirm.
+
+Two append-only files in the engine tree hold the record, and neither is ever
+hand-edited: the definitions (label, date, note, retirement) stay in
+`engine/anchors.json`, unchanged in shape, and each anchor's **kind and every
+event logged against it** — kinds, slips, uses, misses, confirms, voids and
+graduations — live in `engine/anchor_events.json`. That second file is created by
+the first event write, never by `init`, so a Ledger with no kinds has none. Every
+verb is deterministic, with no model in the path, and every verb *appends* —
+nothing is ever deleted or rewritten. The design, and why it is safe to run an
+older `lucid` against the same Ledger, is
+[ADR-0013](../adr/0013-anchor-kinds.md); the normative fold is
+[`../mvp/engine-module.md`](../mvp/engine-module.md) §"Anchor event store".
 
 **Identity.** Each anchor carries a stable `id` (`anchor_YYYY_MM_DD_a`), minted
-when the milestone is first recorded and never derived from what you called it.
+when the anchor is first recorded and never derived from what you called it.
 The **label is a display name**, so it can be corrected or renamed without
-forking the milestone. Anchors recorded before ids existed keep working exactly
-as they always have and publish `id: "legacy:<label>"` — a synthesized address
-so a harness can still refer to them. Nothing about those records is rewritten.
+forking the anchor; its kind and its events key on the id, so they follow a
+rename untouched. Anchors recorded before ids existed keep working exactly as
+they always have and publish `id: "legacy:<label>"` — a synthesized address so a
+harness can still refer to them. Nothing about those records is rewritten, but a
+synthesized address is not a durable target: an anchor needs a real id before it
+can take a kind or an event, which [`anchor backfill-ids`](#anchor-backfill-ids)
+gives it.
+
+**Receipts.** Every event a verb writes gets its own id,
+`anchorev_YYYY_MM_DD_<slot>` — the **receipt**. The prose ack names it
+(``Saved as `anchorev_2026_04_02_a`.``), and under `--json` the event verbs emit
+one shared receipt shape, extending the global `{receipt_id, logical_date}`
+receipt:
+
+```json
+{
+  "receipt_id": "anchorev_2026_04_02_a",
+  "logical_date": "2026-04-01",
+  "label": "sobriety",
+  "event": {"id": "anchorev_2026_04_02_a", "anchor_id": "anchor_2026_01_01_a",
+            "type": "slip", "day": "2026-04-01",
+            "recorded_at": "2026-04-02T08:15:00-04:00"},
+  "compat": {"id": "anchor_2026_01_01_a", "label": "sobriety",
+             "date": "2026-04-01", "recorded_at": "2026-04-02T08:15:00-04:00"}
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `receipt_id` | The event's id — the receipt to echo back. |
+| `logical_date` | The event's `day`: the day it is about. |
+| `label` | The anchor's current label. |
+| `event` | The stored event, verbatim, with its type's own fields: `kind`, `allowance`, `window_days` on a `kind` event; `intent` on a `use`; `from` on a `confirm`; `target` on a `void`; `note` whenever one was given. |
+| `compat` | Present only when the verb also appended a definition record to `anchors.json` — the re-date a `slip` or a reclassify to `quit` writes, or the restoring record a slip's `void` writes — projected exactly as `anchor add --json` projects a record. Omitted otherwise. |
+
+`anchor slip`, `anchor use`, `anchor miss`, `anchor kind` and `anchor void` emit
+this shape. `anchor add --kind`, `anchor sunset --graduated` and `anchor confirm`
+emit their own, documented under each verb.
+
+**Days.** `slip`, `use` and `miss` default to the **current logical day** — the
+day `metrics` counts against — so a lapse logged after midnight and before the
+rollover lands on the evening it belongs to. `--day` takes the shared grammar
+([Backdating with --day](#backdating-with---day)) on the strict tier, with one
+anchor-specific rule each way: a **partial date is rejected** (an event lands on
+a real day), and so is a day **before the anchor's start** (the quit's start for
+a `quit`, the anchor date for every other kind). A `kind`, `void` or `graduate`
+event carries the logical day you write it; a `confirm`'s day is its through-day.
+
+**Capture tier vs echo-and-confirm.** `slip`, `use` and `miss` are the **capture
+tier**: cheap, append-only, and they point toward honesty — recording a lapse
+never flatters the record — so a chat harness runs them as soon as it
+understands you, leads with the receipt, and fixes a mishearing with
+[`anchor void`](#anchor-void). Everything else — `add`, `kind`, `confirm`,
+`void`, `sunset` (with or without `--graduated`) and `rename` — changes what the
+numbers mean, so a harness echoes the assembled command and waits for a yes.
+`void` sits there too: voiding a lapse makes the record kinder, so it runs only
+on an explicit correction, never on inference.
+
+**No automatic writes.** The binary surfaces a habit that is eligible to
+graduate and a limit that is over its allowance (in [`metrics`](#metrics) and
+the [witness report](witness-report.md#anchors-in-the-report)); it never
+graduates, reclassifies or confirms on its own.
 
 #### `anchor add`
 
-Record a milestone. `<date>` takes the shared date grammar
+Record an anchor. `<date>` takes the shared date grammar
 ([Backdating with --day](#backdating-with---day)), so `lucid anchor add sober
 @yesterday` works alongside a civil `YYYY-MM-DD`. `[note...]` is optional
-trailing free text, joined with spaces.
+trailing free text, joined with spaces; `--note-file <path>` (or `-` for stdin)
+supplies it off the command line instead, so an unquoted `&` or `;` can never cut
+it short.
 
 Re-recording a `<label>` an **active** anchor already holds appends again under
-**that anchor's id**, and **the latest record wins**: a typo fix and a genuine
-reset are the same append-only operation, and days-since then counts from the
-newest. Re-recording a label whose only holder is a **sunset** anchor starts a
-**new** milestone with a new id, and the ack says so — the retired run and the
-new one stay distinct in the ledger rather than reading as one milestone that
-paused and resumed.
+**that anchor's id**, and **the latest record wins**: a typo fix and a re-date
+are the same append-only operation, and the count then runs from the newest
+date. This stays the **correction** path for every kind — a relapse on a quit is
+an [`anchor slip`](#anchor-slip), not a re-date. Re-recording a label whose only
+holder is a **sunset** anchor starts a **new** anchor with a new id, and the ack
+says so — the retired run and the new one stay distinct in the ledger rather
+than reading as one anchor that paused and resumed.
 
-Human-first prose ack by default; `--json` emits the recorded anchor
+**`--kind <kind>`** (`milestone`, `quit`, `limit` or `habit`) records the same
+definition plus the anchor's first `kind` event. A `limit` needs **both**
+`--allowance N` and `--window D`, positive whole numbers read as "N use-days in
+any D days" (`--allowance 4 --window 90` is 4 days in 90); a `habit` may take
+`--window D` for its rolling rate (default 30); a `milestone` or a `quit` takes
+neither. The `kind` event's day is the logical day you write it, not the anchor
+date — for a habit that is the day its confirmations start, so a backdated habit
+claims nothing before today unless you vouch for it with
+[`anchor confirm --from`](#anchor-confirm). **Without `--kind` the verb is
+exactly what it has always been** — a milestone, and no event is written.
+`--kind` on a label an active anchor already holds is rejected: reclassify it
+with [`anchor kind`](#anchor-kind) instead, so a date correction never changes a
+kind as a side effect.
+
+`add --kind` writes both files, in a fixed order (the `kind` event, then the
+definition), so an interrupted write never shows a half-made anchor. If one is
+ever interrupted, `lucid validate` names it and re-running the same command
+finishes it.
+
+Human-first prose ack by default:
+
+```text
+Anchor recorded: first-gate — 2026-03-01.
+Anchor recorded: late-night-snacks — 2026-01-05, a limit of 4 days in 90. Saved as `anchorev_2026_03_02_a`.
+Anchor recorded: morning-walk — 2026-01-05, a habit (30-day window); confirmations start 2026-03-02. Saved as `anchorev_2026_03_02_b`.
+```
+
+Under `--json` a plain `add` emits the recorded anchor
 `{id, label, date, note, recorded_at}` (`recorded_at` is the append timestamp,
-local TZ). An empty label or an unparseable date is rejected (prints the fixed
-copy, exits `1`); missing arguments are a usage error (exit `2`).
+local TZ), byte-for-byte as before. With `--kind` it emits the same object plus
+`kind` (the kind name), `receipt_id` (the `kind` event's id) and `event` (that
+event, verbatim). An empty label or an unparseable date is rejected (prints the
+fixed copy, exits `1`); missing arguments are a usage error (exit `2`).
 
-`anchor add` is the CLI's **two documented exceptions** to the strict tier:
+`anchor add`'s positional date is the CLI's **two documented exceptions** to the
+strict tier:
 
 - **A future date is accepted** — an anchor may be a forward commitment, a date
   you count *toward* rather than only since. It is the one date surface with no
@@ -585,51 +810,232 @@ copy, exits `1`); missing arguments are a usage error (exit `2`).
   precise "days since" number, and deriving it from a guessed January 1st would
   report a confident wrong count. Use `YYYY-MM-DD` (or `@yesterday`) instead.
 
+#### `anchor kind`
+
+Reclassify an active anchor **in place** as a `milestone`, `quit`, `limit` or
+`habit`. Its id, label and date are unchanged; one dated `kind` event is
+appended, and `anchors.json` is untouched (one exception below). Changing a
+limit's allowance or window is the same verb — the dated `kind` events *are* the
+parameter history, and the current numbers read the latest one. The parameter
+rules are `add --kind`'s: both `--allowance` and `--window` for a `limit`,
+`--window` alone (default 30) for a `habit`, neither for a `milestone` or a
+`quit`. `--note-file` records why, on the event.
+
+Events are facts that outlive a kind change. Quit slips and limit uses are both
+**use-days**, so a quit slip reads as a `slip`-intent use under `limit`, and a
+limit's uses — planned or not — count as slips under `quit`. Each kind's math
+reads only the facts it understands (`milestone` none, `quit` and `limit`
+use-days, `habit` misses and confirms); the others stay on the record and come
+back if you convert back. **No conversion makes a quit run longer than the
+truth:** reclassifying to `quit` counts from the latest use-day when it is later
+than the anchor's date, and then also appends a re-dated definition — the
+exception — so an older `lucid` reading the same Ledger agrees. A recent planned
+use can never hide inside a long quit run.
+
+Reclassifying to `habit` starts its confirmations on the day you reclassify,
+never the anchor date; after a change away and back, the later of that day and
+the day after its last confirm. Every run writes one event, so re-recording
+`habit` on an anchor that is already a habit moves its "became a habit" day to
+today — days before that are claimed only with `confirm --from`.
+
+```text
+sobriety is now a quit — counting from 2026-01-01. Saved as `anchorev_2026_03_02_a`.
+late-night-snacks is now a quit — counting from 2026-02-14, its latest use-day. Saved as `anchorev_2026_03_02_b`.
+late-night-snacks is now a limit of 4 days in 90. Saved as `anchorev_2026_03_02_c`.
+morning-walk is now a habit (30-day window); confirmations start 2026-03-02. Saved as `anchorev_2026_03_02_d`.
+```
+
+`--json` emits the event receipt, with `compat` when the reclassify re-dated.
+Echo-and-confirm tier.
+
+#### `anchor slip`
+
+**`quit` anchors only.** Record a relapse, kept separate from a date correction:
+the running count restarts from the slip day, while the **longest clean run**
+and the **slip count** are kept. `--day` backdates it (default: the current
+logical day); `--note-file` adds a note.
+
+When the slip moves the quit's effective date — the later of its start and every
+use-day on record (its slips, plus any uses logged while it was a limit), this
+one included — `slip` also appends a re-dated definition to
+`anchors.json`, written *before* the event, so neither this binary nor an older
+one ever shows a run longer than the truth. A slip that does not move it (one
+backdated behind a later slip, or on a day already counted) writes its event
+alone; it can still change the longest run. Re-dating with
+[`anchor add`](#anchor-add) stays the *correction* path, for a start date that
+was simply wrong.
+
+```text
+Logged a slip on sobriety for 2026-04-01 as `anchorev_2026_04_02_a` — counting again from 2026-04-01 (longest 90 days, 1 slip).
+```
+
+`--json` emits the event receipt (with `compat` when it re-dated). Capture tier.
+
+#### `anchor use`
+
+**`limit` anchors only.** Log one use of the allowance with its **intent**:
+exactly one of `--planned` (a deliberate, sanctioned use) or `--slip` (one you
+did not mean to have). Neither or both is a usage error — the binary never
+guesses an intent. `--day` backdates it (default: the current logical day);
+`--note-file` adds a note.
+
+A use spends allowance; **a planned use never resets or zeroes anything** — it
+is spend, not failure, the same idea as the Engine's error budget. Several uses
+on one day are **one use-day**: a limit counts frequency, not quantity. The ack
+says where the allowance stands, and says so plainly when it is over:
+
+```text
+Logged a planned use of late-night-snacks for 2026-03-14 as `anchorev_2026_03_15_a` — 1 of 4 in the last 90 days.
+Logged a slip use of late-night-snacks for 2026-03-20 as `anchorev_2026_03_20_a` — 5 of 4 in the last 90 days, over allowance.
+```
+
+`--json` emits the event receipt. Capture tier.
+
+#### `anchor miss`
+
+**`habit` anchors only.** Log a day the habit did not happen — the only thing a
+habit logs as it happens. `--day` backdates it (default: the current logical
+day); `--note-file` adds a note ("at a friend's place"). A miss **always wins**
+over a confirm on the same day, so a miss remembered after a day was already
+confirmed is still recorded and still counts.
+
+One isolated miss means nothing: the signal is **never miss twice**, so only a
+run of consecutive misses reaching `anchors.miss_alarm` (default 2) is called
+out, in the ack and in [`metrics`](#metrics):
+
+```text
+Logged a miss on morning-walk for 2026-03-14 as `anchorev_2026_03_14_a`.
+Logged a miss on morning-walk for 2026-03-15 as `anchorev_2026_03_15_a` — missed 2 days in a row.
+```
+
+`--json` emits the event receipt. Capture tier.
+
+#### `anchor confirm`
+
+Attest that a habit held on the days you have not logged a miss — the weekly
+question that turns quiet days into **kept** days. Without it, an unlogged day
+is **unaccounted, never kept**.
+
+- **Which habits.** Each named `<label>` (all must be active habits; one that is
+  not is a wrong-kind rejection), or with no labels **every active habit**. All
+  named habits are checked before anything is written, and their confirms land
+  in one write.
+- **The through-day** is `--through <grammar>` (strict tier: a future or partial
+  date is rejected), defaulting to **yesterday's logical day**, because today is
+  not over.
+- **The span starts** at the later of the day after the habit's last confirm and
+  the day it **became** a habit (its latest `habit` `kind` event) — never the
+  anchor date. So by default nothing before the cutover is claimed, and a
+  skipped week heals itself: the next confirm covers the gap.
+- **`--from <grammar>`** widens the start to an earlier stretch you actually
+  vouch for. It is rejected before the anchor date or after the through-day.
+- **What a span does.** Days in it with no logged miss count as kept; a miss
+  inside it stays a miss.
+- **An empty span writes nothing** for that habit (it is already confirmed
+  through the through-day, or the through-day falls before it became a habit).
+  With no active habits the command is an honest no-op.
+
+The ack names the exact span confirmed per habit, so whoever asked can say it
+back:
+
+```text
+morning-walk: confirmed 2026-01-18–2026-01-24 as `anchorev_2026_01_25_a`.
+evening-stretch: already confirmed through 2026-01-24; nothing written.
+```
+
+`--json` emits `{through, confirmed, already_confirmed}`: `through` is the
+through-day used; `confirmed[]` holds one `{label, anchor_id, from, through,
+receipt_id}` per habit with a non-empty span; `already_confirmed[]` holds one
+`{label, anchor_id, last_confirmed}` per habit with an empty one (`last_confirmed`
+is omitted for a habit never confirmed). Both arrays are always present, empty
+when there is nothing to list. Echo-and-confirm tier — a confirm claims days as
+kept.
+
+#### `anchor void`
+
+Correct a misheard or mistaken event without rewriting anything: `anchor void
+<event-id>` appends a `void` naming it, the voided event drops out of all math,
+and the history keeps both. `--reason-file` records why. A void corrects a
+`slip`, `use`, `miss`, `confirm` or `graduate`. A **`kind` event is never
+voidable** — the dated kind events are the parameter history — so a wrong kind
+is corrected with [`anchor kind`](#anchor-kind).
+
+Voiding a slip that had moved a quit's effective date also appends the
+**restoring** definition record (the void first, then the record), so an older
+`lucid` reads the corrected date too. Voiding a `graduate` leaves the plain
+sunset in place, so the anchor reads as an ordinary retirement; that is the one
+void a sunset anchor accepts.
+
+```text
+Voided `anchorev_2026_04_02_a` (a slip on sobriety, 2026-04-01) as `anchorev_2026_04_03_a` — it no longer counts; both records are kept. sobriety counts from 2026-01-01 again.
+```
+
+`--json` emits the event receipt (`event.target` is the voided id; `compat` is
+the restoring record, when one was written). Echo-and-confirm tier.
+
 #### `anchor sunset`
 
-Retire a milestone from the counting surfaces **without deleting anything** — a
+Retire an anchor from the counting surfaces **without deleting anything** — a
 mistyped label, a duplicate, an abandoned gate. It appends one record mirroring
-the anchor plus `state: "sunset"`, with the optional `[reason...]` carried in
-that record's `note`.
+the anchor plus `state: "sunset"`, with the optional `[reason...]` (or
+`--reason-file <path>`) carried in that record's `note`.
 
-What changes: the milestone stops appearing in `lucid metrics` prose, leaves
-`anchors[]` in `metrics --json`, and stops raising the witness aging-anchor
-check. What does not: the milestone stays in `history[]` in full, and appears in
-`metrics --json` → `anchors_sunset[]` with the date it counted from, so a
-retired milestone is never invisible — it just stops counting.
+What changes: the anchor stops appearing in `lucid metrics` prose, leaves
+`anchors[]` in `metrics --json`, and drops out of the witness report's
+kind-aware watch-outs. What does not: the anchor stays in `history[]` in full,
+and appears in `metrics --json` → `anchors_sunset[]` with the date it counted
+from, so a retired anchor is never invisible — it just stops counting.
 
-Adding the label again later is supported and starts a new milestone under a new
-id (see `anchor add` above). This is the supported way to correct the metrics
+**`--graduated`** retires it as **graduated** — "this became who I am", which is
+different from an abandoned sunset. It writes a `graduate` event, then the very
+same plain sunset record (never a new state value, so an older `lucid` simply
+shows an ordinary sunset), and the anchor appears in `metrics --json` →
+`anchors_graduated[]` instead of `anchors_sunset[]`. Any kind can graduate;
+[`metrics`](#metrics) surfaces a habit that is eligible (`graduation_eligible`),
+and the decision is always yours.
+
+```text
+Anchor sunset: gate-30 — 2026-02-01. It no longer counts on the metrics surface; the record is kept.
+Anchor graduated: morning-walk — 2026-01-05. It no longer counts on the metrics surface; the record is kept. Saved as `anchorev_2026_04_10_a`.
+```
+
+Under `--json` a plain sunset emits the appended record; with `--graduated` the
+same object plus `receipt_id` (the `graduate` event's id) and `event` (that
+event, verbatim). Echo-and-confirm tier.
+
+Adding the label again later is supported and starts a new anchor under a new id
+(see `anchor add` above). This is the supported way to correct the metrics
 surface; hand-editing the store is not.
 
 #### `anchor rename`
 
-Change an active anchor's display name. Its id, date, note and running day count
-all carry forward, so a rename costs you nothing — it is one more append whose
-label differs. Exactly two arguments: there is no trailing reason, because
-nothing is being retired.
+Change an active anchor's display name. Its id, date, note, kind, events and
+running day count all carry forward, so a rename costs you nothing — it is one
+more append whose label differs. Exactly two arguments: there is no trailing
+reason, because nothing is being retired.
 
 Renaming an anchor **recorded before ids existed** *adopts* it, in a single
 write: a retired stub under the old name appears in `anchors_sunset[]` carrying
-`id: "legacy:<old-label>"`, and the milestone continues under the new name with
-a freshly minted id. That stub is documented behavior, not a caveat — it is how
+`id: "legacy:<old-label>"`, and the anchor continues under the new name with a
+freshly minted id. That stub is documented behavior, not a caveat — it is how
 the ledger stays honest about a name that is no longer in use, and it is what
 every rename of a pre-id anchor will do.
 
 #### `anchor backfill-ids`
 
 Give every anchor **recorded before ids existed** a real, written
-`anchor_YYYY_MM_DD_<slot>` id — so `anchor:<id>` linking, and any future
-reference, has a durable target instead of the read-time `legacy:<label>`
-identity. It works by **appending, never rewriting**: one *adoption record* per
-legacy anchor, copying that anchor's label, date, note, state, and `recorded_at`
-verbatim and adding the minted id (see
+`anchor_YYYY_MM_DD_<slot>` id — so `anchor:<id>` linking, a kind, an event, and
+any future reference have a durable target instead of the read-time
+`legacy:<label>` identity. It works by **appending, never rewriting**: one
+*adoption record* per legacy anchor, copying that anchor's label, date, note,
+state, and `recorded_at` verbatim and adding the minted id (see
 [`../mvp/engine-module.md`](../mvp/engine-module.md) §`anchors.json`). No stored
 record is edited or removed.
 
 This is an **explicit maintenance command, never automatic** — a silent write to
 primary testimony on upgrade is exactly what Lucid does not do. It is safe to
-re-run: once every legacy anchor is adopted it appends nothing.
+re-run: once every legacy anchor is adopted it appends nothing. It is also the
+remedy the event verbs name when they meet a pre-id anchor.
 
 | Flag | Effect |
 |------|--------|
@@ -647,31 +1053,62 @@ lucid anchor backfill-ids
 
 #### Errors
 
-Each of these prints a fixed reason, exits `1`, and appends nothing:
+Each rejection prints a fixed reason that names its remedy and ends "Nothing
+was saved." — and appends nothing to either file. A problem visible on the
+command line alone is a **usage error** (exit `2`): an unknown kind name,
+`--allowance` or `--window` that is not a positive whole number or sits on a
+kind that does not take it, or `anchor use` with neither or both of `--planned`
+and `--slip`. Everything decided against the store — and an unreadable, future
+or partial date, as for `anchor add` — exits `1`:
 
 - **A label no anchor holds** — the error names the labels that *are* recorded,
   so the remedy is in the message rather than in a separate lookup:
   `no anchor named "gate-3" — recorded anchors: gate-30, sobriety`.
 - **A label that is already sunset** — a retired anchor is history, not an
-  editable record. Add it again to start a new milestone under that name.
+  editable record, and takes no new events. Add it again to start a new anchor
+  under that name.
 - **`rename` onto a label an active anchor already holds**, or onto the same
   label — at most one active anchor per label is what lets every verb take a
   bare label.
+- **A wrong-kind event** — `slip` on anything but a quit, `use` on anything but a
+  limit, `miss` or a named `confirm` on anything but a habit:
+  `"sobriety" is a milestone, and a slip belongs to a quit — reclassify it as a quit first: lucid anchor kind sobriety quit`.
+- **An event or reclassify on a pre-id anchor** — run
+  `lucid anchor backfill-ids` first.
+- **`add --kind` on a label an active anchor already holds** — reclassify it in
+  place with `lucid anchor kind`.
+- **A `void` of an unknown id, an already voided event, a `void`, or a `kind`
+  event** — the last one names `anchor kind` as the fix.
+- **A day before the anchor's start**, or a **`confirm --from`** before the
+  anchor date or after the through-day.
+- **A different change to an anchor with an unfinished two-file write** — retry
+  the original command to finish it; `lucid validate` names it.
 
 Renaming onto a label held only by a **sunset** anchor succeeds — that name is
-free, exactly as it is for `add`.
+free, exactly as it is for `add`. The full table, with each message, is
+[`../mvp/error-states.md`](../mvp/error-states.md) §"Anchors".
 
 ```sh
-lucid anchor add sobriety 2026-01-15
+lucid anchor add sobriety 2026-01-15 --kind quit
 lucid anchor add gate-30 2026-02-01 cleared the first gate
 lucid anchor add sobriety 2026-01-16    # correction — same anchor, latest wins
-lucid anchor add streak-restart @yesterday
+lucid anchor add late-night-snacks 2026-01-05 --kind limit --allowance 4 --window 90
+lucid anchor add morning-walk 2026-01-05 --kind habit
+lucid anchor kind late-night-snacks limit --allowance 3 --window 90   # a new allowance
+lucid anchor slip sobriety --day @yesterday --note-file /tmp/slip-note.txt
+lucid anchor use late-night-snacks --planned --note-file /tmp/use-note.txt
+lucid anchor miss morning-walk --note-file /tmp/miss-note.txt
+lucid anchor confirm                     # every active habit, through yesterday
+lucid anchor confirm morning-walk --from 2026-01-05
+lucid anchor void anchorev_2026_04_02_a --reason-file /tmp/void-reason.txt
 lucid anchor sunset gate-30 mistyped label
+lucid anchor sunset morning-walk --graduated
 lucid anchor rename gate-30 gate-thirty
 ```
 
-Read the running counts with [`metrics`](#metrics) (`anchors[]` → `days_since`),
-and the retired ones with `metrics --json` (`anchors_sunset[]`).
+Read the running numbers with [`metrics`](#metrics) (`anchors[]` → `days_since`
+plus the kind object), and the retired ones with `metrics --json`
+(`anchors_sunset[]`, `anchors_graduated[]`).
 
 ### obs
 

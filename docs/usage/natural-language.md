@@ -39,7 +39,10 @@ Rule of thumb: **reads run immediately**, and the Engine's day-record writes
 (`closeout`, `closeout backfill`, `mode`, `skip`) are **echoed back as the
 assembled command and wait for a one-word confirmation** before they run —
 voice-to-text is lossy, and a write lands an immutable day record. Lifecycle
-state changes (`storm`, `anchor`, `profile`) are echoed the same way.
+state changes (`storm`, `profile`, and the anchor verbs that set up, confirm,
+correct or retire an anchor) are echoed the same way. The one anchor exception
+is the **capture tier** — a slip, a use, or a missed day — which runs at once,
+like a capture ([Anchors, by kind](#anchors-by-kind)).
 
 ### Reads — run immediately
 
@@ -132,14 +135,16 @@ moves your clocks. The harness echoes these for a confirm too.
   the chain."* / *"The storm's over, I'm back."*
 - **the harness assembles** `lucid storm travel-week` (or `lucid storm end`).
 
-**`anchor`** — mark a dated "days since X" milestone.
+**`anchor`** — set up a dated anchor: a milestone, a quit, a limit, or a habit.
 
-- **Instead of typing** `lucid anchor add quit-soda 2026-03-01`
+- **Instead of typing** `lucid anchor add quit-soda 2026-03-01 --kind quit`
 - **you can say** — *"Set an anchor — I quit soda on March 1st."* / *"Mark the day
   I cleared the 30-day gate, April 1st."*
-- **the harness assembles** `lucid anchor add quit-soda 2026-03-01` (or
-  `lucid anchor add gate-30 2026-04-01 cleared the first gate`). Read the running
-  counts back with `metrics`.
+- **the harness assembles** `lucid anchor add quit-soda 2026-03-01 --kind quit`
+  (or `lucid anchor add gate-30 2026-04-01 cleared the first gate` — a date that
+  matters, so a plain milestone). Read the running numbers back with `metrics`.
+  Logging what happens to an anchor afterward has its own section:
+  [Anchors, by kind](#anchors-by-kind).
 
 **`profile`** — switch to a named clock profile (effective the next logical day).
 
@@ -147,6 +152,70 @@ moves your clocks. The harness echoes these for a confirm too.
 - **you can say** — *"Switch me to my travel schedule."* / *"Back to my default
   clock."*
 - **the harness assembles** `lucid profile travel` (or `lucid profile default`).
+
+## Anchors, by kind
+
+An anchor's **kind** decides both its honest number and what is worth saying
+about it ([`commands.md`](commands.md#anchor)). Sam keeps four:
+
+- **`first-gate`** — a `milestone`: a date that matters. Nothing to log.
+- **`smoke-free`** — a `quit`: something stopped. Only a slip is logged.
+- **`late-night-snacks`** — a `limit` of 4 days in 90: rarely, and on purpose.
+  Each use is logged with its intent.
+- **`morning-walk`** — a `habit`: something done often. Only a miss is logged,
+  plus one weekly confirm.
+
+**Logging what happens — the capture tier, run at once.** A slip, a use, or a
+missed day is cheap, append-only, and only ever makes the record more honest, so
+the harness runs it as soon as it understands you and **leads with the receipt**
+(the `anchorev_…` id). A note goes through `--note-file`, so punctuation in it can
+never cut the write short. A mishearing is fixed with `anchor void` (below).
+
+- *"Smoked again last night."*
+  → `lucid anchor slip smoke-free --day @yesterday`
+- *"Had a planned slice of cake at the party."*
+  → `lucid anchor use late-night-snacks --planned --note-file <note>` (note:
+  "a slice of cake at the party")
+- *"Raided the fridge at midnight — didn't mean to."*
+  → `lucid anchor use late-night-snacks --slip` — no `--day` needed: a use logged
+  after midnight and before the rollover lands on the evening it belongs to.
+- *"Skipped the morning walk — I'm at a friend's place."*
+  → `lucid anchor miss morning-walk --note-file <note>` (note: "at a friend's
+  place")
+
+A planned use is spend, not failure: it never resets anything, so there is no
+reason to soften it or to hide it. A single missed walk means nothing either —
+the signal is two in a row.
+
+**Setting up, reclassifying, confirming, correcting, retiring — echoed and
+confirmed.** These change what the numbers mean, so the harness shows the
+assembled command and waits for a *"yes"*.
+
+- *"Late-night snacks should be rare — four nights in ninety, starting today."*
+  → `lucid anchor add late-night-snacks <today> --kind limit --allowance 4 --window 90`
+- *"Track the morning walk as a habit."*
+  → `lucid anchor add morning-walk <today> --kind habit`
+- *"Make late-night snacks three in ninety instead."*
+  → `lucid anchor kind late-night-snacks limit --allowance 3 --window 90`
+- *"That slip was wrong — I didn't smoke last night."*
+  → `lucid anchor void <receipt> --reason-file <reason>`, naming the slip's
+  receipt from the earlier ack
+- *"The morning walk is just who I am now — graduate it."*
+  → `lucid anchor sunset morning-walk --graduated`
+
+**The weekly confirm.** A habit's quiet days count as **kept** only once you
+confirm them; until then they are unaccounted, never assumed. Once a week the
+harness asks one question that names the real span, read from `metrics --json`
+(`habit.next_confirm_from` through yesterday), so a skipped week is asked about
+rather than assumed:
+
+- **the harness asks** — *"Any misses since January 18th on morning-walk?"*
+- **you say** — *"Just Tuesday — I was sick."*
+- **the harness assembles** `lucid anchor miss morning-walk --day 2026-01-20`
+  and then `lucid anchor confirm`, echoes both, and runs them on your *"yes"*.
+  The confirm's ack names the exact span it covered
+  (`morning-walk: confirmed 2026-01-18–2026-01-24 …`), and the harness says it
+  back. The Tuesday miss stays a miss inside the confirmed span.
 
 ## The night close-out, step by step
 
@@ -187,7 +256,9 @@ One rule keeps voice-first both fast and honest:
 - **Read verbs run immediately.** `status`, `day`, `metrics`, `log`, and `obs`
   change no day record (a capture is additive and never overwrites a decided
   day), so the harness runs them the moment it understands you — no confirmation
-  step.
+  step. The anchor **capture tier** — `anchor slip`, `anchor use`, `anchor miss` —
+  runs the same way, leading with the receipt: logging a lapse can only make the
+  record more honest, and `anchor void` fixes a mishearing.
 - **State-writing verbs are echoed and confirmed.** `closeout`,
   `closeout backfill`, `mode`, and `skip` land or move an Engine day record, so
   the harness **assembles the compact command, shows it back, and waits for a
@@ -196,8 +267,10 @@ One rule keeps voice-first both fast and honest:
 The reason is voice-to-text itself: it mishears a digit, flips a link state, or
 drops a word — and a close-out writes an **immutable** day record plus a journal
 line. A one-word confirm is cheap insurance that the record stays true to what
-you actually did. The lifecycle verbs `storm`, `anchor`, and `profile` are
-consequential state changes and are echoed for the same one-word confirm.
+you actually did. The lifecycle verbs `storm` and `profile`, and the anchor verbs
+that change what a number means — `anchor add`, `kind`, `confirm`, `void`,
+`sunset` (including `--graduated`) and `rename` — are consequential state changes
+and are echoed for the same one-word confirm.
 
 ## When the harness asks instead of guesses
 
@@ -215,6 +288,12 @@ didn't give.
 - **A count that doesn't fit the chain** — if the states you give don't total
   your chain's link count (three characters for a three-link chain), the harness
   flags the mismatch and asks, rather than padding or trimming to fit.
+- **A use with no intent** — *"Had some cake last night."* A limit use needs its
+  intent, and the binary refuses to guess it, so the harness asks *"Planned, or a
+  slip?"* rather than picking one.
+- **Which anchor** — a lapse that could belong to more than one anchor, or to
+  none, gets one question naming the candidates; the harness never files it
+  under the nearest-sounding label.
 
 One question, then it proceeds. The goal is to remove typing, not to remove the
 truth.

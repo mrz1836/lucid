@@ -907,7 +907,9 @@ A synthetic example: `Late-night snacks: 1 of 4 in the last 90 days (1 planned,
   hollow 100%.
 * **`current_miss_run`** — consecutive *calendar* miss days ending at the latest
   accounted day; **`alarm`** when it reaches `miss_alarm`. A single isolated
-  miss never alarms.
+  miss never alarms. **`miss_run_7d`** — the longest such run that touches the
+  last seven logical days, at its full length — is what the witness habit
+  watch-out reads, so a mid-week slide stays visible after a recovery.
 * **`last_confirmed`** — the latest through-day of a non-voided confirm.
 * **`graduation_eligible`** — true once the accounted days since the last run
   of at least `miss_alarm` consecutive misses ended — or since the anchor became
@@ -944,7 +946,9 @@ and its meaning: `date` and `days_since` stay the plain fold of `anchors.json`
 (latest record wins, compat records included), so for a quit after a slip they
 show the re-dated effective date — exactly what an older binary shows. Each
 anchor row adds `kind` and one kind object (`quit`, `limit` or `habit`) holding
-the numbers above; **both are omitted for a milestone**, so absence means
+the numbers above (every field is listed in
+[`../usage/commands.md`](../usage/commands.md#metrics) §metrics); **both are
+omitted for a milestone**, so absence means
 milestone, the same convention `state` uses. Graduated anchors appear in
 `anchors_graduated[]`, separate from `anchors_sunset[]`, omitted when empty. A
 Ledger with no kind events is byte-identical to today, `--json` included.

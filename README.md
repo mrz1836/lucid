@@ -296,7 +296,7 @@ gate, `2` usage / flag-parse error. Usage errors print on stderr as
 |---------|-------|--------------|
 | `day [date\|yesterday]` | — | The joined day view — engine record + observations + enrichment + raw entries. |
 | `status` | — | Ambient Engine state: streak, adherence vs. declared mode with its honest co-numbers, error-budget burn, days to the next gate. |
-| `metrics` | — | Practice-quality rollup: current/longest streak, 30-day adherence (30/60/90 gate rollups under `--json`), misses, error budget, days-since per anchor. |
+| `metrics` | — | Practice-quality rollup: current/longest streak, 30-day adherence (30/60/90 gate rollups under `--json`), misses, error budget, and one line per anchor in its kind's language — days since, days since the last slip, allowance spent, or kept-of-accounted days. |
 | `stats` | `--last` `--from` `--to` | Ledger volume over a window of logical days — counts only, never content. |
 | `reflect [gate]` | — | Recall your validated insights; never proposes a new pattern. |
 | `reflect week` | `--days` `--since` `--week` | Read-only weekly deep-dive since your last reflection. `reflect week apply` persists a candidate through the resonance gate (JSON on stdin); `reflect week close` stamps the cursor. |
@@ -330,8 +330,15 @@ gate, `2` usage / flag-parse error. Usage errors print on stderr as
 | `person merge <source> <target>`<br>`person alias <subject> <form>`<br>`person rename <subject> <new-name…>` | — | Reconcile the people records: fold a duplicate onto a canonical record (append-only redirect, never a delete), record another written form, or change a display name (the `person_key` is stable). |
 | `person set <subject>` | `--dob` `--relationship` `--note` | Record the user-authored durable fields on a person — never inferred. |
 | `person off-limits <subject>` | `--restore` | Mark a person off-limits to inference (the P-3 redaction); `--restore` clears it. |
-| `anchor add <label> <date> [note…]` | — | Record a days-since milestone. A future date is accepted — an anchor may be a date you count *toward*. |
-| `anchor rename <label> <new-label>`<br>`anchor sunset <label> [reason…]` | — | Rename a milestone's display label (the day count carries forward), or retire it from the counting surfaces (the record is kept). |
+| `anchor add <label> <date> [note…]` | `--kind` `--allowance` `--window` `--note-file` | Record an anchor — a `milestone` by default, or with `--kind` a `quit`, a `limit` (`--allowance N --window D`: N use-days in any D days), or a `habit`. A future date is accepted — an anchor may be a date you count *toward*. |
+| `anchor kind <label> <kind>` | `--allowance` `--window` `--note-file` | Reclassify an anchor in place (id and date unchanged), or change a limit's allowance. Events outlive the change, and no conversion makes a quit run longer than the truth. |
+| `anchor slip <label>` | `--day` `--note-file` | Log a relapse on a `quit`: the count restarts, the longest clean run and the slip count are kept. Returns an `anchorev_…` receipt. |
+| `anchor use <label>` | `--planned` `--slip` `--day` `--note-file` | Log a use of a `limit`'s allowance with its required intent. A planned use is spend, never a reset. |
+| `anchor miss <label>` | `--day` `--note-file` | Log a missed day on a `habit` — the only thing a habit logs as it happens. Never miss twice. |
+| `anchor confirm [<label>…]` | `--through` `--from` | Confirm each habit's days since its last confirm (through yesterday by default), turning quiet days into kept days — an unconfirmed day is never kept. |
+| `anchor void <event-id>` | `--reason-file` | Correct a misheard slip, use, miss, confirm or graduation by its receipt — append-only, both records kept. |
+| `anchor rename <label> <new-label>`<br>`anchor sunset <label> [reason…]` | `--reason-file` `--graduated` (on `sunset`) | Rename an anchor's display label (its day count, kind and events carry forward), or retire it from the counting surfaces (the record is kept) — `--graduated` retires one that became who you are, kept apart from an abandoned sunset. |
+| `anchor backfill-ids` | `--dry-run` | Give every anchor recorded before ids existed a written id — appended, never rewritten. |
 | `link <media>`<br>`unlink <media>`<br>`annotate <media>` | `--to` `--note` | Point a stored attachment at anything it's about — a person, injury, day, anchor, thread — through the append-only link ledger (`--to <kind>:<key>`, repeatable). `unlink` retires an association; `annotate` adds a note to one. Correctable and retroactive; the media binary is never touched and nothing is destroyed. |
 | `structure [raw_id]` | `--since` `--until` `--force` | Run the Structuring pass over raw entries a check-in did not capture — one id, or an inclusive date window. |
 | `bootstrap [done]` | — | Toggle historical-entry mode to backfill the past without disturbing today. |

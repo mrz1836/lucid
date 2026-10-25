@@ -25,12 +25,16 @@ morning/evening routine. Full syntax: [`usage/commands.md`](usage/commands.md).
 
 **Deterministic metrics substrate.** `lucid metrics --json` is the read surface a
 harness consumes for the practice's honest numbers — current/longest streak,
-30-day adherence (with the 30/60/90 gate rollups), misses in window, and a
-days-since count for each recorded anchor. Every number comes from the Engine
-fold, so a harness (or a morning brief) renders them **without ever recomputing**
-— they can't drift or be softened downstream. The record verb that feeds it is
-`lucid anchor add <label> <date> [note]`, which appends a dated milestone to the
-append-only anchors store; both are deterministic and provider-free, exactly like
+30-day adherence (with the 30/60/90 gate rollups), misses in window, and each
+recorded anchor's numbers in its kind's language — days since a milestone, days
+since a quit's last slip, a limit's allowance spent, a habit's kept-of-accounted
+days. Every number comes from the Engine fold, so a harness (or a morning brief)
+renders them **without ever recomputing** — they can't drift or be softened
+downstream. The record verbs that feed it are `lucid anchor add <label> <date>
+[note]` (with `--kind` for a quit, limit or habit) and the anchor event verbs
+(`anchor slip`, `use`, `miss`, `confirm` — see
+[`usage/commands.md`](usage/commands.md#anchor)), which append to the
+append-only anchor stores; all are deterministic and provider-free, exactly like
 the rest of the loop above.
 
 ## B — Works today: autonomous sends (bell, L1/L2 tripwire, monthly heartbeat)
