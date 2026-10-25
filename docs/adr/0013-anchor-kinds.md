@@ -294,7 +294,8 @@ anchor's start (§5).
 * **Current run.** `DaysSince(max(start, latest use-day), today)`.
 * **Longest run.** The maximum over the runs between successive use-days,
   counted from the start, the current run included.
-* **Slips.** The number of distinct use-days after the start.
+* **Slips.** The number of distinct use-days on or after the start — a slip
+  logged on the start day itself is still a slip.
 
 A synthetic example: `sobriety` starts 2026-01-01 and slips on 2026-03-01; on
 2026-04-10 it reads `Days since sobriety: 40 (longest 59, 1 slip).`

@@ -517,7 +517,7 @@ voided events never count. Dates are civil `YYYY-MM-DD`.
 |-------|---------|
 | `current_run` | Days since the later of the quit's start and its latest use-day. With no slips, exactly a milestone's count. |
 | `longest_run` | The longest clean run, counted from the start, the current run included. |
-| `slips` | Use-days after the start — the quit's slips, plus any uses logged while it was a limit. |
+| `slips` | Use-days on or after the start — the quit's slips, plus any uses logged while it was a limit. A slip on the start day itself still counts. |
 | `slips_7d` | Days in the last seven logical days, today included — the witness report's week — that carry a slip: a `slip` event, or a use logged `--slip` before a conversion. A planned use never counts here. A count, never a date or a note. |
 | `last_slip` | The latest use-day. Omitted when there is none. |
 

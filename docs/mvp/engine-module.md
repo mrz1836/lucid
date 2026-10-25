@@ -875,8 +875,9 @@ rollover boundary.
   slips this is exactly a milestone's count.
 * **Longest run** — the maximum over the runs between successive use-days,
   counted from the start, the current run included.
-* **Slips** — the number of distinct use-days after the start; **`slips_7d`** —
-  the slip use-days in the last seven logical days (the witness report's week).
+* **Slips** — the number of distinct use-days on or after the start (a slip
+  logged on the start day itself is still a slip); **`slips_7d`** — the slip
+  use-days in the last seven logical days (the witness report's week).
 
 A synthetic example: `sobriety` starts 2026-01-01 and slips on 2026-03-01; on
 2026-04-10 it reads `Days since sobriety: 40 (longest 59, 1 slip).`
