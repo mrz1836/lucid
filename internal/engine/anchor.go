@@ -197,6 +197,20 @@ func ValidateAnchor(label, date string) error {
 	return nil
 }
 
+// adoptionRemap maps each legacy identity an adoption record takes over to the
+// id that record minted. Records carrying adopts take over a legacy identity,
+// so a pre-id record and the record that adopted it fold as one anchor rather
+// than two. Last adoption wins if an identity somehow carries more than one.
+func adoptionRemap(log AnchorLog) map[string]string {
+	remap := map[string]string{}
+	for _, a := range log.History {
+		if a.Adopts != "" && a.ID != "" {
+			remap[a.Adopts] = a.ID
+		}
+	}
+	return remap
+}
+
 // LatestAnchors folds the append-only history to the effective anchor per
 // identity: the most-recently-appended record wins (append order, i.e.
 // RecordedAt), so a correction whose date is *earlier* than the original
@@ -208,15 +222,7 @@ func ValidateAnchor(label, date string) error {
 // display name have a total, stable order rather than one that depends on map
 // iteration. An empty log yields an empty slice.
 func LatestAnchors(log AnchorLog) []Anchor {
-	// Records carrying adopts take over a legacy identity, so a pre-id record
-	// and the record that adopted it fold as one anchor rather than two.
-	// Last adoption wins if an identity somehow carries more than one.
-	remap := map[string]string{}
-	for _, a := range log.History {
-		if a.Adopts != "" && a.ID != "" {
-			remap[a.Adopts] = a.ID
-		}
-	}
+	remap := adoptionRemap(log)
 
 	latest := make(map[string]Anchor, len(log.History))
 	for _, a := range log.History {
