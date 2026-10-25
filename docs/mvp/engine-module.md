@@ -163,10 +163,16 @@ superseded *only* for these three sends.
 | `/storm <clause-label\|unwritten> [--day <date>]` | Declare a storm citing a Charter clause label (registered in `storm.json`) or `unwritten` (engine §4). Stands only on witness confirmation within the confirmation window (72 hours); ambush windows enter automatically from their `storm.json` dates, no per-event confirmation. Ack while pending: `storm declared (<label>) — pending witness confirmation (72h).` Ack once standing: `storm standing through <date> (<label>) — undeclared days default to red; the stake is stayed; contact continues.` Renewal is the same command re-issued before expiry, once. | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
 | `/storm end [--day <date>]` | End a standing storm early; expiry at the duration bound is otherwise automatic. Breach math resets at exit (engine §4). | `engine/storm.json` (append-only `history[]`); rebuilt `engine/status.json` |
 | `/profile <name>` | Switch to a named clock profile defined in `chain.json` (definitions change only at a Retro — engine §2). Sticky, recorded, **effective from the next logical day, never the current one**; the outgoing day completes under the clocks that started it. | `engine/profile.json` (append-only `history[]`) |
-| `metrics` (read; CLI `lucid metrics [--json]`) | Read-only **practice-quality** rollup: current/longest streak, 30-day adherence (co-presented with its honest co-numbers) **plus the 30/60/90 gate rollups in `--json`**, misses in window, error-budget burn, and a days-since count for each recorded anchor. Assembled from existing Engine folds (`ComputeStreaks`, the adherence/error-budget windows) — no new chain math; the only new arithmetic is the days-since day count. | None (silent scaffold only) |
-| `anchor add <label> <date> [note]` (record; CLI `lucid anchor add`) | Record a dated **milestone anchor** ("days since X") to the append-only anchors store. `<date>` reads the shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)) with two documented carve-outs: a **future date is accepted** (an anchor may be a forward commitment — the CLI's only surface with no future ceiling), and a **partial date is rejected** (a "days since" count needs a real day, never a guessed January 1st). **Latest record per identity wins**: the append reuses the id of the **active** anchor holding that label (a correction), and mints a new id only when none does — a first use, or a label whose only holder was sunset. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
-| `anchor sunset <label> [reason]` (record; CLI `lucid anchor sunset`) | Retire a milestone from the counting surfaces without deleting anything: appends one full mirror of the anchor plus `state: "sunset"`, carrying the anchor's own `date` and the optional reason in `note`. The milestone leaves `metrics` prose, `anchors[]`, and the witness aging-anchor check, and appears in `metrics --json` → `anchors_sunset[]`. Rejects an unrecorded label (naming the recorded ones) or an already-sunset one, before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
-| `anchor rename <label> <new-label>` (record; CLI `lucid anchor rename`) | Change an active anchor's display name, keeping its id, date, note and running day count — one append under the same id. Against a **legacy (id-less) anchor** it writes a **pair** in a single write: an id-less sunset stub retiring `legacy:<old-label>`, plus a new id-bearing record carrying the original date and note under the new name. Rejects an unrecorded, already-sunset, identical, or actively-held target label before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `metrics` (read; CLI `lucid metrics [--json]`) | Read-only **practice-quality** rollup: current/longest streak, 30-day adherence (co-presented with its honest co-numbers) **plus the 30/60/90 gate rollups in `--json`**, misses in window, error-budget burn, and one line per active anchor **in its kind's language** — days since for a `milestone`, days since the last slip for a `quit`, the allowance spent for a `limit`, kept-of-accounted days for a `habit` (§"Anchor event store (`anchor_events.json`)"). Assembled from existing Engine folds (`ComputeStreaks`, the adherence/error-budget windows) — no new chain math; the only new arithmetic is the anchor math (the days-since day count and the per-kind fold), a pure function of the two anchor files that never touches the chain numbers. | None (silent scaffold only) |
+| `anchor add <label> <date> [note] [--kind <kind>] [--allowance N --window D] [--note-file <path>]` (record; CLI `lucid anchor add`) | Record a dated **anchor** to the append-only anchors store. `<date>` reads the shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)) with two documented carve-outs: a **future date is accepted** (an anchor may be a forward commitment — the CLI's only surface with no future ceiling), and a **partial date is rejected** (a "days since" count needs a real day, never a guessed January 1st). **Latest record per identity wins**: the append reuses the id of the **active** anchor holding that label (a correction), and mints a new id only when none does — a first use, or a label whose only holder was sunset. **Without `--kind` the verb is exactly what it has always been** — a `milestone` (the default kind) and no event. **`--kind <kind>`** (`milestone`, `quit`, `limit`, `habit`) records the same v3 definition plus the anchor's first `kind` event (with `--allowance`/`--window` for a `limit`, `--window` optionally for a `habit`); it is a two-file verb, written **intent → `kind` event → definition**. `--kind` on a label an active anchor already holds is rejected (reclassify with `anchor kind`). `--note-file` supplies the note off the command line. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`); with `--kind`, first `engine/anchor_events.json` (a pair intent, then the `kind` event) |
+| `anchor sunset <label> [reason] [--reason-file <path>] [--graduated]` (record; CLI `lucid anchor sunset`) | Retire an anchor from the counting surfaces without deleting anything: appends one full mirror of the anchor plus `state: "sunset"`, carrying the anchor's own `date` and the optional reason in `note`. The anchor leaves `metrics` prose, `anchors[]`, and the kind-aware witness watch-outs, and appears in `metrics --json` → `anchors_sunset[]`. **`--graduated`** retires it as *graduated* — "this became who I am", not an abandoned sunset — and is a two-file verb, written **intent → `graduate` event → the same plain v3 sunset record**: never a new `state` value, because an older binary's `IsSunset` reads any other state as active. A graduated anchor appears in `anchors_graduated[]` instead of `anchors_sunset[]`; an older binary shows an ordinary sunset. Rejects an unrecorded label (naming the recorded ones) or an already-sunset one, before any write. Echo-and-confirm tier for `--graduated`. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`); with `--graduated`, first `engine/anchor_events.json` (a pair intent, then the `graduate` event) |
+| `anchor rename <label> <new-label>` (record; CLI `lucid anchor rename`) | Change an active anchor's display name, keeping its id, date, note and running day count — one append under the same id. Against a **legacy (id-less) anchor** it writes a **pair** in a single write: an id-less sunset stub retiring `legacy:<old-label>`, plus a new id-bearing record carrying the original date and note under the new name. An anchor's kind and events key on its id, so they follow a rename untouched, for every kind. Rejects an unrecorded, already-sunset, identical, or actively-held target label before any write. Deterministic, no model in the path. | `engine/anchors.json` (append-only `history[]`) |
+| `anchor kind <label> <kind> [--allowance N --window D] [--note-file <path>]` (record; CLI `lucid anchor kind`) | **Reclassify** an active anchor in place as `milestone`, `quit`, `limit` or `habit`: its id, label and date are unchanged, and one dated `kind` event is appended. Changing a limit's allowance or window is the same verb, so the parameter history is the sequence of dated `kind` events. A `limit` requires both `--allowance` and `--window` (positive integers); a `habit` takes `--window` alone (default 30); a `milestone` or `quit` takes neither. A reclassify **to `quit`** whose latest use-day is later than the folded date also appends a **compat re-date** — a v3 definition record at that use-day, so an older binary agrees — and is then a two-file verb, written **intent → compat re-date → `kind` event**. Every other reclassify leaves `anchors.json` untouched. Rejects a pre-id anchor (`lucid anchor backfill-ids` first), a sunset anchor, or invalid parameters, before any write. Echo-and-confirm tier; the receipt is the event id. Deterministic, no model in the path. | `engine/anchor_events.json` (one `kind` event); a reclassify to `quit` past a later use-day writes a pair intent, then the compat re-date to `engine/anchors.json`, then the `kind` event |
+| `anchor slip <label> [--day <grammar>] [--note-file <path>]` (record; CLI `lucid anchor slip`) | **`quit` anchors only.** Record a relapse, kept separate from a date correction: the running count restarts from the slip day, while the longest clean run and the slip count are kept. When the slip moves the quit's effective date — `max(start, every accepted use-day including this one)`, so a backdated slip never moves it backwards — it is a two-file verb, written **intent → compat re-date → `slip` event**, so neither binary ever shows a run longer than the truth; a slip that does not move it (backdated, or on a day already counted) writes the event alone. Re-dating with `anchor add` stays the *correction* path. Capture tier; the receipt is the event id. Deterministic, no model in the path. | `engine/anchor_events.json` (`slip` event, plus a pair intent when it re-dates) + `engine/anchors.json` (the compat re-date, when the effective date moves) |
+| `anchor use <label> (--planned \| --slip) [--day <grammar>] [--note-file <path>]` (record; CLI `lucid anchor use`) | **`limit` anchors only.** Log one use with its **required intent** — `--planned` or `--slip`; neither or both is rejected, because the binary never guesses an intent. A use spends allowance; a **planned use never resets or zeroes anything**. Several uses on one day are one use-day. Capture tier; the receipt is the event id. Deterministic, no model in the path. | `engine/anchor_events.json` (one `use` event) |
+| `anchor miss <label> [--day <grammar>] [--note-file <path>]` (record; CLI `lucid anchor miss`) | **`habit` anchors only.** Log a missed day — the only thing a habit logs as it happens. A miss always wins over a confirm on the same day. Capture tier; the receipt is the event id. Deterministic, no model in the path. | `engine/anchor_events.json` (one `miss` event) |
+| `anchor confirm [<label>...] [--through <grammar>] [--from <grammar>]` (record; CLI `lucid anchor confirm`) | Attest a span of days for each named **habit** (no labels: every active habit). The through-day defaults to **yesterday's logical day**; the span starts at the later of the day after the habit's last non-voided confirm and the day of its latest `habit` `kind` event — the day it became a habit, never the anchor date — and `--from` widens it to an earlier stretch the person vouches for, never before the anchor date nor after the through-day. One `confirm` event per non-empty span; an empty span writes nothing ("already confirmed through `<date>`"), and no active habits is an honest no-op. The ack names `confirmed <from>–<through>` per habit. Echo-and-confirm tier. Deterministic, no model in the path. | `engine/anchor_events.json` (one `confirm` event per habit with a non-empty span) |
+| `anchor void <event-id> [--reason-file <path>]` (record; CLI `lucid anchor void`) | Correct a misheard `slip`, `use`, `miss`, `confirm` or `graduate` without rewriting: appends a `void` naming the target, and the voided event drops out of all math while the history keeps both. A void of a slip that moves the quit's effective date also appends the **restoring** v3 definition, and is then a two-file verb, written **intent → `void` event → restoring record**. Rejects an unknown id, an already voided event, a `void`, a `kind` event (reclassify instead), or an event of a sunset anchor other than its own `graduate`, before any write. Echo-and-confirm tier — voiding a lapse makes the record kinder, so it runs only on an explicit correction. Deterministic, no model in the path. | `engine/anchor_events.json` (one `void` event, plus a pair intent when it restores) + `engine/anchors.json` (the restoring record, last) |
 | `self set <key> <value> [--since <date>] [--note <text>]` (record; CLI `lucid self set`) | Record a **self fact** — a durable, atemporal attribute of the subject — to the append-only self-facts store. The `<key>` is `<namespace>.<leaf>` over a fixed five-namespace set (`identity.`, `body.`, `constraint.`, `pref.`, `misc.`) with a free-form leaf; an unrecognized namespace is rejected with the accepted set **and** `misc.` named, so no fact is ever turned away. **Latest record per identity wins**: the append reuses the id of the **active** fact holding that key (a correction), and mints a new id only when none does — a first use, or a key whose only holder was retired. `--since` is **optional** (the only write surface where a date is not required at all) and reads the shared date grammar with `AllowPartial`: a partial origin is stored **as typed**, never snapped, because nothing derives a day count from a self fact. Deterministic, no model in the path. | `engine/self.json` (append-only `history[]`) |
 | `self retire <key> [reason]` (record; CLI `lucid self retire`) | Retire a fact that has stopped being true, without deleting anything: appends one full mirror of the fact plus `state: "retired"`, carrying the fact's own `since` (never the retirement day) and the optional reason in `note`. The key leaves the rendered profile, `--json`, and the `/ask` grounding slice, while staying in `history[]` in full and readable under `--history`. Rejects an unrecorded key (naming the recorded ones) or an already-retired one, before any write. Deterministic, no model in the path. | `engine/self.json` (append-only `history[]`) |
 | `self move <key> <new-key>` (record; CLI `lucid self move`) | Re-categorize a fact, keeping its id, value, origin, note and whole history — **exactly one append** under the same id with the new key. There is no legacy pair-write here: every record in this store carries an id, so the `anchor rename` adoption path has no analogue. Rejects an unrecorded, already-retired, identical, or actively-held target key before any write; a key held only by a retired fact is free. Deterministic, no model in the path. | `engine/self.json` (append-only `history[]`) |
@@ -332,7 +338,8 @@ accepted.
 ├── witness.json             # witness contract + consent record
 ├── storm.json               # storm clauses, ambush windows, append-only history
 ├── profile.json             # active clock profile + append-only switch history
-├── anchors.json             # milestone anchors ("days since X") — append-only history
+├── anchors.json             # anchor definitions (label, date, state) — append-only history, v3
+├── anchor_events.json       # anchor event store — kinds, slips, uses, misses, confirms, voids, graduations (append-only; absent until the first event)
 ├── self.json                # self facts ("about me") — append-only history, atemporal
 ├── days/                    # one record per logical day (append-only per day)
 │   └── 2026/07/day_2026_07_02.json
@@ -344,6 +351,7 @@ New storage-adapter named ops: `write_engine_day`, `read_engine_day`,
 `read_engine_status`, `read_chain_config`, `read_witness_contract`,
 `read_storm_state`, `append_storm_event`, `read_profile_state`,
 `append_profile_event`, `read_anchors`, `append_anchor`,
+`read_anchor_events`, `append_anchor_events`, `append_anchor_pair_intent`,
 `read_self_facts`, `append_self_fact`.
 Same discipline as [`architecture.md`](architecture.md) §4: only the
 adapter touches disk; `days/` is append-only per day-id (corrections
@@ -564,6 +572,14 @@ The store is **append-only** and never hand-edited, the same discipline as
 `storm.json` and `profile.json`: every verb appends one record to `history[]` and
 no record is ever rewritten or removed.
 
+**Every anchor has a kind, and the kind is not stored here.** An anchor is a
+`milestone` — the default, and everything this section describes — or a `quit`,
+a `limit` or a `habit` ([ADR-0013](../adr/0013-anchor-kinds.md)). The kind, its
+parameters and every slip, use, miss, confirm, void and graduation live in the
+separate anchor event store (§"Anchor event store (`anchor_events.json`)"),
+joined to this file by `id`. An anchor with no `kind` event is a milestone, so a
+Ledger with no event store reads exactly as it always has.
+
 **Identity.** An anchor's identity is its `id` — `anchor_YYYY_MM_DD_<slot>`, a
 per-day bijective base-26 slot (the same grammar the insights store uses),
 minted from the clock and never derived from the label. That makes the **label a
@@ -632,13 +648,22 @@ called out here rather than discovered later.
 absent ⇒ active; `"sunset"` ⇒ retired. `anchor sunset <label> [reason]` appends a
 full mirror of the anchor plus `state: "sunset"`, carrying the superseded
 anchor's `date` (never the retirement day) and the optional reason in `note`. A
-retired milestone is filtered out of the counting surfaces — `metrics` prose,
-`anchors[]`, and the witness aging-anchor check — while staying in `history[]` in
-full and surfacing in `metrics --json` → `anchors_sunset[]`. `anchor rename
-<label> <new-label>` appends under the **same id** with a new label; against a
-legacy anchor it writes a **pair** in one write — an id-less sunset stub retiring
-`legacy:<old-label>`, plus a new id-bearing record carrying the original date and
-note forward.
+retired anchor is filtered out of the counting surfaces — `metrics` prose,
+`anchors[]`, and the witness watch-outs — while staying in `history[]` in full
+and surfacing in `metrics --json` → `anchors_sunset[]`. The witness watch-outs
+are **kind-aware**: a `limit` over its allowance, a `habit` miss run of at least
+`miss_alarm` that overlaps the report week, and one count-only line per anchor
+with slips this week; a `milestone` and a long `quit` run produce nothing,
+because a long run is a win, not a worry (§"Anchor event store" → "Witness
+watch-outs and anchor detail"). A **graduation** (`anchor sunset --graduated`)
+is this same plain sunset record — never a new `state` value, because an older
+binary's `IsSunset` reads any other state as active; only its paired `graduate`
+event in the event store moves the anchor from `anchors_sunset[]` to
+`anchors_graduated[]`.
+`anchor rename <label> <new-label>` appends under the **same id** with a new
+label; against a legacy anchor it writes a **pair** in one write — an id-less
+sunset stub retiring `legacy:<old-label>`, plus a new id-bearing record carrying
+the original date and note forward.
 
 **`version: 3` is a signal, not a gate.** It is stamped on every append (bumped
 from 2 when the adoption fields shipped), so the number in a file is always true
@@ -649,11 +674,412 @@ fold a backfilled anchor as **two** identities (the legacy record and its
 adoption), just as it already ignores `state` and would keep counting a sunset
 anchor on its metrics surface.
 
+**Anchor kinds change neither this record shape nor the version:
+`AnchorVersion = 3` stays.** No record gains a field and no sibling array is
+added. The reason
+is the older binary's *write*: its `anchor add|rename|sunset` decodes this file
+into its own v3 struct, appends, and re-marshals the whole file, so any field or
+array it does not know is silently erased on its next write — a `kind` field
+here would revert every quit, limit and habit to a milestone and orphan its
+events. Kinds and events therefore live in their own file, which an older binary
+never opens. The only records anchor kinds append here are **ordinary v3
+records** an older binary already understands:
+
+* the **compat re-date** — a full mirror of the anchor's folded definition with
+  only `date` moved — that `anchor slip`, an `anchor void` of a slip (the
+  *restoring* record), or an `anchor kind` to `quit` past a later use-day
+  appends, so an older binary counting from this file never shows a quit run
+  longer than the truth;
+* the **definition** `anchor add --kind` writes, the same record a plain
+  `anchor add` writes;
+* the **plain sunset** `anchor sunset --graduated` writes (above).
+
+Each is one half of a **pair** with an event in the store, and follows the
+conservative per-verb write order (§"Anchor event store" → "Two-file verbs and
+the write order"). The pair is identified by an append-only **pair intent**
+holding the exact planned event and the exact planned v3 record, as well as by
+the shared anchor id and `recorded_at` — a timestamp alone is never treated as
+proof. In the new binary's quit fold a compat re-date in a **completed** pair is
+a reading of the slip, not a correction, so it never moves the quit's start; one
+whose pair is still **pending** stays a conservative floor on the effective
+date. An older binary reads every one of these records as an ordinary
+correction or sunset — the meaning it has always had.
+
 No capacity, journal, or Mirror data ever rides this file — it holds ids, labels
 and dates only. It no longer shares the storm clause labels' discipline: an
 anchor is addressed by a stable id, while a storm clause is still identified by
 its label string. Because the store lives in the engine tree (not a Mirror
-tree), it carries no schema-kind entry in the `validate` schema sweep.
+tree), it carries no schema-kind entry in the `validate` schema sweep; `lucid
+validate` checks it instead through its own anchors check — this file's record
+schema, the event store's schema, and the cross-file pairs (§"Anchor event
+store" → "Reads, older binaries, validation and backup").
+
+### Anchor event store (`anchor_events.json`)
+
+```json
+{
+  "version": 1,
+  "events": [
+    {"id": "anchorev_2026_01_02_a", "anchor_id": "anchor_2026_01_01_a",
+     "type": "kind", "day": "2026-01-02",
+     "recorded_at": "2026-01-02T08:30:00-05:00", "kind": "quit"},
+    {"id": "anchorev_2026_03_02_a", "anchor_id": "anchor_2026_01_05_a",
+     "type": "kind", "day": "2026-03-02",
+     "recorded_at": "2026-03-02T21:10:00-05:00",
+     "kind": "limit", "allowance": 4, "window_days": 90},
+    {"id": "anchorev_2026_03_14_a", "anchor_id": "anchor_2026_01_05_a",
+     "type": "use", "day": "2026-03-14",
+     "recorded_at": "2026-03-15T00:40:00-04:00",
+     "intent": "planned", "note": "a slice of cake at a birthday"},
+    {"id": "anchorev_2026_04_02_a", "anchor_id": "anchor_2026_01_01_a",
+     "type": "slip", "day": "2026-04-01",
+     "recorded_at": "2026-04-02T08:15:00-04:00"}
+  ],
+  "pair_intents": [
+    {"order": "compat_first",
+     "event": {"id": "anchorev_2026_04_02_a",
+               "anchor_id": "anchor_2026_01_01_a", "type": "slip",
+               "day": "2026-04-01",
+               "recorded_at": "2026-04-02T08:15:00-04:00"},
+     "compat": {"id": "anchor_2026_01_01_a", "label": "sobriety",
+                "date": "2026-04-01", "note": "",
+                "recorded_at": "2026-04-02T08:15:00-04:00"}}
+  ]
+}
+```
+
+Four events and one pair intent (all synthetic): `sobriety` reclassified as a
+`quit` (one event, no intent — nothing to re-date); `late-night-snacks`
+reclassified as a `limit` of 4 use-days per 90; a planned use of that allowance,
+logged after midnight and so landing on the evening's logical day; and a slip on
+`sobriety`, written as a pair whose compat re-date (the intent's `compat`) went
+to `anchors.json` first.
+
+The anchor event store holds every anchor's **kind** and every fact logged
+against it — `kind`, `slip`, `use`, `miss`, `confirm`, `void` and `graduate`
+events — beside `anchors.json`, which keeps the definitions
+([ADR-0013](../adr/0013-anchor-kinds.md)). The split is forced by the
+older-binary write described under §"`anchors.json`": anything an older binary
+must not erase cannot live in a file it re-marshals. The store is
+**append-only** and never hand-edited, owned by `internal/storage` (P3) like
+every other engine file, and read by the pure Engine as a value: every number
+below is a function of the two files, the current logical day and two
+thresholds — no clock, no disk, no model (P9).
+
+#### Envelope, records and ids
+
+**The envelope.** `{"version": 1, "events": [...]}`, plus an optional
+append-only `pair_intents` array that is **absent when unused** (§"Two-file
+verbs and the write order" below). `const AnchorEventsVersion = 1` is a constant
+of its own, separate from `AnchorVersion`, stamped on every write.
+
+**Writes.** Each write reads the whole file, appends, and writes once through
+the same atomic temp-file-and-rename discipline `anchors.json` uses, with
+owner-only permissions. No event or intent is ever rewritten or removed. The
+file is **never scaffolded**: `init` does not create it, the first event write
+does, and a Ledger with no kinds therefore has no store and reads exactly as it
+always has. A JSON envelope rather than JSONL because every write already needs
+the whole store (to mint a slot and to check the anchor's current kind), so a
+line append would save nothing, and the atomic rename rules out a torn record.
+
+**The event record.** Every event carries:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | `anchorev_YYYY_MM_DD_<slot>` — the receipt |
+| `anchor_id` | The target anchor's minted `anchor_…` id |
+| `type` | `kind`, `slip`, `use`, `miss`, `confirm`, `void` or `graduate` |
+| `day` | The civil logical day the event is about (for `confirm`, the through-day) |
+| `recorded_at` | RFC3339 append time, local offset |
+| `note` | Optional free text (`--note-file`, or `--reason-file` for `void`) |
+
+Each type adds its own fields:
+
+| Type | Adds | Written by |
+|------|------|------------|
+| `kind` | `kind` (`milestone`, `quit`, `limit`, `habit`); `allowance` and `window_days` for a `limit` (both positive integers, both required); `window_days` optionally for a `habit` (default 30) | `anchor add --kind`, `anchor kind` |
+| `slip` | — | `anchor slip` |
+| `use` | `intent`: `planned` or `slip` (required) | `anchor use` |
+| `miss` | — | `anchor miss` |
+| `confirm` | `from`: the first day of the attested span (`day` is its last) | `anchor confirm` |
+| `void` | `target`: the voided event's id | `anchor void` |
+| `graduate` | — | `anchor sunset --graduated` |
+
+Unknown fields are tolerated on read, so a later version can add a field
+without breaking this one.
+
+**Event ids.** `anchorev_YYYY_MM_DD_<slot>` uses the shared per-day slot grammar
+(`SlotLabel`), minted from the write's logical day exactly as `NextAnchorID`
+mints anchor ids. The mint scans every event **and** every id a pair intent has
+reserved, so an id is never reissued — not even one whose operation never
+completed. The `anchorev_` prefix can never collide with an `anchor_` id or an
+`anchor:<id>` link subject. Every write returns its event id as the receipt, in
+the ack and in `--json`.
+
+**Event days.** `slip`, `use` and `miss` default to the **current logical day**
+of the active profile — the day `metrics` counts against — so a write after
+midnight and before the rollover lands on the evening's day; `--day` reads the
+shared date grammar ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)).
+A future day or a partial date is rejected, and so is a day before the anchor's
+start (the quit start below for a `quit`, the anchor date for every other kind).
+A `confirm`'s `day` is its through-day. A `kind`, `void` or `graduate` event
+carries the logical day of the write — for a `kind` event that is the day the
+anchor *became* that kind, never its anchor date, which is what keeps a first
+`confirm` from claiming days before the cutover.
+
+#### The join and the fold
+
+**The join.** Events join `anchors.json` by `anchor_id` against the **folded**
+identity (adoption remap included). An event whose anchor is unknown is ignored
+by the fold and reported by `lucid validate`. Events need a **durable** id: a
+pre-id anchor folds under the read-time `legacy:<label>` identity, which is
+never written, so every event and reclassify on one is rejected with the remedy
+`lucid anchor backfill-ids` — there is no implicit adoption write. An event aimed
+at a sunset anchor is rejected; the one exception is a `void` of that anchor's
+`graduate` event, which leaves the plain sunset in place so the anchor reads as
+an ordinary retirement.
+
+**The kind.** The latest `kind` event wins; `void` never targets a `kind`
+event, so that is simply the latest one. With **no `kind` event the anchor is a
+`milestone`**. A limit's or habit's parameters are those of its latest `kind`
+event, applied across the whole window (the dated `kind` events keep the
+history; the v1 math does not read it per day).
+
+**Which facts each kind reads.** Events are facts that outlive a kind change.
+Quit slips and limit uses are both **use-days**, and a quit slip reads as a
+`slip`-intent use under `limit`. `milestone` reads no events; `quit` and `limit`
+read use-days; `habit` reads misses and confirms. Every other event stays in
+the store and in the detail view but drops out of the math, and converting back
+brings it back in. Voided events drop out of all math. Every day difference
+uses the UTC-civil discipline `DaysSince` already uses, so a DST transition
+never shifts a count, and "today" is the current logical day at the chain's
+rollover boundary.
+
+**`milestone`.** Identical to today's days-since math, from the folded date.
+
+**`quit`.**
+
+* **Start** — the date of the latest definition record that is **not** the
+  compat half of a *completed* pair. An `anchor add` correction therefore still
+  moves the start exactly as it always has, while a slip's own re-date does
+  not; a compat re-date whose pair is still *pending* stays a conservative floor
+  on the effective date (below).
+* **Use-days** — the distinct days of non-voided `slip` events, plus the
+  distinct days of non-voided `use` events of either intent (which can only have
+  been logged while the anchor was a `limit`).
+* **Current run** — `DaysSince(max(start, latest use-day), today)`. With no
+  slips this is exactly a milestone's count.
+* **Longest run** — the maximum over the runs between successive use-days,
+  counted from the start, the current run included.
+* **Slips** — the number of distinct use-days after the start; **`slips_7d`** —
+  the slip use-days in the last seven logical days (the witness report's week).
+
+A synthetic example: `sobriety` starts 2026-01-01 and slips on 2026-03-01; on
+2026-04-10 it reads `Days since sobriety: 40 (longest 59, 1 slip).`
+
+**`limit`.**
+
+* **Window** — the `window_days` logical days ending today, inclusive, clipped
+  at the anchor date.
+* **Used** — the distinct use-days in the window; several uses on one day are
+  one use-day, and planned and slip uses both spend allowance. **Remaining** —
+  `max(0, allowance − used)`.
+* **Planned and slip counts** — use-days in the window by intent; a day logged
+  with both intents counts as a slip day, the honest direction.
+* **Days since the last use**, **`over_allowance`** when used > allowance
+  (using exactly the allowance is fine), and **`slips_7d`**, the note-free count
+  of slip use-days in the last seven logical days.
+
+A **planned use never resets or zeroes anything**: it is spend, the Engine's
+error-budget idea ([`../calibration.md`](../calibration.md)) applied to a goal.
+A synthetic example: `Late-night snacks: 1 of 4 in the last 90 days (1 planned,
+0 slips); 7 days since last.`
+
+**`habit`.**
+
+* **Window** — `window_days` (default 30) logical days ending today, clipped at
+  the anchor date.
+* **Accounted days** — the union of non-voided confirm spans and logged miss
+  days inside the window, never before the anchor date. **A miss always wins
+  over a confirm** on the same day; a confirm never erases a miss.
+* **Kept days** — accounted days minus miss days. **An unconfirmed day is never
+  kept**; a habit with no accounted days reads "no accounted days yet", never a
+  hollow 100%.
+* **`current_miss_run`** — consecutive *calendar* miss days ending at the latest
+  accounted day; **`alarm`** when it reaches `miss_alarm`. A single isolated
+  miss never alarms.
+* **`last_confirmed`** — the latest through-day of a non-voided confirm.
+* **`graduation_eligible`** — true once the accounted days since the last run
+  of at least `miss_alarm` consecutive misses ended — or since the anchor became
+  a habit, if no run ever reached it — number at least `graduation_days`. This
+  reads the anchor's full history, so an old rough patch does not disqualify a
+  habit forever. Eligibility is only surfaced; graduating is always the
+  person's call.
+
+A synthetic example: `Morning walk: kept 29 of 30 accounted days, 1 miss;
+confirmed through 2026-01-24.`
+
+**The `confirm` span.** The through-day defaults to yesterday's logical day,
+because today is not over. The span starts at the **later** of the day after the
+habit's last non-voided confirm and the day of its latest `habit` `kind` event,
+so by default nothing before the cutover is claimed, a skipped week self-heals
+(the next confirm covers the gap), and after a kind change away and back the
+span starts at the later of the two. `--from` widens the start to an earlier
+stretch the person vouches for; it is rejected before the anchor date or after
+the through-day. Days in the span with no logged miss count as kept; a miss
+inside the span stays a miss. An empty span writes nothing.
+
+**No conversion makes a quit run longer than the truth.** A reclassify to
+`quit` counts from the latest use-day when it is later than the folded date, and
+appends a compat re-date so an older binary agrees. A recent planned use can
+never hide inside a long quit run.
+
+**Thresholds.** `miss_alarm` (default 2, at least 2 — a 1 would let a single
+isolated miss alarm) and `graduation_days` (default 90, at least 1) come from
+the `lucid.json` `anchors` block and are passed into the Engine as parameters;
+there is no per-anchor override in v1. An older binary ignores the block.
+
+**The metrics projection.** `lucid metrics --json` keeps every existing field
+and its meaning: `date` and `days_since` stay the plain fold of `anchors.json`
+(latest record wins, compat records included), so for a quit after a slip they
+show the re-dated effective date — exactly what an older binary shows. Each
+anchor row adds `kind` and one kind object (`quit`, `limit` or `habit`) holding
+the numbers above; **both are omitted for a milestone**, so absence means
+milestone, the same convention `state` uses. Graduated anchors appear in
+`anchors_graduated[]`, separate from `anchors_sunset[]`, omitted when empty. A
+Ledger with no kind events is byte-identical to today, `--json` included.
+
+#### Two-file verbs and the write order
+
+Five verbs write both files: `anchor add --kind`, `anchor slip`, `anchor void`
+of a slip, `anchor kind` to `quit` past a later use-day, and `anchor sunset
+--graduated`. Each file write is atomic on its own, but two files cannot be
+written atomically together, so these verbs follow one documented protocol. A
+crash between the halves must never flatter either binary's reading of a quit,
+and the incomplete pair must be detectable.
+
+**Pair intents.** Before either domain half, the verb appends an
+**`AnchorPairIntent`** to `pair_intents`: it reserves the event id and holds the
+**exact planned event**, the **exact planned v3 record**, and the `order`
+(`compat_first` or `event_first`). It is transaction metadata, not an applied
+fact — the fold never reads its nested event as an event. Intents are never
+edited or removed; completion is inferred from the presence of the matching
+event and the exact matching record in `anchors.json`. The ordinary event and its
+v3 record also share the anchor id and `recorded_at`, but a timestamp alone is
+never treated as proof of a pair. A slip, a slip void or a reclassify whose v3
+half would not move the quit's effective date has no second half: it writes
+its event alone, with no intent.
+
+**The write order, per verb:**
+
+| Verb | Order | A crash after the first half leaves… |
+|------|-------|----------------------------------------|
+| `anchor slip` | intent → **v3 re-date** → `slip` event (`compat_first`) | Both binaries counting from the re-date: honest, never longer. The slip count catches up on retry. |
+| `anchor kind` to `quit` (later use-day) | intent → **v3 re-date** → `kind` event (`compat_first`) | The older binary counting from the re-date; the new binary still reading the old kind, with the pending re-date as a floor. |
+| `anchor void` of a slip | intent → **`void` event** → restoring v3 record (`event_first`) | The new binary reading the corrected history; the older binary still counting from the slip — shorter, never longer. |
+| `anchor add --kind` | intent → **`kind` event** → v3 definition (`event_first`) | A dangling kind event the fold ignores; no anchor appears in either binary. |
+| `anchor sunset --graduated` | intent → **`graduate` event** → plain v3 sunset (`event_first`) | An active anchor in both binaries; the new binary recognizes a graduation only once its sunset half exists. |
+
+The re-date a slip writes uses the effective date `max(start, every accepted
+use-day including the proposed slip)`, so a backdated slip can never move the
+effective date backwards. A compat re-date or restoring record is a full mirror
+of the anchor's folded definition with only `date` changed.
+
+**Pending reads are conservative.** An unpaired compat re-date stays an
+effective-date **floor** for the new binary: the fold does not ignore it merely
+because an intent identifies it as compat. Only a *completed* pair is excluded
+from the quit start. An event-first slip void may let the new binary show the
+corrected, longer run while the older binary stays conservatively shorter.
+
+**Recovery is explicit, never automatic.** `lucid validate` reports an
+intent-only, compat-only or event-only operation as a **half-written pair**,
+naming the reserved event id and the missing half, and never repairs it. The
+remedy is to retry the original verb: a matching explicit retry reuses the
+intent and its event id, appends only the missing halves in the recorded order,
+and returns the original receipt. A *different* mutation of that anchor is
+rejected while its pair is incomplete, so a provisional floor can never turn
+into an ordinary correction by accident.
+
+**The crash proof.** Tests fault-inject before and after every atomic boundary
+(the intent, the first half, the second half) of every two-file verb. At each
+point both the current fold and an **anchors-only v3 fold** (today's
+`LatestAnchors` path, standing in for an older binary) must read a quit run no
+longer than the accepted history permits — completed and pending operations,
+backdated and duplicate-day slips, and an older-binary write landing between an
+interrupted operation and its recovery included.
+
+#### Reads, older binaries, validation and backup
+
+**Reads are tolerant and ungated.** A missing file is the empty log — the same
+tolerance `self.json` has — and is not an error. `version` is **a signal, not a
+gate**: nothing checks it on read, on the same terms as `anchors.json`. A record
+that fails validation (an unknown type, a malformed day, a missing per-type
+field) is skipped by the fold and reported by `lucid validate`; an unparseable
+file is a loud read error that names the file. Nothing on any read path panics.
+
+**Older binaries.** An older binary never opens this file — nothing in Lucid
+enumerates `engine/` and rejects unknown files — and ignores the new
+`lucid.json` keys. It degrades per kind, and nothing is corrupted: a `milestone`
+reads exactly the same; a `quit` reads days since its last slip, through the
+compat re-date; a `limit` or `habit` reads plain days since its anchor date; a
+graduated anchor reads as an ordinary sunset. Its writes touch `anchors.json`
+only and append pure v3 records the new fold reads as corrections, so every
+kind, event and pair intent here survives them.
+
+**Validation.** `lucid validate` covers anchors for the first time, through
+storage reads and never by opening the Ledger itself: an `anchors.json` schema
+check (a non-empty label, a civil date, `state` empty or `sunset`, a version of
+at least 1); this store's schema (the id grammar, a known type, a civil `day`,
+an RFC3339 `recorded_at`, the per-type fields above); and cross-file checks —
+every event targets a known minted anchor id, kind parameters are valid, `void`
+targets exist and are legal, and every pair intent is whole. A hand-corrupted
+record is reported and never panics; a missing store is clean, and a Ledger
+with only today's v1, v2 and v3 shapes validates with no new findings. The
+rejections and findings are listed in [`error-states.md`](error-states.md)
+§"Anchors".
+
+**Backup.** `lucid backup` archives `engine/` whole, so the store is in every
+archive; a downgrade leaves it intact and a later re-upgrade reads it again.
+
+#### Witness watch-outs and anchor detail
+
+**The watch-outs are kind-aware**, and the rule holds in both detail modes:
+
+* **`limit`** — over allowance (`<label>: over allowance — N of A in the last W
+  days.`);
+* **`habit`** — a miss run of at least `miss_alarm` that overlaps the report
+  week (`<label>: missed N days in a row.`), so a mid-week slide is not hidden by
+  a recovery before Sunday;
+* **slips this week** — one count-only line per anchor with any non-voided quit
+  `slip` or limit `use --slip` dated in the report week (`1 slip on <label> this
+  week`, `N slips on <label> this week`), with no date and no note; planned uses
+  never produce a line;
+* **`milestone`, and a long `quit` run** — nothing. A long run is a win, not a
+  worry.
+
+These lines read only the metrics projection's note-free numbers.
+
+**Summary is the default** (`witness_report.anchor_detail: summary`): the report
+carries only the watch-out lines, with no note and no event date, and no
+note-reaching reader is wired, so the witness package's by-construction privacy
+holds exactly as before. **Full is a global, explicit opt-in**
+(`witness_report.anchor_detail: full`): code renders a deterministic, verbatim
+**Anchor detail** section holding each anchor's events for the report week —
+dates, intent, slips, misses, confirms and notes. It is **never sent to the
+model** (it is not part of the compose body or the report digest, so the model
+input is byte-identical with the detail on and off), **never scanned** (it is
+the person's own words and they opted in), and **survives the metrics-only
+fallback**. Full detail is **lossless**: it is rendered into an ordered batch of
+embeds within the existing field, field-count and total-character budgets, and
+overflow continues in additional numbered messages through the existing
+delivery path — no new transport, destination or schedule, and no "and N more"
+omission. Every part is read back; the scheduled runner records per-part
+progress in the existing witness receipt, a retry resumes the frozen batch
+without re-sending verified parts, and the week is marked delivered only once
+every part has verified. This is the witness package's one deliberate, opt-in
+exception to its by-construction privacy. Any other `anchor_detail` value is a
+config error naming the two; an older binary ignores the key and reads as
+summary.
 
 ### `self.json`
 
@@ -990,6 +1416,7 @@ unbacked morning failure is total silence rather than a plainer message.
 | `/storm` citing an unknown label | Reject | "No clause or window by that name — clauses live in the Charter and are registered in storm.json. `/storm unwritten` if life exceeded the list." | None | Quarterly writes the missing clause |
 | `/storm` unconfirmed for 72 hours | Lapse | L1-style note: "storm declaration lapsed — no confirmation within 72h. Declare again, or talk to <witness>." | `storm.json` history: declaration stands unconfirmed; no storm state | Re-declare |
 | `/storm` renewal beyond the one allowed | Reject | "A storm renews once (engine §4). Past that, this is a season, not a storm — it goes to the quarterly." | None | Quarterly review |
+| An anchor verb aimed at the wrong kind, a pre-id or sunset anchor, an illegal `void` target, invalid allowance/window, a `confirm --from` outside the anchor's life, or an anchor with a half-written pair | Reject before any write — the strict tier | The fixed copy of [`error-states.md`](error-states.md) An-4–An-13, each naming its remedy; "Nothing was saved." | None | Follow the named remedy (reclassify, `lucid anchor backfill-ids`, retry the original verb) |
 | `/profile` naming an undefined profile | Reject | "No profile by that name — profiles are defined in chain.json, at a Retro (engine §2)." | None | Retro defines it |
 | `status.json` corrupt/missing | Rebuild silently | — | Regenerated from `days/` | By design (P2) |
 | Harness down at bell time | Nothing | — | None | **The chain runs anyway** — phone alarm is the Phase-0 fallback; a text-to-self is a valid record, backfilled via `/closeout backfill` (P10) |
