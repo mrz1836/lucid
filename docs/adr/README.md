@@ -23,3 +23,4 @@ new one; records are append-only, like everything else here
 | [0010](0010-life-archive-excavation.md) | Life-archive excavation: build the deferred Mirror surface on the frozen foundation | Accepted |
 | [0011](0011-person-alias-resolution.md) | Person alias resolution: extend the redirect-tombstone mechanism, tighten reconcile precision | Accepted |
 | [0012](0012-gratitude-semantic-matching.md) | Gratitude by-meaning matching and outward expression: three tiers behind the canonical-key seam, an opt-in judge, a tally-neutral "expressed" record | Accepted |
+| [0013](0013-anchor-kinds.md) | Anchor kinds: milestone, quit, limit, habit — each kind its own honest number, kinds and events in a separate append-only store | Proposed |
