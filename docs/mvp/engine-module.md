@@ -859,11 +859,15 @@ rollover boundary.
 
 **`quit`.**
 
-* **Start** — the date of the latest definition record that is **not** the
-  compat half of a *completed* pair. An `anchor add` correction therefore still
-  moves the start exactly as it always has, while a slip's own re-date does
-  not; a compat re-date whose pair is still *pending* stays a conservative floor
-  on the effective date (below).
+* **Start** — the date of the latest definition record that **changes the
+  date** and is **not** the compat half of a *completed* pair. An `anchor add`
+  correction therefore still moves the start exactly as it always has, while a
+  slip's own re-date does not. A record that **keeps** the date it follows — a
+  rename, a plain sunset, an id adoption, whichever binary wrote it — never
+  moves the start: after a slip such a record carries the re-dated date
+  forward, and reading it as a correction would quietly drop the slip and
+  shorten the longest run. A compat re-date whose pair is still *pending* stays
+  a conservative floor on the effective date (below).
 * **Use-days** — the distinct days of non-voided `slip` events, plus the
   distinct days of non-voided `use` events of either intent (which can only have
   been logged while the anchor was a `limit`).
@@ -1027,7 +1031,8 @@ enumerates `engine/` and rejects unknown files — and ignores the new
 reads exactly the same; a `quit` reads days since its last slip, through the
 compat re-date; a `limit` or `habit` reads plain days since its anchor date; a
 graduated anchor reads as an ordinary sunset. Its writes touch `anchors.json`
-only and append pure v3 records the new fold reads as corrections, so every
+only and append pure v3 records the new fold reads as corrections (or, for a
+rename or sunset that keeps the date, as no change to a quit's start), so every
 kind, event and pair intent here survives them.
 
 **Validation.** `lucid validate` covers anchors for the first time, through

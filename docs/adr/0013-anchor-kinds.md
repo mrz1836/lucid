@@ -280,10 +280,14 @@ anchor's start (§5).
 
 **`quit`:**
 
-* **Start.** The date of the latest definition record that is *not* part of a
-  completed compat pair. So an `add` correction still moves the start, exactly
-  as it always has, while a slip's own compat re-date does not. A pending
-  conservative re-date still floors the effective date (§3).
+* **Start.** The date of the latest definition record that *changes the date*
+  and is *not* part of a completed compat pair. So an `add` correction still
+  moves the start, exactly as it always has, while a slip's own compat re-date
+  does not. A record that keeps the date it follows — a rename, a plain
+  sunset, an id adoption, whichever binary wrote it — never moves the start:
+  after a slip such a record carries the re-dated date forward, and reading it
+  as a correction would quietly drop the slip and shorten the longest run. A
+  pending conservative re-date still floors the effective date (§3).
 * **Use-days.** The distinct days of non-voided `slip` events, plus the distinct
   days of non-voided `use` events of either intent (which can only have been
   logged while the anchor was a `limit`).
@@ -546,7 +550,9 @@ into its v3 `AnchorLog`, appends, and re-marshals `anchors.json` only. Every
 record this design puts there is a pure v3 record, so that re-marshal is
 lossless; and the store is never touched, so every kind, event and pair intent
 survives. A record an older binary appends is an ordinary definition record,
-which the new fold reads as a correction — the meaning it has always had. A
+which the new fold reads as a correction when it changes the date — the
+meaning it has always had — and as no change to a quit's start when it keeps
+the date (a rename or a sunset). A
 unit test proves this with a v3-only decode, append and re-marshal followed by a
 new-binary fold, and a smoke test proves it with a real run of the previous
 release against a throwaway Ledger.
