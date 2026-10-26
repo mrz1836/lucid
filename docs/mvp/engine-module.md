@@ -1005,7 +1005,21 @@ intent-only, compat-only or event-only operation as a **half-written pair**,
 naming the reserved event id and the missing half, and never repairs it. The
 remedy is to retry the original verb: a matching explicit retry reuses the
 intent and its event id, appends only the missing halves in the recorded order,
-and returns the original receipt. A *different* mutation of that anchor is
+and returns the original receipt. An older binary may write between the interruption and the retry — a
+correction, a rename, a sunset — and the retry never lets the planned halves turn
+stale into a flattering reading. It still appends them exactly, because that is
+what completes the pair; then, when the anchor's newest record would carry an
+older date than its honest effective date, or a label and note an older-binary
+rename replaced, it appends **one more plain v3 record** carrying the current
+label and note and the later of the two dates. That record never moves a quit
+start: it only ever changes the date when an older-binary correction moved the
+start past the planned date, and then it carries exactly that start. A retry on
+an anchor an older binary has since sunset is rejected (An-6), because a
+restoring record would quietly bring it back. An `add --kind` whose reserved
+anchor id an older binary has since minted for another anchor can't be
+finished: the fold ignores the event half of an unfinished `add --kind` on
+whichever anchor holds that id, it blocks no change to that anchor,
+`lucid validate` names it, and the label is free to record again. A *different* mutation of that anchor is
 rejected while its pair is incomplete, so a provisional floor can never turn
 into an ordinary correction by accident.
 
