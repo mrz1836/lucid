@@ -29,6 +29,8 @@ var (
 	ErrAnchorAlreadyVoided = errors.New("anchor event already voided")
 	// ErrAnchorUnfinished — the anchor has a half-written pair (An-13).
 	ErrAnchorUnfinished = errors.New("anchor has an unfinished write")
+	// ErrAnchorConfirmSpan — a confirm --from falls outside the anchor's life (An-11).
+	ErrAnchorConfirmSpan = errors.New("anchor confirm span outside the anchor's life")
 )
 
 // errPairUnfinished marks a two-file write that failed after its pair intent
@@ -98,6 +100,55 @@ type AnchorVoidRequest struct {
 	EventID string
 	Reason  string
 	Now     time.Time
+}
+
+// AnchorMissRequest is one `lucid anchor miss` intent. DayArg is the --day
+// value in the shared grammar; empty is the current logical day.
+type AnchorMissRequest struct {
+	Label  string
+	DayArg string
+	Note   string
+	Now    time.Time
+}
+
+// AnchorConfirmRequest is one `lucid anchor confirm` intent: attest a span of
+// days for each named habit, or for every active habit when Labels is empty.
+// ThroughArg is --through in the shared grammar, empty for yesterday's logical
+// day; FromArg is --from, empty for each habit's default start.
+type AnchorConfirmRequest struct {
+	Labels     []string
+	ThroughArg string
+	FromArg    string
+	Now        time.Time
+}
+
+// AnchorConfirmed is one habit's written confirm. The event's From and Day are
+// the span it attests, and its id is the receipt.
+type AnchorConfirmed struct {
+	Label string
+	Event engine.AnchorEvent
+}
+
+// AnchorConfirmSkipped is one habit whose span was empty, so nothing was
+// written for it: already confirmed through the through-day, or the through-day
+// falls before it became a habit. LastConfirmed is its latest confirmed
+// through-day, empty for a habit never confirmed; NextFrom is the day its next
+// confirm starts by default.
+type AnchorConfirmSkipped struct {
+	Label         string
+	AnchorID      string
+	LastConfirmed string
+	NextFrom      string
+}
+
+// AnchorConfirmResult reports one confirm: the through-day it used, the habits
+// it confirmed (in label order), the habits whose span was empty, and the ack —
+// one line per habit, naming the exact span or why nothing was written.
+type AnchorConfirmResult struct {
+	Through          string
+	Confirmed        []AnchorConfirmed
+	AlreadyConfirmed []AnchorConfirmSkipped
+	Ack              string
 }
 
 // AnchorKind executes `lucid anchor kind <label> <kind>` (engine-module.md
@@ -267,6 +318,239 @@ func (r *Router) AnchorVoid(req AnchorVoidRequest) (AnchorEventResult, error) {
 		return AnchorEventResult{}, eventWriteError("the void", err)
 	}
 	return eventResult(w.afterWrite(ev, compat, engine.AnchorPairEventFirst), ev, compat, w.today, false), nil
+}
+
+// AnchorMiss executes `lucid anchor miss <label>` (engine-module.md §Commands):
+// log a day a habit did not happen — the only thing a habit logs as it happens.
+// A miss touches the event store only. It always wins over a confirm on the
+// same day, so a miss remembered after the day was confirmed is still recorded
+// and still counts. One isolated miss means nothing — the signal is never miss
+// twice — so the ack calls out only a run of consecutive misses reaching
+// anchors.miss_alarm.
+func (r *Router) AnchorMiss(req AnchorMissRequest) (AnchorEventResult, error) {
+	now := whenOr(req.Now)
+	w, err := r.openAnchorWrite(now)
+	if err != nil {
+		return AnchorEventResult{}, err
+	}
+	day, err := resolveAnchorDay(req.DayArg, now, w.today)
+	if err != nil {
+		return AnchorEventResult{}, err
+	}
+	f, err := w.eventTarget(req.Label)
+	if err != nil {
+		return AnchorEventResult{}, err
+	}
+	planned := engine.AnchorEvent{AnchorID: f.AnchorID, Type: engine.AnchorEventMiss, Day: day}
+	if res, done, err := r.resumeEvent(w, f, planned); done || err != nil {
+		return res, err // a miss is never half of a pair, so this only ever rejects
+	}
+	if err := requireAnchorKind(f, engine.AnchorKindHabit, "miss"); err != nil {
+		return AnchorEventResult{}, err
+	}
+	if err := requireOnOrAfterStart(f, day); err != nil {
+		return AnchorEventResult{}, err
+	}
+
+	ev := w.newEvent(f, engine.AnchorEventMiss, day, req.Note)
+	if err := r.appendEventWithCompat(ev, nil, ""); err != nil {
+		return AnchorEventResult{}, eventWriteError("the miss", err)
+	}
+	after := w.withEvent(ev).facts[f.AnchorID]
+	return AnchorEventResult{Label: after.Anchor.Label, Event: ev, Ack: missAck(after, ev, r.anchorThresholds())}, nil
+}
+
+// AnchorConfirm executes `lucid anchor confirm [<label>...]` (engine-module.md
+// §Commands): attest that each named habit — or, with no labels, every active
+// habit — held on the days of its span that carry no logged miss. Without a
+// confirm an unlogged day is unaccounted, never kept.
+//
+// The through-day defaults to yesterday's logical day, because today is not
+// over. Each habit's span starts at the later of the day after its last confirm
+// and the day it became a habit, so by default nothing before the cutover is
+// claimed and a skipped week heals itself; --from widens it to a stretch the
+// person vouches for (engine.ConfirmSpan). Every named habit is checked, and
+// every span resolved, before anything is written, and the confirms land in
+// one write: a rejection for one habit saves nothing for any. A habit whose
+// span is empty writes nothing and the ack says why.
+func (r *Router) AnchorConfirm(req AnchorConfirmRequest) (AnchorConfirmResult, error) {
+	now := whenOr(req.Now)
+	w, err := r.openAnchorWrite(now)
+	if err != nil {
+		return AnchorConfirmResult{}, err
+	}
+	through := engine.AddDays(w.today, -1)
+	if strings.TrimSpace(req.ThroughArg) != "" {
+		if through, err = resolveEventDay(req.ThroughArg, now, w.today); err != nil {
+			return AnchorConfirmResult{}, err
+		}
+	}
+	var from *time.Time
+	if strings.TrimSpace(req.FromArg) != "" {
+		vouched, fromErr := resolveEventDay(req.FromArg, now, w.today)
+		if fromErr != nil {
+			return AnchorConfirmResult{}, fromErr
+		}
+		from = &vouched
+	}
+	habits, err := w.confirmTargets(req.Labels)
+	if err != nil {
+		return AnchorConfirmResult{}, err
+	}
+
+	res := AnchorConfirmResult{
+		Through:          engine.DateString(through),
+		Confirmed:        []AnchorConfirmed{},
+		AlreadyConfirmed: []AnchorConfirmSkipped{},
+	}
+	minting := w.events
+	minting.Events = slices.Clone(w.events.Events)
+	var events []engine.AnchorEvent
+	for _, f := range habits {
+		start, last, empty, spanErr := engine.ConfirmSpan(f, through, from)
+		if spanErr != nil {
+			return AnchorConfirmResult{}, rejectAnchor(ErrAnchorConfirmSpan,
+				"%s. Nothing was saved.", strings.TrimPrefix(spanErr.Error(), "engine: "))
+		}
+		if empty {
+			h := engine.ComputeHabitStats(f, w.today, engine.AnchorThresholds{})
+			res.AlreadyConfirmed = append(res.AlreadyConfirmed, AnchorConfirmSkipped{
+				Label: f.Anchor.Label, AnchorID: f.AnchorID, LastConfirmed: h.LastConfirmed, NextFrom: h.NextConfirmFrom,
+			})
+			continue
+		}
+		ev := engine.AnchorEvent{
+			ID:         engine.NextAnchorEventID(minting, w.today),
+			AnchorID:   f.AnchorID,
+			Type:       engine.AnchorEventConfirm,
+			Day:        engine.DateString(last),
+			RecordedAt: w.stamp,
+			From:       engine.DateString(start),
+		}
+		minting.Events = append(minting.Events, ev)
+		events = append(events, ev)
+		res.Confirmed = append(res.Confirmed, AnchorConfirmed{Label: f.Anchor.Label, Event: ev})
+	}
+	if len(events) > 0 {
+		if err := r.store.AppendAnchorEvents(events...); err != nil {
+			return AnchorConfirmResult{}, fmt.Errorf("could not record the confirm; nothing was saved: %w", err)
+		}
+	}
+	res.Ack = confirmAck(habits, res)
+	return res, nil
+}
+
+// confirmTargets resolves the habits a confirm covers, in label order: every
+// active habit with no labels, else the named ones.
+func (w anchorWrite) confirmTargets(labels []string) ([]engine.AnchorFacts, error) {
+	if len(labels) == 0 {
+		return w.activeHabits()
+	}
+	return w.namedHabits(labels)
+}
+
+// activeHabits is every active habit, in label order. By construction it never
+// hits An-4, but a habit with an unfinished write still refuses the whole
+// confirm (An-13), so the write is finished — by retrying it — before its days
+// are claimed.
+func (w anchorWrite) activeHabits() ([]engine.AnchorFacts, error) {
+	var out []engine.AnchorFacts
+	for _, a := range w.latest { // label order
+		if a.IsSunset() || a.ID == "" {
+			continue // a pre-id anchor takes no kind, so it is never a habit
+		}
+		f := w.facts[a.ID]
+		if f.Kind != engine.AnchorKindHabit {
+			continue
+		}
+		if st, pending := blockingPair(f); pending {
+			return nil, unfinishedRejection(a.Label, st)
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
+// namedHabits resolves each named label like any event verb's (An-1, An-5,
+// An-6), refuses one whose anchor has an unfinished write (An-13), and
+// requires a habit (An-4). A label named twice is confirmed once. The result
+// is in label order.
+func (w anchorWrite) namedHabits(labels []string) ([]engine.AnchorFacts, error) {
+	var out []engine.AnchorFacts
+	seen := map[string]bool{}
+	for _, label := range labels {
+		if seen[label] {
+			continue
+		}
+		seen[label] = true
+		f, err := w.eventTarget(label)
+		if err != nil {
+			return nil, err
+		}
+		if st, pending := blockingPair(f); pending {
+			return nil, unfinishedRejection(label, st)
+		}
+		if err := requireAnchorKind(f, engine.AnchorKindHabit, "confirm"); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	slices.SortStableFunc(out, func(a, b engine.AnchorFacts) int { return strings.Compare(a.Anchor.Label, b.Anchor.Label) })
+	return out, nil
+}
+
+// confirmAck is `anchor confirm`'s ack: one line per habit, in label order,
+// naming the exact span confirmed and its receipt so whoever asked can say it
+// back, or why nothing was written for it.
+func confirmAck(habits []engine.AnchorFacts, res AnchorConfirmResult) string {
+	if len(habits) == 0 {
+		return "No active habits to confirm; nothing written."
+	}
+	confirmed := map[string]engine.AnchorEvent{}
+	for _, c := range res.Confirmed {
+		confirmed[c.Event.AnchorID] = c.Event
+	}
+	skipped := map[string]AnchorConfirmSkipped{}
+	for _, s := range res.AlreadyConfirmed {
+		skipped[s.AnchorID] = s
+	}
+	lines := make([]string, 0, len(habits))
+	for _, f := range habits {
+		label := f.Anchor.Label
+		if ev, ok := confirmed[f.AnchorID]; ok {
+			lines = append(lines, fmt.Sprintf("%s: confirmed %s–%s as `%s`.", label, ev.From, ev.Day, ev.ID))
+			continue
+		}
+		s := skipped[f.AnchorID]
+		if s.LastConfirmed != "" && s.LastConfirmed >= res.Through { // civil YYYY-MM-DD orders lexically
+			lines = append(lines, fmt.Sprintf("%s: already confirmed through %s; nothing written.", label, s.LastConfirmed))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf(
+			"%s: nothing to confirm through %s — its confirmations start %s; nothing written.",
+			label, res.Through, s.NextFrom,
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// missAck is `anchor miss`'s ack: the miss and its receipt, and — only when
+// the run of consecutive misses it belongs to reaches the miss alarm — the run
+// called out. A single isolated miss is never called out.
+func missAck(f engine.AnchorFacts, ev engine.AnchorEvent, th engine.AnchorThresholds) string {
+	ack := fmt.Sprintf("Logged a miss on %s for %s as `%s`", f.Anchor.Label, ev.Day, ev.ID)
+	if run, alarm := engine.MissRunThrough(f, ev.Day, th); alarm {
+		return fmt.Sprintf("%s — missed %d days in a row.", ack, run)
+	}
+	return ack + "."
+}
+
+// anchorThresholds is the effective config's anchors block as the Engine's
+// thresholds. Before Boot the block is zero, which the Engine reads as its
+// defaults.
+func (r *Router) anchorThresholds() engine.AnchorThresholds {
+	a := r.cfg.Anchors
+	return engine.AnchorThresholds{MissAlarm: a.MissAlarm, GraduationDays: a.GraduationDays}
 }
 
 // anchorAddKind is `anchor add --kind`: a new anchor's v3 definition plus its
@@ -490,11 +774,20 @@ func (v anchorView) unfinishedForLabel(label string) error {
 		}
 		return nil
 	}
+	return v.unfinishedFor(target)
+}
+
+// unfinishedFor is the An-13 guard the plain anchors.json verbs — a correction,
+// a sunset, a rename — run on the active anchor they resolved: an unfinished
+// pair on it refuses the change, so a provisional floor is never overwritten by
+// an ordinary record and a graduation never strands as a plain sunset. A
+// pre-id anchor can hold no pair.
+func (v anchorView) unfinishedFor(target engine.Anchor) error {
 	if target.ID == "" {
 		return nil
 	}
 	if st, pending := blockingPair(v.facts[target.ID]); pending {
-		return unfinishedRejection(label, st)
+		return unfinishedRejection(target.Label, st)
 	}
 	return nil
 }
@@ -712,18 +1005,29 @@ func sunsetEventRejection(a engine.Anchor) error {
 // day). A partial date is rejected, because an event lands on a real day, and
 // so is a day after the current logical day: it has not happened yet.
 func resolveAnchorDay(dayArg string, now, today time.Time) (string, error) {
+	day, err := resolveEventDay(dayArg, now, today)
+	if err != nil {
+		return "", err
+	}
+	return engine.DateString(day), nil
+}
+
+// resolveEventDay is [resolveAnchorDay] returning the civil day itself, at
+// midnight in today's location: what a confirm's --through and --from feed the
+// span math.
+func resolveEventDay(dayArg string, now, today time.Time) (time.Time, error) {
 	if strings.TrimSpace(dayArg) == "" {
-		return engine.DateString(today), nil
+		return today, nil
 	}
 	res, err := observations.ResolveDay(dayArg, now, observations.DayOptions{AllowFuture: true})
 	switch {
 	case errors.Is(err, observations.ErrDayPartial):
-		return "", rejectDay(
+		return time.Time{}, rejectDay(
 			"an anchor event lands on a real day, not a whole year or month — give YYYY-MM-DD or @yesterday; "+
 				"nothing was saved (got %q)", dayArg,
 		)
 	case err != nil:
-		return "", rejectDay(
+		return time.Time{}, rejectDay(
 			"could not read the day %q (want @yesterday or YYYY-MM-DD, optionally with a time); nothing was saved",
 			dayArg,
 		)
@@ -733,11 +1037,11 @@ func resolveAnchorDay(dayArg string, now, today time.Time) (string, error) {
 		day = engine.AddDays(today, -1)
 	}
 	if day.After(today) {
-		return "", rejectDay(
+		return time.Time{}, rejectDay(
 			"cannot record against %s — that day has not happened yet; nothing was saved", engine.DateString(day),
 		)
 	}
-	return engine.DateString(day), nil
+	return day, nil
 }
 
 // anchorView is one read of both anchor files: anchors.json, the event store,
@@ -815,17 +1119,23 @@ func (v anchorView) eventTarget(label string) (engine.AnchorFacts, error) {
 		return engine.AnchorFacts{}, anchorStateRejection(v.latest, label)
 	}
 	if target.ID == "" {
-		return engine.AnchorFacts{}, rejectAnchor(ErrAnchorNeedsID,
-			"%q was recorded before anchors had ids — run lucid anchor backfill-ids first, then try again. "+
-				"Nothing was saved.",
-			label,
-		)
+		return engine.AnchorFacts{}, needsIDRejection(label)
 	}
 	f, ok := v.facts[target.ID]
 	if !ok { // every anchor in anchors.json folds to facts; this is a broken invariant
 		return engine.AnchorFacts{}, fmt.Errorf("router: anchor %s has no folded facts", target.ID)
 	}
 	return f, nil
+}
+
+// needsIDRejection is the An-5 copy: an anchor recorded before ids existed
+// takes no kind and no event until the explicit backfill gives it one.
+func needsIDRejection(label string) error {
+	return rejectAnchor(ErrAnchorNeedsID,
+		"%q was recorded before anchors had ids — run lucid anchor backfill-ids first, then try again. "+
+			"Nothing was saved.",
+		label,
+	)
 }
 
 // voidTarget resolves the event a void names and the anchor it belongs to. An

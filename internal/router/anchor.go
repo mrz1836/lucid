@@ -234,72 +234,138 @@ func anchorReaddAck(a engine.Anchor, sunsetOn string) string {
 	return fmt.Sprintf("Anchor added: %s — %s (a previous %s was sunset %s).", a.Label, a.Date, a.Label, sunsetOn)
 }
 
-// AnchorSunsetRequest is one `lucid anchor sunset` intent: retire the milestone
-// a label names. The reason is optional free text. Now is the record time — the
-// wall clock when zero — and stamps the retirement.
+// AnchorSunsetRequest is one `lucid anchor sunset` intent: retire the anchor a
+// label names. The reason is optional free text. Graduated retires it as
+// graduated rather than as a plain sunset. Now is the record time — the wall
+// clock when zero — and stamps the retirement.
 type AnchorSunsetRequest struct {
-	Label  string
-	Reason string
-	Now    time.Time
+	Label     string
+	Reason    string
+	Graduated bool
+	Now       time.Time
 }
 
 // AnchorSunsetResult reports the appended sunset record and the inventory-only
-// ack. Retiring a milestone is never scored, so the ack carries no evaluative
-// language (engine §0) — just what was retired and what became of it.
+// ack. Retiring an anchor is never scored, so the ack carries no evaluative
+// language (engine §0) — just what was retired and what became of it. Event is
+// the graduate event a `--graduated` sunset wrote (its id is the receipt), and
+// nil for a plain sunset.
 type AnchorSunsetResult struct {
 	Anchor engine.Anchor
+	Event  *engine.AnchorEvent
 	Ack    string
 }
 
 // AnchorSunset executes `lucid anchor sunset <label> [reason]` (engine-module.md
-// §Commands): retire a milestone from the counting surfaces by *appending*,
+// §Commands): retire an anchor from the counting surfaces by *appending*,
 // never by editing. The appended record mirrors the anchor it retires and adds
-// the sunset state, so the milestone stays in the append-only history and in
+// the sunset state, so the anchor stays in the append-only history and in
 // `metrics --json` → anchors_sunset[] while dropping out of the metrics prose,
-// anchors[], and the witness aging-anchor check.
+// anchors[], and the witness report's watch-outs.
 //
 // A bare label is unambiguous because at most one active anchor can hold one.
 // A label no active anchor holds is rejected before any append — already
 // retired, or never recorded — and the store is untouched (error-states.md
-// §An-1, §An-2). The engine tree is still scaffolded, as it is for any engine
-// verb; nothing is appended to the history.
+// §An-1, §An-2); so is an anchor whose two-file write is unfinished (§An-13),
+// which a retry of that write finishes first. The engine tree is still
+// scaffolded, as it is for any engine verb; nothing is appended to the
+// history. With Graduated, see [Router.anchorSunsetGraduated].
 func (r *Router) AnchorSunset(req AnchorSunsetRequest) (AnchorSunsetResult, error) {
 	now := whenOr(req.Now)
+	if req.Graduated {
+		return r.anchorSunsetGraduated(req, now)
+	}
 
 	if err := r.prepareEngine(); err != nil {
 		return AnchorSunsetResult{}, err
 	}
-	log, err := r.store.ReadAnchors()
+	view, err := r.readAnchorView()
 	if err != nil {
 		return AnchorSunsetResult{}, err
 	}
-	latest := engine.LatestAnchors(log)
 
-	target, ok := engine.FindActiveAnchor(latest, req.Label)
+	target, ok := engine.FindActiveAnchor(view.latest, req.Label)
 	if !ok {
-		return AnchorSunsetResult{}, anchorStateRejection(latest, req.Label)
+		return AnchorSunsetResult{}, anchorStateRejection(view.latest, req.Label)
+	}
+	if err := view.unfinishedFor(target); err != nil {
+		return AnchorSunsetResult{}, err
 	}
 
-	record := engine.Anchor{
+	record := sunsetRecord(target, req.Reason, now.Format(time.RFC3339))
+	if err := r.store.AppendAnchor(record); err != nil {
+		return AnchorSunsetResult{}, fmt.Errorf("could not sunset the anchor; nothing was saved: %w", err)
+	}
+
+	return AnchorSunsetResult{Anchor: record, Ack: anchorSunsetAck(record)}, nil
+}
+
+// anchorSunsetGraduated is `anchor sunset --graduated`: retire an anchor as
+// graduated — "this became who I am", which is different from an abandoned
+// sunset. It is a two-file verb written event first: the graduate event, then
+// the very same plain v3 sunset record a plain sunset writes. Never a new state
+// value: an older binary's IsSunset reads any other state as active, so it
+// shows an ordinary sunset, and the new binary recognizes the graduation only
+// once the sunset half exists. Any kind can graduate; graduating is always the
+// person's call, never automatic.
+//
+// It resolves the label as a plain sunset does (An-1, An-2), then needs a
+// durable id (An-5). An unfinished graduation of the same anchor is finished
+// by this retry and returns the original receipt; any other unfinished write
+// refuses it (An-13).
+func (r *Router) anchorSunsetGraduated(req AnchorSunsetRequest, now time.Time) (AnchorSunsetResult, error) {
+	w, err := r.openAnchorWrite(now)
+	if err != nil {
+		return AnchorSunsetResult{}, err
+	}
+	target, ok := engine.FindActiveAnchor(w.latest, req.Label)
+	if !ok {
+		return AnchorSunsetResult{}, anchorStateRejection(w.latest, req.Label)
+	}
+	if target.ID == "" {
+		return AnchorSunsetResult{}, needsIDRejection(req.Label)
+	}
+	f := w.facts[target.ID]
+	planned := engine.AnchorEvent{AnchorID: target.ID, Type: engine.AnchorEventGraduate}
+	res, done, err := r.resumeEvent(w, f, planned)
+	if err != nil {
+		return AnchorSunsetResult{}, err
+	}
+	if done {
+		ev := res.Event
+		return AnchorSunsetResult{
+			Anchor: *res.Compat, Event: &ev,
+			Ack: "Finished the earlier unfinished write. " + anchorGraduatedAck(*res.Compat, ev),
+		}, nil
+	}
+
+	ev := w.newEvent(f, engine.AnchorEventGraduate, w.todayString(), req.Reason)
+	record := sunsetRecord(target, req.Reason, w.stamp)
+	if err := r.appendEventWithCompat(ev, &record, engine.AnchorPairEventFirst); err != nil {
+		return AnchorSunsetResult{}, eventWriteError("the graduation", err)
+	}
+	return AnchorSunsetResult{Anchor: record, Event: &ev, Ack: anchorGraduatedAck(record, ev)}, nil
+}
+
+// sunsetRecord is the record a sunset appends: a full mirror of the anchor it
+// retires plus the sunset state, with the optional reason as its note. A plain
+// sunset and a graduation append exactly this.
+func sunsetRecord(target engine.Anchor, reason, recordedAt string) engine.Anchor {
+	return engine.Anchor{
 		// Copied verbatim, empty included. Retiring an anchor written before
 		// ids existed means appending an id-less record, so it folds under the
 		// same synthetic identity and actually retires it; stamping a fresh id
 		// here would retire nothing and leave the original active.
 		ID:    target.ID,
 		Label: target.Label,
-		// The milestone's own date, never today: the field means the same
-		// thing in every record of this store, which is what keeps a sunset
-		// readable without knowing which kind of record it is.
+		// The anchor's own date, never today: the field means the same thing
+		// in every record of this store, which is what keeps a sunset readable
+		// without knowing which kind of record it is.
 		Date:       target.Date,
-		Note:       req.Reason,
-		RecordedAt: now.Format(time.RFC3339),
+		Note:       reason,
+		RecordedAt: recordedAt,
 		State:      engine.AnchorStateSunset,
 	}
-	if err := r.store.AppendAnchor(record); err != nil {
-		return AnchorSunsetResult{}, fmt.Errorf("could not sunset the anchor; nothing was saved: %w", err)
-	}
-
-	return AnchorSunsetResult{Anchor: record, Ack: anchorSunsetAck(record)}, nil
 }
 
 // anchorSunsetAck builds the inventory ack for a retired anchor: what was
@@ -308,6 +374,15 @@ func (r *Router) AnchorSunset(req AnchorSunsetRequest) (AnchorSunsetResult, erro
 func anchorSunsetAck(a engine.Anchor) string {
 	return fmt.Sprintf(
 		"Anchor sunset: %s — %s. It no longer counts on the metrics surface; the record is kept.", a.Label, a.Date,
+	)
+}
+
+// anchorGraduatedAck is the ack for a graduation: the plain sunset's ack under
+// its own word, naming the graduate event's receipt.
+func anchorGraduatedAck(a engine.Anchor, ev engine.AnchorEvent) string {
+	return fmt.Sprintf(
+		"Anchor graduated: %s — %s. It no longer counts on the metrics surface; the record is kept. Saved as `%s`.",
+		a.Label, a.Date, ev.ID,
 	)
 }
 
@@ -348,7 +423,9 @@ type AnchorRenameResult struct {
 // blank new name, renaming a label to itself, a label no active anchor holds
 // (never recorded, or already retired), or a new name an *active* anchor
 // already holds. A name held only by a retired anchor is free, exactly as it is
-// for `anchor add`.
+// for `anchor add`. An anchor whose two-file write is unfinished is refused too
+// (§An-13), so the rename never lands between an interrupted write and its
+// retry.
 func (r *Router) AnchorRename(req AnchorRenameRequest) (AnchorRenameResult, error) {
 	now := whenOr(req.Now)
 
@@ -363,14 +440,17 @@ func (r *Router) AnchorRename(req AnchorRenameRequest) (AnchorRenameResult, erro
 	if err := r.prepareEngine(); err != nil {
 		return AnchorRenameResult{}, err
 	}
-	log, err := r.store.ReadAnchors()
+	view, err := r.readAnchorView()
 	if err != nil {
 		return AnchorRenameResult{}, err
 	}
-	latest := engine.LatestAnchors(log)
+	log := view.log
 
-	target, err := resolveRenameTarget(latest, req.Label, newLabel)
+	target, err := resolveRenameTarget(view.latest, req.Label, newLabel)
 	if err != nil {
+		return AnchorRenameResult{}, err
+	}
+	if err := view.unfinishedFor(target); err != nil {
 		return AnchorRenameResult{}, err
 	}
 

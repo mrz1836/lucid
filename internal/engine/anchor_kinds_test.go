@@ -1309,6 +1309,52 @@ func TestAnchorThresholdsDefaults(t *testing.T) {
 	assert.Equal(t, AnchorThresholds{MissAlarm: 4, GraduationDays: 30}, AnchorThresholds{MissAlarm: 4, GraduationDays: 30}.withDefaults())
 }
 
+// TestMissRunThrough: the run a logged miss belongs to is the consecutive
+// calendar miss days around it, wherever it falls — a backdated miss beside an
+// earlier one joins its run — and it alarms only at the miss alarm, which is
+// never below 2. Voided misses and misses before the start do not count.
+func TestMissRunThrough(t *testing.T) {
+	a := newKindAnchor(t, "morning-walk", "2026-01-05")
+	a.kind("2026-01-05", AnchorKindHabit, 0, 0)
+	a.confirm("2026-01-05", "2026-01-20")
+	a.miss("2026-01-10")
+	a.miss("2026-01-12")
+	voided := a.miss("2026-01-13")
+	a.void("2026-01-21", voided)
+
+	run, alarm := MissRunThrough(a.facts(), "2026-01-10", AnchorThresholds{})
+	assert.Equal(t, 1, run)
+	assert.False(t, alarm, "one isolated miss never alarms")
+
+	run, alarm = MissRunThrough(a.facts(), "2026-01-14", AnchorThresholds{})
+	assert.Zero(t, run, "a day with no miss is in no run")
+	assert.False(t, alarm)
+
+	a.miss("2026-01-11") // backdated between two isolated misses
+	for _, day := range []string{"2026-01-10", "2026-01-11", "2026-01-12"} {
+		run, alarm = MissRunThrough(a.facts(), day, AnchorThresholds{})
+		assert.Equal(t, 3, run, day)
+		assert.True(t, alarm, day)
+	}
+	run, alarm = MissRunThrough(a.facts(), "2026-01-12", AnchorThresholds{MissAlarm: 4})
+	assert.Equal(t, 3, run)
+	assert.False(t, alarm, "below a raised alarm")
+	_, alarm = MissRunThrough(a.facts(), "2026-01-10", AnchorThresholds{MissAlarm: 1})
+	assert.True(t, alarm, "a run of 3 alarms at the floor")
+
+	single := newKindAnchor(t, "evening-stretch", "2026-01-05")
+	single.kind("2026-01-05", AnchorKindHabit, 0, 0)
+	single.miss("2026-01-08")
+	_, alarm = MissRunThrough(single.facts(), "2026-01-08", AnchorThresholds{MissAlarm: 1})
+	assert.False(t, alarm, "a miss alarm of 1 is raised to 2")
+
+	single.correct("2026-01-09")
+	run, _ = MissRunThrough(single.facts(), "2026-01-08", AnchorThresholds{})
+	assert.Zero(t, run, "a miss before the start is not this habit's")
+	run, _ = MissRunThrough(single.facts(), "not-a-day", AnchorThresholds{})
+	assert.Zero(t, run)
+}
+
 // TestBuildMetricsGraduatedAnchors: a sunset anchor whose graduation pair is
 // whole is projected in anchors_graduated and not in anchors_sunset; a plain
 // sunset, and a graduation whose sunset half never landed, are not.

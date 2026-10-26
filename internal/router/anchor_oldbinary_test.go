@@ -158,7 +158,7 @@ func eventOp(res AnchorEventResult, err error) (string, bool, error) {
 	return res.Event.ID, res.Resumed, err
 }
 
-// crashScenarios are the four two-file verbs this phase writes. Each verify
+// crashScenarios are the five two-file verbs. Each verify
 // holds the readings at a stage to the truth the accepted history permits:
 // until a fact-bearing half lands that is the history before the verb, and
 // once one has, the history after it.
@@ -281,6 +281,36 @@ func crashScenarios(t *testing.T) []crashScenario {
 				default:
 					assert.Equal(t, quitReadings{old: 27, current: 27, oldOK: true, currentOK: true}, q, stage)
 				}
+			},
+		},
+		{
+			name:  "sunset --graduated",
+			order: engine.AnchorPairEventFirst,
+			setup: func(t *testing.T, r *Router, c *kindsClock) {
+				addAnchorOfKind(t, r, c, "sobriety", "2026-01-01", engine.AnchorKindQuit, 0, 0)
+			},
+			op: func(r *Router, c *kindsClock) (string, bool, error) {
+				res, err := r.AnchorSunset(AnchorSunsetRequest{Label: "sobriety", Graduated: true, Now: c.next()})
+				if err != nil {
+					return "", false, err
+				}
+				return res.Event.ID, strings.HasPrefix(res.Ack, "Finished the earlier unfinished write."), nil
+			},
+			differ: func(r *Router, c *kindsClock) error {
+				_, err := r.AnchorSunset(AnchorSunsetRequest{Label: "sobriety", Now: c.next()})
+				return err
+			},
+			verify: func(t *testing.T, a *storage.Adapter, stage string) {
+				q := readQuit(t, a, "sobriety")
+				f := foldAnchor(t, a, "sobriety")
+				if stage != "done" { // the sunset half has not landed: an active quit in both binaries
+					assert.Equal(t, quitReadings{old: 99, current: 99, oldOK: true, currentOK: true}, q, stage)
+					assert.False(t, f.Graduated, "%s: a graduate event alone is never a graduation", stage)
+					return
+				}
+				assert.Equal(t, quitReadings{}, q, "retired in both binaries")
+				assert.True(t, f.Graduated)
+				assert.Equal(t, engine.AnchorStateSunset, f.Anchor.State, "a plain v3 sunset")
 			},
 		},
 	}

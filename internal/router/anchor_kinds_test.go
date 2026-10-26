@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -780,6 +781,21 @@ func TestAnchorWrongKindRejectedWithRemedy(t *testing.T) {
 			return e
 		}, `"late-night-snacks" is a limit, and a slip belongs to a quit — reclassify it as a quit first: ` +
 			`lucid anchor kind late-night-snacks quit. Nothing was saved.`},
+		{"miss on a milestone", func() error {
+			_, e := r.AnchorMiss(AnchorMissRequest{Label: "sobriety", Now: c.next()})
+			return e
+		}, `"sobriety" is a milestone, and a miss belongs to a habit — reclassify it as a habit first: ` +
+			`lucid anchor kind sobriety habit. Nothing was saved.`},
+		{"miss on a limit", func() error {
+			_, e := r.AnchorMiss(AnchorMissRequest{Label: "late-night-snacks", Now: c.next()})
+			return e
+		}, `"late-night-snacks" is a limit, and a miss belongs to a habit — reclassify it as a habit first: ` +
+			`lucid anchor kind late-night-snacks habit. Nothing was saved.`},
+		{"a named confirm on a limit", func() error {
+			_, e := r.AnchorConfirm(AnchorConfirmRequest{Labels: []string{"late-night-snacks"}, Now: c.next()})
+			return e
+		}, `"late-night-snacks" is a limit, and a confirm belongs to a habit — reclassify it as a habit first: ` +
+			`lucid anchor kind late-night-snacks habit. Nothing was saved.`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -813,6 +829,18 @@ func TestAnchorEventRejectsLegacyAnchor(t *testing.T) {
 		},
 		"use": func() error {
 			_, e := r.AnchorUse(AnchorUseRequest{Label: "sobriety", Intent: engine.AnchorIntentSlip, Now: c.next()})
+			return e
+		},
+		"miss": func() error {
+			_, e := r.AnchorMiss(AnchorMissRequest{Label: "sobriety", Now: c.next()})
+			return e
+		},
+		"confirm <label>": func() error {
+			_, e := r.AnchorConfirm(AnchorConfirmRequest{Labels: []string{"sobriety"}, Now: c.next()})
+			return e
+		},
+		"sunset --graduated": func() error {
+			_, e := r.AnchorSunset(AnchorSunsetRequest{Label: "sobriety", Graduated: true, Now: c.next()})
 			return e
 		},
 	}
@@ -897,4 +925,718 @@ func TestAnchorEventReceiptIsEventID(t *testing.T) {
 		assert.Equal(t, "anchorev_2026_04_10_a", res.Event.ID)
 		assert.Equal(t, kindsToday, res.Event.Day)
 	})
+}
+
+// noon moves the clock to noon UTC on a civil day — past the 04:00 rollover,
+// so that day is the logical day. Later writes tick a minute at a time from
+// there.
+func (c *kindsClock) noon(t *testing.T, day string) {
+	t.Helper()
+	c.at = civil(t, day).Add(12 * time.Hour)
+}
+
+// habitStats is the current binary's habit numbers for a label as of a
+// logical day.
+func habitStats(t *testing.T, a *storage.Adapter, label, today string) engine.HabitStats {
+	t.Helper()
+	f := foldAnchor(t, a, label)
+	require.Equal(t, engine.AnchorKindHabit, f.Kind, "%s should read as a habit", label)
+	return engine.ComputeHabitStats(f, civil(t, today), engine.AnchorThresholds{})
+}
+
+// kindsMetrics projects both anchor files through BuildMetrics as of
+// kindsToday, as `lucid metrics` reads them.
+func kindsMetrics(t *testing.T, a *storage.Adapter) engine.Metrics {
+	t.Helper()
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	events, err := a.ReadAnchorEvents()
+	require.NoError(t, err)
+	clocks, err := engine.DefaultChain().ClocksFor(engine.DefaultProfile)
+	require.NoError(t, err)
+	return engine.BuildMetrics(engine.MetricsInput{
+		Anchors:   engine.LatestAnchors(log),
+		AnchorLog: log,
+		Events:    events,
+		Now:       time.Date(2026, time.April, 10, 18, 0, 0, 0, time.UTC),
+		Clocks:    clocks,
+		Loc:       time.UTC,
+	})
+}
+
+// confirm runs one confirm and requires it to succeed.
+func confirm(t *testing.T, r *Router, req AnchorConfirmRequest) AnchorConfirmResult {
+	t.Helper()
+	res, err := r.AnchorConfirm(req)
+	require.NoError(t, err)
+	return res
+}
+
+// TestAnchorMissRecordsHabitMiss: a miss is one event in the store and nothing
+// in anchors.json; it defaults to the current logical day, backdates with
+// --day, and always wins over a confirm on the same day. One isolated miss is
+// never called out; a run reaching anchors.miss_alarm is, wherever the logged
+// day falls in it, and the alarm reads the config.
+func TestAnchorMissRecordsHabitMiss(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	c := newKindsClock()
+	habit := addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+	anchorsBefore, _ := anchorFiles(t, home)
+
+	res, err := r.AnchorMiss(AnchorMissRequest{
+		Label: "morning-walk", DayArg: "2026-04-07", Note: "at a friend's place", Now: c.next(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Logged a miss on morning-walk for 2026-04-07 as `anchorev_2026_04_10_b`.", res.Ack)
+	assert.Equal(t, "morning-walk", res.Label)
+	assert.Nil(t, res.Compat, "a miss touches the event store only")
+	assert.False(t, res.Resumed)
+	assert.Equal(t, engine.AnchorEvent{
+		ID: "anchorev_2026_04_10_b", AnchorID: habit.Anchor.ID, Type: engine.AnchorEventMiss, Day: "2026-04-07",
+		RecordedAt: res.Event.RecordedAt, Note: "at a friend's place",
+	}, res.Event)
+	stored := storedEvents(t, a)
+	assert.Equal(t, res.Event, stored[len(stored)-1])
+
+	res, err = r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "@yesterday", Now: c.next()})
+	require.NoError(t, err)
+	assert.Equal(t, "2026-04-09", res.Event.Day, "@yesterday is the day before the logical day")
+	assert.Equal(t, "Logged a miss on morning-walk for 2026-04-09 as `anchorev_2026_04_10_c`.", res.Ack,
+		"04-07 and 04-09 are not consecutive")
+
+	res, err = r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-04-08", Now: c.next()})
+	require.NoError(t, err)
+	assert.Equal(t,
+		"Logged a miss on morning-walk for 2026-04-08 as `anchorev_2026_04_10_d` — missed 3 days in a row.", res.Ack,
+		"a backdated miss joins the run around it")
+
+	res, err = r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", Now: c.next()})
+	require.NoError(t, err)
+	assert.Equal(t, kindsToday, res.Event.Day, "the default is the current logical day")
+	assert.Contains(t, res.Ack, "missed 4 days in a row.")
+
+	anchorsAfter, _ := anchorFiles(t, home)
+	assert.Equal(t, string(anchorsBefore), string(anchorsAfter), "a miss never touches anchors.json")
+	assert.Len(t, foldAnchor(t, a, "morning-walk").Misses, 4)
+
+	t.Run("a miss wins over a confirm on the same day", func(t *testing.T) {
+		r2, a2, _ := newBootedRouter(t)
+		c2 := newKindsClock()
+		addAnchorOfKind(t, r2, c2, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+		confirm(t, r2, AnchorConfirmRequest{FromArg: "2026-03-30", ThroughArg: "2026-04-05", Now: c2.next()})
+		before := habitStats(t, a2, "morning-walk", kindsToday)
+		require.Equal(t, 7, before.Kept)
+
+		res, err := r2.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-04-02", Now: c2.next()})
+		require.NoError(t, err, "a miss on a confirmed day is still recorded")
+		assert.Equal(t, "Logged a miss on morning-walk for 2026-04-02 as `anchorev_2026_04_10_c`.", res.Ack)
+		after := habitStats(t, a2, "morning-walk", kindsToday)
+		assert.Equal(t, 7, after.Accounted)
+		assert.Equal(t, 6, after.Kept, "the confirmed day now counts as a miss")
+		assert.Equal(t, 1, after.Misses)
+	})
+
+	t.Run("the alarm reads anchors.miss_alarm", func(t *testing.T) {
+		r2, a2, _ := newBootedRouter(t)
+		cfg := r2.Config()
+		cfg.Anchors.MissAlarm = 3
+		require.NoError(t, a2.SaveConfig(cfg))
+		_, err := r2.Boot()
+		require.NoError(t, err)
+		c2 := newKindsClock()
+		addAnchorOfKind(t, r2, c2, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+
+		_, err = r2.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-04-08", Now: c2.next()})
+		require.NoError(t, err)
+		res, err := r2.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-04-09", Now: c2.next()})
+		require.NoError(t, err)
+		assert.NotContains(t, res.Ack, "in a row", "a run of 2 is below a miss alarm of 3")
+		res, err = r2.AnchorMiss(AnchorMissRequest{Label: "morning-walk", Now: c2.next()})
+		require.NoError(t, err)
+		assert.Contains(t, res.Ack, "— missed 3 days in a row.")
+	})
+
+	t.Run("a day before the start or not yet lived is rejected", func(t *testing.T) {
+		err := requireNothingWritten(t, home, ErrAnchorBeforeStart, func() error {
+			_, missErr := r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-01-04", Now: c.next()})
+			return missErr
+		})
+		assert.Equal(t,
+			`that's before "morning-walk" started (2026-01-05) — an anchor's events begin on its start. Nothing was saved.`,
+			err.Error())
+
+		beforeA, beforeE := anchorFiles(t, home)
+		for _, day := range []string{"2026-04-11", "2026-04", "not-a-day"} {
+			_, missErr := r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: day, Now: c.next()})
+			var refused *DayRejectedError
+			require.ErrorAs(t, missErr, &refused, "day %q", day)
+		}
+		afterA, afterE := anchorFiles(t, home)
+		assert.Equal(t, string(beforeA), string(afterA))
+		assert.Equal(t, string(beforeE), string(afterE))
+	})
+
+	t.Run("an unknown or sunset label is rejected", func(t *testing.T) {
+		_ = requireNothingWritten(t, home, ErrAnchorUnknownLabel, func() error {
+			_, missErr := r.AnchorMiss(AnchorMissRequest{Label: "evening-stretch", Now: c.next()})
+			return missErr
+		})
+		_, err := r.AnchorSunset(AnchorSunsetRequest{Label: "morning-walk", Now: c.next()})
+		require.NoError(t, err)
+		err = requireNothingWritten(t, home, ErrAnchorAlreadySunset, func() error {
+			_, missErr := r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", Now: c.next()})
+			return missErr
+		})
+		assert.Contains(t, err.Error(), "takes no new events")
+	})
+}
+
+// TestAnchorConfirmSpanRules: a confirm attests a span per habit, ending at the
+// through-day (default: yesterday's logical day) and starting at the later of
+// the day after the last confirm and the day the anchor became a habit — never
+// the anchor date — so a first confirm claims nothing before the cutover, a
+// skipped week heals itself, and a kind change away and back starts again at
+// the later day. --from widens the start, never before the anchor date nor past
+// the through-day. An empty span writes nothing; no labels covers every active
+// habit; every habit is checked before anything is written.
+func TestAnchorConfirmSpanRules(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	c := newKindsClock()
+	c.noon(t, "2026-03-01")
+	addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+
+	t.Run("the first confirm starts on the day it became a habit", func(t *testing.T) {
+		c.noon(t, "2026-03-08")
+		res := confirm(t, r, AnchorConfirmRequest{Labels: []string{"morning-walk"}, Now: c.next()})
+		assert.Equal(t, "2026-03-07", res.Through, "the through-day defaults to yesterday's logical day")
+		require.Len(t, res.Confirmed, 1)
+		ev := res.Confirmed[0].Event
+		assert.Equal(t, "2026-03-01", ev.From, "never the anchor date (2026-01-05)")
+		assert.Equal(t, "2026-03-07", ev.Day)
+		assert.Equal(t, engine.AnchorEventConfirm, ev.Type)
+		assert.Equal(t, "morning-walk", res.Confirmed[0].Label)
+		assert.Empty(t, res.AlreadyConfirmed)
+		h := habitStats(t, a, "morning-walk", "2026-03-08")
+		assert.Equal(t, 7, h.Accounted)
+		assert.Equal(t, 7, h.Kept)
+		assert.Equal(t, "2026-03-07", h.LastConfirmed)
+	})
+
+	t.Run("a skipped week heals itself and a miss inside the span stays a miss", func(t *testing.T) {
+		c.noon(t, "2026-03-20")
+		_, err := r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-03-10", Now: c.next()})
+		require.NoError(t, err)
+		c.noon(t, "2026-03-22")
+		res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		require.Len(t, res.Confirmed, 1)
+		ev := res.Confirmed[0].Event
+		assert.Equal(t, "2026-03-08", ev.From, "the next confirm covers the gap")
+		assert.Equal(t, "2026-03-21", ev.Day)
+		h := habitStats(t, a, "morning-walk", "2026-03-22")
+		assert.Equal(t, 21, h.Accounted)
+		assert.Equal(t, 20, h.Kept)
+		assert.Equal(t, 1, h.Misses)
+	})
+
+	t.Run("an empty span writes nothing", func(t *testing.T) {
+		beforeA, beforeE := anchorFiles(t, home)
+		res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		assert.Empty(t, res.Confirmed)
+		require.Len(t, res.AlreadyConfirmed, 1)
+		assert.Equal(t, AnchorConfirmSkipped{
+			Label: "morning-walk", AnchorID: foldAnchor(t, a, "morning-walk").AnchorID,
+			LastConfirmed: "2026-03-21", NextFrom: "2026-03-22",
+		}, res.AlreadyConfirmed[0])
+		assert.Equal(t, "morning-walk: already confirmed through 2026-03-21; nothing written.", res.Ack)
+		afterA, afterE := anchorFiles(t, home)
+		assert.Equal(t, string(beforeA), string(afterA))
+		assert.Equal(t, string(beforeE), string(afterE), "an empty span writes no event")
+	})
+
+	t.Run("--from is rejected before the anchor date or past the through-day", func(t *testing.T) {
+		err := requireNothingWritten(t, home, ErrAnchorConfirmSpan, func() error {
+			_, confirmErr := r.AnchorConfirm(AnchorConfirmRequest{FromArg: "2026-01-04", Now: c.next()})
+			return confirmErr
+		})
+		assert.Equal(t, `--from can't be before "morning-walk" started (2026-01-05). Nothing was saved.`, err.Error())
+
+		err = requireNothingWritten(t, home, ErrAnchorConfirmSpan, func() error {
+			_, confirmErr := r.AnchorConfirm(AnchorConfirmRequest{
+				FromArg: "2026-03-20", ThroughArg: "2026-03-15", Now: c.next(),
+			})
+			return confirmErr
+		})
+		assert.Equal(t, "--from 2026-03-20 is after the through-day 2026-03-15. Nothing was saved.", err.Error())
+	})
+
+	t.Run("a through-day not yet lived or partial is rejected", func(t *testing.T) {
+		beforeA, beforeE := anchorFiles(t, home)
+		for _, day := range []string{"2026-03-23", "2026-03", "not-a-day"} {
+			_, err := r.AnchorConfirm(AnchorConfirmRequest{ThroughArg: day, Now: c.next()})
+			var refused *DayRejectedError
+			require.ErrorAs(t, err, &refused, "through %q", day)
+			_, err = r.AnchorConfirm(AnchorConfirmRequest{FromArg: day, Now: c.next()})
+			require.ErrorAs(t, err, &refused, "from %q", day)
+		}
+		afterA, afterE := anchorFiles(t, home)
+		assert.Equal(t, string(beforeA), string(afterA))
+		assert.Equal(t, string(beforeE), string(afterE))
+	})
+
+	t.Run("a kind change away and back starts at the later day", func(t *testing.T) {
+		c.noon(t, "2026-03-25")
+		_, err := r.AnchorKind(AnchorKindRequest{Label: "morning-walk", Kind: engine.AnchorKindMilestone, Now: c.next()})
+		require.NoError(t, err)
+		_ = requireNothingWritten(t, home, ErrAnchorWrongKind, func() error {
+			_, confirmErr := r.AnchorConfirm(AnchorConfirmRequest{Labels: []string{"morning-walk"}, Now: c.next()})
+			return confirmErr
+		})
+		noHabits := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		assert.Equal(t, "No active habits to confirm; nothing written.", noHabits.Ack, "a milestone is not covered")
+
+		c.noon(t, "2026-04-01")
+		_, err = r.AnchorKind(AnchorKindRequest{Label: "morning-walk", Kind: engine.AnchorKindHabit, Now: c.next()})
+		require.NoError(t, err)
+		c.noon(t, "2026-04-05")
+		res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		require.Len(t, res.Confirmed, 1)
+		assert.Equal(t, "2026-04-01", res.Confirmed[0].Event.From,
+			"the later of the day after the last confirm (03-22) and the day it became a habit again")
+		assert.Equal(t, "2026-04-04", res.Confirmed[0].Event.Day)
+	})
+
+	t.Run("--from vouches for an earlier stretch", func(t *testing.T) {
+		r, a, _ := newBootedRouter(t)
+		c := newKindsClock()
+		addAnchorOfKind(t, r, c, "morning-walk", "2026-03-01", engine.AnchorKindHabit, 0, 0)
+		res := confirm(t, r, AnchorConfirmRequest{FromArg: "2026-03-01", Now: c.next()})
+		require.Len(t, res.Confirmed, 1)
+		assert.Equal(t, "2026-03-01", res.Confirmed[0].Event.From, "back to the anchor date, which the person vouched for")
+		assert.Equal(t, "2026-04-09", res.Confirmed[0].Event.Day)
+		h := habitStats(t, a, "morning-walk", kindsToday)
+		assert.Equal(t, 29, h.Kept, "every vouched day in the window is kept")
+		assert.Equal(t, 29, h.Accounted, "today, inside the window but not over, stays unaccounted")
+	})
+
+	t.Run("a through-day before it became a habit is an empty span", func(t *testing.T) {
+		r, _, home := newBootedRouter(t)
+		c := newKindsClock()
+		addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+		beforeA, beforeE := anchorFiles(t, home)
+		res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		assert.Equal(t, "2026-04-09", res.Through)
+		require.Len(t, res.AlreadyConfirmed, 1)
+		assert.Empty(t, res.AlreadyConfirmed[0].LastConfirmed, "never confirmed")
+		assert.Equal(t,
+			"morning-walk: nothing to confirm through 2026-04-09 — its confirmations start 2026-04-10; nothing written.",
+			res.Ack)
+		afterA, afterE := anchorFiles(t, home)
+		assert.Equal(t, string(beforeA), string(afterA))
+		assert.Equal(t, string(beforeE), string(afterE))
+	})
+
+	t.Run("no labels covers every active habit, and only those", func(t *testing.T) {
+		r, a, home := newBootedRouter(t)
+		c := newKindsClock()
+		c.noon(t, "2026-04-01")
+		addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+		addAnchorOfKind(t, r, c, "evening-stretch", "2026-01-05", engine.AnchorKindHabit, 0, 14)
+		addAnchorOfKind(t, r, c, "retired-habit", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+		addAnchorOfKind(t, r, c, "sobriety", "2026-01-01", engine.AnchorKindQuit, 0, 0)
+		_, err := r.AnchorAdd(AnchorAddRequest{Label: "first-gate", Date: "2026-05-01", Now: c.next()})
+		require.NoError(t, err)
+		_, err = r.AnchorSunset(AnchorSunsetRequest{Label: "retired-habit", Now: c.next()})
+		require.NoError(t, err)
+		eventsBefore := len(storedEvents(t, a))
+
+		c.noon(t, "2026-04-05")
+		res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		require.Len(t, res.Confirmed, 2)
+		assert.Equal(t, "evening-stretch", res.Confirmed[0].Label, "label order")
+		assert.Equal(t, "morning-walk", res.Confirmed[1].Label)
+		assert.Equal(t, "anchorev_2026_04_05_a", res.Confirmed[0].Event.ID)
+		assert.Equal(t, "anchorev_2026_04_05_b", res.Confirmed[1].Event.ID, "one write, consecutive receipts")
+		assert.Len(t, storedEvents(t, a), eventsBefore+2)
+		assert.Equal(t, 4, habitStats(t, a, "evening-stretch", "2026-04-05").Kept, "04-01 through 04-04, all kept")
+
+		t.Run("a rejection for one named habit saves nothing for any", func(t *testing.T) {
+			c.noon(t, "2026-04-09")
+			err := requireNothingWritten(t, home, ErrAnchorWrongKind, func() error {
+				_, confirmErr := r.AnchorConfirm(AnchorConfirmRequest{
+					Labels: []string{"morning-walk", "sobriety"}, Now: c.next(),
+				})
+				return confirmErr
+			})
+			assert.Equal(t,
+				`"sobriety" is a quit, and a confirm belongs to a habit — reclassify it as a habit first: `+
+					`lucid anchor kind sobriety habit. Nothing was saved.`,
+				err.Error())
+			_ = requireNothingWritten(t, home, ErrAnchorUnknownLabel, func() error {
+				_, confirmErr := r.AnchorConfirm(AnchorConfirmRequest{
+					Labels: []string{"morning-walk", "nope"}, Now: c.next(),
+				})
+				return confirmErr
+			})
+			_ = requireNothingWritten(t, home, ErrAnchorAlreadySunset, func() error {
+				_, confirmErr := r.AnchorConfirm(AnchorConfirmRequest{
+					Labels: []string{"morning-walk", "retired-habit"}, Now: c.next(),
+				})
+				return confirmErr
+			})
+		})
+
+		t.Run("a label named twice is confirmed once", func(t *testing.T) {
+			res := confirm(t, r, AnchorConfirmRequest{
+				Labels: []string{"morning-walk", "morning-walk"}, Now: c.next(),
+			})
+			require.Len(t, res.Confirmed, 1)
+			assert.Equal(t, "2026-04-05", res.Confirmed[0].Event.From)
+			assert.Equal(t, "2026-04-08", res.Confirmed[0].Event.Day)
+		})
+	})
+
+	t.Run("no active habits is an honest no-op", func(t *testing.T) {
+		r, _, home := newBootedRouter(t)
+		c := newKindsClock()
+		_, err := r.AnchorAdd(AnchorAddRequest{Label: "first-gate", Date: "2026-03-01", Now: c.next()})
+		require.NoError(t, err)
+		res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+		assert.Equal(t, "No active habits to confirm; nothing written.", res.Ack)
+		assert.Equal(t, "2026-04-09", res.Through)
+		assert.NotNil(t, res.Confirmed)
+		assert.NotNil(t, res.AlreadyConfirmed)
+		_, statErr := os.Stat(filepath.Join(home, "engine", "anchor_events.json"))
+		require.ErrorIs(t, statErr, os.ErrNotExist, "a no-op confirm never creates the event store")
+	})
+}
+
+// TestAnchorConfirmAckNamesSpan: the ack is one line per habit in label order,
+// naming the exact span confirmed and its receipt — so whoever asked can say
+// it back — or why nothing was written for it.
+func TestAnchorConfirmAckNamesSpan(t *testing.T) {
+	r, _, _ := newBootedRouter(t)
+	c := newKindsClock()
+	c.noon(t, "2026-01-18")
+	addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+	addAnchorOfKind(t, r, c, "evening-stretch", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+	c.noon(t, "2026-01-25")
+	first := confirm(t, r, AnchorConfirmRequest{Labels: []string{"evening-stretch"}, Now: c.next()})
+	assert.Equal(t, "evening-stretch: confirmed 2026-01-18–2026-01-24 as `anchorev_2026_01_25_a`.", first.Ack)
+
+	res := confirm(t, r, AnchorConfirmRequest{Now: c.next()})
+	assert.Equal(t,
+		"evening-stretch: already confirmed through 2026-01-24; nothing written.\n"+
+			"morning-walk: confirmed 2026-01-18–2026-01-24 as `anchorev_2026_01_25_b`.",
+		res.Ack)
+
+	c.noon(t, "2026-01-26")
+	one := confirm(t, r, AnchorConfirmRequest{Labels: []string{"morning-walk"}, Now: c.next()})
+	assert.Equal(t, "morning-walk: confirmed 2026-01-25–2026-01-25 as `anchorev_2026_01_26_a`.", one.Ack,
+		"a one-day span still names both ends")
+}
+
+// TestAnchorSunsetGraduatedWritesPlainSunsetAndEvent: --graduated writes a
+// graduate event, then the very same plain sunset record — its state exactly
+// "sunset", never a new value — as one event-first pair. The new binary reads
+// it as graduated and projects it in anchors_graduated; an older binary reads
+// an ordinary sunset. Any kind can graduate, and a plain sunset writes no event.
+func TestAnchorSunsetGraduatedWritesPlainSunsetAndEvent(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	c := newKindsClock()
+	habit := addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+
+	grad, err := r.AnchorSunset(AnchorSunsetRequest{
+		Label: "morning-walk", Reason: "part of every morning now", Graduated: true, Now: c.next(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t,
+		"Anchor graduated: morning-walk — 2026-01-05. It no longer counts on the metrics surface; the record is kept. "+
+			"Saved as `anchorev_2026_04_10_b`.",
+		grad.Ack)
+	require.NotNil(t, grad.Event)
+	assert.Equal(t, engine.AnchorEvent{
+		ID: "anchorev_2026_04_10_b", AnchorID: habit.Anchor.ID, Type: engine.AnchorEventGraduate, Day: kindsToday,
+		RecordedAt: grad.Anchor.RecordedAt, Note: "part of every morning now",
+	}, *grad.Event)
+
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	assert.Equal(t, engine.AnchorVersion, log.Version, "anchors.json stays v3")
+	require.Len(t, log.History, 2)
+	rec := log.History[1]
+	assert.Equal(t, grad.Anchor, rec)
+	assert.Equal(t, engine.Anchor{
+		ID: habit.Anchor.ID, Label: "morning-walk", Date: "2026-01-05", Note: "part of every morning now",
+		RecordedAt: grad.Event.RecordedAt, State: engine.AnchorStateSunset,
+	}, rec, "a plain v3 sunset: the state is exactly sunset")
+
+	states := pairStates(t, a)
+	require.Len(t, states, 2)
+	assert.Equal(t, engine.AnchorPairEventFirst, states[1].Intent.Order, "the graduate event, then the sunset")
+	assert.Equal(t, engine.AnchorPairComplete, states[1].Status)
+
+	f := foldAnchor(t, a, "morning-walk")
+	assert.True(t, f.Graduated)
+	assert.Equal(t, engine.AnchorKindHabit, f.Kind, "the kind survives the retirement")
+	_, active := oldDaysSince(t, a, "morning-walk")
+	assert.False(t, active, "an older binary reads an ordinary sunset")
+
+	m := kindsMetrics(t, a)
+	require.Len(t, m.AnchorsGraduated, 1)
+	assert.Equal(t, "morning-walk", m.AnchorsGraduated[0].Label)
+	assert.Empty(t, m.AnchorsSunset, "graduated, not abandoned")
+	assert.Empty(t, m.Anchors)
+
+	t.Run("any kind can graduate", func(t *testing.T) {
+		r2, a2, _ := newBootedRouter(t)
+		c2 := newKindsClock()
+		addAnchorOfKind(t, r2, c2, "sobriety", "2026-01-01", engine.AnchorKindQuit, 0, 0)
+		addAnchorOfKind(t, r2, c2, "late-night-snacks", "2026-01-01", engine.AnchorKindLimit, 4, 90)
+		_, err := r2.AnchorAdd(AnchorAddRequest{Label: "first-gate", Date: "2026-03-01", Now: c2.next()})
+		require.NoError(t, err)
+		for _, label := range []string{"sobriety", "late-night-snacks", "first-gate"} {
+			res, err := r2.AnchorSunset(AnchorSunsetRequest{Label: label, Graduated: true, Now: c2.next()})
+			require.NoError(t, err, label)
+			assert.Equal(t, engine.AnchorStateSunset, res.Anchor.State, label)
+			assert.True(t, foldAnchor(t, a2, label).Graduated, label)
+		}
+		assert.Len(t, kindsMetrics(t, a2).AnchorsGraduated, 3)
+	})
+
+	t.Run("a plain sunset writes no event and stays a plain sunset", func(t *testing.T) {
+		r2, a2, home2 := newBootedRouter(t)
+		c2 := newKindsClock()
+		_, err := r2.AnchorAdd(AnchorAddRequest{Label: "gate-30", Date: "2026-02-01", Now: c2.next()})
+		require.NoError(t, err)
+		res, err := r2.AnchorSunset(AnchorSunsetRequest{Label: "gate-30", Reason: "mistyped label", Now: c2.next()})
+		require.NoError(t, err)
+		assert.Nil(t, res.Event)
+		assert.Equal(t,
+			"Anchor sunset: gate-30 — 2026-02-01. It no longer counts on the metrics surface; the record is kept.", res.Ack)
+		_, statErr := os.Stat(filepath.Join(home2, "engine", "anchor_events.json"))
+		require.ErrorIs(t, statErr, os.ErrNotExist, "a plain sunset never creates the event store")
+		assert.False(t, foldAnchor(t, a2, "gate-30").Graduated)
+		m := kindsMetrics(t, a2)
+		assert.Len(t, m.AnchorsSunset, 1)
+		assert.Empty(t, m.AnchorsGraduated)
+	})
+
+	t.Run("rejections write nothing", func(t *testing.T) {
+		r2, a2, home2 := newBootedRouter(t)
+		c2 := newKindsClock()
+		require.NoError(t, a2.ScaffoldEngine())
+		require.NoError(t, a2.AppendAnchor(engine.Anchor{
+			Label: "old-gate", Date: "2026-01-01", RecordedAt: c2.next().Format(time.RFC3339),
+		}))
+		err := requireNothingWritten(t, home2, ErrAnchorNeedsID, func() error {
+			_, sunsetErr := r2.AnchorSunset(AnchorSunsetRequest{Label: "old-gate", Graduated: true, Now: c2.next()})
+			return sunsetErr
+		})
+		assert.Equal(t,
+			`"old-gate" was recorded before anchors had ids — run lucid anchor backfill-ids first, then try again. `+
+				`Nothing was saved.`, err.Error())
+		_ = requireNothingWritten(t, home2, ErrAnchorUnknownLabel, func() error {
+			_, sunsetErr := r2.AnchorSunset(AnchorSunsetRequest{Label: "nope", Graduated: true, Now: c2.next()})
+			return sunsetErr
+		})
+		_, err = r2.AnchorSunset(AnchorSunsetRequest{Label: "old-gate", Now: c2.next()})
+		require.NoError(t, err, "a plain sunset of a pre-id anchor is unaffected")
+		err = requireNothingWritten(t, home2, ErrAnchorAlreadySunset, func() error {
+			_, sunsetErr := r2.AnchorSunset(AnchorSunsetRequest{Label: "old-gate", Graduated: true, Now: c2.next()})
+			return sunsetErr
+		})
+		assert.Contains(t, err.Error(), "was already sunset on")
+	})
+
+	t.Run("an interrupted graduation refuses a plain sunset and finishes on retry", func(t *testing.T) {
+		r2, a2, home2 := newBootedRouter(t)
+		c2 := newKindsClock()
+		addAnchorOfKind(t, r2, c2, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+		r2.pairFault = failAt(pairStepSecond)
+		_, err := r2.AnchorSunset(AnchorSunsetRequest{Label: "morning-walk", Graduated: true, Now: c2.next()})
+		r2.pairFault = nil
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "retry the same command")
+		assert.False(t, foldAnchor(t, a2, "morning-walk").Graduated, "no graduation before its sunset half lands")
+		_, active := oldDaysSince(t, a2, "morning-walk")
+		assert.True(t, active, "still an active anchor in an older binary")
+
+		err = requireNothingWritten(t, home2, ErrAnchorUnfinished, func() error {
+			_, sunsetErr := r2.AnchorSunset(AnchorSunsetRequest{Label: "morning-walk", Now: c2.next()})
+			return sunsetErr
+		})
+		assert.Contains(t, err.Error(), "the sunset record is missing")
+		_ = requireNothingWritten(t, home2, ErrAnchorUnfinished, func() error {
+			_, renameErr := r2.AnchorRename(AnchorRenameRequest{Label: "morning-walk", NewLabel: "walks", Now: c2.next()})
+			return renameErr
+		})
+
+		res, err := r2.AnchorSunset(AnchorSunsetRequest{Label: "morning-walk", Graduated: true, Now: c2.next()})
+		require.NoError(t, err)
+		assert.True(t, strings.HasPrefix(res.Ack, "Finished the earlier unfinished write. Anchor graduated: morning-walk"))
+		assert.Equal(t, pairStates(t, a2)[1].Intent.Event.ID, res.Event.ID, "the original receipt")
+		assert.True(t, foldAnchor(t, a2, "morning-walk").Graduated)
+		requireAllPairsComplete(t, a2)
+	})
+
+	t.Run("voiding the graduation leaves an ordinary retirement", func(t *testing.T) {
+		voided, err := r.AnchorVoid(AnchorVoidRequest{EventID: grad.Event.ID, Now: c.next()})
+		require.NoError(t, err)
+		assert.Contains(t, voided.Ack, "(a graduation on morning-walk, 2026-04-10)")
+		f := foldAnchor(t, a, "morning-walk")
+		assert.False(t, f.Graduated)
+		assert.True(t, f.Anchor.IsSunset())
+		m := kindsMetrics(t, a)
+		assert.Len(t, m.AnchorsSunset, 1)
+		assert.Empty(t, m.AnchorsGraduated)
+	})
+}
+
+// TestAnchorIdentityVerbsUnchangedForEveryKind: an anchor's kind and events key
+// on its id, so rename, sunset, re-adding a freed label, backfill-ids and the
+// adoption a pre-id rename writes all work exactly as before for every kind —
+// ids and kinds survive, and every event stays attached.
+func TestAnchorIdentityVerbsUnchangedForEveryKind(t *testing.T) {
+	r, a, _ := newBootedRouter(t)
+	c := newKindsClock()
+	require.NoError(t, a.ScaffoldEngine())
+	for _, label := range []string{"old-walk", "old-gate"} { // recorded before ids existed
+		require.NoError(t, a.AppendAnchor(engine.Anchor{
+			Label: label, Date: "2026-01-02", RecordedAt: c.next().Format(time.RFC3339),
+		}))
+	}
+	_, err := r.AnchorAdd(AnchorAddRequest{Label: "first-gate", Date: "2026-05-01", Now: c.next()})
+	require.NoError(t, err)
+	addAnchorOfKind(t, r, c, "sobriety", "2026-01-01", engine.AnchorKindQuit, 0, 0)
+	addAnchorOfKind(t, r, c, "late-night-snacks", "2026-01-01", engine.AnchorKindLimit, 4, 90)
+	addAnchorOfKind(t, r, c, "morning-walk", "2026-01-05", engine.AnchorKindHabit, 0, 0)
+	_, err = r.AnchorSlip(AnchorSlipRequest{Label: "sobriety", DayArg: "2026-03-01", Now: c.next()})
+	require.NoError(t, err)
+	_, err = r.AnchorUse(AnchorUseRequest{
+		Label: "late-night-snacks", Intent: engine.AnchorIntentPlanned, DayArg: "2026-04-01", Now: c.next(),
+	})
+	require.NoError(t, err)
+	_, err = r.AnchorMiss(AnchorMissRequest{Label: "morning-walk", DayArg: "2026-04-10", Now: c.next()})
+	require.NoError(t, err)
+
+	// snapshot is everything about an anchor that must survive an identity verb.
+	type snapshot struct {
+		id, kind                      string
+		slips, uses, misses, confirms int
+		quit                          engine.QuitStats
+		used                          int
+	}
+	snap := func(label string) snapshot {
+		f := foldAnchor(t, a, label)
+		s := snapshot{
+			id: f.AnchorID, kind: f.Kind,
+			slips: len(f.Slips), uses: len(f.Uses), misses: len(f.Misses), confirms: len(f.Confirms),
+		}
+		switch f.Kind {
+		case engine.AnchorKindQuit:
+			s.quit = engine.ComputeQuitStats(f, kindsTodayDate())
+		case engine.AnchorKindLimit:
+			s.used = engine.ComputeLimitStats(f, kindsTodayDate()).Used
+		}
+		return s
+	}
+	kinded := map[string]string{
+		"first-gate": engine.AnchorKindMilestone, "sobriety": engine.AnchorKindQuit,
+		"late-night-snacks": engine.AnchorKindLimit, "morning-walk": engine.AnchorKindHabit,
+	}
+	before := map[string]snapshot{}
+	for label, kind := range kinded {
+		before[label] = snap(label)
+		require.Equal(t, kind, before[label].kind)
+	}
+	assert.Equal(t, 1, before["sobriety"].quit.Slips)
+
+	t.Run("backfill-ids adopts only the pre-id anchors", func(t *testing.T) {
+		res, err := r.BackfillAnchorIDs(BackfillAnchorIDsRequest{Now: c.next()})
+		require.NoError(t, err)
+		assert.Equal(t, []string{"old-gate", "old-walk"}, adoptedLabels(res.Planned))
+		for label := range kinded {
+			assert.Equal(t, before[label], snap(label), "%s is untouched by the backfill", label)
+		}
+		_, err = r.AnchorKind(AnchorKindRequest{Label: "old-walk", Kind: engine.AnchorKindHabit, Now: c.next()})
+		require.NoError(t, err, "a backfilled anchor takes a kind")
+		_, err = r.AnchorMiss(AnchorMissRequest{Label: "old-walk", Now: c.next()})
+		require.NoError(t, err)
+		kinded["old-walk"] = engine.AnchorKindHabit
+		before["old-walk"] = snap("old-walk")
+	})
+
+	t.Run("rename keeps the id, the kind and every event", func(t *testing.T) {
+		for label := range kinded {
+			renamed := label + "-renamed"
+			_, err := r.AnchorRename(AnchorRenameRequest{Label: label, NewLabel: renamed, Now: c.next()})
+			require.NoError(t, err, label)
+			assert.Equal(t, before[label], snap(renamed), "%s keeps everything through a rename", label)
+		}
+	})
+
+	t.Run("adopting a pre-id anchor by rename gives it a durable id that takes a kind", func(t *testing.T) {
+		// old-gate was backfilled above; a fresh pre-id record exercises the
+		// rename adoption itself.
+		require.NoError(t, a.AppendAnchor(engine.Anchor{
+			Label: "legacy-gate", Date: "2026-01-03", RecordedAt: c.next().Format(time.RFC3339),
+		}))
+		res, err := r.AnchorRename(AnchorRenameRequest{Label: "legacy-gate", NewLabel: "gate-two", Now: c.next()})
+		require.NoError(t, err)
+		require.NotNil(t, res.Retired, "the adoption writes the retired stub")
+		_, err = r.AnchorKind(AnchorKindRequest{Label: "gate-two", Kind: engine.AnchorKindQuit, Now: c.next()})
+		require.NoError(t, err)
+		_, err = r.AnchorRename(AnchorRenameRequest{Label: "gate-two", NewLabel: "gate-2", Now: c.next()})
+		require.NoError(t, err)
+		f := foldAnchor(t, a, "gate-2")
+		assert.Equal(t, res.Anchor.ID, f.AnchorID)
+		assert.Equal(t, engine.AnchorKindQuit, f.Kind, "the kind follows the adopted id through a rename")
+	})
+
+	t.Run("sunset keeps the kind and events; re-adding the label starts a new anchor", func(t *testing.T) {
+		for label := range kinded {
+			name := label + "-renamed"
+			_, err := r.AnchorSunset(AnchorSunsetRequest{Label: name, Now: c.next()})
+			require.NoError(t, err, label)
+			retired := foldAnchor(t, a, name)
+			assert.True(t, retired.Anchor.IsSunset())
+			assert.False(t, retired.Graduated)
+			assert.Equal(t, before[label].kind, retired.Kind, "%s: a retired anchor keeps its kind", label)
+			assert.Len(t, retired.Slips, before[label].slips)
+			assert.Len(t, retired.Uses, before[label].uses)
+			assert.Len(t, retired.Misses, before[label].misses)
+
+			again, err := r.AnchorAdd(AnchorAddRequest{Label: name, Date: "2026-04-01", Now: c.next()})
+			require.NoError(t, err, label)
+			assert.NotEqual(t, before[label].id, again.Anchor.ID, "%s: a freed label mints a new id", label)
+			f, ok := engine.FoldAnchorEvents(mustEvents(t, a), mustAnchors(t, a))[again.Anchor.ID]
+			require.True(t, ok)
+			assert.Equal(t, engine.AnchorKindMilestone, f.Kind, "%s: the new anchor starts with no kind", label)
+			assert.Empty(t, f.Slips)
+			assert.Empty(t, f.Misses)
+		}
+		facts := engine.FoldAnchorEvents(mustEvents(t, a), mustAnchors(t, a))
+		for label, s := range before {
+			f, ok := facts[s.id]
+			require.True(t, ok, label)
+			assert.Equal(t, s.kind, f.Kind, "%s: the retired run keeps its kind under its own id", label)
+			assert.True(t, f.Anchor.IsSunset(), label)
+		}
+	})
+}
+
+// mustEvents reads the event store.
+func mustEvents(t *testing.T, a *storage.Adapter) engine.AnchorEventLog {
+	t.Helper()
+	log, err := a.ReadAnchorEvents()
+	require.NoError(t, err)
+	return log
+}
+
+// mustAnchors reads anchors.json.
+func mustAnchors(t *testing.T, a *storage.Adapter) engine.AnchorLog {
+	t.Helper()
+	log, err := a.ReadAnchors()
+	require.NoError(t, err)
+	return log
 }

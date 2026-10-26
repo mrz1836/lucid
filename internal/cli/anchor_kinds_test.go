@@ -58,9 +58,9 @@ func requireUsageError(t *testing.T, home, reason string, args ...string) {
 }
 
 // TestAnchorVerbsJSONAndFileFlags pins the --json shapes of add --kind, kind,
-// slip, use and void, proves every free-text field travels whole through its
-// file flag (an unquoted & or ; never cuts it short), and types the
-// command-line rejections as usage errors.
+// slip, use, void, miss, confirm and sunset --graduated, proves every free-text
+// field travels whole through its file flag (an unquoted & or ; never cuts it
+// short), and types the command-line rejections as usage errors.
 func TestAnchorVerbsJSONAndFileFlags(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, afternoon())
@@ -186,6 +186,95 @@ func TestAnchorVerbsJSONAndFileFlags(t *testing.T) {
 		require.ErrorIs(t, err, errAnchorNotRecorded)
 		assert.Contains(t, stderr, `no anchor event "anchorev_2026_01_01_z"`)
 	})
+
+	// first-gate became a habit (14-day window) in the kind subtest above, on
+	// the logical day 2026-07-05.
+	t.Run("miss", func(t *testing.T) {
+		note := writeNoteFile(t, "miss-note.txt")
+		got := jsonObject(t, runAnchor(t, "miss", "first-gate", "--day", "@yesterday", "--note-file", note, "--json"))
+		assert.Equal(t, []string{"event", "label", "logical_date", "receipt_id"}, sortedKeys(got),
+			"a miss writes no definition record")
+		assert.Equal(t, "2026-07-04", got["logical_date"])
+		event, ok := got["event"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "miss", event["type"])
+		assert.Equal(t, shellHostileNote, event["note"])
+		assert.Equal(t, got["receipt_id"], event["id"])
+
+		assert.Contains(t, runAnchor(t, "miss", "first-gate"), "— missed 2 days in a row.")
+
+		_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "miss", "sobriety")
+		require.ErrorIs(t, err, errAnchorNotRecorded)
+		assert.Equal(t, ExitErr, exitCodeForError(err))
+		assert.Contains(t, stderr, `"sobriety" is a quit, and a miss belongs to a habit`)
+	})
+
+	t.Run("confirm", func(t *testing.T) {
+		empty := jsonObject(t, runAnchor(t, "confirm", "--json"))
+		assert.Equal(t, []string{"already_confirmed", "confirmed", "through"}, sortedKeys(empty))
+		assert.Equal(t, "2026-07-04", empty["through"], "the through-day defaults to yesterday's logical day")
+		assert.Equal(t, []any{}, empty["confirmed"], "both arrays are always present")
+		skipped, ok := empty["already_confirmed"].([]any)
+		require.True(t, ok)
+		require.Len(t, skipped, 1)
+		entry, ok := skipped[0].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, []string{"anchor_id", "label"}, sortedKeys(entry), "last_confirmed is omitted when never confirmed")
+		assert.Equal(t, "first-gate", entry["label"])
+
+		got := jsonObject(t, runAnchor(t, "confirm", "first-gate", "--from", "2026-06-20", "--json"))
+		assert.Equal(t, []any{}, got["already_confirmed"])
+		confirmed, ok := got["confirmed"].([]any)
+		require.True(t, ok)
+		require.Len(t, confirmed, 1)
+		entry, ok = confirmed[0].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, []string{"anchor_id", "from", "label", "receipt_id", "through"}, sortedKeys(entry))
+		assert.Equal(t, "2026-06-20", entry["from"])
+		assert.Equal(t, "2026-07-04", entry["through"])
+
+		again := jsonObject(t, runAnchor(t, "confirm", "--json"))
+		skipped, ok = again["already_confirmed"].([]any)
+		require.True(t, ok)
+		require.Len(t, skipped, 1)
+		entry, ok = skipped[0].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "2026-07-04", entry["last_confirmed"])
+
+		assert.Equal(t, "first-gate: already confirmed through 2026-07-04; nothing written.\n", runAnchor(t, "confirm"))
+
+		_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "confirm", "--through", "2026-07")
+		require.ErrorIs(t, err, errAnchorNotRecorded)
+		assert.Contains(t, stderr, "an anchor event lands on a real day")
+		_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "anchor", "confirm", "first-gate", "--from", "2026-02-01")
+		require.ErrorIs(t, err, errAnchorNotRecorded)
+		assert.Contains(t, stderr, `--from can't be before "first-gate" started (2026-03-01). Nothing was saved.`)
+	})
+
+	t.Run("sunset --graduated", func(t *testing.T) {
+		reason := writeNoteFile(t, "graduate-reason.txt")
+		got := jsonObject(t, runAnchor(t, "sunset", "first-gate", "--graduated", "--reason-file", reason, "--json"))
+		assert.Equal(t,
+			[]string{"date", "event", "id", "label", "note", "receipt_id", "recorded_at", "state"}, sortedKeys(got))
+		assert.Equal(t, "sunset", got["state"], "the very same plain sunset record, never a new state")
+		assert.Equal(t, shellHostileNote, got["note"], "the reason arrives whole")
+		event, ok := got["event"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "graduate", event["type"])
+		assert.Equal(t, got["receipt_id"], event["id"])
+		assert.Equal(t, got["id"], event["anchor_id"])
+		assert.Equal(t, shellHostileNote, event["note"])
+
+		plain := jsonObject(t, runAnchor(t, "sunset", "late-night-snacks", "--json"))
+		assert.Equal(t, []string{"date", "id", "label", "recorded_at", "state"}, sortedKeys(plain),
+			"a plain sunset's shape is unchanged")
+
+		out := runAnchor(t, "add", "evening-stretch", "2026-03-01", "--kind", "habit")
+		require.Contains(t, out, "a habit")
+		ack := runAnchor(t, "sunset", "evening-stretch", "--graduated")
+		assert.Contains(t, ack, "Anchor graduated: evening-stretch — 2026-03-01.")
+		assert.Contains(t, ack, "Saved as `anchorev_2026_07_05_")
+	})
 }
 
 // TestAnchorEventDayRollover: an event written after midnight and before the
@@ -207,6 +296,12 @@ func TestAnchorEventDayRollover(t *testing.T) {
 
 	use := jsonObject(t, runAnchor(t, "use", "late-night-snacks", "--slip", "--day", "@yesterday", "--json"))
 	assert.Equal(t, "2026-07-04", use["logical_date"], "@yesterday is the day before the logical day")
+
+	runAnchor(t, "add", "morning-walk", "2026-01-01", "--kind", "habit")
+	miss := jsonObject(t, runAnchor(t, "miss", "morning-walk", "--json"))
+	assert.Equal(t, "2026-07-05", miss["logical_date"], "a miss at 00:30 belongs to the evening before")
+	confirmed := jsonObject(t, runAnchor(t, "confirm", "--json"))
+	assert.Equal(t, "2026-07-04", confirmed["through"], "the default through-day is the day before the logical day")
 
 	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "anchor", "slip", "sobriety", "--day", "2026-07-06")
 	require.ErrorIs(t, err, errAnchorNotRecorded)

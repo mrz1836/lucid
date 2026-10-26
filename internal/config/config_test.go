@@ -1113,3 +1113,79 @@ func TestGratitudeMatch_Tier3ProviderConfig(t *testing.T) {
 		"a zero block reads as the defaults")
 	assert.Equal(t, 120, base.TimeoutSeconds, "the base block is not mutated")
 }
+
+// TestAnchorsConfigDefaults covers the anchors block end to end: the documented
+// defaults (never miss twice; 90 accounted days to graduate) written under the
+// documented keys, an absent or partial block reading its defaults without a
+// clip warning, valid overrides surviving a write/read cycle, and a threshold
+// below its floor rejected by Validate with the field named — never clipped,
+// because a miss alarm of 1 would let one isolated miss alarm.
+func TestAnchorsConfigDefaults(t *testing.T) {
+	assert.Equal(t, AnchorsConfig{MissAlarm: 2, GraduationDays: 90}, Default().Anchors)
+	assert.Equal(t, Default().Anchors, DefaultAnchors())
+
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+	var m struct {
+		Anchors map[string]any `json:"anchors"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.Len(t, m.Anchors, 2, "exactly the two documented thresholds")
+	assert.EqualValues(t, 2, m.Anchors["miss_alarm"])
+	assert.EqualValues(t, 90, m.Anchors["graduation_days"])
+
+	absent, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14}`))
+	require.NoError(t, err)
+	assert.Equal(t, DefaultAnchors(), absent.Anchors, "an absent block reads the defaults")
+	_, warnings := absent.Clip()
+	assert.Empty(t, warnings, "an absent block is not a clip")
+
+	partial, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14,
+		"anchors": {"miss_alarm": 3}}`))
+	require.NoError(t, err)
+	assert.Equal(t, AnchorsConfig{MissAlarm: 3, GraduationDays: 90}, partial.Anchors,
+		"a set key wins, a missing key keeps its default")
+
+	zero := Default()
+	zero.Anchors = AnchorsConfig{}
+	clipped, warnings := zero.Clip()
+	assert.Empty(t, warnings)
+	assert.Equal(t, DefaultAnchors(), clipped.Anchors, "a config built without the block clips to the defaults")
+	require.NoError(t, zero.Validate(), "an absent block validates as the defaults")
+
+	override := Default()
+	override.Anchors = AnchorsConfig{MissAlarm: 3, GraduationDays: 60}
+	require.NoError(t, override.Validate())
+	raw, err := override.Marshal()
+	require.NoError(t, err)
+	got, err := Unmarshal(raw)
+	require.NoError(t, err)
+	assert.Equal(t, override.Anchors, got.Anchors, "valid overrides round-trip")
+
+	invalid := map[string]struct {
+		anchors AnchorsConfig
+		field   string
+	}{
+		"a miss alarm of 1":         {AnchorsConfig{MissAlarm: 1, GraduationDays: 90}, "anchors.miss_alarm must be >= 2"},
+		"a zero miss alarm":         {AnchorsConfig{MissAlarm: 0, GraduationDays: 90}, "anchors.miss_alarm must be >= 2"},
+		"a negative miss alarm":     {AnchorsConfig{MissAlarm: -2, GraduationDays: 90}, "anchors.miss_alarm must be >= 2"},
+		"a zero graduation bar":     {AnchorsConfig{MissAlarm: 2, GraduationDays: 0}, "anchors.graduation_days must be >= 1"},
+		"a negative graduation bar": {AnchorsConfig{MissAlarm: 2, GraduationDays: -5}, "anchors.graduation_days must be >= 1"},
+	}
+	for name, tc := range invalid {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			c.Anchors = tc.anchors
+			verr := c.Validate()
+			require.Error(t, verr)
+			assert.Contains(t, verr.Error(), tc.field)
+			clipped, warnings := c.Clip()
+			assert.Empty(t, warnings, "an out-of-range threshold is rejected, never clipped")
+			assert.Equal(t, tc.anchors, clipped.Anchors)
+		})
+	}
+
+	explicit, err := Unmarshal([]byte(`{"version": 1, "anchors": {"miss_alarm": 1}}`))
+	require.NoError(t, err)
+	assert.Equal(t, 1, explicit.Anchors.MissAlarm, "decoding never coerces; Validate is what refuses it")
+}

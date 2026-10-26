@@ -65,6 +65,8 @@ corrects a mistaken event.`,
 	parent.AddCommand(newAnchorKindCmd())
 	parent.AddCommand(newAnchorSlipCmd())
 	parent.AddCommand(newAnchorUseCmd())
+	parent.AddCommand(newAnchorMissCmd())
+	parent.AddCommand(newAnchorConfirmCmd())
 	parent.AddCommand(newAnchorVoidCmd())
 	parent.AddCommand(newAnchorSunsetCmd())
 	parent.AddCommand(newAnchorRenameCmd())
@@ -276,25 +278,35 @@ label an active anchor already holds is rejected: reclassify it in place with
 	return cmd
 }
 
-// newAnchorSunsetCmd builds the `sunset` child: retire the milestone a label
+// newAnchorSunsetCmd builds the `sunset` child: retire the anchor a label
 // names. The retirement is an append like every other anchor write, so nothing
 // is deleted and the record stays auditable. Human-first prose ack by default;
 // the appended record as JSON under --json for scripts (ADR-0007). A label no
 // active anchor holds is rejected with the fixed reason on stderr and a
-// non-zero exit, and nothing is appended.
+// non-zero exit, and nothing is appended. --graduated retires it as graduated:
+// a graduate event, then the same plain sunset record.
 func newAnchorSunsetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sunset <label> [reason...]",
-		Short: "Retire an anchor from the counting surfaces (the record is kept)",
-		Long: `sunset retires a days-since milestone: it stops counting, and nothing is
-deleted. The store is append-only, so a retirement is a new record mirroring
-the anchor plus the optional trailing reason. The milestone stays in the
-history and appears in ` + "`metrics --json`" + ` under anchors_sunset[]; it drops out
-of the metrics prose, out of anchors[], and out of the witness aging-anchor
-check.
+		Short: "Retire an anchor from the counting surfaces, or graduate it (the record is kept)",
+		Long: `sunset retires an anchor: it stops counting, and nothing is deleted. The
+store is append-only, so a retirement is a new record mirroring the anchor plus
+the optional trailing reason (or --reason-file). The anchor stays in the
+history and appears in ` + "`metrics --json`" + ` under anchors_sunset[]; it drops out of
+the metrics prose, out of anchors[], and out of the witness report's
+watch-outs.
+
+--graduated retires it as graduated — "this became who I am", which is
+different from an abandoned sunset. It writes a graduate event, whose id is the
+receipt, then the very same plain sunset record (never a new state value, so an
+older lucid simply shows an ordinary sunset), and the anchor appears in
+` + "`metrics --json`" + ` under anchors_graduated[] instead of anchors_sunset[]. Any kind can
+graduate; ` + "`lucid metrics`" + ` surfaces a habit that is eligible, and the decision is
+always yours. It needs a durable id: an anchor recorded before ids existed
+needs ` + "`lucid anchor backfill-ids`" + ` first.
 
 A bare label is enough, because at most one active anchor holds one. Recording
-the label again later is supported and starts a new milestone under that freed
+the label again later is supported and starts a new anchor under that freed
 name, with its own id, so the two runs stay distinct in the ledger. A label no
 active anchor holds — never recorded, or already retired — is rejected with the
 recorded labels named, and nothing is appended.`,
@@ -305,6 +317,9 @@ recorded labels named, and nothing is appended.`,
   # Say why (trailing words are joined into the record's note).
   lucid anchor sunset gate-30 mistyped label
 
+  # A habit that became who you are.
+  lucid anchor sunset morning-walk --graduated --reason-file /tmp/why.txt
+
   # Machine-readable output for a harness.
   lucid anchor sunset gate-30 --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -314,19 +329,28 @@ recorded labels named, and nothing is appended.`,
 			}
 			// --reason-file supplies the retirement reason off the command line;
 			// the trailing positional words are the fallback source.
-			reason, err := resolvePrimaryText(cmd, "anchor sunset", "reason-file", strings.Join(args[1:], " "))
+			reason, err := resolvePrimaryText(cmd, "anchor sunset", anchorFlagReasonFile, strings.Join(args[1:], " "))
 			if err != nil {
 				return emitErr(cmd, err)
 			}
+			graduated, _ := cmd.Flags().GetBool(anchorFlagGraduated)
 			res, err := r.AnchorSunset(router.AnchorSunsetRequest{
-				Label:  args[0],
-				Reason: reason,
-				Now:    clockNow(),
+				Label:     args[0],
+				Reason:    reason,
+				Graduated: graduated,
+				Now:       clockNow(),
 			})
 			if err != nil {
 				return anchorRejection(cmd, err)
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				if res.Event != nil {
+					return writeJSON(cmd.OutOrStdout(), anchorSunsetGraduatedView{
+						AnchorRecord: engine.ProjectAnchor(res.Anchor),
+						ReceiptID:    res.Event.ID,
+						Event:        *res.Event,
+					})
+				}
 				return writeJSON(cmd.OutOrStdout(), engine.ProjectAnchor(res.Anchor))
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
@@ -334,9 +358,11 @@ recorded labels named, and nothing is appended.`,
 		},
 	}
 	cmd.Flags().String(
-		"reason-file", "",
+		anchorFlagReasonFile, "",
 		"Read the retirement reason from this file (or - for stdin) instead of positional words",
 	)
+	cmd.Flags().Bool(anchorFlagGraduated, false,
+		"Retire it as graduated (\"this became who I am\") rather than as a plain sunset")
 	return cmd
 }
 

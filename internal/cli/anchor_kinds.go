@@ -20,7 +20,68 @@ const (
 	anchorFlagReasonFile = "reason-file"
 	anchorFlagPlanned    = "planned"
 	anchorFlagSlip       = "slip"
+	anchorFlagThrough    = "through"
+	anchorFlagFrom       = "from"
+	anchorFlagGraduated  = "graduated"
 )
+
+// anchorConfirmView is `anchor confirm --json` (usage/commands.md §"anchor
+// confirm"): the through-day used, one entry per habit confirmed and one per
+// habit whose span was empty. Both arrays are always present, empty when there
+// is nothing to list.
+type anchorConfirmView struct {
+	Through          string                `json:"through"`
+	Confirmed        []anchorConfirmedView `json:"confirmed"`
+	AlreadyConfirmed []anchorSkippedView   `json:"already_confirmed"`
+}
+
+// anchorConfirmedView is one written confirm: the habit, the span it attests,
+// and its receipt.
+type anchorConfirmedView struct {
+	Label     string `json:"label"`
+	AnchorID  string `json:"anchor_id"`
+	From      string `json:"from"`
+	Through   string `json:"through"`
+	ReceiptID string `json:"receipt_id"`
+}
+
+// anchorSkippedView is one habit whose span was empty; last_confirmed is
+// omitted for a habit never confirmed.
+type anchorSkippedView struct {
+	Label         string `json:"label"`
+	AnchorID      string `json:"anchor_id"`
+	LastConfirmed string `json:"last_confirmed,omitempty"`
+}
+
+// anchorConfirmJSON projects a confirm result into its machine surface.
+func anchorConfirmJSON(res router.AnchorConfirmResult) anchorConfirmView {
+	view := anchorConfirmView{
+		Through:          res.Through,
+		Confirmed:        make([]anchorConfirmedView, 0, len(res.Confirmed)),
+		AlreadyConfirmed: make([]anchorSkippedView, 0, len(res.AlreadyConfirmed)),
+	}
+	for _, c := range res.Confirmed {
+		view.Confirmed = append(view.Confirmed, anchorConfirmedView{
+			Label: c.Label, AnchorID: c.Event.AnchorID, From: c.Event.From, Through: c.Event.Day, ReceiptID: c.Event.ID,
+		})
+	}
+	for _, s := range res.AlreadyConfirmed {
+		view.AlreadyConfirmed = append(view.AlreadyConfirmed, anchorSkippedView{
+			Label: s.Label, AnchorID: s.AnchorID, LastConfirmed: s.LastConfirmed,
+		})
+	}
+	return view
+}
+
+// anchorSunsetGraduatedView is `anchor sunset --graduated --json`: the appended
+// sunset record, projected exactly as a plain sunset projects it, plus the
+// receipt and the graduate event verbatim.
+type anchorSunsetGraduatedView struct {
+	engine.AnchorRecord
+
+	ReceiptID string             `json:"receipt_id"`
+	Event     engine.AnchorEvent `json:"event"`
+}
 
 // anchorAddKindView is `anchor add --kind --json`: the recorded anchor,
 // projected exactly as a plain add projects it, plus the kind, the receipt and
@@ -276,6 +337,122 @@ reclassify command named.`,
 	cmd.Flags().Bool(anchorFlagSlip, false, "The use was one you did not mean to have")
 	cmd.Flags().String(flagDay, "", "The day of the use (shared grammar; default: the current logical day)")
 	cmd.Flags().String(anchorFlagNoteFile, "", "Read a note for the use from this file (or - for stdin)")
+	return cmd
+}
+
+// newAnchorMissCmd builds the `miss` child: log a day a habit did not happen.
+// Capture tier.
+func newAnchorMissCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "miss <label>",
+		Short: "Log a day a habit did not happen (the only thing a habit logs as it happens)",
+		Long: `miss logs a day a habit anchor did not happen — the only thing a habit logs
+as it happens; a normal day costs nothing. --day backdates it (the shared
+grammar; default: the current logical day, so a miss logged after midnight and
+before the rollover lands on the evening it belongs to); --note-file adds a note
+("at a friend's place").
+
+A miss always wins over a confirm on the same day, so a miss remembered after a
+day was already confirmed is still recorded and still counts. One isolated miss
+means nothing: the signal is never miss twice, so only a run of consecutive
+misses reaching anchors.miss_alarm (default 2) is called out, in the ack and in
+` + "`lucid metrics`" + `. A miss on anything but a habit is rejected with the reclassify
+command named.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  # No walk today.
+  lucid anchor miss morning-walk
+
+  # Yesterday's miss, with a note.
+  lucid anchor miss morning-walk --day @yesterday --note-file /tmp/miss-note.txt
+
+  # Machine-readable receipt for a harness.
+  lucid anchor miss morning-walk --json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			note, err := resolvePrimaryText(cmd, "anchor miss", anchorFlagNoteFile, "")
+			if err != nil {
+				return emitErr(cmd, err)
+			}
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			day, _ := cmd.Flags().GetString(flagDay)
+			res, err := r.AnchorMiss(router.AnchorMissRequest{Label: args[0], DayArg: day, Note: note, Now: clockNow()})
+			if err != nil {
+				return anchorRejection(cmd, err)
+			}
+			return emitAnchorEvent(cmd, res)
+		},
+	}
+	cmd.Flags().String(flagDay, "", "The day the habit was missed (shared grammar; default: the current logical day)")
+	cmd.Flags().String(anchorFlagNoteFile, "", "Read a note for the miss from this file (or - for stdin)")
+	return cmd
+}
+
+// newAnchorConfirmCmd builds the `confirm` child: attest a span of days for
+// each named habit, or every active habit. Echo-and-confirm tier — a confirm
+// claims days as kept.
+func newAnchorConfirmCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "confirm [<label>...]",
+		Short: "Confirm habits held through a day (quiet days become kept days)",
+		Long: `confirm attests that a habit held on the days you have not logged a miss —
+the weekly question that turns quiet days into kept days. Without it, an
+unlogged day is unaccounted, never kept.
+
+Each named <label> must be an active habit; with no labels it covers every
+active habit. Every named habit is checked before anything is written, and
+their confirms land in one write.
+
+--through <grammar> is the last day confirmed (strict tier: a future or partial
+date is rejected), defaulting to yesterday's logical day, because today is not
+over. Each habit's span starts at the later of the day after its last confirm
+and the day it became a habit — never the anchor date — so by default nothing
+before the cutover is claimed, and a skipped week heals itself: the next confirm
+covers the gap. --from <grammar> widens the start to an earlier stretch you
+actually vouch for; it is rejected before the anchor date or after the
+through-day. Days in the span with no logged miss count as kept; a miss inside
+it stays a miss. An empty span writes nothing for that habit, and with no
+active habits the command is an honest no-op.
+
+The ack names the exact span confirmed per habit, so whoever asked can say it
+back.`,
+		Args: cobra.ArbitraryArgs,
+		Example: `  # The Sunday question: confirm every habit through yesterday.
+  lucid anchor confirm
+
+  # One habit, through a given day.
+  lucid anchor confirm morning-walk --through 2026-01-24
+
+  # Vouch for an earlier stretch too.
+  lucid anchor confirm morning-walk --from 2026-01-05
+
+  # Machine-readable spans and receipts for a harness.
+  lucid anchor confirm --json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			through, _ := cmd.Flags().GetString(anchorFlagThrough)
+			from, _ := cmd.Flags().GetString(anchorFlagFrom)
+			res, err := r.AnchorConfirm(router.AnchorConfirmRequest{
+				Labels: args, ThroughArg: through, FromArg: from, Now: clockNow(),
+			})
+			if err != nil {
+				return anchorRejection(cmd, err)
+			}
+			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				return writeJSON(cmd.OutOrStdout(), anchorConfirmJSON(res))
+			}
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
+			return nil
+		},
+	}
+	cmd.Flags().String(anchorFlagThrough, "",
+		"The last day confirmed (shared grammar; default: yesterday's logical day)")
+	cmd.Flags().String(anchorFlagFrom, "",
+		"Start the span earlier, at a day you vouch for (never before the anchor date)")
 	return cmd
 }
 

@@ -136,7 +136,7 @@ func TestAnchorCmd_HasEverySubcommand(t *testing.T) {
 	for _, c := range newAnchorCmd().Commands() {
 		got[c.Name()] = true
 	}
-	want := []string{"add", "kind", "slip", "use", "void", "sunset", "rename", "backfill-ids"}
+	want := []string{"add", "kind", "slip", "use", "miss", "confirm", "void", "sunset", "rename", "backfill-ids"}
 	for _, name := range want {
 		assert.Truef(t, got[name], "anchor group missing %q", name)
 	}

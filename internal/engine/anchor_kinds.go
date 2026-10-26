@@ -430,6 +430,39 @@ func ComputeHabitStats(f AnchorFacts, today time.Time, th AnchorThresholds) Habi
 	return s
 }
 
+// MissRunThrough returns the length of the run of consecutive calendar miss
+// days that contains day — 0 when day carries no non-voided miss on or after
+// the anchor's start — and whether that run reaches th.MissAlarm. It is the
+// run `anchor miss` calls out for the day it logged, wherever that day falls,
+// so a backdated miss beside an earlier one is never quietly isolated. One
+// isolated miss never alarms: the floor of 2 holds whatever is passed.
+func MissRunThrough(f AnchorFacts, day string, th AnchorThresholds) (run int, alarm bool) {
+	th = th.withDefaults()
+	d, okDay := parseCivilDay(day)
+	base, okBase := anchorBase(f)
+	if !okDay || !okBase || d < base {
+		return 0, false
+	}
+	misses := map[civilDay]bool{}
+	for _, e := range f.Misses {
+		if m, ok := parseCivilDay(e.Day); ok && m >= base {
+			misses[m] = true
+		}
+	}
+	if !misses[d] {
+		return 0, false
+	}
+	first, last := d, d
+	for misses[first-1] {
+		first--
+	}
+	for misses[last+1] {
+		last++
+	}
+	run = missRun{first: first, last: last}.length()
+	return run, run >= th.MissAlarm
+}
+
 // ConfirmSpan resolves the span one anchor confirm attests for a habit
 // (PD-8), ending at the through-day. By default it starts at the later of the
 // day after the habit's last non-voided confirm and the day it became a habit,
