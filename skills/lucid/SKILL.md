@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.38.0"
+min_lucid_version: "0.40.0"
 ---
 
 # Lucid
@@ -95,6 +95,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid thread` | Record or amend a thread you're working on. |
 | `lucid reframe` | Keep and rotate your self-talk reframes (a *catch → flip* pair) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`, where `surface` returns one reframe per logical day (least-recently-surfaced, idempotent within the day). Deterministic, no model in any path. |
 | `lucid focus` | Keep and rotate your daily focus work-ons (a work-on plus an optional success criterion) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`/`retire`, where `surface` returns one active item per logical day (least-recently-surfaced, idempotent within the day) and `retire` deactivates without deleting (`list --all` is the audit view). Deterministic, no model in any path. |
+| `lucid rep` | Keep and rotate your daily practice reps (one concrete thing to try, an optional solo variant that works with nobody around, and an optional `level` — your own label for the step size, never a grade) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`/`retire`. `add` takes `--solo`/`--solo-file`, `--level N` (a positive integer) and `--body-file`; `surface` returns one active rep per logical day **with its solo variant** (least-recently-surfaced, idempotent within the day, never level-aware, never guessing whether the day is solo); `retire` deactivates without deleting (`list --all` is the audit view). It never asks whether a rep was done and keeps no streak. Deterministic, no model in any path. |
 | `lucid gratitude` | Keep a running gratitude tally (the count of things you return to gratitude for) — an append-only **registry** kind reached by its CLI form: `add`/`list`/`merge`/`import`/`reconcile`/`thank`. `add "<thing>"` matches the wording to an existing entry in up to three tiers — canonical key, a deterministic word match, then an optional, opt-in by-meaning model judge — and bumps a clear match automatically, creates a new entry for a new thing, or **suggests** when it is unsure. A non-interactive or `--json` caller in that ambiguous band gets exit `1`, nothing written, and the suggestion (candidate ids, scores); relay it to the person and re-run with their answer — `add --into <id>` (bump that entry) or `add --new` (start a new one) — never guess. `add --person <subject>` also links a person (link-only); `merge <src> <dst>` folds a duplicate; `reconcile` proposes folds (dry-run unless `--apply`); `import` seeds an existing count via explicit `--count`/`--first`/`--last`; `thank <id> --person <subject>` links a person and privately notes you told them — tally-neutral, and Lucid sends nothing. `list` may offer a gentle "You might tell …" line, never counted and never an off-limits person. Every write returns a receipt id, distinct from the stable entry id `list` shows. The verbatim nightly gratitude stays a separate, unchanged `lucid log` (`#gratitude`). Deterministic except the optional tier-3 judge; with no model it runs on the deterministic tiers alone. |
 | `lucid retro` | Keep the retro parking lot — the `R-NNN` queue of things parked to revisit at the weekly Retro or a Gate — an append-only inner-work record family reached by its CLI form: `park`/`list`/`show`/`resolve`/`defer`. `park "<item>"` mints the next global `R-NNN` and returns it plus a per-write receipt (the id an agent echoes back — `parked as R-012`); `list` defaults to open **and** deferred (`--all` adds resolved, `--resolved` shows only it), `show <R-NNN>` renders one item, `resolve <R-NNN> "<resolution>"` moves it to `resolved` **without deleting** (the append-only audit trail), and `defer <R-NNN> "<reason>"` sets the first-class `deferred` status while keeping it in the default `list`. Transitions reference the affected `R-NNN` without consuming a new id. Deterministic, no model in any path. |
 | `lucid wheel` | Keep the monthly Wheel of Life — your own integer **1–10** rating of eight pillars (health, relationships, career/work, finances, personal growth, fun/recreation, environment, contribution) — an append-only **registry** kind, one file per calendar month, reached by its CLI form: `add`/`show`/`list`. It is a monthly state write assembled from a guided conversation, so it is never chat-mapped: gather all eight ratings **from the person** (never propose, infer, or default a number — any evidence shown before they rate is facts only, with no number), echo the assembled wheel, and run `add` only on their confirmation. `add` requires all eight ratings (a missing, out-of-range, or non-integer one writes nothing); `add --input <path\|->` takes the whole wheel as strict JSON, keeping notes and the reflection off the command line. `--suggested <pillar>=<1-10>` stores an optional calibration value beside a rating — accepted only with all eight ratings, never the score, never in the trend, and never shown back before the person rates; any gap between it and their number is raised only **after** they rate, as an optional talking point, never a correction. `--vision-reviewed` / `--vision-reflection` record the monthly vision re-read (no link to any document is stored). A second `add` for the same month appends a new snapshot that wins on read — nothing is mutated, and every write returns its own receipt id. `show` renders the trend (rating, signed delta vs the prior stored month, sparkline, lowest and biggest-drop callouts) as `key: value` lines with no table; `list` shows months, and both say `no prior month` rather than invent a delta. No balance score, streak, or target. Deterministic, no model in any path. |
@@ -129,10 +130,10 @@ never re-decided here. In brief:
 
 * **Which verbs carry it.** `log`, `obs`, `attach`, `mode`, `storm`, `memory`,
   `workout log`, `workout amend` (a re-date of the logged session),
-  `anchor slip` / `use` / `miss`, and `closeout` (where `--day` is an alias onto
-  `closeout backfill`); `anchor confirm` reads the same grammar through
-  `--through` / `--from`. `obs` also accepts an inline `@yesterday` token in its
-  value stream. The anchor event verbs default to the current logical day and
+  `anchor slip` / `use` / `miss`, `rep add`, and `closeout` (where `--day` is
+  an alias onto `closeout backfill`); `anchor confirm` reads the same grammar
+  through `--through` / `--from`. `obs` also accepts an inline `@yesterday`
+  token in its value stream. The anchor event verbs default to the current logical day and
   reject a partial date or a day before the anchor's start.
 * **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
   04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
@@ -203,11 +204,11 @@ every guarantee holds exactly as it does on the command line:
   **Preferred:** pass the text off the command line via the field's `--…-file
   <path>` flag (write it to a temp file first, or `-` for stdin) —
   `--journal-file` (closeout), `--body-file` (log/obs/memory/thread/gratitude/
-  focus), `--catch-file`/`--flip-file` (reframe), `--tone-file`/`--why-file`/
+  focus/rep), `--catch-file`/`--flip-file` (reframe), `--tone-file`/`--why-file`/
   `--followup-file`/`--caption-file` (memory), `--intent-file`/`--domain-file`/
   `--note-file` (thread/era/self, and anchor add/kind/slip/use/miss),
   `--value-file` (self), `--reason-file` (anchor sunset/void),
-  `--success-file` (focus), `--input` /
+  `--success-file` (focus), `--solo-file` (rep), `--input` /
   `--vision-reflection-file` (wheel). **Fallback** for any shell-only
   path: wrap the whole free-text argument in single quotes (or a quoted
   heredoc). Then verify the saved raw id/day when the write is consequential. A
@@ -259,13 +260,14 @@ an existing media at more subjects, `lucid unlink` retires a pair, and `lucid
 annotate` notes one — all append-only, and the stored binary is never touched.
 
 Under `--json` the write verbs emit a receipt, not prose: `log`, `closeout`
-(and its `amend` / `backfill`), `obs`, `reframe add`, and `focus add` / `retire`
-emit a bare `{receipt_id, logical_date}` JSON object on stdout, while `mode`
-emits the minimal `{mode}` shape. The anchor event verbs (`anchor kind`, `slip`,
-`use`, `miss`, `void`) extend that receipt to `{receipt_id, logical_date, label,
-event}`, plus `compat` when a definition record was appended alongside;
-`anchor confirm` emits `{through, confirmed, already_confirmed}`. Diagnostics
-stay on stderr, so the `--json` stdout is always parseable.
+(and its `amend` / `backfill`), `obs`, `reframe add`, `focus add` / `retire`, and
+`rep add` / `retire` emit a bare `{receipt_id, logical_date}` JSON object on
+stdout, while `mode` emits the minimal `{mode}` shape. The anchor event verbs
+(`anchor kind`, `slip`, `use`, `miss`, `void`) extend that receipt to
+`{receipt_id, logical_date, label, event}`, plus `compat` when a definition
+record was appended alongside; `anchor confirm` emits `{through, confirmed,
+already_confirmed}`. Diagnostics stay on stderr, so the `--json` stdout is
+always parseable.
 
 ## Verbatim passthrough on Engine verbs
 

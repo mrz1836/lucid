@@ -19,9 +19,9 @@ this reference stays the precise baseline.
 - **`--json`** is a persistent flag on every command: *"Emit machine-readable
   JSON output."* Read verbs emit their structured shape, and the **write verbs
   emit a receipt**. The write verbs `log`, `closeout` (plus its `amend` /
-  `backfill` sub-forms), `obs`, `reframe add`, `focus add`, and `focus retire`
-  emit a bare snake_case object on stdout carrying two string fields:
-  `receipt_id` (the write's id) and `logical_date` (the day it belongs to, in
+  `backfill` sub-forms), `obs`, `reframe add`, `focus add`, `focus retire`,
+  `rep add`, and `rep retire` emit a bare snake_case object on stdout carrying
+  two string fields: `receipt_id` (the write's id) and `logical_date` (the day it belongs to, in
   `YYYY-MM-DD` form). For `closeout skip` and an idempotent `closeout` — which
   write no new raw entry — `receipt_id` carries the returned day-record id, so
   it is always populated. `mode` is the one exception: it produces no receipt,
@@ -74,8 +74,8 @@ Every verb that stamps a logical day reads **one** date grammar, so a token that
 works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
 the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
 flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
-[`reframe add`](#reframe), [`focus add`](#focus), [`gratitude add`](#gratitude),
-[`gratitude thank`](#gratitude), [`workout log`](#workout),
+[`reframe add`](#reframe), [`focus add`](#focus), [`rep add`](#rep),
+[`gratitude add`](#gratitude), [`gratitude thank`](#gratitude), [`workout log`](#workout),
 [`workout amend`](#workout), [`mode`](#mode),
 [`storm`](#storm), [`closeout`](#closeout), and the anchor event verbs
 [`anchor slip`](#anchor-slip), [`anchor use`](#anchor-use), and
@@ -164,7 +164,7 @@ registry now carries the future ceiling, so it is not on this list:
 | `self set`'s date is optional entirely | It is the one write surface where a date is not required at all. A self fact is atemporal by definition — most have no origin worth recording, and inventing one would be worse than the silence. |
 
 **The closed write surface.** Every verb that stamps a logical day is named
-above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `gratitude add`,
+above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `rep add`, `gratitude add`,
 `gratitude thank`, `memory`, `workout log`, `workout amend` (a re-date), `era`,
 `injury`, `anchor`, `mode`, `storm`, `closeout`. Four write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
@@ -1257,6 +1257,81 @@ lucid focus list --json
 lucid focus list --all
 lucid focus surface
 lucid focus retire focus_2026_08_20_001
+```
+
+### rep
+
+```
+lucid rep add <text> [--body-file <path>] [--solo <text> | --solo-file <path>] [--level N] [--day <date>]
+lucid rep list [--all|--include-retired] [--json]
+lucid rep surface [--json]
+lucid rep retire <id>
+```
+
+Keep and rotate your daily **practice reps** — one concrete thing to try, with an
+optional **solo** variant that works on a day with nobody around and an optional
+**level** (your own label for how big a step it is). Deterministic, no LLM, an
+append-only record family under `~/.lucid/reps/`, modeled on `focus`. Full layer
+spec (schema, id format, active-vs-retired state, the append-only retirement
+event, and the surface-state rotation): [`../reps.md`](../reps.md).
+
+- **`add <text>`** appends one immutable **active** entry and prints its receipt
+  id (`rep_<logical_date>_<seq>`). `text` is required and stored verbatim; an
+  empty `text` is a usage error and nothing is written. `--solo <text>` is
+  optional and stored verbatim — it is never synthesized. `--level N` is
+  optional and must be a positive integer (no maximum, no meaning inside Lucid);
+  omitted, the rep is stored unlevelled (`level: 0`), while a given `0` or
+  negative level is a usage error and nothing is written. `add` prints its
+  receipt id as prose by default; under `--json` it emits the
+  `{receipt_id, logical_date}` receipt.
+- **`list`** reads the stored reps (retirement events folded, retired entries
+  omitted) and prints the **active** reps; `--all` (alias `--include-retired`)
+  adds the retired ones as an audit view; `--json` emits the structured list,
+  `{count, reps}`, exposing each rep's `id`.
+- **`surface`** returns **exactly one active** rep for the logical day, together
+  with its solo variant, and records that it was shown. Repeated calls **within
+  the same logical day return the same pick** (idempotent, no advance);
+  successive days rotate the **least-recently-surfaced** active entry,
+  unsurfaced entries first, ties broken by rep id ascending — the rotation never
+  reads `level`. The prose line is `<text> (level N) — Solo: <solo>`, omitting
+  the parts that are unset; `--json` emits `{day, rep}`, with `rep` the full
+  entry or `null` when there is nothing to surface. It never guesses whether the
+  day is solo and never asks whether a rep was done. This is the daily
+  one-per-day source a morning surface reads.
+- **`retire <id>`** appends a retirement event moving that rep to `retired` — it
+  leaves `surface` and the default `list`, but stays in `list --all`. Retiring
+  an unknown or already-retired id is a clean error and appends nothing. This is
+  the audit-preserving deactivation a weekly KEEP/SWAP/ADD pass uses (a SWAP is
+  a `retire` of the old + an `add` of the new), never a delete. Under `--json`,
+  `retire` emits the `{receipt_id, logical_date}` receipt (the retirement
+  event's id and day).
+
+Both free-text fields have a `--…-file` sibling — `--body-file <path>` for the
+text and `--solo-file <path>` for the solo variant — that reads the field's value
+from a file path, or from `-` (stdin). This keeps shell metacharacters and
+multiline content off the command line, consistent with the other free-text
+write verbs. An inline form and its file sibling are mutually exclusive for the
+same field, an empty file is rejected, and only one field may read stdin in a
+single call.
+
+State is a fold, never a mutation: nothing is deleted or rewritten. To bring a
+rep back, `add` it again as a fresh active rep; the retired original stays in
+the audit view.
+
+`rep add` carries the `--day` flag ([Backdating with --day](#backdating-with---day)),
+the **strict** tier: `--day @yesterday` and `--day @YYYY-MM-DD` set the entry's
+`logical_date`; an unreadable token or a future day is a clean error and nothing
+is captured. `recorded_at` is always the real write time.
+
+```sh
+lucid rep add "Ask one question in a meeting you would normally sit through quietly"
+lucid rep add "Ask one question in a meeting" --solo "Write the question down and send it afterward" --level 2
+lucid rep add --body-file /tmp/rep.txt --solo-file /tmp/solo.txt --level 3
+lucid rep add "Try one new route home" --day @yesterday
+lucid rep list --json
+lucid rep list --all
+lucid rep surface
+lucid rep retire rep_2026_08_20_001
 ```
 
 ### retro

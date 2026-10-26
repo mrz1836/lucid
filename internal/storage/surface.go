@@ -7,18 +7,19 @@ import (
 	"slices"
 )
 
-// surface.go is the shared one-per-day rotation the focus and reframe record
-// families both run (focus.md §4 / reframes.md §4). Their surface-state
-// projections are byte-identical JSON and their selection logic was, until this,
-// two near-identical copies — the divergence risk the maintainability pass calls
-// out (a fix to one rotation path silently missing the other). The rotation now
-// lives here once, parameterized over the entry type and the pool the caller
-// hands it; each family keeps only what genuinely differs: which fold builds the
-// pool (FoldState vs FoldCorrections) and, for focus, the active-only filter.
+// surface.go is the shared one-per-day rotation the focus, reframe, and rep
+// record families all run (focus.md §4 / reframes.md §4 / reps.md §4). Their
+// surface-state projections are byte-identical JSON and their selection logic
+// was, until this, two near-identical copies — the divergence risk the
+// maintainability pass calls out (a fix to one rotation path silently missing
+// the other). The rotation now lives here once, parameterized over the entry
+// type and the pool the caller hands it; each family keeps only what genuinely
+// differs: which fold builds the pool (FoldState vs FoldCorrections) and, for
+// focus and reps, the active-only filter.
 
 const (
 	// surfaceStateFile is the rebuildable rotation projection at each family's
-	// tree root. Both families reuse the same file name under their own tree.
+	// tree root. Every family reuses the same file name under its own tree.
 	surfaceStateFile = "surface_state.json"
 	// surfaceStateSchema versions the rebuildable projection independently of the
 	// entry schema; it is disposable, so a bump only changes how a stale file is
@@ -26,12 +27,13 @@ const (
 	surfaceStateSchema = 1
 )
 
-// surfaceState is the verb-owned rotation projection shared by the focus and
-// reframe families: the per-id last-surfaced logical-date and the current day's
-// pick. It is rebuildable and disposable — the entry JSONL is the source of
-// truth, and deleting it only resets rotation memory. It records only which item
-// was shown when, never anything that grades the user (focus.md §0 / reframes.md
-// §0). Both families use byte-identical JSON, so one type serves both.
+// surfaceState is the verb-owned rotation projection shared by the focus,
+// reframe, and rep families: the per-id last-surfaced logical-date and the
+// current day's pick. It is rebuildable and disposable — the entry JSONL is the
+// source of truth, and deleting it only resets rotation memory. It records only
+// which item was shown when, never anything that grades the user (focus.md §0 /
+// reframes.md §0 / reps.md §0). Every family uses byte-identical JSON, so one
+// type serves them all.
 type surfaceState struct {
 	Schema       int               `json:"schema"`
 	LastSurfaced map[string]string `json:"last_surfaced"`
@@ -46,16 +48,16 @@ type todayPick struct {
 }
 
 // surfaceOne selects exactly one entry for the logical day named by dayKey from
-// pool — already folded (and, for focus, filtered to active) by the caller — and
-// records the pick in the rotation projection at statePath (created under dir,
-// labeled by label for its write error). It is idempotent within a day: a pick
-// already recorded for dayKey is returned unchanged and the rotation does not
-// advance; if that recorded pick has left the pool since (retired/superseded), it
-// re-picks from the current pool so the day still surfaces a live entry. On the
-// first call of a new day it selects the least-recently-surfaced entry
-// (unsurfaced first, ties broken by id ascending) and advances. An empty pool is
-// a clean (zero, false, nil) — "nothing to surface," never an error. id extracts
-// an entry's stable id.
+// pool — already folded (and, for focus and reps, filtered to active) by the
+// caller — and records the pick in the rotation projection at statePath
+// (created under dir, labeled by label for its write error). It is idempotent
+// within a day: a pick already recorded for dayKey is returned unchanged and
+// the rotation does not advance; if that recorded pick has left the pool since
+// (retired/superseded), it re-picks from the current pool so the day still
+// surfaces a live entry. On the first call of a new day it selects the
+// least-recently-surfaced entry (unsurfaced first, ties broken by id ascending)
+// and advances. An empty pool is a clean (zero, false, nil) — "nothing to
+// surface," never an error. id extracts an entry's stable id.
 func surfaceOne[T any](
 	a *Adapter, dir, label, statePath, dayKey string, pool []T, id func(T) string,
 ) (T, bool, error) {
@@ -122,11 +124,12 @@ func (a *Adapter) readSurfaceState(path string) (surfaceState, error) {
 	return readJSONResilient[surfaceState](path, "surface state")
 }
 
-// writeSurfaceState persists a rotation projection, creating its tree if needed.
-// It is the only writer of a family's surface_state.json (architecture P3). label
-// names the family for the create/write errors ("focus" / "reframe"). The write
-// is a plain os.WriteFile, not atomic: the projection is disposable, so a torn
-// write is a clean cold-start on the next read, never a lost record.
+// writeSurfaceState persists a rotation projection, creating its tree if
+// needed. It is the only writer of a family's surface_state.json (architecture
+// P3). label names the family for the create/write errors ("focus" / "reframe"
+// / "rep"). The write is a plain os.WriteFile, not atomic: the projection is
+// disposable, so a torn write is a clean cold-start on the next read, never a
+// lost record.
 func (a *Adapter) writeSurfaceState(dir, label, path string, st surfaceState) error {
 	if err := ensureDir(dir, label); err != nil {
 		return err
