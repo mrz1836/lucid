@@ -116,16 +116,16 @@ func TestRun_RepoOnlyDirty(t *testing.T) {
 	}
 }
 
-// TestRun_LedgerOnly: with only a ledger source, the schema and redirect-graph
-// checks run.
+// TestRun_LedgerOnly: with only a ledger source, the schema, redirect-graph
+// and anchors checks run.
 func TestRun_LedgerOnly(t *testing.T) {
 	rep, err := Run(Options{Ledger: &fakeLedger{}})
 	require.NoError(t, err)
 	assert.True(t, rep.OK())
-	assert.Equal(t, []string{CheckSchema, CheckPeopleRedirects}, rep.Ran)
+	assert.Equal(t, []string{CheckSchema, CheckPeopleRedirects, CheckAnchors}, rep.Ran)
 }
 
-// TestRun_Both: repo + ledger runs all six checks.
+// TestRun_Both: repo + ledger runs all seven checks.
 func TestRun_Both(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/x\n")
@@ -133,7 +133,7 @@ func TestRun_Both(t *testing.T) {
 	rep, err := Run(Options{RepoRoot: root, Denylist: realDenylist(), Ledger: &fakeLedger{}})
 	require.NoError(t, err)
 	assert.True(t, rep.OK())
-	assert.Len(t, rep.Ran, 6)
+	assert.Len(t, rep.Ran, 7)
 }
 
 // TestRun_PropagatesLedgerListError: a listing that cannot be read surfaces as

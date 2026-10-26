@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/mrz1836/lucid/internal/validate"
@@ -40,8 +41,8 @@ type validateJSON struct {
 
 // newValidateCmd wires `lucid validate` (claude-code-workflow.md; ADR-0008):
 // the read-only verification sweep. It runs the S-7 public-boundary, S-8
-// diagnostic-language, sanctuary, doc-link, and Ledger-schema checks and exits
-// non-zero if any error-severity gate is breached. It writes nothing —
+// diagnostic-language, sanctuary, doc-link, Ledger-schema, people-redirect and
+// anchors checks and exits non-zero if any error-severity gate is breached. It writes nothing —
 // neither the repo nor the Ledger is mutated (the Ledger is not even
 // scaffolded).
 func newValidateCmd() *cobra.Command {
@@ -228,3 +229,13 @@ func (l ledgerAdapter) PersonRedirect(key string) (string, error) {
 
 // LoadConfigErr returns only the parse error of loading lucid.json.
 func (l ledgerAdapter) LoadConfigErr() error { _, err := l.a.LoadConfig(); return err }
+
+// ReadAnchorsErr returns anchors.json's log and its read error; a missing file
+// surfaces as the storage error wrapping fs.ErrNotExist.
+func (l ledgerAdapter) ReadAnchorsErr() (engine.AnchorLog, error) { return l.a.ReadAnchors() }
+
+// ReadAnchorEventsErr returns the anchor event store and its read error; a
+// missing store is the empty log.
+func (l ledgerAdapter) ReadAnchorEventsErr() (engine.AnchorEventLog, error) {
+	return l.a.ReadAnchorEvents()
+}

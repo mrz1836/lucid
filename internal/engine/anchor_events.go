@@ -247,6 +247,36 @@ type AnchorPairState struct {
 	Err         error
 }
 
+// MissingHalves names, in plain words, what an incomplete pair still lacks —
+// the event, the v3 record, or both in the order the intent writes them. It is
+// the copy the unfinished-write rejection and `lucid validate` share, so the
+// two always describe the same pair the same way.
+func (s AnchorPairState) MissingHalves() string {
+	p := s.Intent
+	event := fmt.Sprintf("the %s event", p.Event.Type)
+	var record string
+	switch {
+	case p.Event.Type == AnchorEventGraduate:
+		record = "the sunset record"
+	case p.Event.Type == AnchorEventVoid:
+		record = "the restoring record"
+	case p.Event.Type == AnchorEventKind && p.Order == AnchorPairEventFirst:
+		record = "the anchor's definition"
+	default:
+		record = "the re-dated record"
+	}
+	switch s.Status {
+	case AnchorPairCompatOnly:
+		return event + " is missing"
+	case AnchorPairEventOnly:
+		return record + " is missing"
+	}
+	if p.Order == AnchorPairCompatFirst {
+		return record + " and " + event + " are missing"
+	}
+	return event + " and " + record + " are missing"
+}
+
 // ValidateAnchorPairIntent reports whether a pair intent is well formed: a
 // known order, a well-formed planned event of a type that is written as a pair
 // in the order that type uses, and a planned v3 record for the same anchor,

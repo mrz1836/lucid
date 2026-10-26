@@ -648,3 +648,29 @@ func TestFoldAnchorStartSkipsMalformedDates(t *testing.T) {
 	assert.Empty(t, start, "no valid record, no start")
 	assert.Empty(t, floor)
 }
+
+// TestAnchorPairStateMissingHalves names what each incomplete pair lacks, in
+// the order its intent writes the halves, for every paired event type.
+func TestAnchorPairStateMissingHalves(t *testing.T) {
+	pair := func(typ, order string) AnchorPairIntent {
+		return AnchorPairIntent{Order: order, Event: AnchorEvent{Type: typ}}
+	}
+	cases := []struct {
+		intent AnchorPairIntent
+		status string
+		want   string
+	}{
+		{pair(AnchorEventSlip, AnchorPairCompatFirst), AnchorPairIntentOnly, "the re-dated record and the slip event are missing"},
+		{pair(AnchorEventSlip, AnchorPairCompatFirst), AnchorPairCompatOnly, "the slip event is missing"},
+		{pair(AnchorEventKind, AnchorPairCompatFirst), AnchorPairCompatOnly, "the kind event is missing"},
+		{pair(AnchorEventKind, AnchorPairEventFirst), AnchorPairIntentOnly, "the kind event and the anchor's definition are missing"},
+		{pair(AnchorEventKind, AnchorPairEventFirst), AnchorPairEventOnly, "the anchor's definition is missing"},
+		{pair(AnchorEventVoid, AnchorPairEventFirst), AnchorPairIntentOnly, "the void event and the restoring record are missing"},
+		{pair(AnchorEventVoid, AnchorPairEventFirst), AnchorPairEventOnly, "the restoring record is missing"},
+		{pair(AnchorEventGraduate, AnchorPairEventFirst), AnchorPairEventOnly, "the sunset record is missing"},
+	}
+	for _, c := range cases {
+		st := AnchorPairState{Intent: c.intent, Status: c.status, CompatIndex: -1}
+		assert.Equal(t, c.want, st.MissingHalves(), "%s %s %s", c.intent.Event.Type, c.intent.Order, c.status)
+	}
+}

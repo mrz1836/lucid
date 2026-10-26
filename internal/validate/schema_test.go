@@ -2,6 +2,8 @@ package validate
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -19,7 +22,9 @@ var errSentinel = errors.New("boom")
 // fakeLedger is an in-memory LedgerSource: it enumerates fixed id lists and
 // fails the reads named in the bad* sets, so the schema sweep can be driven
 // without touching disk. A listErr forces a listing failure; a configErr fails
-// the lucid.json check.
+// the lucid.json check. anchors nil reads as a missing anchors.json; events is
+// the anchor event store (its zero value is the empty log a missing store
+// reads as), and anchorsErr / eventsErr force a read failure.
 type fakeLedger struct {
 	home          string
 	processed     []string
@@ -41,6 +46,10 @@ type fakeLedger struct {
 	linkListErr   error
 	secretListErr error
 	configErr     error
+	anchors       *engine.AnchorLog
+	anchorsErr    error
+	events        engine.AnchorEventLog
+	eventsErr     error
 }
 
 func (f *fakeLedger) Home() string { return f.home }
@@ -77,6 +86,20 @@ func (f *fakeLedger) PersonRedirect(key string) (string, error) {
 }
 
 func (f *fakeLedger) LoadConfigErr() error { return f.configErr }
+
+func (f *fakeLedger) ReadAnchorsErr() (engine.AnchorLog, error) {
+	switch {
+	case f.anchorsErr != nil:
+		return engine.AnchorLog{}, f.anchorsErr
+	case f.anchors == nil:
+		return engine.AnchorLog{}, fmt.Errorf("storage: read anchors.json: %w", fs.ErrNotExist)
+	}
+	return *f.anchors, nil
+}
+
+func (f *fakeLedger) ReadAnchorEventsErr() (engine.AnchorEventLog, error) {
+	return f.events, f.eventsErr
+}
 
 // errIf returns a parse error when id is in the bad set.
 func errIf(bad map[string]bool, id string) error {

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/mrz1836/lucid/internal/validate"
 )
@@ -396,6 +397,14 @@ func (s personLedgerSource) ReadLinkEventErr(id string) error    { return s.a.Re
 func (s personLedgerSource) ListSecretRefIDs() ([]string, error) { return s.a.ListSecretRefIDs() }
 func (s personLedgerSource) ReadSecretRefErr(id string) error    { return s.a.ReadSecretRefErr(id) }
 func (s personLedgerSource) LoadConfigErr() error                { _, err := s.a.LoadConfig(); return err }
+
+func (s personLedgerSource) ReadAnchorsErr() (engine.AnchorLog, error) {
+	return s.a.ReadAnchors()
+}
+
+func (s personLedgerSource) ReadAnchorEventsErr() (engine.AnchorEventLog, error) {
+	return s.a.ReadAnchorEvents()
+}
 
 // PersonRedirect returns the redirect_to of one person record, backing the
 // redirect-graph check; an unreadable/absent record resolves to "".

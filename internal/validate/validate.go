@@ -1,7 +1,6 @@
 // Package validate implements `lucid validate`: a read-only, deterministic
 // sweep that makes the architecture's verification gates (architecture.md §6)
-// checkable from one command. It carries five checks, none of which mutates
-// anything:
+// checkable from one command. None of its checks mutates anything:
 //
 //   - public-boundary (S-7): the repo never leaks a private-integration
 //     identity or an internal todo id (product-principles.md §10; the external
@@ -13,18 +12,26 @@
 //     architecture.md §6 context-slice gate).
 //   - schema: every on-disk Ledger record parses against its validator
 //     (data-model.md); a corrupt record is reported, never rewritten.
+//   - people-redirects: the people tree's redirect tombstones form a
+//     single-hop, acyclic graph.
+//   - anchors: anchors.json and the anchor event store hold well-formed
+//     records whose joins are whole — every event targets a recorded anchor,
+//     every void target is legal, and no two-file write is half-written
+//     (engine-module.md §"Anchor event store").
 //   - links: relative Markdown links across the doc set resolve (a warning-
 //     level hygiene check, never a gate).
 //
 // The grep-style checks (public-boundary, diagnostic, sanctuary, links) run
-// over a repo root; the schema check runs over a Ledger home through the
-// storage adapter. Either half may be absent — `lucid validate` runs whatever
+// over a repo root; the Ledger checks (schema, people-redirects, anchors) run
+// over a Ledger home through the storage adapter. Either half may be absent — `lucid validate` runs whatever
 // is present and says what it skipped.
 package validate
 
 import (
 	"cmp"
 	"slices"
+
+	"github.com/mrz1836/lucid/internal/engine"
 )
 
 // Severity ranks a finding. An error fails the sweep (a real gate breach); a
@@ -46,6 +53,7 @@ const (
 	CheckSchema          = "schema"
 	CheckLinks           = "links"
 	CheckPeopleRedirects = "people-redirects"
+	CheckAnchors         = "anchors"
 )
 
 // Finding is one issue the sweep surfaced. Path is repo-relative (grep checks)
@@ -97,7 +105,8 @@ func (r Report) count(s Severity) int {
 
 // Options selects what the sweep runs against. RepoRoot enables the grep
 // checks (public-boundary, diagnostic, sanctuary, links); an empty RepoRoot
-// skips them. Ledger enables the schema check; a nil Ledger skips it.
+// skips them. Ledger enables the Ledger checks (schema, people-redirects,
+// anchors); a nil Ledger skips them.
 // Denylist is the sanctuary subtree list the router enforces
 // (router.SanctuaryDenylist), passed in so validate stays decoupled from the
 // router package.
@@ -139,6 +148,16 @@ type LedgerSource interface {
 	// double-report it). It backs [CheckPeopleRedirects].
 	PersonRedirect(key string) (string, error)
 	LoadConfigErr() error
+	// ReadAnchorsErr returns anchors.json's decoded log with its read error,
+	// and ReadAnchorEventsErr the anchor event store's. Unlike the per-record
+	// Read*Err ops they return the content as well as the error, because the
+	// anchors check reads both files whole to join them; a read or parse
+	// failure is still only a finding. A missing anchors.json is an error
+	// wrapping fs.ErrNotExist (the check reads it as nothing recorded); a
+	// missing event store is the empty log, as storage reads it. Both back
+	// [CheckAnchors].
+	ReadAnchorsErr() (engine.AnchorLog, error)
+	ReadAnchorEventsErr() (engine.AnchorEventLog, error)
 }
 
 // Run executes every enabled check and returns the merged report. It performs
@@ -188,6 +207,9 @@ func Run(opts Options) (Report, error) {
 		}
 		rep.Ran = append(rep.Ran, CheckPeopleRedirects)
 		rep.Findings = append(rep.Findings, redirects...)
+
+		rep.Ran = append(rep.Ran, CheckAnchors)
+		rep.Findings = append(rep.Findings, CheckAnchorFiles(opts.Ledger)...)
 	}
 
 	sortFindings(rep.Findings)

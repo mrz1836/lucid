@@ -843,35 +843,8 @@ func unfinishedRejection(label string, st engine.AnchorPairState) error {
 	return rejectAnchor(ErrAnchorUnfinished,
 		"%q has an unfinished write (%s: %s) — retry the original command to finish it; "+
 			"lucid validate names it. Nothing was saved.",
-		label, st.Intent.Event.ID, missingHalves(st),
+		label, st.Intent.Event.ID, st.MissingHalves(),
 	)
-}
-
-// missingHalves names what an incomplete pair still lacks, in plain words.
-func missingHalves(st engine.AnchorPairState) string {
-	p := st.Intent
-	event := fmt.Sprintf("the %s event", p.Event.Type)
-	var record string
-	switch {
-	case p.Event.Type == engine.AnchorEventGraduate:
-		record = "the sunset record"
-	case p.Event.Type == engine.AnchorEventVoid:
-		record = "the restoring record"
-	case p.Event.Type == engine.AnchorEventKind && p.Order == engine.AnchorPairEventFirst:
-		record = "the anchor's definition"
-	default:
-		record = "the re-dated record"
-	}
-	switch st.Status {
-	case engine.AnchorPairCompatOnly:
-		return event + " is missing"
-	case engine.AnchorPairEventOnly:
-		return record + " is missing"
-	}
-	if p.Order == engine.AnchorPairCompatFirst {
-		return record + " and " + event + " are missing"
-	}
-	return event + " and " + record + " are missing"
 }
 
 // eventWriteError wraps a failed event write with the honest clause: nothing
