@@ -1739,11 +1739,26 @@ lucid validate [--json]
 ```
 
 Read-only verification sweep: the public-boundary (S-7), diagnostic-language
-(S-8), sanctuary, doc-link, and Ledger-schema checks. Writes nothing — it won't
-even scaffold the Ledger. Exits non-zero if any error-severity check fails
+(S-8), sanctuary, doc-link, Ledger-schema and anchors checks. Writes nothing — it
+won't even scaffold the Ledger. Exits non-zero if any error-severity check fails
 (warnings alone don't). Repo checks are skipped when run outside a checkout; the
-schema check is skipped when no Ledger exists. `--json` emits
+Ledger checks are skipped when no Ledger exists. `--json` emits
 `{ok, ran, skipped, errors, warnings, findings, …}`.
+
+The **anchors** check reads `engine/anchors.json` and the anchor event store
+`engine/anchor_events.json`. It checks each record (a label, a civil date, a
+`state` of empty or `sunset`), each event (its id, type, day, `recorded_at` and
+per-type fields) and the joins between them: every event targets a recorded
+anchor, every `void` target is legal, and every two-file write is whole. An
+interrupted two-file write is a **half-written pair**. Its finding names the
+reserved event id, the missing half and the command to retry, and `validate`
+never repairs it. A missing event store is clean. One finding is a warning, not
+an error: an unfinished `anchor add --kind` whose reserved anchor id is already
+recorded can never be finished, and nothing reads it.
+
+```
+error anchors             engine/anchor_events.json — anchorev_2026_04_02_a: half-written pair — the slip event is missing; retry lucid anchor slip sobriety --day 2026-04-01
+```
 
 ```sh
 lucid validate

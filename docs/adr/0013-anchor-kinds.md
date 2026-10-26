@@ -593,7 +593,11 @@ Ledger itself:
 
 A hand-corrupted event is reported and never panics a read path. A missing
 store is clean, and a Ledger with only today's v1, v2 and v3 shapes validates
-with no new findings.
+with no new findings. It runs as its own `anchors` check. A half-written pair is
+reported with its reserved id, the missing half and the command to retry. Every
+finding is an error except an unfinished `add --kind` whose reserved anchor id
+is already recorded: no retry can finish it and nothing reads it, so it is a
+warning rather than a gate that fails forever.
 
 ## Consequences
 

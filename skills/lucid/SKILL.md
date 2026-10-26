@@ -324,7 +324,9 @@ configuration — the witness contact is never named in this skill.
 
 ## Read-only verification
 
-`lucid validate` runs the schema, public-boundary (S-7), diagnostic-language
-(S-8), sanctuary, and doc-link checks read-only. A harness or a contributor
+`lucid validate` runs the schema, anchors, public-boundary (S-7),
+diagnostic-language (S-8), sanctuary, and doc-link checks read-only. The anchors
+check reports an interrupted two-file anchor write as a half-written pair, with
+the command to retry; it never repairs anything. A harness or a contributor
 can run it any time to confirm the boundary holds; it writes nothing and never
 scaffolds the Ledger.

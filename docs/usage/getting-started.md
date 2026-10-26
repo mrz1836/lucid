@@ -216,7 +216,7 @@ Mirror verbs — never your whole history.
 
 ```sh
 lucid validate            # read-only sweep: public-boundary, diagnostic-language,
-                          # sanctuary, doc-link, and Ledger-schema checks
+                          # sanctuary, doc-link, Ledger-schema, and anchors checks
 ```
 
 `validate` writes nothing (it won't even scaffold the Ledger) and exits non-zero

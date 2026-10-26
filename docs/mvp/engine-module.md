@@ -1019,7 +1019,8 @@ restoring record would quietly bring it back. An `add --kind` whose reserved
 anchor id an older binary has since minted for another anchor can't be
 finished: the fold ignores the event half of an unfinished `add --kind` on
 whichever anchor holds that id, it blocks no change to that anchor,
-`lucid validate` names it, and the label is free to record again. A *different* mutation of that anchor is
+`lucid validate` names it (as a warning: nothing reads it and no retry can
+finish it), and the label is free to record again. A *different* mutation of that anchor is
 rejected while its pair is incomplete, so a provisional floor can never turn
 into an ordinary correction by accident.
 
@@ -1058,8 +1059,17 @@ an RFC3339 `recorded_at`, the per-type fields above); and cross-file checks —
 every event targets a known minted anchor id, kind parameters are valid, `void`
 targets exist and are legal, and every pair intent is whole. A hand-corrupted
 record is reported and never panics; a missing store is clean, and a Ledger
-with only today's v1, v2 and v3 shapes validates with no new findings. The
-rejections and findings are listed in [`error-states.md`](error-states.md)
+with only today's v1, v2 and v3 shapes validates with no new findings. It runs
+as its own `anchors` check, beside `schema`, and each defect is one finding
+naming the file, the record or event id and the rule that fired. A file that is
+not valid JSON is one finding naming the file, and the cross-file checks are
+skipped until it reads. A half-written pair names its reserved event id, the
+missing half and the command to retry (`anchorev_2026_04_02_a: half-written pair
+— the slip event is missing; retry lucid anchor slip sobriety --day
+2026-04-01`). Every finding is an error except one: an unfinished `add --kind`
+whose reserved anchor id is already recorded can never be finished and nothing
+reads it, so it is named as a warning rather than failing the sweep forever.
+The rejections and findings are listed in [`error-states.md`](error-states.md)
 §"Anchors".
 
 **Backup.** `lucid backup` archives `engine/` whole, so the store is in every

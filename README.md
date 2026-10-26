@@ -374,7 +374,7 @@ gate, `2` usage / flag-parse error. Usage errors print on stderr as
 | `backup` | `--out` | Write the must-keep Ledger trees to a single `.tar.gz`. Never writes into `~/.lucid/`, never clobbers an existing file. |
 | `restore [<file>]` | `--in` `--force` | Overlay a backup archive back into the Ledger; refuses an occupied home without `--force`. |
 | `secret <add\|list\|note\|remove>` | `--note` `--clear` | Maintain a names-only catalog of hush secret handles — a handle and an optional note, never a value. `note` updates a live handle's note (or removes it with `--clear`), keeping its creation time; `remove` tombstones it. History stays append-only. No reveal, no fetch, no storage. |
-| `validate` | — | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema). |
+| `validate` | — | Read-only architecture & boundary sweep (boundary, diagnostic-language, links, schema, anchors). |
 | `serve` | — | Speak the stdin/JSON protocol that drives the interactive `/checkin` — the chat-harness entry point. |
 | `version` | — | Print build metadata: version, commit, build date. |
 | `update` | `--check` `--force` `--verbose` | Self-update in place from a GitHub release (alias: `upgrade`). |
