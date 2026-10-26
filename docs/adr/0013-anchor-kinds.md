@@ -367,8 +367,10 @@ confirmed through 2026-01-24.`
 * **`--from <day>`** widens the span to an earlier stretch the person actually
   vouches for. It is rejected before the anchor date or after the through-day.
 * **A skipped week self-heals:** the next confirm covers the gap.
-* **An empty span writes nothing** for that habit, and the ack reads "already
-  confirmed through `<date>`". With no active habits the ack is an honest no-op.
+* **An empty span writes nothing** for that habit, and the ack says why:
+  "already confirmed through `<date>`", or — for a habit whose through-day falls
+  before it became a habit, which has nothing to confirm yet — the day its
+  confirmations start. With no active habits the ack is an honest no-op.
 * **One event per habit**, and the ack names the exact span confirmed for each
   (`confirmed <from>–<through>`), so whoever asked can say it back.
 

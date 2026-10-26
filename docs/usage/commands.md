@@ -935,13 +935,16 @@ is **unaccounted, never kept**.
   through the through-day, or the through-day falls before it became a habit).
   With no active habits the command is an honest no-op.
 
-The ack names the exact span confirmed per habit, so whoever asked can say it
-back:
+The ack is one line per habit, in label order, naming the exact span confirmed
+so whoever asked can say it back — or why nothing was written for it:
 
 ```text
-morning-walk: confirmed 2026-01-18–2026-01-24 as `anchorev_2026_01_25_a`.
 evening-stretch: already confirmed through 2026-01-24; nothing written.
+morning-walk: confirmed 2026-01-18–2026-01-24 as `anchorev_2026_01_25_a`.
+piano-practice: nothing to confirm through 2026-01-24 — its confirmations start 2026-01-25; nothing written.
 ```
+
+With no active habits the ack is `No active habits to confirm; nothing written.`
 
 `--json` emits `{through, confirmed, already_confirmed}`: `through` is the
 through-day used; `confirmed[]` holds one `{label, anchor_id, from, through,
