@@ -84,7 +84,8 @@ func TestAnchorEventsMissingFileReadsEmpty(t *testing.T) {
 	t.Run("a re-scaffold leaves an existing store byte-unchanged", func(t *testing.T) {
 		a := newEngineAdapter(t)
 		require.NoError(t, a.AppendAnchorEvent(syntheticKindEvent(
-			"anchorev_2026_03_02_a", "anchor_2026_03_01_a", "2026-03-02", engine.AnchorKindQuit, 0, 0)))
+			"anchorev_2026_03_02_a", "anchor_2026_03_01_a", "2026-03-02", engine.AnchorKindQuit, 0, 0,
+		)))
 		before := readStoreBytes(t, a)
 
 		require.NoError(t, a.ScaffoldEngine())
@@ -349,7 +350,8 @@ func TestAnchorEventsMalformedRecordNoPanic(t *testing.T) {
 
 		// The next append keeps every defective record for validate to report.
 		require.NoError(t, a.AppendAnchorEvent(syntheticAnchorEvent(
-			"anchorev_2026_03_10_a", "anchor_2026_03_01_a", engine.AnchorEventSlip, "2026-03-10")))
+			"anchorev_2026_03_10_a", "anchor_2026_03_01_a", engine.AnchorEventSlip, "2026-03-10",
+		)))
 		log, err = a.ReadAnchorEvents()
 		require.NoError(t, err)
 		assert.Len(t, log.Events, 8, "an append never erases what the fold skips")
@@ -377,9 +379,11 @@ func TestAnchorEventsMalformedRecordNoPanic(t *testing.T) {
 
 				// A corrupt store is never buried under an append.
 				require.Error(t, a.AppendAnchorEvent(syntheticAnchorEvent(
-					"anchorev_2026_03_10_a", "anchor_2026_03_01_a", engine.AnchorEventSlip, "2026-03-10")))
+					"anchorev_2026_03_10_a", "anchor_2026_03_01_a", engine.AnchorEventSlip, "2026-03-10",
+				)))
 				require.Error(t, a.AppendAnchorPairIntent(syntheticAddKindIntent(
-					"anchorev_2026_03_02_b", "anchor_2026_03_02_a", "morning-walk")))
+					"anchorev_2026_03_02_b", "anchor_2026_03_02_a", "morning-walk",
+				)))
 				assert.Equal(t, body, string(readStoreBytes(t, a)), "the corrupt bytes are left exactly as found")
 			})
 		}
