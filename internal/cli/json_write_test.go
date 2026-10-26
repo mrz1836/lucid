@@ -150,7 +150,7 @@ func assertReceiptJSON(t *testing.T, out, prose, ridPrefix string) {
 	}
 }
 
-// TestWriteVerbsJSON_Inner is the reframe/focus half of the write-verb --json
+// TestWriteVerbsJSON_Inner is the reframe/focus/rep half of the write-verb --json
 // contract (AC-10, AC-11, AC-13). Each inner-work write verb routes through the
 // same emitReceipt choke point, so under --json it emits the bare
 // {receipt_id, logical_date} object with no prose ack; the focus retire row
@@ -186,6 +186,26 @@ func TestWriteVerbsJSON_Inner(t *testing.T) {
 				return []string{"focus", "retire", resolveFocusID(t)}
 			},
 		},
+		{
+			name:      "rep add",
+			prose:     "Added rep",
+			ridPrefix: "rep_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				return []string{"rep", "add", "practice", "--solo", "solo practice", "--level", "2"}
+			},
+		},
+		{
+			name:      "rep retire",
+			prose:     "Retired",
+			ridPrefix: "rep_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "rep", "add", "practice")
+				require.NoError(t, err)
+				return []string{"rep", "retire", resolveRepID(t)}
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -213,6 +233,22 @@ func resolveFocusID(t *testing.T) string {
 	require.NoError(t, json.Unmarshal([]byte(out), &listed))
 	require.NotEmpty(t, listed.Focus, "expected a seeded focus item to retire")
 	return listed.Focus[0].ID
+}
+
+// resolveRepID reads back the single seeded rep's id from `rep list --json`, the
+// same way rep_test.go resolves a retire target.
+func resolveRepID(t *testing.T) string {
+	t.Helper()
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "rep", "list", "--json")
+	require.NoError(t, err)
+	var listed struct {
+		Reps []struct {
+			ID string `json:"id"`
+		} `json:"reps"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &listed))
+	require.NotEmpty(t, listed.Reps, "expected a seeded rep to retire")
+	return listed.Reps[0].ID
 }
 
 // TestModeJSON_EmitsModeShape pins mode's minimal --json shape (AC-12, AC-13):

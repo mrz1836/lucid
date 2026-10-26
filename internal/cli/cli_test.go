@@ -73,7 +73,7 @@ func TestVersion_RejectsArgs(t *testing.T) {
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	want := []string{"init", "log", "attach", "link", "unlink", "annotate", "closeout", "mode", "status", "obs", "reframe", "wheel", "focus", "retro", "day", "stats", "validate", "export", "backup", "restore", "version", "update", "scheduler", "companion", "anchor", "metrics", "storm", "profile", "person", "bootstrap", "serve", "reflect", "ask", "injury", "era", "thread", "structure"}
+	want := []string{"init", "log", "attach", "link", "unlink", "annotate", "closeout", "mode", "status", "obs", "reframe", "wheel", "focus", "rep", "retro", "day", "stats", "validate", "export", "backup", "restore", "version", "update", "scheduler", "companion", "anchor", "metrics", "storm", "profile", "person", "bootstrap", "serve", "reflect", "ask", "injury", "era", "thread", "structure"}
 	got := map[string]bool{}
 	for _, c := range root.Commands() {
 		got[c.Name()] = true
@@ -155,4 +155,17 @@ func TestFocusCmd_HasSubcommands(t *testing.T) {
 		assert.Truef(t, got[want], "focus group missing %q", want)
 	}
 	assert.Len(t, got, 4, "focus exposes exactly add, list, surface, and retire")
+}
+
+// TestRepCmd_HasSubcommands guards the rep command tree the same way: exactly
+// add, list, surface, and retire, so a dropped registration fails loudly.
+func TestRepCmd_HasSubcommands(t *testing.T) {
+	got := map[string]bool{}
+	for _, c := range newRepCmd().Commands() {
+		got[c.Name()] = true
+	}
+	for _, want := range []string{"add", "list", "surface", "retire"} {
+		assert.Truef(t, got[want], "rep group missing %q", want)
+	}
+	assert.Len(t, got, 4, "rep exposes exactly add, list, surface, and retire")
 }

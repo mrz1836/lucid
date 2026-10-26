@@ -277,6 +277,50 @@ func TestFocus_CLI_SuccessFileConflictsWithInline(t *testing.T) {
 	assert.Contains(t, err.Error(), "not both")
 }
 
+// TestRep_CLI_FileInputFields: --body-file supplies the text and --solo-file the
+// solo variant off the command line, both landing verbatim (shell
+// metacharacters included).
+func TestRep_CLI_FileInputFields(t *testing.T) {
+	home := isolatedHome(t)
+	bf := writeTemp(t, "ask one question & listen; then ask \"why?\"")
+	sf := writeTemp(t, "write it down & send it afterward")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"rep", "add", "--body-file", bf, "--solo-file", sf, "--level", "3")
+	require.NoError(t, err)
+
+	entries := readRepEntries(t, home)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "ask one question & listen; then ask \"why?\"", entries[0].Text)
+	assert.Equal(t, "write it down & send it afterward", entries[0].Solo)
+	assert.Equal(t, 3, entries[0].Level)
+}
+
+// TestRep_CLI_SoloFileConflictsWithInline: --solo and --solo-file for the same
+// field is refused and nothing is written; so is --body-file alongside
+// positional text, and two fields both reading stdin.
+func TestRep_CLI_SoloFileConflictsWithInline(t *testing.T) {
+	home := isolatedHome(t)
+	sf := writeTemp(t, "from the file")
+	bf := writeTemp(t, "text from the file")
+
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"},
+		"rep", "add", "a practice", "--solo", "inline", "--solo-file", sf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"},
+		"rep", "add", "a practice", "--body-file", bf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"},
+		"rep", "add", "--body-file", "-", "--solo-file", "-")
+	require.Error(t, err, "only one field may read stdin")
+
+	assert.Empty(t, readRepEntries(t, home), "a refused add writes nothing")
+}
+
 // TestMemory_CLI_FileInputFields: the story text and a prose-metadata field
 // (tone) both arrive off the command line and land on the event payload.
 func TestMemory_CLI_FileInputFields(t *testing.T) {
