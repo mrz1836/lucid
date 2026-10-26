@@ -15,6 +15,12 @@ import (
 type Router struct {
 	store *storage.Adapter
 	cfg   config.Config
+
+	// pairFault is the two-file write's fault-injection seam: when set, it is
+	// consulted before each durable boundary (the pair intent, the first and
+	// the second half) and a returned error stops the write there, as a crash
+	// would. It is nil outside the crash tests.
+	pairFault func(step string) error
 }
 
 // New constructs a router over a storage adapter. Call [Router.Boot]

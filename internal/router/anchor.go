@@ -86,18 +86,29 @@ func anchorStateRejection(latest []engine.Anchor, label string) error {
 // The free-text annotation is optional. Now is the record time — the wall clock
 // when zero — and stamps RecordedAt, which resolves latest-wins per identity at
 // read.
+//
+// Kind, when set, records a new anchor of that kind: the definition plus its
+// first kind event (ADR-0013). Allowance and Window are the kind's parameters,
+// zero when not given; they are legal only with a Kind. With no Kind the verb
+// is exactly what it has always been.
 type AnchorAddRequest struct {
-	Label string
-	Date  string
-	Note  string
-	Now   time.Time
+	Label     string
+	Date      string
+	Note      string
+	Kind      string
+	Allowance int
+	Window    int
+	Now       time.Time
 }
 
 // AnchorAddResult reports the recorded anchor and the inventory-only ack.
 // Recording a milestone is never scored, so the ack carries no evaluative
-// language (engine §0) — just the label and the date that were written.
+// language (engine §0) — just the label and the date that were written. Event
+// is the first kind event an `add --kind` wrote (its id is the receipt), and
+// nil for a plain add.
 type AnchorAddResult struct {
 	Anchor engine.Anchor
+	Event  *engine.AnchorEvent
 	Ack    string
 }
 
@@ -116,6 +127,12 @@ type AnchorAddResult struct {
 // grammar above is unchanged. Recording a label no active anchor holds mints a
 // new id: a first use, or a name reused after a retirement, which is a new
 // milestone rather than a resumed one, and the ack says so.
+//
+// The event store is read but never written by a plain add: it is what keeps a
+// correction from landing on an anchor whose two-file write is unfinished
+// (error-states.md An-13), and what keeps a new id from reusing one an
+// unfinished `add --kind` reserved. A Ledger with no store reads exactly as
+// before. With a Kind, see [Router.anchorAddKind].
 func (r *Router) AnchorAdd(req AnchorAddRequest) (AnchorAddResult, error) {
 	now := whenOr(req.Now)
 
@@ -124,16 +141,26 @@ func (r *Router) AnchorAdd(req AnchorAddRequest) (AnchorAddResult, error) {
 	if err := engine.ValidateAnchor(req.Label, req.Date); err != nil {
 		return AnchorAddResult{}, anchorRejection(req.Label, req.Date)
 	}
+	if err := validateAddKind(req); err != nil {
+		return AnchorAddResult{}, err
+	}
 
 	// Scaffold before reading: a never-scaffolded tree has no anchors.json.
 	if err := r.prepareEngine(); err != nil {
 		return AnchorAddResult{}, err
 	}
-	log, err := r.store.ReadAnchors()
+	view, err := r.readAnchorView()
 	if err != nil {
 		return AnchorAddResult{}, err
 	}
-	latest := engine.LatestAnchors(log)
+	w := anchorWrite{anchorView: view, now: now, stamp: now.Format(time.RFC3339)}
+	if req.Kind != "" {
+		if w.today, err = r.anchorToday(now); err != nil {
+			return AnchorAddResult{}, err
+		}
+		return r.anchorAddKind(w, req)
+	}
+	latest := w.latest
 
 	anchor := engine.Anchor{
 		Label:      req.Label,
@@ -142,6 +169,9 @@ func (r *Router) AnchorAdd(req AnchorAddRequest) (AnchorAddResult, error) {
 		RecordedAt: now.Format(time.RFC3339),
 	}
 
+	if err := w.unfinishedForLabel(req.Label); err != nil {
+		return AnchorAddResult{}, err
+	}
 	ack := anchorAck(anchor)
 	if target, ok := engine.FindActiveAnchor(latest, req.Label); ok {
 		// Copied verbatim, empty included: a correction to a record written
@@ -152,7 +182,7 @@ func (r *Router) AnchorAdd(req AnchorAddRequest) (AnchorAddResult, error) {
 	} else {
 		// The whole history feeds the mint, not the fold, so a slot held by a
 		// retired anchor is never reissued.
-		anchor.ID = engine.NextAnchorID(log, now)
+		anchor.ID = w.mintAnchorID()
 		if prior, retired := engine.LatestSunsetFor(latest, req.Label); retired {
 			ack = anchorReaddAck(anchor, engine.SunsetDate(prior))
 		}
@@ -163,6 +193,20 @@ func (r *Router) AnchorAdd(req AnchorAddRequest) (AnchorAddResult, error) {
 	}
 
 	return AnchorAddResult{Anchor: anchor, Ack: ack}, nil
+}
+
+// validateAddKind gates `add`'s kind parameters before any read: a kind must be
+// one of the four with legal parameters (error-states.md An-9), and an
+// allowance or a window without a kind has nothing to apply to.
+func validateAddKind(req AnchorAddRequest) error {
+	if req.Kind == "" {
+		if req.Allowance != 0 || req.Window != 0 {
+			return rejectAnchor(ErrAnchorRejected,
+				"--allowance and --window go with --kind, e.g. --kind limit --allowance 4 --window 90. Nothing was saved.")
+		}
+		return nil
+	}
+	return validateKindParams(req.Kind, req.Allowance, req.Window)
 }
 
 // anchorRejection composes the fixed rejection copy, distinguishing the two
