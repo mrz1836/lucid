@@ -21,6 +21,7 @@ import (
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/lucidtest"
+	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -583,4 +584,222 @@ func TestDefaultDBPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(got, filepath.Join("lucid", "witness-report.db")), "the default lands under the config dir, got %q", got)
 	assert.NotContains(t, got, filepath.Join(".lucid"), "the job DB is outside the Ledger")
+}
+
+// --- Fire: multi-message full anchor detail (lossless delivery) ------------
+
+// flakyDeliverer is the shared fake with one extra steer: failSend fails the
+// Nth embed send (1-based, counted across fires) once, before it reaches the
+// fake, so a test can stop a batch at a chosen part.
+type flakyDeliverer struct {
+	lucidtest.FakeDeliverer
+
+	failSend map[int]error
+	attempts int
+}
+
+func (f *flakyDeliverer) SendEmbedReturningID(ctx context.Context, channel string, e notify.Embed) (string, error) {
+	f.attempts++
+	if err, ok := f.failSend[f.attempts]; ok {
+		return "", err
+	}
+	return f.FakeDeliverer.SendEmbedReturningID(ctx, channel, e)
+}
+
+// multipartReport is a report whose full anchor detail spans several messages.
+func multipartReport(t *testing.T) (Report, []notify.Embed) {
+	t.Helper()
+	rep := oversizedDetailReport()
+	rep.ISOWeek = "2026-W29"
+	parts := RenderEmbeds(rep)
+	require.Greater(t, len(parts), 2, "the fixture spans several messages")
+	return rep, parts
+}
+
+// sentEmbeds returns the embeds a fake received, in order.
+func sentEmbeds(del *lucidtest.FakeDeliverer) []notify.Embed {
+	out := make([]notify.Embed, 0, len(del.Embeds))
+	for _, e := range del.Embeds {
+		out = append(out, e.Embed)
+	}
+	return out
+}
+
+// TestAnchorDetailMultipartDelivery: the scheduled runner sends every ordered
+// part of an oversized report through the existing notifier to the one
+// resolved channel, reads each part back, and only then marks the week
+// delivered — the receipt keeps every part's frozen payload, message id and
+// read-back, with part 1 (the report card) as the week's message.
+func TestAnchorDetailMultipartDelivery(t *testing.T) {
+	rep, parts := multipartReport(t)
+	comp := &runFakeComposer{report: rep}
+	del := &lucidtest.FakeDeliverer{}
+	r, store := newRunner(t, comp, del)
+
+	out, err := r.Fire(context.Background(), reportNow())
+	require.NoError(t, err)
+
+	assert.True(t, out.Delivered)
+	assert.Equal(t, len(parts), out.Parts)
+	assert.Equal(t, parts, sentEmbeds(del), "every part is sent, in order, exactly as rendered")
+	for _, e := range del.Embeds {
+		assert.Equal(t, engine.ChannelUser, e.Channel, "every part goes to the one resolved channel")
+	}
+	wantIDs := make([]string, 0, len(parts))
+	for i := range parts {
+		wantIDs = append(wantIDs, fmt.Sprintf("msg-%d", i+1))
+	}
+	assert.Equal(t, wantIDs, del.Verifies, "every part is read back, once")
+	assert.Empty(t, del.Alerts)
+
+	rec, ok, err := store.ReadWitnessReportReceipt()
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "msg-1", rec.MessageID, "the report card is the week's message")
+	assert.True(t, rec.Verified)
+	assert.False(t, rec.Pending())
+	require.Len(t, rec.Parts, len(parts))
+	for i, p := range rec.Parts {
+		assert.Equal(t, wantIDs[i], p.MessageID)
+		assert.True(t, p.Verified)
+		assert.Equal(t, parts[i], thawEmbed(p.Embed), "the frozen payload is the part as rendered")
+	}
+
+	again, err := r.Fire(context.Background(), reportNow().Add(time.Hour))
+	require.NoError(t, err)
+	assert.True(t, again.Skipped, "a delivered multi-part week is an idempotent skip")
+	assert.Len(t, del.Embeds, len(parts), "nothing is re-sent")
+}
+
+// TestAnchorDetailPartialDeliveryResumes: a batch that stops partway — a part
+// that cannot be read back, or a send that fails — is a loud partial failure
+// (one alert naming how many parts verified, and an error), and the week stays
+// incomplete: no week message, unverified. The next fire resumes the frozen
+// batch without re-composing and without re-sending a verified part; a part
+// sent but unconfirmed is re-probed first, and re-sent only when provably gone.
+// A legacy single-message receipt still reads and still guards its week.
+func TestAnchorDetailPartialDeliveryResumes(t *testing.T) {
+	t.Run("an indeterminate read-back stops the batch, the retry re-probes", func(t *testing.T) {
+		rep, parts := multipartReport(t)
+		n := len(parts)
+		comp := &runFakeComposer{report: rep}
+		del := &lucidtest.FakeDeliverer{VerifyErrFor: map[string]error{"msg-2": errors.New("discord 503")}}
+		r, store := newRunner(t, comp, del)
+
+		_, err := r.Fire(context.Background(), reportNow())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("partial delivery — 1 of %d parts verified: verify part 2 of %d", n, n))
+		require.Len(t, del.Alerts, 1, "exactly one loud alert")
+		assert.Contains(t, del.Alerts[0].Text, fmt.Sprintf("incomplete — 1 of %d messages verified", n))
+		assert.Equal(t, engine.ChannelUser, del.Alerts[0].Channel)
+		assert.Len(t, del.Embeds, 2, "the batch stopped at the unconfirmed part")
+
+		rec, ok, rerr := store.ReadWitnessReportReceipt()
+		require.NoError(t, rerr)
+		require.True(t, ok)
+		assert.True(t, rec.Pending(), "a partial delivery stays incomplete")
+		assert.Empty(t, rec.MessageID)
+		assert.False(t, rec.Verified)
+		require.Len(t, rec.Parts, n, "the whole batch was frozen before the first send")
+		assert.True(t, rec.Parts[0].Verified)
+		assert.Equal(t, "msg-2", rec.Parts[1].MessageID)
+		assert.False(t, rec.Parts[1].Verified)
+		assert.Empty(t, rec.Parts[2].MessageID, "later parts were never sent")
+
+		delete(del.VerifyErrFor, "msg-2")
+		out, err := r.Fire(context.Background(), reportNow().Add(time.Hour))
+		require.NoError(t, err)
+		assert.True(t, out.Delivered)
+		assert.Equal(t, n, out.Parts)
+		assert.Equal(t, 1, comp.calls, "the retry resumes the frozen batch, never re-composes")
+		assert.Equal(t, parts, sentEmbeds(del), "no part was sent twice")
+		assert.Equal(t, "msg-2", del.Verifies[2], "the unconfirmed part is re-probed before anything else")
+
+		rec, _, rerr = store.ReadWitnessReportReceipt()
+		require.NoError(t, rerr)
+		assert.False(t, rec.Pending())
+		assert.Equal(t, "msg-1", rec.MessageID)
+		assert.True(t, rec.Verified)
+		assert.Equal(t, n, rec.PartsVerified())
+	})
+
+	t.Run("a failed send stops the batch, the retry sends only what is left", func(t *testing.T) {
+		rep, parts := multipartReport(t)
+		n := len(parts)
+		comp := &runFakeComposer{report: rep}
+		del := &flakyDeliverer{failSend: map[int]error{3: errors.New("discord 500")}}
+		r, store := newRunner(t, comp, del)
+
+		_, err := r.Fire(context.Background(), reportNow())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("partial delivery — 2 of %d parts verified: deliver part 3 of %d", n, n))
+		require.Len(t, del.Alerts, 1)
+		assert.Contains(t, del.Alerts[0].Text, fmt.Sprintf("2 of %d messages verified", n))
+
+		rec, _, rerr := store.ReadWitnessReportReceipt()
+		require.NoError(t, rerr)
+		assert.Equal(t, 2, rec.PartsVerified())
+		assert.Empty(t, rec.Parts[2].MessageID)
+
+		out, err := r.Fire(context.Background(), reportNow().Add(time.Hour))
+		require.NoError(t, err)
+		assert.True(t, out.Delivered)
+		assert.Equal(t, 1, comp.calls)
+		assert.Equal(t, parts, sentEmbeds(&del.FakeDeliverer), "every part landed exactly once, in order")
+	})
+
+	t.Run("a part provably gone is sent again", func(t *testing.T) {
+		rep, parts := multipartReport(t)
+		n := len(parts)
+		comp := &runFakeComposer{report: rep}
+		absent := fmt.Errorf("404: %w", flynode.ErrMessageAbsent)
+		del := &lucidtest.FakeDeliverer{VerifyErrFor: map[string]error{"msg-2": absent}}
+		r, _ := newRunner(t, comp, del)
+
+		_, err := r.Fire(context.Background(), reportNow())
+		require.Error(t, err)
+
+		out, err := r.Fire(context.Background(), reportNow().Add(time.Hour))
+		require.NoError(t, err)
+		assert.True(t, out.Delivered)
+		require.Len(t, del.Embeds, n+1, "only the vanished part is sent a second time")
+		assert.Equal(t, parts[1], del.Embeds[2].Embed, "the re-send is the frozen part 2")
+	})
+
+	t.Run("a mode change starts the report afresh in the new channel", func(t *testing.T) {
+		rep, _ := multipartReport(t)
+		comp := &runFakeComposer{report: rep}
+		del := &lucidtest.FakeDeliverer{VerifyErrFor: map[string]error{"msg-2": errors.New("discord 503")}}
+		r, store := newRunner(t, comp, del)
+		_, err := r.Fire(context.Background(), reportNow())
+		require.Error(t, err)
+
+		delete(del.VerifyErrFor, "msg-2")
+		r.mode = config.WitnessReportModeAuto
+		out, err := r.Fire(context.Background(), reportNow().Add(time.Hour))
+		require.NoError(t, err)
+		assert.True(t, out.Delivered)
+		assert.Equal(t, engine.ChannelWitness, out.Channel)
+		assert.Equal(t, 2, comp.calls, "the new audience gets the whole report, freshly composed")
+		rec, _, rerr := store.ReadWitnessReportReceipt()
+		require.NoError(t, rerr)
+		assert.Equal(t, engine.ChannelWitness, rec.ChannelID)
+	})
+
+	t.Run("a legacy single-message receipt still guards its week", func(t *testing.T) {
+		comp := &runFakeComposer{report: sampleReport()}
+		del := &lucidtest.FakeDeliverer{}
+		r, store := newRunner(t, comp, del)
+		require.NoError(t, store.WriteWitnessReportReceipt(storage.WitnessReportReceipt{
+			Week: "2026-W29", MessageID: "msg-legacy", ChannelID: engine.ChannelUser, Verified: true,
+			DeliveredAt: "2026-07-13T09:00:00Z",
+		}))
+
+		out, err := r.Fire(context.Background(), reportNow())
+		require.NoError(t, err)
+		assert.True(t, out.Skipped)
+		assert.Equal(t, flynode.SkipAlreadyDelivered, out.SkipReason)
+		assert.Zero(t, comp.calls)
+		assert.Empty(t, del.Embeds)
+	})
 }

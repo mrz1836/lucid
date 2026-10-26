@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1188,4 +1189,56 @@ func TestAnchorsConfigDefaults(t *testing.T) {
 	explicit, err := Unmarshal([]byte(`{"version": 1, "anchors": {"miss_alarm": 1}}`))
 	require.NoError(t, err)
 	assert.Equal(t, 1, explicit.Anchors.MissAlarm, "decoding never coerces; Validate is what refuses it")
+}
+
+// TestWitnessReportAnchorDetailConfig covers witness_report.anchor_detail end
+// to end: the shipped default is summary, written under the documented key; a
+// lucid.json that never mentions the key (an older one) reads as summary; full
+// survives a write/read cycle and is the only value that opts in; and any other
+// value is a config error naming the two — whether or not the report is
+// enabled, because the key is a privacy choice a typo must never decide.
+func TestWitnessReportAnchorDetailConfig(t *testing.T) {
+	def := Default().WitnessReport
+	assert.Equal(t, WitnessReportAnchorDetailSummary, def.AnchorDetail, "summary is the shipped default")
+	assert.False(t, def.AnchorDetailFull())
+
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"anchor_detail": "summary"`)
+
+	t.Run("an absent key reads as summary", func(t *testing.T) {
+		got, err := Unmarshal([]byte(`{"witness_report": {"enabled": false, "mode": "preview"}}`))
+		require.NoError(t, err)
+		assert.Empty(t, got.WitnessReport.AnchorDetail)
+		assert.False(t, got.WitnessReport.AnchorDetailFull(), "no key never opts in")
+		require.NoError(t, got.WitnessReport.validate())
+	})
+
+	t.Run("full round-trips and opts in", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport.AnchorDetail = WitnessReportAnchorDetailFull
+		raw, err := c.Marshal()
+		require.NoError(t, err)
+		got, err := Unmarshal(raw)
+		require.NoError(t, err)
+		assert.Equal(t, WitnessReportAnchorDetailFull, got.WitnessReport.AnchorDetail)
+		assert.True(t, got.WitnessReport.AnchorDetailFull())
+		require.NoError(t, got.Validate())
+	})
+
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("an unknown value is rejected (enabled=%t)", enabled), func(t *testing.T) {
+			c := Default()
+			c.WitnessReport = WitnessReportConfig{
+				Enabled: enabled, Mode: WitnessReportModePreview, Time: "09:00", Weekday: 1,
+				SystemPrompt: "s.md", Template: "t.md", AnchorDetail: "verbose",
+			}
+			err := c.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "witness_report.anchor_detail")
+			assert.Contains(t, err.Error(), `"summary"`)
+			assert.Contains(t, err.Error(), `"full"`)
+			assert.False(t, c.WitnessReport.AnchorDetailFull())
+		})
+	}
 }

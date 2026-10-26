@@ -161,63 +161,63 @@ func TestBuildReport_TwoWeeksDiffer(t *testing.T) {
 	assert.False(t, reflect.DeepEqual(strong, heavy), "the reports differ materially")
 }
 
-// TestBuildReport_AgingAnchorWatchOut proves the aging-anchor branch: an anchor
-// past the mark surfaces a neutral, honest check-in watch-out. It injects the
-// projection directly, so no fixture couples to a specific calendar.
-func TestBuildReport_AgingAnchorWatchOut(t *testing.T) {
-	m := engine.Metrics{
-		Adherence: engine.Window{Length: 30},
-		Anchors: []engine.AnchorDaysSince{
-			{Label: "fresh", Date: "2026-07-10", DaysSince: 3},
-			{Label: "stale-check-in", Date: "2026-05-01", DaysSince: 60},
-		},
-	}
-	r, err := BuildReport(reportNow(), fakeNumbers{result: router.MetricsResult{Metrics: m}}, fakeRecords{})
-	require.NoError(t, err)
-
-	assert.Contains(t, r.WatchOuts, "60 days since stale-check-in — worth a check-in.")
-	assert.NotContains(t, strings.Join(r.WatchOuts, "\n"), "fresh", "a recent anchor never trips the mark")
-}
-
 // TestBuildReport_SunsetAnchorRaisesNoWatchOut proves the report inherits the
-// retirement filter rather than implementing one: a long-stale anchor raises
-// the aging watch-out while it counts, and stops the moment it is sunset —
+// retirement filter rather than implementing one: a limit over its allowance
+// raises its watch-out while it counts, and stops the moment it is sunset —
 // with no anchor-state logic anywhere in this package. The projection is built
 // by the real engine fold, because a retirement is only expressible upstream:
 // by the time it reaches the report the retired anchor is simply absent.
 func TestBuildReport_SunsetAnchorRaisesNoWatchOut(t *testing.T) {
-	const wantWatchOut = "200 days since gate-30 — worth a check-in."
-	stale := engine.Anchor{
-		ID: "anchor_2025_12_25_a", Label: "gate-30", Date: "2025-12-25",
-		RecordedAt: "2025-12-25T09:00:00Z",
+	const wantWatchOut = "late-night-snacks: over allowance — 3 of 2 in the last 30 days."
+	limit := engine.Anchor{
+		ID: "anchor_2026_06_01_a", Label: "late-night-snacks", Date: "2026-06-01",
+		RecordedAt: "2026-06-01T12:00:00Z",
 	}
-	build := func(t *testing.T, anchors []engine.Anchor) Report {
+	event := func(id, typ, day string) engine.AnchorEvent {
+		return engine.AnchorEvent{
+			ID: id, AnchorID: limit.ID, Type: typ, Day: day, RecordedAt: day + "T12:00:00Z",
+		}
+	}
+	kind := event("anchorev_2026_06_01_a", engine.AnchorEventKind, "2026-06-01")
+	kind.Kind, kind.Allowance, kind.WindowDays = engine.AnchorKindLimit, 2, 30
+	events := engine.AnchorEventLog{Version: engine.AnchorEventsVersion, Events: []engine.AnchorEvent{kind}}
+	for _, day := range []string{"2026-07-01", "2026-07-05", "2026-07-08"} {
+		use := event("anchorev_"+strings.ReplaceAll(day, "-", "_")+"_a", engine.AnchorEventUse, day)
+		use.Intent = engine.AnchorIntentPlanned
+		events.Events = append(events.Events, use)
+	}
+
+	build := func(t *testing.T, history []engine.Anchor) Report {
 		t.Helper()
 		clocks, err := engine.DefaultChain().ClocksFor(engine.DefaultProfile)
 		require.NoError(t, err)
+		log := engine.AnchorLog{Version: engine.AnchorVersion, History: history}
 		m := engine.BuildMetrics(engine.MetricsInput{
-			Anchors: anchors,
-			Chain:   engine.DefaultChain(),
-			Now:     reportNow(),
-			Clocks:  clocks,
-			Loc:     reportNow().Location(),
+			Anchors:   engine.LatestAnchors(log),
+			AnchorLog: log,
+			Events:    events,
+			Chain:     engine.DefaultChain(),
+			Now:       reportNow(),
+			Clocks:    clocks,
+			Loc:       reportNow().Location(),
 		})
 		r, err := BuildReport(reportNow(), fakeNumbers{result: router.MetricsResult{Metrics: m}}, fakeRecords{})
 		require.NoError(t, err)
 		return r
 	}
 
-	active := build(t, []engine.Anchor{stale})
+	active := build(t, []engine.Anchor{limit})
 	require.Len(t, active.Anchors, 1)
-	assert.Equal(t, 200, active.Anchors[0].DaysSince, "the anchor is well past the aging mark")
-	assert.Contains(t, active.WatchOuts, wantWatchOut, "while it counts, it is worth a check-in")
+	require.NotNil(t, active.Anchors[0].Limit)
+	assert.True(t, active.Anchors[0].Limit.OverAllowance, "three use-days against an allowance of two")
+	assert.Contains(t, active.WatchOuts, wantWatchOut, "while it counts, an over-allowance limit is flagged")
 
-	retired := stale
-	retired.RecordedAt = "2026-07-01T09:00:00Z"
+	retired := limit
+	retired.RecordedAt = "2026-07-10T09:00:00Z"
 	retired.State = engine.AnchorStateSunset
-	sunset := build(t, []engine.Anchor{retired})
+	sunset := build(t, []engine.Anchor{limit, retired})
 	assert.Empty(t, sunset.Anchors, "a retired anchor never reaches the report")
-	assert.NotContains(t, sunset.WatchOuts, wantWatchOut, "and so raises no aging watch-out")
+	assert.NotContains(t, sunset.WatchOuts, wantWatchOut, "and so raises no watch-out")
 }
 
 // TestBuildReport_ReaderErrorsPropagate guards both read seams: a failing

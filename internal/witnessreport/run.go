@@ -106,6 +106,7 @@ func NewRunner(o Options) *Runner {
 		Provider:     o.Provider,
 		Numbers:      o.Numbers,
 		Records:      o.Records,
+		AnchorDetail: o.AnchorDetail,
 		Build:        o.Build,
 	}
 	return &Runner{
@@ -126,12 +127,16 @@ func NewRunner(o Options) *Runner {
 // model prose (the metrics-only report still delivered, and the operator was
 // alerted to review). FallbackReason, FallbackError, and FallbackDetail carry
 // the composer's record of why a fallback fired (see [Report]) up to the
-// scheduled worker, which reports it.
+// scheduled worker, which reports it. Parts is how many messages the delivered
+// report spanned: 1 for the card alone, more when full anchor detail continued
+// past it. A resumed multi-message batch carries no compose metadata (it was
+// composed by the earlier attempt), so its fallback fields read empty.
 type Outcome struct {
 	Week           string
 	Delivered      bool
 	MessageID      string
 	Channel        string
+	Parts          int
 	Fallback       bool
 	SafetyTripped  bool
 	Skipped        bool
@@ -150,6 +155,15 @@ type Outcome struct {
 // report but alerts the operator to review. Any total send failure fires a
 // best-effort alert and returns a loud error — silence is the one outcome it
 // never produces.
+//
+// A report that spans several messages (full anchor detail past one embed) is
+// delivered as a frozen batch: the rendered parts are persisted in the week's
+// receipt before the first send, each part is sent and read back in order with
+// its progress recorded, and the week is marked delivered only once every part
+// has verified. A failure partway is loud — one alert naming how many parts
+// verified — and leaves the week incomplete; the next fire in the same week
+// resumes that frozen batch instead of re-composing, without re-sending a
+// verified part. A single-message report takes exactly the original path.
 func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 	channel, err := ChannelForMode(r.mode)
 	if err != nil {
@@ -162,66 +176,20 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 		return Outcome{}, err
 	}
 
-	fired, err := flynode.Fire(ctx, now, flynode.Delivery[Report]{
-		Channel:  channel,
-		CutoffAt: markAt.Add(staleAfter),
-		Guard: func(_ context.Context, _ time.Time) (flynode.Receipt, error) {
-			rec, ok, rerr := r.store.ReadWitnessReportReceipt()
-			if rerr != nil {
-				return flynode.Receipt{}, fmt.Errorf("witnessreport: read receipt: %w", rerr)
-			}
-			if ok && rec.Week == week && rec.MessageID != "" {
-				return flynode.Receipt{MessageID: rec.MessageID, Channel: rec.ChannelID, Found: true}, nil
-			}
-			return flynode.Receipt{}, nil
-		},
-		Compose: func(cctx context.Context, cnow time.Time) (Report, error) {
-			report, cerr := r.compose.Compose(cctx, cnow)
-			if cerr != nil {
-				return Report{}, fmt.Errorf("witnessreport: compose: %w", cerr)
-			}
-			return report, nil
-		},
-		Send: func(sctx context.Context, ch string, report Report) (string, error) {
-			id, serr := r.deliver.SendEmbedReturningID(sctx, ch, RenderEmbed(report))
-			if serr != nil {
-				return "", fmt.Errorf("witnessreport: deliver: %w", serr)
-			}
-			return id, nil
-		},
-		Verify: func(vctx context.Context, ch, id string) error {
-			if verr := r.deliver.VerifyPresent(vctx, ch, id); verr != nil {
-				return fmt.Errorf("witnessreport: verify delivery: %w", verr)
-			}
-			return nil
-		},
-		WriteReceipt: func(wnow time.Time, ch, id string) error {
-			if werr := r.store.WriteWitnessReportReceipt(storage.WitnessReportReceipt{
-				Week:        week,
-				MessageID:   id,
-				ChannelID:   ch,
-				Verified:    true,
-				DeliveredAt: wnow.Format(time.RFC3339),
-			}); werr != nil {
-				return fmt.Errorf("witnessreport: write receipt: %w", werr)
-			}
-			return nil
-		},
-		Alert: func(text string) { r.alert(ctx, text) },
-		PostSend: func(report Report) {
-			// A tripped witness-safe scan means the model produced flagged prose
-			// that was discarded — alert so the operator can review why. It runs
-			// only after the receipt is persisted and never unwinds the send.
-			if report.SafetyTripped {
-				r.alert(ctx, fmt.Sprintf(
-					"Lucid weekly witness report for %s tripped the witness-safe scan — the model prose was discarded and the metrics-only report was delivered. Worth a review.",
-					week,
-				))
-			}
-		},
+	f := &weeklyFire{r: r, week: week, channel: channel}
+	fired, err := flynode.Fire(ctx, now, flynode.Delivery[weeklyPayload]{
+		Channel:      channel,
+		CutoffAt:     markAt.Add(staleAfter),
+		Guard:        f.guard,
+		Compose:      f.compose,
+		Send:         f.send,
+		Verify:       f.verify,
+		WriteReceipt: f.writeReceipt,
+		Alert:        func(text string) { f.alert(ctx, text) },
+		PostSend:     func(p weeklyPayload) { f.postSend(ctx, p) },
 		CutoffAlert:  fmt.Sprintf("Lucid weekly witness report skipped for %s — it is past the missed-fire cut-off (the host was asleep at the scheduled mark). No stale report was posted.", week),
 		ComposeAlert: "Lucid weekly witness report could not be composed — the scheduled report did not go out.",
-		SendAlert:    "Lucid weekly witness report failed to deliver — the scheduled report did not go out.",
+		SendAlert:    weeklySendAlert,
 		VerifyAlert:  "Lucid weekly witness report sent a report that could not be verified in the channel.",
 		GuardAlert:   "Lucid weekly witness report could not confirm the earlier delivery is still posted — not re-sending to avoid a duplicate; it will retry.",
 		ReceiptAlert: "Lucid weekly witness report delivered but could not record the receipt — a retry may re-post; check the channel.",
@@ -230,19 +198,257 @@ func (r *Runner) Fire(ctx context.Context, now time.Time) (Outcome, error) {
 		return Outcome{}, err
 	}
 
+	report := fired.Payload.report
 	return Outcome{
 		Week:           week,
 		Delivered:      fired.Delivered,
 		MessageID:      fired.MessageID,
 		Channel:        fired.Channel,
-		Fallback:       fired.Payload.Fallback,
-		SafetyTripped:  fired.Payload.SafetyTripped,
+		Parts:          len(fired.Payload.parts),
+		Fallback:       report.Fallback,
+		SafetyTripped:  report.SafetyTripped,
 		Skipped:        fired.Skipped,
 		SkipReason:     fired.SkipReason,
-		FallbackReason: fired.Payload.FallbackReason,
-		FallbackError:  fired.Payload.FallbackError,
-		FallbackDetail: fired.Payload.FallbackDetail,
+		FallbackReason: report.FallbackReason,
+		FallbackError:  report.FallbackError,
+		FallbackDetail: report.FallbackDetail,
 	}, nil
+}
+
+// weeklySendAlert is the generic send-failure alert; a frozen batch that stops
+// partway replaces it with one naming how many parts verified.
+const weeklySendAlert = "Lucid weekly witness report failed to deliver — the scheduled report did not go out."
+
+// weeklyFire is one fire's delivery policy for [flynode.Fire]: the closures
+// over the week and channel, plus the multi-message batch state they share.
+type weeklyFire struct {
+	r       *Runner
+	week    string
+	channel string
+	// resume is this week's frozen, unfinished batch, found by the guard.
+	resume *storage.WitnessReportReceipt
+	// batch is the multi-message batch this fire is delivering.
+	batch *storage.WitnessReportReceipt
+	// batchAlert replaces the generic send alert once a batch stopped
+	// partway, so a partial delivery is reported as exactly that.
+	batchAlert string
+}
+
+// guard reads the week's receipt: a delivered week is an idempotent skip
+// (once its message reads back). An unfinished batch for this week is kept
+// for compose to resume — unless the mode changed since, in which case the
+// report goes whole to the new audience rather than splitting across two
+// channels.
+func (f *weeklyFire) guard(_ context.Context, _ time.Time) (flynode.Receipt, error) {
+	rec, ok, err := f.r.store.ReadWitnessReportReceipt()
+	if err != nil {
+		return flynode.Receipt{}, fmt.Errorf("witnessreport: read receipt: %w", err)
+	}
+	if !ok || rec.Week != f.week {
+		return flynode.Receipt{}, nil
+	}
+	if rec.MessageID != "" {
+		return flynode.Receipt{MessageID: rec.MessageID, Channel: rec.ChannelID, Found: true}, nil
+	}
+	if rec.Pending() && rec.ChannelID == f.channel {
+		f.resume = &rec
+	}
+	return flynode.Receipt{}, nil
+}
+
+// compose resumes the frozen batch when there is one, and otherwise composes
+// the week's report and renders its ordered parts.
+func (f *weeklyFire) compose(ctx context.Context, now time.Time) (weeklyPayload, error) {
+	if f.resume != nil {
+		return weeklyPayload{parts: thawParts(f.resume.Parts), resumed: true}, nil
+	}
+	report, err := f.r.compose.Compose(ctx, now)
+	if err != nil {
+		return weeklyPayload{}, fmt.Errorf("witnessreport: compose: %w", err)
+	}
+	return weeklyPayload{report: report, parts: RenderEmbeds(report)}, nil
+}
+
+// send delivers a single-message report exactly as it always was, and a
+// multi-message one as a frozen batch: persisted whole before the first send,
+// so a retry resumes exactly what this attempt rendered.
+func (f *weeklyFire) send(ctx context.Context, ch string, p weeklyPayload) (string, error) {
+	if len(p.parts) == 1 && !p.resumed {
+		id, err := f.r.deliver.SendEmbedReturningID(ctx, ch, p.parts[0])
+		if err != nil {
+			return "", fmt.Errorf("witnessreport: deliver: %w", err)
+		}
+		return id, nil
+	}
+	b := f.resume
+	if b == nil {
+		b = &storage.WitnessReportReceipt{Week: f.week, ChannelID: ch, Parts: freezeParts(p.parts)}
+		if err := f.r.store.WriteWitnessReportReceipt(*b); err != nil {
+			return "", fmt.Errorf("witnessreport: freeze multi-part report: %w", err)
+		}
+	}
+	f.batch = b
+	id, err := f.r.deliverBatch(ctx, ch, b)
+	if err != nil {
+		f.batchAlert = fmt.Sprintf(
+			"Lucid weekly witness report for %s is incomplete — %d of %d messages verified in the channel. It is not marked delivered; a retry resumes the remaining parts without re-sending a verified one.",
+			f.week, b.PartsVerified(), len(b.Parts),
+		)
+		return "", err
+	}
+	return id, nil
+}
+
+// verify reads a message back — except a batch's part 1, which deliverBatch
+// read back moments ago, part by part.
+func (f *weeklyFire) verify(ctx context.Context, ch, id string) error {
+	if f.batch != nil && f.batch.Parts[0].Verified && f.batch.Parts[0].MessageID == id {
+		return nil
+	}
+	if err := f.r.deliver.VerifyPresent(ctx, ch, id); err != nil {
+		return fmt.Errorf("witnessreport: verify delivery: %w", err)
+	}
+	return nil
+}
+
+// writeReceipt marks the week delivered. A batch keeps its frozen parts, every
+// one now verified, with part 1 as the week's message.
+func (f *weeklyFire) writeReceipt(now time.Time, ch, id string) error {
+	rec := storage.WitnessReportReceipt{Week: f.week, ChannelID: ch}
+	if f.batch != nil {
+		rec = *f.batch
+	}
+	rec.MessageID, rec.Verified, rec.DeliveredAt = id, true, now.Format(time.RFC3339)
+	if err := f.r.store.WriteWitnessReportReceipt(rec); err != nil {
+		return fmt.Errorf("witnessreport: write receipt: %w", err)
+	}
+	return nil
+}
+
+// alert sends the loud ping, naming a partial batch delivery as exactly that.
+func (f *weeklyFire) alert(ctx context.Context, text string) {
+	if text == weeklySendAlert && f.batchAlert != "" {
+		text = f.batchAlert
+	}
+	f.r.alert(ctx, text)
+}
+
+// postSend alerts the operator when the witness-safe scan tripped: the model
+// produced flagged prose that was discarded. It runs only after the receipt is
+// persisted and never unwinds the send.
+func (f *weeklyFire) postSend(ctx context.Context, p weeklyPayload) {
+	if p.report.SafetyTripped {
+		f.r.alert(ctx, fmt.Sprintf(
+			"Lucid weekly witness report for %s tripped the witness-safe scan — the model prose was discarded and the metrics-only report was delivered. Worth a review.",
+			f.week,
+		))
+	}
+}
+
+// weeklyPayload is one fire's composed delivery: the report and the ordered
+// embeds it renders to (one per message). A resumed payload is a frozen batch
+// read back from the receipt — its report was composed by the earlier attempt,
+// so only the parts travel.
+type weeklyPayload struct {
+	report  Report
+	parts   []notify.Embed
+	resumed bool
+}
+
+// deliverBatch sends a frozen multi-message batch to ch in order, skipping any
+// part already verified, and records each part's message id and read-back in
+// the receipt as it goes. A part a prior attempt sent but could not verify is
+// probed first: present counts as verified, provably absent is sent again, and
+// an indeterminate probe stops the run without re-sending (it could
+// double-post). It returns part 1's id once every part has verified; any
+// failure is a loud partial-delivery error naming how far the batch got.
+func (r *Runner) deliverBatch(ctx context.Context, ch string, b *storage.WitnessReportReceipt) (string, error) {
+	for i := range b.Parts {
+		if err := r.deliverPart(ctx, ch, b, i); err != nil {
+			return "", fmt.Errorf("witnessreport: partial delivery — %d of %d parts verified: %w",
+				b.PartsVerified(), len(b.Parts), err)
+		}
+	}
+	return b.Parts[0].MessageID, nil
+}
+
+// deliverPart brings part i of a frozen batch to verified, recording each step
+// in the receipt. A verified part is left alone; a part sent before but never
+// confirmed is re-probed, and sent again only when provably gone.
+func (r *Runner) deliverPart(ctx context.Context, ch string, b *storage.WitnessReportReceipt, i int) error {
+	p := &b.Parts[i]
+	step := func(what string, err error) error {
+		return fmt.Errorf("%s part %d of %d: %w", what, i+1, len(b.Parts), err)
+	}
+	if p.Verified {
+		return nil
+	}
+	if p.MessageID != "" {
+		err := r.deliver.VerifyPresent(ctx, ch, p.MessageID)
+		switch {
+		case err == nil:
+			p.Verified = true
+			return r.recordPart(b, step)
+		case !errors.Is(err, flynode.ErrMessageAbsent):
+			return step("verify", err) // presence unknown: re-sending could double-post
+		}
+		p.MessageID = "" // provably gone: send it again
+	}
+	id, err := r.deliver.SendEmbedReturningID(ctx, ch, thawEmbed(p.Embed))
+	if err != nil {
+		return step("deliver", err)
+	}
+	p.MessageID = id
+	if err := r.recordPart(b, step); err != nil {
+		return err
+	}
+	if err := r.deliver.VerifyPresent(ctx, ch, id); err != nil {
+		return step("verify", err)
+	}
+	p.Verified = true
+	return r.recordPart(b, step)
+}
+
+// recordPart persists a batch's progress after a part changed.
+func (r *Runner) recordPart(b *storage.WitnessReportReceipt, step func(string, error) error) error {
+	if err := r.store.WriteWitnessReportReceipt(*b); err != nil {
+		return step("record", err)
+	}
+	return nil
+}
+
+// freezeParts converts rendered embeds into the receipt's frozen parts, none
+// yet sent.
+func freezeParts(embeds []notify.Embed) []storage.WitnessReportPart {
+	parts := make([]storage.WitnessReportPart, 0, len(embeds))
+	for _, e := range embeds {
+		fields := make([]storage.WitnessReportField, 0, len(e.Fields))
+		for _, f := range e.Fields {
+			fields = append(fields, storage.WitnessReportField{Name: f.Name, Value: f.Value, Inline: f.Inline})
+		}
+		parts = append(parts, storage.WitnessReportPart{Embed: storage.WitnessReportEmbed{
+			Title: e.Title, Description: e.Description, Color: e.Color, Fields: fields, Footer: e.Footer,
+		}})
+	}
+	return parts
+}
+
+// thawParts reads a frozen batch back into embeds, in order.
+func thawParts(parts []storage.WitnessReportPart) []notify.Embed {
+	embeds := make([]notify.Embed, 0, len(parts))
+	for _, p := range parts {
+		embeds = append(embeds, thawEmbed(p.Embed))
+	}
+	return embeds
+}
+
+// thawEmbed reads one frozen embed back, byte for byte.
+func thawEmbed(e storage.WitnessReportEmbed) notify.Embed {
+	fields := make([]notify.EmbedField, 0, len(e.Fields))
+	for _, f := range e.Fields {
+		fields = append(fields, notify.EmbedField{Name: f.Name, Value: f.Value, Inline: f.Inline})
+	}
+	return notify.Embed{Title: e.Title, Description: e.Description, Color: e.Color, Fields: fields, Footer: e.Footer}
 }
 
 // fallbackDaemon names the weekly report in a fallback report's log line,
@@ -384,16 +590,19 @@ func ChannelForMode(mode string) (string, error) {
 // disposable job DB outside ~/.lucid, and the real clock). Config selects the
 // mode, the weekly mark, and the operator's opaque prompt files; Provider selects
 // the compose backend; Build overrides the provider builder for tests.
+// AnchorDetail is the opt-in full-detail reader: the composition root sets it
+// only when witness_report.anchor_detail is full, and leaves it nil otherwise.
 type Options struct {
-	Store    *storage.Adapter
-	Config   config.WitnessReportConfig
-	Provider config.ProviderConfig
-	Numbers  NumbersReader
-	Records  RecordsReader
-	Notifier Deliverer
-	DBPath   string
-	Clock    models.Clock
-	Build    composekit.ProviderBuilder
+	Store        *storage.Adapter
+	Config       config.WitnessReportConfig
+	Provider     config.ProviderConfig
+	Numbers      NumbersReader
+	Records      RecordsReader
+	AnchorDetail AnchorDetailReader
+	Notifier     Deliverer
+	DBPath       string
+	Clock        models.Clock
+	Build        composekit.ProviderBuilder
 }
 
 // weeklyArgs is the empty typed payload for the periodic: it carries no input —

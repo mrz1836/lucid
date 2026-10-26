@@ -61,6 +61,10 @@ const slotInstruction = "Respond with EXACTLY these four labeled slots and nothi
 // input surface of the deterministic core — deliberately no observations,
 // journal, or raw-entry reader exists on Deps, so private detail is structurally
 // unreachable (the firewall is the absence of a wider reader, not a filter).
+// AnchorDetail is the one deliberate, opt-in exception: the week's anchor
+// events, notes included, wired only when witness_report.anchor_detail is full
+// and nil otherwise. Its section is rendered by code after the model pass, so it
+// never enters the model's input or the witness-safe scan.
 type Deps struct {
 	SystemPrompt string
 	Template     string
@@ -69,6 +73,7 @@ type Deps struct {
 	Provider     config.ProviderConfig
 	Numbers      NumbersReader
 	Records      RecordsReader
+	AnchorDetail AnchorDetailReader
 	// Build overrides the provider builder; nil defaults to factory.Build.
 	Build composekit.ProviderBuilder
 }
@@ -91,6 +96,7 @@ type Composer struct {
 	provider     config.ProviderConfig
 	numbers      NumbersReader
 	records      RecordsReader
+	detail       AnchorDetailReader
 	build        composekit.ProviderBuilder
 }
 
@@ -109,6 +115,7 @@ func New(d Deps) *Composer {
 		provider:     d.Provider,
 		numbers:      d.Numbers,
 		records:      d.Records,
+		detail:       d.AnchorDetail,
 		build:        build,
 	}
 }
@@ -126,7 +133,30 @@ func New(d Deps) *Composer {
 // never the report. Every non-provider failure (a missing prompt file, an
 // unreadable projection, a bad backend) is a loud error so a caller never
 // delivers a half-built or silently-empty report.
+//
+// With full anchor detail opted in, the week's anchor events are read and
+// attached last, after the model pass and the scan, on every path — the
+// metrics-only fallback keeps them too. A failed detail read is loud, never a
+// report quietly missing the section its operator asked for.
 func (c *Composer) Compose(ctx context.Context, now time.Time) (Report, error) {
+	r, err := c.compose(ctx, now)
+	if err != nil {
+		return Report{}, err
+	}
+	if c.detail == nil {
+		return r, nil
+	}
+	detail, err := c.detail.AnchorDetail(now)
+	if err != nil {
+		return Report{}, fmt.Errorf("witnessreport: read anchor detail: %w", err)
+	}
+	r.AnchorDetail = detail
+	return r, nil
+}
+
+// compose is Compose without the anchor detail: the deterministic scaffold,
+// the model pass over the witness-safe Report, the scan, and the fallback.
+func (c *Composer) compose(ctx context.Context, now time.Time) (Report, error) {
 	// 1. The deterministic, witness-safe scaffold — honest numbers, real
 	// watch-outs, and auto-drafted friend-asks, no model in the path.
 	r, err := BuildReport(now, c.numbers, c.records)

@@ -12,10 +12,14 @@ import (
 // projection plus the human-readable lines rendered from it. The CLI prints the
 // lines for a person and the Metrics as JSON for a script (a harness), so the
 // practice's real numbers are read from one place and never recomputed
-// downstream.
+// downstream. Thresholds are the effective anchors thresholds the per-kind math
+// read (defaults applied), so a downstream signal — the witness report's habit
+// watch-out — judges a miss run against the same miss_alarm the projection
+// used. They are never serialized: the CLI emits Metrics and Lines only.
 type MetricsResult struct {
-	Metrics engine.Metrics
-	Lines   []string
+	Metrics    engine.Metrics
+	Lines      []string
+	Thresholds engine.AnchorThresholds
 }
 
 // Metrics executes `lucid metrics` (engine-module.md §Commands): the read-only
@@ -67,6 +71,7 @@ func (r *Router) Metrics(now time.Time) (MetricsResult, error) {
 		}
 	}
 
+	thresholds := r.anchorThresholds()
 	m := engine.BuildMetrics(engine.MetricsInput{
 		Records:    days,
 		Chain:      chain,
@@ -76,9 +81,9 @@ func (r *Router) Metrics(now time.Time) (MetricsResult, error) {
 		Loc:        loc,
 		AnchorLog:  anchorLog,
 		Events:     events,
-		Thresholds: r.anchorThresholds(),
+		Thresholds: thresholds,
 	})
-	return MetricsResult{Metrics: m, Lines: metricsLines(m)}, nil
+	return MetricsResult{Metrics: m, Lines: metricsLines(m), Thresholds: thresholds.WithDefaults()}, nil
 }
 
 // metricsLines renders the honest-number-paired practice-quality surface,

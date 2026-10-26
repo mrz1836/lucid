@@ -31,8 +31,9 @@ type AnchorThresholds struct {
 	GraduationDays int
 }
 
-// withDefaults fills unset or out-of-range thresholds with their defaults.
-func (t AnchorThresholds) withDefaults() AnchorThresholds {
+// WithDefaults fills unset or out-of-range thresholds with their defaults —
+// the thresholds the per-kind math actually reads.
+func (t AnchorThresholds) WithDefaults() AnchorThresholds {
 	if t.MissAlarm < DefaultMissAlarm {
 		t.MissAlarm = DefaultMissAlarm
 	}
@@ -380,7 +381,7 @@ func defaultConfirmStart(f AnchorFacts, since, base civilDay) civilDay {
 // once the accounted days since the last alarm run ended — or since the anchor
 // became a habit, whichever is later — reach th.GraduationDays.
 func ComputeHabitStats(f AnchorFacts, today time.Time, th AnchorThresholds) HabitStats {
-	th = th.withDefaults()
+	th = th.WithDefaults()
 	window := f.WindowDays
 	if window <= 0 {
 		window = DefaultHabitWindowDays
@@ -437,7 +438,7 @@ func ComputeHabitStats(f AnchorFacts, today time.Time, th AnchorThresholds) Habi
 // so a backdated miss beside an earlier one is never quietly isolated. One
 // isolated miss never alarms: the floor of 2 holds whatever is passed.
 func MissRunThrough(f AnchorFacts, day string, th AnchorThresholds) (run int, alarm bool) {
-	th = th.withDefaults()
+	th = th.WithDefaults()
 	d, okDay := parseCivilDay(day)
 	base, okBase := anchorBase(f)
 	if !okDay || !okBase || d < base {

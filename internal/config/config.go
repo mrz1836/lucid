@@ -163,6 +163,16 @@ const (
 	WitnessReportModeAuto    = "auto"
 )
 
+// Witness-report anchor detail modes. Summary — the default, and what an empty
+// or absent key reads as — shows anchors only as note-free, date-free watch-out
+// lines. Full is the explicit, global opt-in that adds a code-rendered,
+// verbatim Anchor detail section (the week's anchor events, notes included)
+// that is never sent to the model and never scanned (ADR-0013 §7).
+const (
+	WitnessReportAnchorDetailSummary = "summary"
+	WitnessReportAnchorDetailFull    = "full"
+)
+
 // WitnessReportConfig configures the weekly witness report — the Mirror-side,
 // model-allowed job that composes and delivers a friend-facing weekly
 // accountability report to the witness channel (witness-report.md). Like the
@@ -182,6 +192,11 @@ const (
 // optional curated friend-asks override; empty leaves the report's auto-drafted
 // asks in place. Model optionally overrides provider.model for the compose call;
 // empty inherits the provider default (data-model.md §"lucid.json").
+// AnchorDetail is summary (the default; empty reads the same) or full — the
+// opt-in that wires the one note-reaching reader and adds the verbatim Anchor
+// detail section (usage/witness-report.md §"Anchors in the report"). An older
+// binary ignores the key, because lucid.json decoding is non-strict, and so
+// reads as summary.
 type WitnessReportConfig struct {
 	Enabled      bool   `json:"enabled"`
 	Mode         string `json:"mode"`
@@ -191,6 +206,14 @@ type WitnessReportConfig struct {
 	Template     string `json:"template"`
 	AsksFile     string `json:"asks_file"`
 	Model        string `json:"model"`
+	AnchorDetail string `json:"anchor_detail"`
+}
+
+// AnchorDetailFull reports whether the explicit full anchor-detail opt-in is
+// on. Anything else — summary, or an absent key — is summary, so a config
+// that never mentions the key keeps the by-construction privacy.
+func (c WitnessReportConfig) AnchorDetailFull() bool {
+	return c.AnchorDetail == WitnessReportAnchorDetailFull
 }
 
 // The anchors block's defaults and floors (usage/commands.md §metrics;
@@ -569,9 +592,10 @@ func Default() Config {
 		// companion until an operator points the prompt paths at their own files
 		// and flips enabled true; graduating preview → auto is then one key.
 		WitnessReport: WitnessReportConfig{
-			Mode:    WitnessReportModePreview,
-			Time:    "09:00",
-			Weekday: 1,
+			Mode:         WitnessReportModePreview,
+			Time:         "09:00",
+			Weekday:      1,
+			AnchorDetail: WitnessReportAnchorDetailSummary,
 		},
 		// The anchor thresholds ship their documented defaults: never miss
 		// twice, and a habit is surfaced as eligible to graduate after 90
@@ -830,9 +854,20 @@ func (c WorkoutConfig) validate() error {
 // rather than silently posting to the wrong channel or building a bogus weekly
 // cron. asks_file is optional (an unset curated-asks override is valid) and the
 // optional model override is unconstrained — an unknown model surfaces at compose
-// time from the provider, exactly as provider.model does. There is no clip rule;
-// no witness-report bound is documented as coercible.
+// time from the provider, exactly as provider.model does. anchor_detail is the
+// one key checked whether or not the block is enabled: it must be summary, full,
+// or absent. There is no clip rule; no witness-report bound is documented as
+// coercible.
 func (c WitnessReportConfig) validate() error {
+	// anchor_detail is checked even on a disabled block: it is a privacy
+	// choice, so a typo is never silently read as either mode. Empty is the
+	// absent key, which reads as summary.
+	switch c.AnchorDetail {
+	case "", WitnessReportAnchorDetailSummary, WitnessReportAnchorDetailFull:
+	default:
+		return fmt.Errorf("config: witness_report.anchor_detail %q must be %q or %q",
+			c.AnchorDetail, WitnessReportAnchorDetailSummary, WitnessReportAnchorDetailFull)
+	}
 	if !c.Enabled {
 		return nil
 	}

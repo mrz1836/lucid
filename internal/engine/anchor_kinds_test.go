@@ -1304,9 +1304,9 @@ func TestAnchorKindsEmptyStates(t *testing.T) {
 // TestAnchorThresholdsDefaults: unset thresholds take their defaults, and a
 // miss alarm below 2 is raised to 2 so one isolated miss can never alarm.
 func TestAnchorThresholdsDefaults(t *testing.T) {
-	assert.Equal(t, AnchorThresholds{MissAlarm: 2, GraduationDays: 90}, AnchorThresholds{}.withDefaults())
-	assert.Equal(t, AnchorThresholds{MissAlarm: 2, GraduationDays: 90}, AnchorThresholds{MissAlarm: 1, GraduationDays: -3}.withDefaults())
-	assert.Equal(t, AnchorThresholds{MissAlarm: 4, GraduationDays: 30}, AnchorThresholds{MissAlarm: 4, GraduationDays: 30}.withDefaults())
+	assert.Equal(t, AnchorThresholds{MissAlarm: 2, GraduationDays: 90}, AnchorThresholds{}.WithDefaults())
+	assert.Equal(t, AnchorThresholds{MissAlarm: 2, GraduationDays: 90}, AnchorThresholds{MissAlarm: 1, GraduationDays: -3}.WithDefaults())
+	assert.Equal(t, AnchorThresholds{MissAlarm: 4, GraduationDays: 30}, AnchorThresholds{MissAlarm: 4, GraduationDays: 30}.WithDefaults())
 }
 
 // TestMissRunThrough: the run a logged miss belongs to is the consecutive
