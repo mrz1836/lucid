@@ -506,6 +506,17 @@ func TestFoldCompatPairing(t *testing.T) {
 		assert.Equal(t, "2026-01-05", f.Start, "the definition an add --kind writes sets the start")
 		assert.Empty(t, f.Floor)
 		assert.Empty(t, f.Pending)
+
+		// An older binary mints from anchors.json alone, so it can hand the
+		// reserved id to a different anchor before the retry. The dangling kind
+		// event still never applies: that anchor reads as what it is.
+		claimed := anchorDef(evAnchorB, "first-gate", "2026-05-01", "2026-01-05T09:30:00Z")
+		f = FoldAnchorEvents(log, AnchorLog{History: []Anchor{def, claimed}})[evAnchorB]
+		assert.Equal(t, AnchorKindMilestone, f.Kind, "an unfinished add --kind never reclassifies another anchor")
+		assert.Empty(t, f.KindHistory)
+		require.Len(t, f.Pending, 1, "the unfinished write stays visible for validate")
+		assert.True(t, f.Pending[0].Intent.IsAddKind())
+		assert.False(t, slipIntent.IsAddKind())
 	})
 
 	t.Run("graduation counts once its sunset half exists", func(t *testing.T) {

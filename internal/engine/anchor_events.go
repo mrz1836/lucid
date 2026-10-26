@@ -297,6 +297,13 @@ func ValidateAnchorPairIntent(p AnchorPairIntent) error {
 	return nil
 }
 
+// IsAddKind reports whether the intent is an add --kind: a kind event written
+// before the new anchor's definition. A reclassify to quit is the only other
+// kind pair, and it re-dates first.
+func (p AnchorPairIntent) IsAddKind() bool {
+	return p.Event.Type == AnchorEventKind && p.Order == AnchorPairEventFirst
+}
+
 // redates reports whether the intent's v3 half is a compat re-date — a record
 // that moves a quit's effective date — rather than a definition of its own: a
 // slip's re-date, a slip void's restoring record, or a reclassify to quit's
@@ -478,10 +485,18 @@ func foldAnchorStart(history []Anchor, indices []int, redate map[int]string) (st
 // event ids whose pair is incomplete, and each anchor's incomplete pairs. A
 // malformed intent contributes nothing, so its record reads as an ordinary
 // definition.
+//
+// It also returns the event half of every unfinished add --kind — a kind
+// event written first whose definition has not landed. That event dangles by
+// design, so the fold never applies it, not even to an anchor an older binary
+// has since minted under the same id (an older binary mints from anchors.json
+// alone and cannot see the reservation).
 func anchorPairIndex(log AnchorEventLog, anchors AnchorLog) (
 	redate map[int]string, incomplete map[string]bool, pending map[string][]AnchorPairState,
+	dangling map[string]bool,
 ) {
 	redate, incomplete, pending = map[int]string{}, map[string]bool{}, map[string][]AnchorPairState{}
+	dangling = map[string]bool{}
 	for _, st := range AnchorPairStates(log, anchors) {
 		if st.Status == AnchorPairMalformed {
 			continue
@@ -489,12 +504,15 @@ func anchorPairIndex(log AnchorEventLog, anchors AnchorLog) (
 		if st.Status != AnchorPairComplete {
 			incomplete[st.Intent.Event.ID] = true
 			pending[st.Intent.Event.AnchorID] = append(pending[st.Intent.Event.AnchorID], st)
+			if st.Intent.IsAddKind() {
+				dangling[st.Intent.Event.ID] = true
+			}
 		}
 		if st.CompatIndex >= 0 && st.Intent.redates() {
 			redate[st.CompatIndex] = st.Status
 		}
 	}
-	return redate, incomplete, pending
+	return redate, incomplete, pending, dangling
 }
 
 // addFact files one applicable event into its anchor's facts: a voided event
@@ -552,8 +570,10 @@ func (f *AnchorFacts) settle(incomplete map[string]bool) {
 // The kind is the latest kind event in append order. Kind events are never
 // voidable, so a void aimed at one is ignored. An event whose anchor is
 // unknown is ignored (a dangling add --kind event among them), and so is an
-// event that fails validation. A pair intent's planned event is never read as
-// a fact; only events in the store are. It is pure: no clock, no disk.
+// event that fails validation. The event half of an unfinished add --kind is
+// ignored even when an anchor holds its id. A pair intent's planned event is
+// never read as a fact; only events in the store are. It is pure: no clock, no
+// disk.
 func FoldAnchorEvents(log AnchorEventLog, anchors AnchorLog) map[string]AnchorFacts {
 	remap := adoptionRemap(anchors)
 	indices := map[string][]int{}
@@ -563,7 +583,7 @@ func FoldAnchorEvents(log AnchorEventLog, anchors AnchorLog) map[string]AnchorFa
 		indices[id] = append(indices[id], i)
 		latest[id] = a // last write per identity wins (append order)
 	}
-	redate, incomplete, pending := anchorPairIndex(log, anchors)
+	redate, incomplete, pending, dangling := anchorPairIndex(log, anchors)
 
 	facts := make(map[string]*AnchorFacts, len(latest))
 	for id, rec := range latest {
@@ -580,6 +600,9 @@ func FoldAnchorEvents(log AnchorEventLog, anchors AnchorLog) map[string]AnchorFa
 
 	events, voided := applicableAnchorEvents(log)
 	for _, e := range events {
+		if dangling[e.ID] {
+			continue // an unfinished add --kind: its anchor does not exist yet
+		}
 		if f, ok := facts[e.AnchorID]; ok { // no anchor holds a dangling event's id
 			f.addFact(e, voided)
 		}
