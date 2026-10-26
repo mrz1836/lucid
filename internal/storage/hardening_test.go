@@ -151,6 +151,7 @@ func TestDayPaths_RejectMalformedDate(t *testing.T) {
 	a := newObsStore(t)
 	require.NoError(t, a.ScaffoldFocus())
 	require.NoError(t, a.ScaffoldReframes())
+	require.NoError(t, a.ScaffoldReps())
 
 	for _, bad := range []string{"", "2026", "2026-07", "../../etc", "2026-07-02/../x", `2026\07\02`} {
 		_, oerr := a.obsDayPath(bad)
@@ -159,6 +160,8 @@ func TestDayPaths_RejectMalformedDate(t *testing.T) {
 		require.Error(t, ferr, "focusDayPath(%q)", bad)
 		_, rerr := a.reframeDayPath(bad)
 		require.Error(t, rerr, "reframeDayPath(%q)", bad)
+		_, perr := a.repDayPath(bad)
+		require.Error(t, perr, "repDayPath(%q)", bad)
 	}
 
 	_, aerr := a.AppendObservation(observations.Event{
