@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.34.0"
+min_lucid_version: "0.38.0"
 ---
 
 # Lucid
@@ -63,7 +63,10 @@ its output. Acknowledge *after* the binary persists, never before.
 | `/day [date]` | read-only day view | `lucid day [date]` |
 | `/packet clinician [@<date>\|all]` | clinician packet export | `lucid export packet clinician …` (post only the path) |
 | `/stats [--last N \| --from --to]` | Ledger volume (counts only) | `lucid stats [--last N \| --from --to]` — read-only, counts only, no journal content |
-| `/metrics` | derived practice metrics | `lucid metrics` — streak / adherence (trailing 30d) / days-since-anchor, read-only |
+| `/metrics` | derived practice metrics | `lucid metrics` — streak / adherence (trailing 30d) / one line per anchor in its kind's language, read-only |
+| a slip on a `quit` anchor ("slipped last night") | anchor event capture | `lucid anchor slip <label> [--day <date>] [--note-file <path>]` — **capture tier**: run immediately, lead with the `anchorev_…` receipt |
+| a use of a `limit` anchor ("had a planned slice at the party") | anchor event capture | `lucid anchor use <label> (--planned \| --slip) [--day <date>] [--note-file <path>]` — **capture tier**; the intent is required and **never guessed** — ask "planned, or a slip?" when it was not said |
+| a missed day on a `habit` anchor ("skipped the walk, I'm traveling") | anchor event capture | `lucid anchor miss <label> [--day <date>] [--note-file <path>]` — **capture tier** |
 | `/reflect week` | Sunday weekly recall deep-dive | `lucid reflect week` — read-only weekly deep-dive, never writes |
 | `/excavate` | select the next memory cluster to excavate | `lucid excavate` — read-only, never writes |
 | `/companion [morning\|night]` | compose one companion message on demand | `lucid companion fire --mode <morning\|night>` — dry-run by default; scheduled sends stay scheduler-owned |
@@ -77,7 +80,13 @@ conversational verbs; the rest are reached by their documented CLI forms:
 
 | Verb | Reason it is not a chat command |
 |------|---------------------------------|
-| `lucid anchor` | Record days-since milestones (anchors); a consequential lifecycle verb that is echoed and confirmed rather than chat-mapped. |
+| `lucid anchor add` | Record an anchor — `<label> <date> [note…]`, with `--kind <milestone\|quit\|limit\|habit>`, `--allowance N --window D` (a limit: N use-days in any D days; `--window` alone for a habit), and `--note-file`. A consequential lifecycle verb: **echo-and-confirm**. Without `--kind` it is a plain milestone, exactly as before. |
+| `lucid anchor kind` | Reclassify an anchor in place — `<label> <kind> [--allowance N --window D] [--note-file]`; also how a limit's allowance changes. Changes what the numbers mean: **echo-and-confirm**. |
+| `lucid anchor confirm` | Attest each habit's days since its last confirm — `[<label>…] [--through <date>] [--from <date>]`, through yesterday by default; the ack names the span per habit, which the skill says back. Claims days as kept: **echo-and-confirm**, asked once a week naming the real span (`habit.next_confirm_from` in `metrics --json`). |
+| `lucid anchor void` | Correct a misheard `slip`, `use`, `miss`, `confirm` or `graduate` by receipt — `<event-id> [--reason-file <path>]`; append-only, both records kept. Makes the record kinder, so it runs only on an explicit correction: **echo-and-confirm**. A wrong kind is fixed with `anchor kind`, never a void. |
+| `lucid anchor sunset` | Retire an anchor (the record is kept) — `<label> [reason…] [--reason-file <path>]`; `--graduated` retires it as graduated ("this became who I am"). **Echo-and-confirm**; eligibility is surfaced by `metrics`, never acted on without the person. |
+| `lucid anchor rename` | Change an anchor's display label; its id, kind, events and day count carry forward. **Echo-and-confirm**. |
+| `lucid anchor backfill-ids` | Give every pre-id anchor a written id (`--dry-run` previews) — the remedy the event verbs name for a pre-id anchor. An explicit maintenance write, reached by its CLI form. |
 | `lucid recall` | Read-only: browse the archive by era, thread, injury, or pet — each dimension flag takes a **name or key** (a case-insensitive, alias-aware human name or the opaque key) (never writes). |
 | `lucid gallery` | Read-only: browse stored media as a date-ordered timeline (before/after), filterable by an inclusive date window and/or one linked subject (never writes). |
 | `lucid memory` | Record a story from your past — backdated, linked, kept — through explicit subcommands: bare `memory <text>` creates; `memory amend <obs_id>` appends an **append-only** correction (change `--era`/`--certainty`/`--followup` or the body via `--body-file`; `--clear-followup` clears while a bare `--followup ""` is rejected as ambiguous; the `--era` **key** is validated to exist; no field flags is a no-op error; the stable `obs_id` is never re-minted and the original line never rewritten); `memory show <obs_id> [--history]` reads one story folded, with its amendment trail (`original → amended @ recorded_at`). `--caption` is **not** an amend flag (a caption lives on the linked media entry). Amended values fold on every read surface (`recall`/`excavate`/`day`). |
@@ -119,8 +128,12 @@ per-verb precision tiers are specified once in the command reference —
 never re-decided here. In brief:
 
 * **Which verbs carry it.** `log`, `obs`, `attach`, `mode`, `storm`, `memory`,
-  `workout log`, `workout amend` (a re-date of the logged session), and
-  `closeout` (where `--day` is an alias onto `closeout backfill`). `obs` also accepts an inline `@yesterday` token in its value stream.
+  `workout log`, `workout amend` (a re-date of the logged session),
+  `anchor slip` / `use` / `miss`, and `closeout` (where `--day` is an alias onto
+  `closeout backfill`); `anchor confirm` reads the same grammar through
+  `--through` / `--from`. `obs` also accepts an inline `@yesterday` token in its
+  value stream. The anchor event verbs default to the current logical day and
+  reject a partial date or a day before the anchor's start.
 * **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
   04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
   literally), a partial `2014` or `2014-09` (snaps to the period's first day),
@@ -153,16 +166,25 @@ differently:
   change no day record (a capture is additive, never an overwrite — which holds
   for a backdated `--day` capture too), so the skill assembles and runs them as
   soon as it understands the message — no confirmation step.
+* **Anchor captures run immediately too.** `anchor slip`, `anchor use` and
+  `anchor miss` are the **capture tier**: append-only, and logging a lapse can
+  only make the record more honest. The skill runs them as soon as it
+  understands the message, **leads its reply with the receipt** (the
+  `anchorev_…` id), and fixes a mishearing with `anchor void` (echoed, below).
 * **State-writing verbs are echoed and confirmed.** For `closeout`,
   `closeout backfill`, `mode`, and `closeout skip`, the skill **assembles the
   compact command, shows it back, and waits for a one-word confirmation** before
-  running it. The consequential lifecycle verbs `storm`, `anchor`, and `profile`
-  are echoed for the same one-word confirm.
+  running it. The consequential lifecycle verbs `storm` and `profile`, and the
+  anchor verbs that change what a number means — `anchor add`, `kind`,
+  `confirm`, `void`, `sunset` (including `--graduated`) and `rename` — are
+  echoed for the same one-word confirm.
 
-**Ask, don't guess.** When a required piece — a chain-link state, a capacity, or
-an observation field — is missing or ambiguous, the skill asks **one** concise
-question and waits. It never fabricates a link state, a capacity, or any value
-the user did not give.
+**Ask, don't guess.** When a required piece — a chain-link state, a capacity, an
+observation field, a limit use's intent (planned or slip), or which anchor a
+lapse belongs to — is missing or ambiguous, the skill asks **one** concise
+question and waits. It never fabricates a link state, a capacity, an intent, or
+any value the user did not give. It never reclassifies, confirms or graduates an
+anchor on its own: `metrics` only surfaces eligibility and over-allowance.
 
 **The boundaries do not change.** This is a phrasing layer over the same core;
 every guarantee holds exactly as it does on the command line:
@@ -183,8 +205,9 @@ every guarantee holds exactly as it does on the command line:
   `--journal-file` (closeout), `--body-file` (log/obs/memory/thread/gratitude/
   focus), `--catch-file`/`--flip-file` (reframe), `--tone-file`/`--why-file`/
   `--followup-file`/`--caption-file` (memory), `--intent-file`/`--domain-file`/
-  `--note-file` (thread/era/self), `--value-file` (self), `--reason-file`
-  (anchor sunset), `--success-file` (focus), `--input` /
+  `--note-file` (thread/era/self, and anchor add/kind/slip/use/miss),
+  `--value-file` (self), `--reason-file` (anchor sunset/void),
+  `--success-file` (focus), `--input` /
   `--vision-reflection-file` (wheel). **Fallback** for any shell-only
   path: wrap the whole free-text argument in single quotes (or a quoted
   heredoc). Then verify the saved raw id/day when the write is consequential. A
@@ -198,7 +221,8 @@ every guarantee holds exactly as it does on the command line:
   in is a `lucid` verb.
 
 **Coverage.** The voice-first layer maps the everyday verbs plus the live
-practice-lifecycle verbs `storm`, `anchor`, `profile`, and `metrics` (each a
+practice-lifecycle verbs `storm`, `anchor` (all four kinds — `milestone`,
+`quit`, `limit`, `habit` — and every subverb), `profile`, and `metrics` (each a
 documented verb in the [command reference](../../docs/usage/commands.md)). The
 three **provider-backed** Mirror verbs are **shipped** and driven by their
 documented forms: `/ask` runs `lucid ask <question…>` (grounded, cited Q&A over
@@ -237,8 +261,11 @@ annotate` notes one — all append-only, and the stored binary is never touched.
 Under `--json` the write verbs emit a receipt, not prose: `log`, `closeout`
 (and its `amend` / `backfill`), `obs`, `reframe add`, and `focus add` / `retire`
 emit a bare `{receipt_id, logical_date}` JSON object on stdout, while `mode`
-emits the minimal `{mode}` shape. Diagnostics stay on stderr, so the `--json`
-stdout is always parseable.
+emits the minimal `{mode}` shape. The anchor event verbs (`anchor kind`, `slip`,
+`use`, `miss`, `void`) extend that receipt to `{receipt_id, logical_date, label,
+event}`, plus `compat` when a definition record was appended alongside;
+`anchor confirm` emits `{through, confirmed, already_confirmed}`. Diagnostics
+stay on stderr, so the `--json` stdout is always parseable.
 
 ## Verbatim passthrough on Engine verbs
 
@@ -297,7 +324,9 @@ configuration — the witness contact is never named in this skill.
 
 ## Read-only verification
 
-`lucid validate` runs the schema, public-boundary (S-7), diagnostic-language
-(S-8), sanctuary, and doc-link checks read-only. A harness or a contributor
+`lucid validate` runs the schema, anchors, public-boundary (S-7),
+diagnostic-language (S-8), sanctuary, and doc-link checks read-only. The anchors
+check reports an interrupted two-file anchor write as a half-written pair, with
+the command to retry; it never repairs anything. A harness or a contributor
 can run it any time to confirm the boundary holds; it writes nothing and never
 scaffolds the Ledger.

@@ -190,3 +190,41 @@ func TestMetrics_CLI_HumanSurfaceOmitsSunset(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, out, "Days since", "a retired milestone stops counting on the prose surface")
 }
+
+// TestMetricsKindLinesCLI: through the binary's own verbs, `lucid metrics`
+// prints each anchor in its kind's language and `--json` carries kind plus the
+// one matching kind object, while a milestone stays exactly as before. Every
+// label is synthetic (afternoon() logical day 2026-07-05).
+func TestMetricsKindLinesCLI(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+
+	runAnchor(t, "add", "first-gate", "2026-06-05")
+	runAnchor(t, "add", "sobriety", "2026-07-01", "--kind", "quit")
+	runAnchor(t, "add", "late-night-snacks", "2026-06-01", "--kind", "limit", "--allowance", "4", "--window", "90")
+	runAnchor(t, "slip", "sobriety", "--day", "2026-07-03")
+	runAnchor(t, "use", "late-night-snacks", "--planned", "--day", "2026-07-02")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "metrics")
+	require.NoError(t, err)
+	assert.Contains(t, out, "Days since first-gate: 30.\n")
+	assert.Contains(t, out, "Days since sobriety: 2 (longest 2, 1 slip).\n")
+	assert.Contains(t, out, "late-night-snacks: 1 of 4 in the last 90 days (1 planned, 0 slips); 3 days since last.\n")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "metrics", "--json")
+	require.NoError(t, err)
+	entries, ok := jsonObject(t, out)["anchors"].([]any)
+	require.True(t, ok, "anchors[] must be an array")
+	keys := map[string][]string{}
+	for _, e := range entries {
+		entry, ok := e.(map[string]any)
+		require.True(t, ok)
+		label, _ := entry["label"].(string)
+		keys[label] = sortedKeys(entry)
+	}
+	assert.Equal(t, map[string][]string{
+		"first-gate":        {"date", "days_since", "id", "label"},
+		"late-night-snacks": {"date", "days_since", "id", "kind", "label", "limit"},
+		"sobriety":          {"date", "days_since", "id", "kind", "label", "quit"},
+	}, keys)
+}

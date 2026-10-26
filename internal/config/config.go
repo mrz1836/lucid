@@ -163,6 +163,16 @@ const (
 	WitnessReportModeAuto    = "auto"
 )
 
+// Witness-report anchor detail modes. Summary — the default, and what an empty
+// or absent key reads as — shows anchors only as note-free, date-free watch-out
+// lines. Full is the explicit, global opt-in that adds a code-rendered,
+// verbatim Anchor detail section (the week's anchor events, notes included)
+// that is never sent to the model and never scanned (ADR-0013 §7).
+const (
+	WitnessReportAnchorDetailSummary = "summary"
+	WitnessReportAnchorDetailFull    = "full"
+)
+
 // WitnessReportConfig configures the weekly witness report — the Mirror-side,
 // model-allowed job that composes and delivers a friend-facing weekly
 // accountability report to the witness channel (witness-report.md). Like the
@@ -182,6 +192,11 @@ const (
 // optional curated friend-asks override; empty leaves the report's auto-drafted
 // asks in place. Model optionally overrides provider.model for the compose call;
 // empty inherits the provider default (data-model.md §"lucid.json").
+// AnchorDetail is summary (the default; empty reads the same) or full — the
+// opt-in that wires the one note-reaching reader and adds the verbatim Anchor
+// detail section (usage/witness-report.md §"Anchors in the report"). An older
+// binary ignores the key, because lucid.json decoding is non-strict, and so
+// reads as summary.
 type WitnessReportConfig struct {
 	Enabled      bool   `json:"enabled"`
 	Mode         string `json:"mode"`
@@ -191,6 +206,71 @@ type WitnessReportConfig struct {
 	Template     string `json:"template"`
 	AsksFile     string `json:"asks_file"`
 	Model        string `json:"model"`
+	AnchorDetail string `json:"anchor_detail"`
+}
+
+// AnchorDetailFull reports whether the explicit full anchor-detail opt-in is
+// on. Anything else — summary, or an absent key — is summary, so a config
+// that never mentions the key keeps the by-construction privacy.
+func (c WitnessReportConfig) AnchorDetailFull() bool {
+	return c.AnchorDetail == WitnessReportAnchorDetailFull
+}
+
+// The anchors block's defaults and floors (usage/commands.md §metrics;
+// engine-module.md §"Anchor event store" → "Thresholds").
+const (
+	// DefaultAnchorMissAlarm is the habit miss-run length that alarms: "never
+	// miss twice". It is also the floor — a 1 would let a single isolated miss
+	// alarm.
+	DefaultAnchorMissAlarm = 2
+	// DefaultAnchorGraduationDays is the accounted-day bar a habit clears to be
+	// surfaced as eligible to graduate.
+	DefaultAnchorGraduationDays = 90
+)
+
+// AnchorsConfig carries the two anchor thresholds the Engine's habit math
+// reads, passed in as parameters (ADR-0013 §4). MissAlarm is the miss-run
+// length that alarms (at least 2, so one isolated miss can never alarm);
+// GraduationDays is the accounted days since the last alarm run a habit needs
+// to be surfaced as eligible to graduate (at least 1). There is no per-anchor
+// override. The block is optional: an absent one reads the defaults, and an
+// older binary ignores it, because lucid.json decoding is non-strict.
+type AnchorsConfig struct {
+	MissAlarm      int `json:"miss_alarm"`
+	GraduationDays int `json:"graduation_days"`
+}
+
+// DefaultAnchors returns the documented anchors defaults.
+func DefaultAnchors() AnchorsConfig {
+	return AnchorsConfig{MissAlarm: DefaultAnchorMissAlarm, GraduationDays: DefaultAnchorGraduationDays}
+}
+
+// OrDefault returns a, or [DefaultAnchors] when a is the zero value — a config
+// that never carried the block (one built in code rather than loaded). A
+// loaded lucid.json is pre-seeded by [Unmarshal], so a missing block or key
+// already reads its default there.
+func (a AnchorsConfig) OrDefault() AnchorsConfig {
+	if a == (AnchorsConfig{}) {
+		return DefaultAnchors()
+	}
+	return a
+}
+
+// validate rejects a threshold below its floor, naming the field. Unlike
+// gratitude.match these are not clipped: a miss alarm of 1 would let one
+// isolated miss alarm, which is a choice to refuse, not a typo to coerce. The
+// Engine applies the same floors on its own, so a bad value that slips past
+// can still never alarm a single miss.
+func (a AnchorsConfig) validate() error {
+	a = a.OrDefault()
+	if a.MissAlarm < DefaultAnchorMissAlarm {
+		return fmt.Errorf("config: anchors.miss_alarm must be >= %d (one isolated miss never alarms), got %d",
+			DefaultAnchorMissAlarm, a.MissAlarm)
+	}
+	if a.GraduationDays < 1 {
+		return fmt.Errorf("config: anchors.graduation_days must be >= 1, got %d", a.GraduationDays)
+	}
+	return nil
 }
 
 // GratitudeConfig configures the gratitude tally (gratitude.md §7, §9). Today it
@@ -430,6 +510,11 @@ type Config struct {
 	Companion                CompanionConfig     `json:"companion"`
 	Workout                  WorkoutConfig       `json:"workout"`
 	WitnessReport            WitnessReportConfig `json:"witness_report"`
+	// Anchors carries the anchor kinds' two thresholds (ADR-0013). Like
+	// Gratitude, [Unmarshal] pre-seeds it and [Config.Clip] fills an absent
+	// block, so a lucid.json written before the block existed reads the
+	// defaults.
+	Anchors AnchorsConfig `json:"anchors"`
 	// Gratitude tunes the gratitude tally's three-tier match (gratitude.md §7).
 	// Unlike the off-by-default feature blocks its zero value is not a usable
 	// default, so [Unmarshal] pre-seeds it and [Config.Clip] fills an absent
@@ -507,10 +592,15 @@ func Default() Config {
 		// companion until an operator points the prompt paths at their own files
 		// and flips enabled true; graduating preview → auto is then one key.
 		WitnessReport: WitnessReportConfig{
-			Mode:    WitnessReportModePreview,
-			Time:    "09:00",
-			Weekday: 1,
+			Mode:         WitnessReportModePreview,
+			Time:         "09:00",
+			Weekday:      1,
+			AnchorDetail: WitnessReportAnchorDetailSummary,
 		},
+		// The anchor thresholds ship their documented defaults: never miss
+		// twice, and a habit is surfaced as eligible to graduate after 90
+		// accounted days.
+		Anchors: DefaultAnchors(),
 		// The gratitude match ships its documented conservative cutoffs, with the
 		// optional by-meaning tier on a local backend (gratitude.md §9).
 		Gratitude: GratitudeConfig{Match: DefaultGratitudeMatch()},
@@ -615,6 +705,11 @@ func (c Config) Clip() (Config, []string) {
 		warnings = append(warnings, fmt.Sprintf("%s — clipped to %s", is.reason, is.clippedTo))
 	}
 
+	// An absent anchors block reads its defaults silently, like an absent
+	// gratitude block; an out-of-range threshold is a Validate error, not a
+	// clip.
+	out.Anchors = out.Anchors.OrDefault()
+
 	return out, warnings
 }
 
@@ -661,6 +756,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.WitnessReport.validate(); err != nil {
+		return err
+	}
+	if err := c.Anchors.validate(); err != nil {
 		return err
 	}
 	if err := c.Gratitude.Match.validate(); err != nil {
@@ -756,9 +854,20 @@ func (c WorkoutConfig) validate() error {
 // rather than silently posting to the wrong channel or building a bogus weekly
 // cron. asks_file is optional (an unset curated-asks override is valid) and the
 // optional model override is unconstrained — an unknown model surfaces at compose
-// time from the provider, exactly as provider.model does. There is no clip rule;
-// no witness-report bound is documented as coercible.
+// time from the provider, exactly as provider.model does. anchor_detail is the
+// one key checked whether or not the block is enabled: it must be summary, full,
+// or absent. There is no clip rule; no witness-report bound is documented as
+// coercible.
 func (c WitnessReportConfig) validate() error {
+	// anchor_detail is checked even on a disabled block: it is a privacy
+	// choice, so a typo is never silently read as either mode. Empty is the
+	// absent key, which reads as summary.
+	switch c.AnchorDetail {
+	case "", WitnessReportAnchorDetailSummary, WitnessReportAnchorDetailFull:
+	default:
+		return fmt.Errorf("config: witness_report.anchor_detail %q must be %q or %q",
+			c.AnchorDetail, WitnessReportAnchorDetailSummary, WitnessReportAnchorDetailFull)
+	}
 	if !c.Enabled {
 		return nil
 	}
@@ -816,12 +925,12 @@ func (c Config) Marshal() ([]byte, error) {
 
 // Unmarshal parses lucid.json bytes into a Config. It does not clip or
 // validate — callers decide when to apply [Clip] and [Validate]. The gratitude
-// block is pre-seeded with its defaults before decoding, so a file written before
-// the block existed — or one that sets only some gratitude.match keys — reads the
-// documented default for every missing key; a missing key is not an out-of-range
-// value, so it raises no clip warning and never rewrites the file.
+// and anchors blocks are pre-seeded with their defaults before decoding, so a
+// file written before a block existed — or one that sets only some of its keys —
+// reads the documented default for every missing key; a missing key is not an
+// out-of-range value, so it raises no clip warning and never rewrites the file.
 func Unmarshal(b []byte) (Config, error) {
-	c := Config{Gratitude: GratitudeConfig{Match: DefaultGratitudeMatch()}}
+	c := Config{Gratitude: GratitudeConfig{Match: DefaultGratitudeMatch()}, Anchors: DefaultAnchors()}
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("config: unmarshal: %w", err)
 	}

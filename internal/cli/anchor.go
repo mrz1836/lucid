@@ -28,8 +28,11 @@ var errAnchorNotRecorded = errors.New("lucid: anchor not recorded")
 // [router.AnchorRejectedError] gates the state of the store. Anything else is a
 // real failure and travels on unchanged.
 func anchorRejection(cmd *cobra.Command, err error) error {
-	var rejected *router.AnchorRejectedError
-	if errors.Is(err, router.ErrAnchorRejected) || errors.As(err, &rejected) {
+	var (
+		rejected *router.AnchorRejectedError
+		day      *router.DayRejectedError
+	)
+	if errors.Is(err, router.ErrAnchorRejected) || errors.As(err, &rejected) || errors.As(err, &day) {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 		return errAnchorNotRecorded
 	}
@@ -37,21 +40,34 @@ func anchorRejection(cmd *cobra.Command, err error) error {
 }
 
 // newAnchorCmd wires `lucid anchor` (engine-module.md §Commands): the parent
-// group for the days-since milestone verbs — add, sunset, and rename.
+// group for the anchor verbs — add, the kind and event verbs, sunset, and
+// rename.
 func newAnchorCmd() *cobra.Command {
 	parent := &cobra.Command{
 		Use:   "anchor",
-		Short: "Record days-since milestones (anchors)",
-		Long: `anchor groups the days-since milestone verbs. A milestone is a labeled
-civil date the metrics surface counts elapsed days from — a cessation or a
-gate the practice measures against. Each anchor carries a stable id and the
-label is a display name, so a name can be corrected or renamed without forking
-the milestone. Anchors are append-only: a correction, a reset, a retirement,
-and a rename are all new dated records, and the latest record per identity
-wins.`,
+		Short: "Record anchors — milestones, quits, limits and habits — and their events",
+		Long: `anchor groups the anchor verbs. An anchor is a dated thing you want an
+honest number for, and every anchor has a kind: a milestone (days since or
+toward a date that matters), a quit (days since the last slip), a limit (use-days
+spent of an allowance of N per rolling W days) or a habit (kept days out of
+accounted days). An anchor with no kind recorded is a milestone, exactly what
+every anchor was before kinds existed.
+
+Each anchor carries a stable id and the label is a display name, so a name can
+be corrected or renamed without forking the anchor. Everything is append-only:
+a correction, a reset, a retirement, a rename, a reclassify and every slip,
+use, miss, confirm and void are new dated records, and nothing is ever deleted
+or rewritten. Every event verb returns its event id as the receipt; ` + "`anchor void`" + `
+corrects a mistaken event.`,
 		Args: cobra.NoArgs,
 	}
 	parent.AddCommand(newAnchorAddCmd())
+	parent.AddCommand(newAnchorKindCmd())
+	parent.AddCommand(newAnchorSlipCmd())
+	parent.AddCommand(newAnchorUseCmd())
+	parent.AddCommand(newAnchorMissCmd())
+	parent.AddCommand(newAnchorConfirmCmd())
+	parent.AddCommand(newAnchorVoidCmd())
 	parent.AddCommand(newAnchorSunsetCmd())
 	parent.AddCommand(newAnchorRenameCmd())
 	parent.AddCommand(newAnchorBackfillIDsCmd())
@@ -153,24 +169,36 @@ func anchorBackfillJSON(res router.BackfillAnchorIDsResult) anchorBackfillView {
 // active anchor already holds corrects *that* anchor, and a label whose only
 // holder was retired starts a new one, with an ack that names the earlier
 // retirement.
+//
+// --kind records a new anchor of that kind: the definition plus its first kind
+// event. Without it the verb is exactly what it has always been.
 func newAnchorAddCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "add <label> <date> [note...]",
-		Short: "Record a days-since anchor (a labeled civil-date milestone)",
-		Long: `add records one days-since milestone: a label, a date, and an optional
-trailing note. The date reads the shared date grammar (usage/commands.md
-"Backdating with --day"), so ` + "`@yesterday`" + ` works alongside a civil YYYY-MM-DD,
-with two deliberate carve-outs. A future date is accepted — an anchor may be a
-forward commitment, a date you count toward rather than only since, and this is
-the one date surface with no future ceiling. A partial date (2014, 2014-09) is
-rejected: the whole output is a precise day count, and counting from a guessed
-January 1st would report a confident wrong number.
+		Short: "Record an anchor (a labeled civil date), optionally of a kind",
+		Long: `add records one anchor: a label, a date, and an optional trailing note
+(or --note-file, so an unquoted & or ; can never cut it short). The date reads
+the shared date grammar (usage/commands.md "Backdating with --day"), so
+` + "`@yesterday`" + ` works alongside a civil YYYY-MM-DD, with two deliberate carve-outs.
+A future date is accepted — an anchor may be a forward commitment, a date you
+count toward rather than only since, and this is the one date surface with no
+future ceiling. A partial date (2014, 2014-09) is rejected: the whole output is
+a precise day count, and counting from a guessed January 1st would report a
+confident wrong number.
 
 Recording a label an active anchor already holds appends under that same
 anchor and the latest record wins, so a mistyped date and a genuine reset are
-the same operation. Recording a label whose only holder was sunset starts a new
-milestone with its own id — a freed name, not a resumed count — and the ack
-names the earlier retirement.`,
+the same operation — the correction path for every kind. Recording a label
+whose only holder was sunset starts a new anchor with its own id — a freed
+name, not a resumed count — and the ack names the earlier retirement.
+
+--kind <kind> (milestone, quit, limit or habit) records the same definition
+plus the anchor's first kind event, whose id is the receipt. A limit needs both
+--allowance N and --window D ("N use-days in any D days"); a habit may take
+--window D (default 30); a milestone or a quit takes neither. The kind event's
+day is today's logical day, so a habit's confirmations start today. --kind on a
+label an active anchor already holds is rejected: reclassify it in place with
+` + "`anchor kind`" + `.`,
 		Args: cobra.MinimumNArgs(2),
 		Example: `  # Record a cessation milestone.
   lucid anchor add sobriety 2026-01-01
@@ -181,12 +209,22 @@ names the earlier retirement.`,
   # A forward commitment — a date you count toward (no future ceiling here).
   lucid anchor add gate 2027-01-01
 
-  # Add a note (trailing words are joined).
+  # Add a note (trailing words are joined, or read it from a file).
   lucid anchor add gate 2026-03-15 first ninety-day gate
+  lucid anchor add gate 2026-03-15 --note-file /tmp/gate-note.txt
+
+  # Record an anchor of a kind.
+  lucid anchor add sobriety 2026-01-15 --kind quit
+  lucid anchor add late-night-snacks 2026-01-05 --kind limit --allowance 4 --window 90
+  lucid anchor add morning-walk 2026-01-05 --kind habit
 
   # Machine-readable output for a harness.
   lucid anchor add sobriety 2026-01-01 --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			kind, allowance, window, err := anchorKindFlags(cmd, "")
+			if err != nil {
+				return err
+			}
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
@@ -199,11 +237,18 @@ names the earlier retirement.`,
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), err.Error())
 				return errAnchorNotRecorded
 			}
+			note, err := resolvePrimaryText(cmd, "anchor add", anchorFlagNoteFile, strings.Join(args[2:], " "))
+			if err != nil {
+				return emitErr(cmd, err)
+			}
 			res, err := r.AnchorAdd(router.AnchorAddRequest{
-				Label: args[0],
-				Date:  date,
-				Note:  strings.Join(args[2:], " "),
-				Now:   now,
+				Label:     args[0],
+				Date:      date,
+				Note:      note,
+				Kind:      kind,
+				Allowance: allowance,
+				Window:    window,
+				Now:       now,
 			})
 			if err != nil {
 				return anchorRejection(cmd, err)
@@ -213,33 +258,55 @@ names the earlier retirement.`,
 				// anchor recorded before ids existed carries no stored id, so
 				// marshaling the record would publish an empty one; the
 				// projection synthesizes the legacy: address instead.
+				if res.Event != nil {
+					return writeJSON(cmd.OutOrStdout(), anchorAddKindView{
+						AnchorRecord: engine.ProjectAnchor(res.Anchor),
+						Kind:         res.Event.Kind,
+						ReceiptID:    res.Event.ID,
+						Event:        *res.Event,
+					})
+				}
 				return writeJSON(cmd.OutOrStdout(), engine.ProjectAnchor(res.Anchor))
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
 			return nil
 		},
 	}
+	cmd.Flags().String(anchorFlagKind, "", "Record the anchor as this kind: milestone, quit, limit or habit")
+	addAnchorParamFlags(cmd)
+	cmd.Flags().String(anchorFlagNoteFile, "", "Read the note from this file (or - for stdin) instead of trailing words")
+	return cmd
 }
 
-// newAnchorSunsetCmd builds the `sunset` child: retire the milestone a label
+// newAnchorSunsetCmd builds the `sunset` child: retire the anchor a label
 // names. The retirement is an append like every other anchor write, so nothing
 // is deleted and the record stays auditable. Human-first prose ack by default;
 // the appended record as JSON under --json for scripts (ADR-0007). A label no
 // active anchor holds is rejected with the fixed reason on stderr and a
-// non-zero exit, and nothing is appended.
+// non-zero exit, and nothing is appended. --graduated retires it as graduated:
+// a graduate event, then the same plain sunset record.
 func newAnchorSunsetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sunset <label> [reason...]",
-		Short: "Retire an anchor from the counting surfaces (the record is kept)",
-		Long: `sunset retires a days-since milestone: it stops counting, and nothing is
-deleted. The store is append-only, so a retirement is a new record mirroring
-the anchor plus the optional trailing reason. The milestone stays in the
-history and appears in ` + "`metrics --json`" + ` under anchors_sunset[]; it drops out
-of the metrics prose, out of anchors[], and out of the witness aging-anchor
-check.
+		Short: "Retire an anchor from the counting surfaces, or graduate it (the record is kept)",
+		Long: `sunset retires an anchor: it stops counting, and nothing is deleted. The
+store is append-only, so a retirement is a new record mirroring the anchor plus
+the optional trailing reason (or --reason-file). The anchor stays in the
+history and appears in ` + "`metrics --json`" + ` under anchors_sunset[]; it drops out of
+the metrics prose, out of anchors[], and out of the witness report's
+watch-outs.
+
+--graduated retires it as graduated — "this became who I am", which is
+different from an abandoned sunset. It writes a graduate event, whose id is the
+receipt, then the very same plain sunset record (never a new state value, so an
+older lucid simply shows an ordinary sunset), and the anchor appears in
+` + "`metrics --json`" + ` under anchors_graduated[] instead of anchors_sunset[]. Any kind can
+graduate; ` + "`lucid metrics`" + ` surfaces a habit that is eligible, and the decision is
+always yours. It needs a durable id: an anchor recorded before ids existed
+needs ` + "`lucid anchor backfill-ids`" + ` first.
 
 A bare label is enough, because at most one active anchor holds one. Recording
-the label again later is supported and starts a new milestone under that freed
+the label again later is supported and starts a new anchor under that freed
 name, with its own id, so the two runs stay distinct in the ledger. A label no
 active anchor holds — never recorded, or already retired — is rejected with the
 recorded labels named, and nothing is appended.`,
@@ -250,6 +317,9 @@ recorded labels named, and nothing is appended.`,
   # Say why (trailing words are joined into the record's note).
   lucid anchor sunset gate-30 mistyped label
 
+  # A habit that became who you are.
+  lucid anchor sunset morning-walk --graduated --reason-file /tmp/why.txt
+
   # Machine-readable output for a harness.
   lucid anchor sunset gate-30 --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -259,19 +329,28 @@ recorded labels named, and nothing is appended.`,
 			}
 			// --reason-file supplies the retirement reason off the command line;
 			// the trailing positional words are the fallback source.
-			reason, err := resolvePrimaryText(cmd, "anchor sunset", "reason-file", strings.Join(args[1:], " "))
+			reason, err := resolvePrimaryText(cmd, "anchor sunset", anchorFlagReasonFile, strings.Join(args[1:], " "))
 			if err != nil {
 				return emitErr(cmd, err)
 			}
+			graduated, _ := cmd.Flags().GetBool(anchorFlagGraduated)
 			res, err := r.AnchorSunset(router.AnchorSunsetRequest{
-				Label:  args[0],
-				Reason: reason,
-				Now:    clockNow(),
+				Label:     args[0],
+				Reason:    reason,
+				Graduated: graduated,
+				Now:       clockNow(),
 			})
 			if err != nil {
 				return anchorRejection(cmd, err)
 			}
 			if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
+				if res.Event != nil {
+					return writeJSON(cmd.OutOrStdout(), anchorSunsetGraduatedView{
+						AnchorRecord: engine.ProjectAnchor(res.Anchor),
+						ReceiptID:    res.Event.ID,
+						Event:        *res.Event,
+					})
+				}
 				return writeJSON(cmd.OutOrStdout(), engine.ProjectAnchor(res.Anchor))
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), res.Ack)
@@ -279,9 +358,11 @@ recorded labels named, and nothing is appended.`,
 		},
 	}
 	cmd.Flags().String(
-		"reason-file", "",
+		anchorFlagReasonFile, "",
 		"Read the retirement reason from this file (or - for stdin) instead of positional words",
 	)
+	cmd.Flags().Bool(anchorFlagGraduated, false,
+		"Retire it as graduated (\"this became who I am\") rather than as a plain sunset")
 	return cmd
 }
 

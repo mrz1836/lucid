@@ -3,10 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrz1836/lucid/internal/config"
 	"github.com/mrz1836/lucid/internal/notify"
+	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/witnessreport"
 )
 
@@ -137,6 +140,7 @@ func runWitnessReport(cmd *cobra.Command, deliver bool) error {
 		Provider:     cfg.Provider,
 		Numbers:      r,
 		Records:      r.Store(),
+		AnchorDetail: witnessAnchorDetail(wr, r),
 		Build:        buildProvider,
 	}
 
@@ -149,6 +153,19 @@ func runWitnessReport(cmd *cobra.Command, deliver bool) error {
 		return renderWitnessDryRun(cmd, report)
 	}
 	return deliverWitnessReport(cmd, wr.Mode, report)
+}
+
+// witnessAnchorDetail returns the opt-in anchor-detail reader for a witness
+// report — the router, whose AnchorDetail reads the week's anchor events with
+// their notes — only when witness_report.anchor_detail is full. In summary mode
+// (the default, and an absent key) it returns a nil interface, so the composer
+// holds no reader that can reach a note at all. The on-demand command and the
+// scheduler's weekly node both build their reader here.
+func witnessAnchorDetail(wr config.WitnessReportConfig, r *router.Router) witnessreport.AnchorDetailReader {
+	if !wr.AnchorDetailFull() {
+		return nil
+	}
+	return r
 }
 
 // renderWitnessDryRun prints a composed report for a person to read: with --json
@@ -172,13 +189,16 @@ func renderWitnessDryRun(cmd *cobra.Command, r witnessreport.Report) error {
 	return nil
 }
 
-// deliverWitnessReport renders the composed report as a rich embed and posts it to
+// deliverWitnessReport renders the composed report as rich embeds and posts them to
 // the channel witness_report.mode selects — preview to the operator's own user
-// channel, auto to the friend-facing witness channel — then read-back-verifies the
-// created message so a delivery is never reported without proof it landed. This is
-// the minimal manual delivery path; Phase 5's weekly node wraps the same
-// SendEmbedReturningID + VerifyPresent shape with per-week receipt idempotency and
-// missed-fire handling.
+// channel, auto to the friend-facing witness channel — read-back-verifying each
+// created message so a delivery is never reported without proof it landed. A
+// report is one message unless full anchor detail outgrew it; then every
+// numbered continuation is sent and read back in order through the same
+// transport, and a failure partway is a loud error naming how many parts
+// verified. This is the minimal manual delivery path; the weekly node wraps the
+// same SendEmbedReturningID + VerifyPresent shape with per-week receipt
+// idempotency, resumable part progress, and missed-fire handling.
 func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Report) error {
 	channel, err := witnessreport.ChannelForMode(mode)
 	if err != nil {
@@ -188,17 +208,39 @@ func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Repor
 	if err != nil {
 		return fmt.Errorf("lucid witness report: %w", err)
 	}
-	id, err := d.SendEmbedReturningID(cmd.Context(), channel, witnessreport.RenderEmbed(r))
-	if err != nil {
-		return fmt.Errorf("lucid witness report: deliver: %w", err)
-	}
-	if err := d.VerifyPresent(cmd.Context(), channel, id); err != nil {
-		return fmt.Errorf("lucid witness report: read-back verify: %w", err)
+	parts := witnessreport.RenderEmbeds(r)
+	ids := make([]string, 0, len(parts))
+	for i, part := range parts {
+		id, err := d.SendEmbedReturningID(cmd.Context(), channel, part)
+		if err != nil {
+			return witnessDeliveryError("deliver", i, len(parts), ids, err)
+		}
+		if err := d.VerifyPresent(cmd.Context(), channel, id); err != nil {
+			return witnessDeliveryError("read-back verify", i, len(parts), ids, err)
+		}
+		ids = append(ids, id)
 	}
 	note := ""
 	if r.Fallback {
 		note = " (deterministic fallback)"
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "witness report delivered to the %s channel%s — message %s.\n", channel, note, id)
+	if len(ids) == 1 {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "witness report delivered to the %s channel%s — message %s.\n", channel, note, ids[0])
+		return nil
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "witness report delivered to the %s channel%s — %d messages: %s.\n",
+		channel, note, len(ids), strings.Join(ids, ", "))
 	return nil
+}
+
+// witnessDeliveryError is the loud error for a failed send or read-back. A
+// single-message report keeps its original wording; for a multi-message report
+// it names the part that failed and how many verified before it, so a partial
+// delivery is never mistaken for a whole one or for nothing at all.
+func witnessDeliveryError(step string, i, total int, verified []string, err error) error {
+	if total == 1 {
+		return fmt.Errorf("lucid witness report: %s: %w", step, err)
+	}
+	return fmt.Errorf("lucid witness report: partial delivery — %d of %d parts verified (%s): %s part %d of %d: %w",
+		len(verified), total, strings.Join(verified, ", "), step, i+1, total, err)
 }

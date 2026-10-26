@@ -37,7 +37,7 @@ func TestPartitionAnchors_SortsBothSurfacesByLabelThenID(t *testing.T) {
 		{ID: "sunset_x1", Label: "xray", Date: "2026-02-01", RecordedAt: "2026-04-08T09:00:00Z", State: AnchorStateSunset},
 	}
 
-	active, sunset := partitionAnchors(anchors, logicalDay)
+	active, sunset, _ := partitionAnchors(anchors, logicalDay, anchorKindView{})
 
 	require.Len(t, active, 3)
 	assert.Equal(t, []string{"anchor_a1", "anchor_a2", "anchor_b"},

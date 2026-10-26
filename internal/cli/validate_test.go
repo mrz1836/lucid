@@ -4,14 +4,17 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/observations"
 	"github.com/mrz1836/lucid/internal/storage"
+	"github.com/mrz1836/lucid/internal/validate"
 )
 
 // TestValidateCLI_CleanRepo runs `lucid validate` from the checkout with no
@@ -243,4 +246,93 @@ func TestValidateCLI_HistoricalGratitudeCollisions(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(addOut), &payload))
 	assert.Equal(t, "grat_2026_04_20_002", payload.Receipt, "a new receipt lands above the shared historical id")
+}
+
+// TestValidateCLI_AnchorKindsClean: every anchor verb, written through the
+// command tree, leaves a Ledger the anchors check sweeps clean — kinds,
+// slips, uses, misses, confirms, a void and a graduation, two-file writes
+// included. A real write never reads as a defect.
+func TestValidateCLI_AnchorKindsClean(t *testing.T) {
+	isolatedHome(t)
+	withClock(t, afternoon())
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "init")
+	require.NoError(t, err)
+
+	runAnchor(t, "add", "sobriety", "2026-01-01", "--kind", "quit")
+	slip := jsonObject(t, runAnchor(t, "slip", "sobriety", "--day", "2026-03-01", "--json"))
+	runAnchor(t, "slip", "sobriety", "--day", "2026-05-01")
+	runAnchor(t, "add", "late-night-snacks", "2026-01-01", "--kind", "limit", "--allowance", "4", "--window", "90")
+	runAnchor(t, "use", "late-night-snacks", "--planned", "--day", "2026-06-01")
+	runAnchor(t, "use", "late-night-snacks", "--slip", "--day", "2026-06-20")
+	runAnchor(t, "add", "first-gate", "2026-02-01")
+	runAnchor(t, "kind", "first-gate", "quit")
+	runAnchor(t, "add", "morning-walk", "2026-06-01", "--kind", "habit")
+	runAnchor(t, "miss", "morning-walk", "--day", "2026-07-02")
+	runAnchor(t, "confirm", "morning-walk", "--from", "2026-06-01", "--through", "2026-07-04")
+	runAnchor(t, "void", slip["receipt_id"].(string))
+	runAnchor(t, "sunset", "morning-walk", "--graduated")
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate", "--json")
+	require.NoError(t, err, out)
+	var payload validateJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.True(t, payload.OK)
+	assert.Contains(t, payload.Ran, validate.CheckAnchors)
+	for _, f := range payload.Findings {
+		assert.NotEqual(t, validate.CheckAnchors, f.Check, "unexpected anchors finding: %+v", f)
+	}
+}
+
+// TestValidateCLI_HalfWrittenPairRetryFinishes is the recovery path end to
+// end: a slip interrupted after its pair intent landed is reported as a
+// half-written pair naming the retry, running exactly that command finishes
+// the write, and the sweep is clean again. validate itself repairs nothing.
+func TestValidateCLI_HalfWrittenPairRetryFinishes(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, afternoon())
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "init")
+	require.NoError(t, err)
+	runAnchor(t, "add", "sobriety", "2026-01-01", "--kind", "quit")
+
+	// The intent a slip on 2026-03-01 reserves before either half — and then
+	// the crash: neither the re-date nor the slip event lands.
+	store := storage.New(home)
+	anchors := readAnchorLog(t, home)
+	def := anchors.History[len(anchors.History)-1]
+	const stamp = "2026-07-05T13:00:00Z"
+	compat := def
+	compat.Date, compat.RecordedAt = "2026-03-01", stamp
+	event := engine.AnchorEvent{
+		ID:         engine.NextAnchorEventID(readAnchorEvents(t, home), afternoon()),
+		AnchorID:   def.ID,
+		Type:       engine.AnchorEventSlip,
+		Day:        "2026-03-01",
+		RecordedAt: stamp,
+	}
+	require.NoError(t, store.AppendAnchorPairIntent(engine.AnchorPairIntent{
+		Order: engine.AnchorPairCompatFirst, Event: event, Compat: compat,
+	}))
+	before, err := os.ReadFile(filepath.Join(home, "engine", "anchor_events.json"))
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate")
+	require.ErrorIs(t, err, errValidationFailed)
+	want := event.ID + ": half-written pair — the re-dated record and the slip event are missing; " +
+		"retry lucid anchor slip sobriety --day 2026-03-01"
+	assert.Contains(t, out, "error anchors")
+	assert.Contains(t, out, want)
+
+	after, err := os.ReadFile(filepath.Join(home, "engine", "anchor_events.json"))
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "validate repairs nothing")
+	assert.Equal(t, anchors, readAnchorLog(t, home), "validate repairs nothing")
+
+	retry := strings.Fields(want[strings.Index(want, "retry lucid ")+len("retry lucid "):])
+	retryOut, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, retry...)
+	require.NoError(t, err, "stderr: %s", stderr)
+	assert.Contains(t, retryOut, event.ID, "the retry returns the original receipt")
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "validate")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "validate: clean")
 }

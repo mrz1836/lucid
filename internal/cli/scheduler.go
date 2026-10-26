@@ -521,12 +521,13 @@ func runSchedulerWithCompanions(
 			// the engine day records from the store; it never suppresses the Engine
 			// (an additive witness-channel send, like the workout slot).
 			return witnessreport.Run(gctx, witnessreport.Options{
-				Store:    store,
-				Config:   cfg.WitnessReport,
-				Provider: cfg.Provider,
-				Numbers:  r,
-				Records:  store,
-				Notifier: notifier,
+				Store:        store,
+				Config:       cfg.WitnessReport,
+				Provider:     cfg.Provider,
+				Numbers:      r,
+				Records:      store,
+				AnchorDetail: witnessAnchorDetail(cfg.WitnessReport, r),
+				Notifier:     notifier,
 			})
 		})
 	}

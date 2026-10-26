@@ -299,8 +299,9 @@ to the storage table below.
 Every verb that stamps a logical day reads one date grammar with two
 failure tiers ([`../usage/commands.md`](../usage/commands.md#backdating-with---day)).
 A **deliberate flag** (`--day`, `--start`, `--end`, `--onset`, `anchor
-add`'s positional date) is **strict**: a value the grammar cannot read,
-or one that breaks a documented rule, is rejected **before any write**,
+add`'s positional date, `anchor confirm`'s `--through` / `--from`) is
+**strict**: a value the grammar cannot read, or one that breaks a
+documented rule, is rejected **before any write**,
 so every row below has no disk effect and the message ends with the
 nothing-was-saved clause of St-1. An **inline `@`-token in `obs` prose**
 is permissive and appears here only as the row that says so: capture is
@@ -318,24 +319,43 @@ total (P10), and an inline date never costs a capture.
 | B-8 | A backdated `storm` event dated before the last recorded storm event | Reject — storm history folds in order, so an out-of-order append would corrupt the standing computation rather than fail loudly. | "That's before the last recorded storm event." | None |
 | B-9 | An unreadable `@`-token inside an `obs` micro-log line | **Not** an error — the permissive tier. The token stays in the note verbatim and the event is written; only a deliberate flag blocks. | The ordinary capture ack. | Event written |
 
-### Anchors (the sunset / rename verbs — deterministic, agent-free)
+### Anchors (kinds, events and the sunset/rename verbs — deterministic, agent-free)
 
 The rows above cover a *date* the grammar cannot read. These cover the
 **state** of an anchor the verb is aimed at — a label nothing holds, a
-milestone already retired, a name already in use. `anchor sunset` and
-`anchor rename` take no date, so none of the `B-` rows applies to them.
-Both are on the **strict tier**: the rejection is decided from the folded
-store *before* any append, the copy is fixed and model-free, the exit is
-non-zero, and every row below ends with the nothing-was-saved clause of
+milestone already retired, a name already in use, an event the anchor's
+kind does not take, an unfinished two-file write — and the stored records
+`lucid validate` finds malformed ([ADR-0013](../adr/0013-anchor-kinds.md),
+[`engine-module.md`](engine-module.md) §"Anchor event store"). `anchor
+sunset`, `anchor rename`, `anchor kind` and `anchor void` take no date, so
+none of the `B-` rows applies to them; `anchor slip`, `anchor use` and
+`anchor miss` take `--day`, and `anchor confirm` takes `--through` and
+`--from`, so B-1 and B-2 apply to those as well. Every verb row is on the
+**strict tier**: the rejection is decided from the folded store and the
+anchor event store *before* any append, the copy is fixed and model-free, the
+exit is non-zero, and the message ends with the nothing-was-saved clause of
 St-1. "None" in the disk column means **no record is appended to
-`history[]`** — the silent, idempotent engine scaffold still runs, as it
-does for a plain `metrics` read.
+`history[]`, and no event or pair intent is appended to
+`engine/anchor_events.json`** — a rejected verb never creates that file; the
+silent, idempotent engine scaffold still runs, as it does for a plain
+`metrics` read. Labels in the messages below are synthetic.
 
 | # | Trigger | System behavior | User-visible message | Disk side effect |
 |---|---------|-----------------|----------------------|------------------|
-| An-1 | `anchor sunset` / `anchor rename` naming a label no anchor holds | Reject before any write. The message **names the labels that are recorded**, so the remedy travels with the error — there is deliberately no `anchor list` verb to send the user to. | `no anchor named "gate-3" — recorded anchors: gate-30, sobriety` (or, on an empty store, that no anchors are recorded yet). | None |
+| An-1 | `anchor sunset` / `anchor rename` / `anchor kind` / `anchor slip` / `anchor use` / `anchor miss` / `anchor confirm <label>` naming a label no anchor holds | Reject before any write. The message **names the labels that are recorded**, so the remedy travels with the error — there is deliberately no `anchor list` verb to send the user to. | `no anchor named "gate-3" — recorded anchors: gate-30, sobriety` (or, on an empty store, that no anchors are recorded yet). | None |
 | An-2 | `anchor sunset` / `anchor rename` targeting an already-sunset label | Reject. A retired anchor is history, not an editable record; re-adding the label is the supported path and starts a new milestone under a new id. | Names the label and the day it was sunset, points at adding it again, then "Nothing was saved." | None |
 | An-3 | `anchor rename` onto a label an **active** anchor already holds, or onto the same label | Reject — at most one active anchor per label is exactly what lets every verb take a bare label instead of an id. Renaming onto a label held only by a **sunset** anchor is *accepted*: that name is free, as it is for `anchor add`. | Names the label that is taken and the remedy (sunset or rename it first), then "Nothing was saved." | None |
+| An-4 | A **wrong-kind event** — `anchor slip` on an anchor that is not a `quit`, `anchor use` on one that is not a `limit`, `anchor miss` or a named `anchor confirm` on one that is not a `habit` (an anchor with no `kind` event is a `milestone`) | Reject. The kind is read from the anchor event store; the binary never infers it from the label or the verb, and never reclassifies on the way to an event. Kinds are reclassified only by `anchor kind`. `anchor confirm` with **no** labels covers only active habits, so it never hits this row. | `"sobriety" is a milestone, and a slip belongs to a quit — reclassify it as a quit first: lucid anchor kind sobriety quit. Nothing was saved.` (likewise "a use belongs to a limit … --allowance N --window D", "a miss belongs to a habit"). | None |
+| An-5 | Any event (`anchor kind`, `slip`, `use`, `miss`, `confirm <label>`, `sunset --graduated`) aimed at a **pre-id legacy anchor** — one written before anchors had ids, folding under the read-time `legacy:<label>` identity | Reject. An event needs a durable anchor id to point at, and `legacy:<label>` is never written. There is **no implicit adoption write**: the backfill stays explicit. A plain `anchor sunset` / `anchor rename` of a legacy anchor is unaffected. | `"sobriety" was recorded before anchors had ids — run lucid anchor backfill-ids first, then try again. Nothing was saved.` | None |
+| An-6 | An event aimed at a **sunset** anchor — `anchor kind`, `slip`, `use`, `miss` or `confirm <label>` on a label whose only holder is sunset, or `anchor void` of an event whose anchor is sunset | Reject. A retired anchor takes no new events, and a restoring record appended to it would quietly bring it back. The one exception is accepted, not rejected: an `anchor void` of the sunset anchor's own `graduate` event, which leaves the plain sunset in place so the anchor reads as an ordinary retirement. | Names the label and the day it was sunset, points at adding it again to start a new anchor, then "Nothing was saved." | None |
+| An-7 | `anchor add --kind` on a label an **active** anchor already holds | Reject. A plain `anchor add` on a held label is a date correction (accepted, unchanged); with `--kind` it would silently reclassify as a side effect of a correction, so reclassifying stays its own verb. | `"sobriety" is already recorded — reclassify it in place with lucid anchor kind sobriety quit. Nothing was saved.` | None |
+| An-8 | `anchor void <event-id>` naming an **unknown** id, an event that is **already voided**, a `void`, or a **`kind` event** | Reject. A `void` corrects a `slip`, `use`, `miss`, `confirm` or `graduate` only. A `kind` event is never voidable — the dated kind events *are* the parameter history — so a wrong kind is corrected by reclassifying. | Unknown: `no anchor event "anchorev_2026_03_14_b"`. Already voided: `"anchorev_2026_03_14_a" is already voided (by "anchorev_2026_03_16_a")`. A void: `a void can't itself be voided`. A kind event: `a kind event is never voided — reclassify with lucid anchor kind <label> <kind>`. Each ends "Nothing was saved." | None |
+| An-9 | Kind or **allowance/window** validation fails on `anchor add --kind` / `anchor kind`: an unknown kind name; a non-positive or non-integer `--allowance` or `--window`; a `limit` missing either; `--allowance` on anything but a `limit`; `--window` on a `milestone` or `quit` | Reject. Both numbers belong to `limit` (required there); `--window` alone also belongs to `habit` (default 30); a `milestone` or `quit` takes neither. | Names the four kinds, or the flag and the kinds that take it — e.g. `--allowance is a positive whole number of use-days, and only a limit takes it` — then "Nothing was saved." | None |
+| An-10 | `anchor use` with **neither or both** of `--planned` and `--slip` | Reject. Intent is required: the binary never guesses whether a use was planned. | `say whether this use was planned or a slip: --planned or --slip. Nothing was saved.` | None |
+| An-11 | `anchor confirm --from` **before the anchor date** or **after the through-day** | Reject. `--from` widens a span to an earlier stretch the person vouches for; it can never claim a day before the anchor existed, and a span cannot end before it starts. A span that is merely empty (already confirmed through the through-day) is **not** an error: it writes nothing and the ack says so. | `--from can't be before "morning-walk" started (2026-01-05)` / `--from 2026-02-03 is after the through-day 2026-02-01`, then "Nothing was saved." | None |
+| An-12 | An event `--day` (or a `confirm --through`) in the **future** or given as a **partial** date, or an event `--day` **before the anchor's start** (the quit start for a `quit`, the anchor date for every other kind) | Reject. The future and an unreadable token are B-1 / B-2; a partial date is rejected as in B-5, because every event lands on a real day; a day before the start would fall outside the anchor's own life. A `confirm --through` before a habit's start is not an error: that habit's span is simply empty. | B-1 / B-2 / B-5 copy as applicable; before the start: `that's before "sobriety" started (2026-01-01) — an anchor's events begin on its start. Nothing was saved.` | None |
+| An-13 | A **different** mutation of an anchor whose two-file write is still incomplete (a **half-written pair**: a pair intent with a missing half) | Reject. Only a matching retry of the original verb may finish the pair — it reuses the reserved event id, appends only the missing halves in the recorded order, and returns the original receipt — so a provisional, conservative floor can never turn into an ordinary correction by accident. Nothing is ever repaired automatically. A retry that an older binary's write has made stale still finishes honestly (one more plain record carries the current label and the honest date; [`engine-module.md`](engine-module.md) §"Two-file verbs and the write order"); a retry on an anchor an older binary has since sunset is rejected as An-6; an unfinished `add --kind` whose reserved id an older binary has since used blocks nothing and is left for `validate` to name. | `"sobriety" has an unfinished write (anchorev_2026_04_02_a: the slip event is missing) — retry the original command to finish it; lucid validate names it. Nothing was saved.` | None |
+| An-14 | `lucid validate` (or any read) meets a **malformed or half-written event-store record**: an unknown type or kind, a bad id or day, a missing per-type field, a target or `anchor_id` that resolves to nothing, invalid kind parameters, an illegal `void` target, a pair intent missing a half; or an `anchors.json` record with an empty label, a non-civil date, or a `state` other than empty or `sunset` | **Validate-reported, never a panic.** `validate` lists one finding per defect, naming the event or reserved id and, for a half-written pair, the missing half and the retry remedy; it repairs nothing. Every finding is an error except an unfinished `add --kind` whose reserved anchor id is already recorded (An-13): no retry can finish it and nothing reads it, so it is a warning. The fold skips a record that fails validation, so `metrics` keeps reading the rest. A file that is not parseable JSON at all is a loud read error naming the file. | One `validate` finding per defect (e.g. `anchor_events.json: anchorev_2026_04_02_a: half-written pair — the slip event is missing; retry lucid anchor slip sobriety --day 2026-04-01`); an unparseable file: `anchor_events.json is not valid JSON — …`. | None — read-only; nothing is rewritten or repaired. |
 
 ### Scheduler daemon (the send schedule — deterministic, agent-free)
 

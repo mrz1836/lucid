@@ -18,12 +18,13 @@ import (
 // golden-testable.
 
 // The risk-sidebar colors. Green when the week surfaced no watch-out at all;
-// amber for a soft signal (a quiet week or an aging anchor); red for a hard one
-// (this-week misses, a spent error budget, or a 30-day adherence dip). The
-// values are ordinary Discord embed decimal colors.
+// amber for a soft signal (a quiet week, or an anchor signal: a limit over its
+// allowance, a habit miss run, a slip this week); red for a hard one (this-week
+// misses, a spent error budget, or a 30-day adherence dip). The values are
+// ordinary Discord embed decimal colors.
 const (
 	colorClear   = 0x57F287 // green — nothing to flag
-	colorCaution = 0xF1C40F // amber — a soft watch-out (quiet week / aging anchor)
+	colorCaution = 0xF1C40F // amber — a soft watch-out (quiet week / anchor signal)
 	colorRisk    = 0xED4245 // red — a hard signal (misses / over-budget / adherence dip)
 )
 
@@ -42,13 +43,14 @@ const (
 // standing promise that the numbers above are exact, never softened.
 const footerNote = "Weekly · Monday after Sunday's reflection · numbers are exact, never softened"
 
-// RenderEmbed turns a Report into the Discord rich embed the witness channel
-// receives. Every number comes straight from the deterministic Report — the
-// model's prose lands only in the description (the warm read) and the Faults /
-// Progress fields. Empty prose fields are omitted (Discord rejects an empty
-// field value), so a deterministic fallback report still renders a clean,
-// complete card: the honest numbers, the asks, and any watch-outs. It is pure
-// and byte-stable.
+// RenderEmbed turns a Report into the Discord rich embed card the witness
+// channel receives — the whole report except any opted-in anchor detail, which
+// [RenderEmbeds] adds. Every number comes straight from the deterministic
+// Report — the model's prose lands only in the description (the warm read) and
+// the Faults / Progress fields. Empty prose fields are omitted (Discord rejects
+// an empty field value), so a deterministic fallback report still renders a
+// clean, complete card: the honest numbers, the asks, and any watch-outs. It is
+// pure and byte-stable.
 func RenderEmbed(r Report) notify.Embed {
 	e := notify.Embed{
 		Title:  fmt.Sprintf("Weekly witness report · Week %s", r.ISOWeek),
@@ -79,7 +81,9 @@ func RenderEmbed(r Report) notify.Embed {
 // retained fallback path (AC-7) for a surface where the rich embed cannot be
 // used. It mirrors the embed's sections one-for-one so the two never drift: the
 // title, the optional warm read, the numbers, the faults, the optional progress,
-// the asks, any watch-outs, and the footer. It is pure and byte-stable.
+// the asks, any watch-outs, the full anchor detail when opted in (the same text
+// [RenderEmbeds] spreads across its parts), and the footer. It is pure and
+// byte-stable.
 func RenderMarkdown(r Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "**Weekly witness report · Week %s**", r.ISOWeek)
@@ -103,6 +107,9 @@ func RenderMarkdown(r Report) string {
 	if len(r.WatchOuts) > 0 {
 		section(fieldWatchOuts, bulletList(r.WatchOuts))
 	}
+	if len(r.AnchorDetail) > 0 {
+		section(fieldAnchorDetail, anchorDetailMarkdown(r.AnchorDetail))
+	}
 	b.WriteString("\n\n_")
 	b.WriteString(footerNote)
 	b.WriteString("_\n")
@@ -112,9 +119,10 @@ func RenderMarkdown(r Report) string {
 // riskColor picks the sidebar color from the report's real signals: red for a
 // hard signal (this-week misses at the watch-out threshold, a spent error
 // budget, or a 30-day adherence dip), amber for any softer watch-out (a quiet
-// week or an aging anchor), and green when nothing was flagged. It reads only
-// deterministic Report fields, so the color always agrees with the rendered
-// watch-outs.
+// week, or a kind-aware anchor signal — a limit over its allowance, a habit
+// miss run, a slip this week), and green when nothing was flagged. It reads
+// only deterministic Report fields, so the color always agrees with the
+// rendered watch-outs.
 func riskColor(r Report) int {
 	hard := r.WeekMisses >= weekMissWatchOut ||
 		r.ErrorBudget.Exceeded ||

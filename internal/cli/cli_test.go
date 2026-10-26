@@ -128,23 +128,24 @@ func TestNewRootCmd_FreshEachCall(t *testing.T) {
 	assert.NotNil(t, b.PersistentFlags().Lookup(jsonFlag))
 }
 
-// TestAnchorCmd_HasFourSubcommands guards the anchor command tree: a dropped
+// TestAnchorCmd_HasEverySubcommand guards the anchor command tree: a dropped
 // registration would ship a missing verb silently, since the group itself still
 // renders. Mirrors TestSpine_AllVerbsRegistered one level down.
-func TestAnchorCmd_HasFourSubcommands(t *testing.T) {
+func TestAnchorCmd_HasEverySubcommand(t *testing.T) {
 	got := map[string]bool{}
 	for _, c := range newAnchorCmd().Commands() {
 		got[c.Name()] = true
 	}
-	for _, want := range []string{"add", "sunset", "rename", "backfill-ids"} {
-		assert.Truef(t, got[want], "anchor group missing %q", want)
+	want := []string{"add", "kind", "slip", "use", "miss", "confirm", "void", "sunset", "rename", "backfill-ids"}
+	for _, name := range want {
+		assert.Truef(t, got[name], "anchor group missing %q", name)
 	}
-	assert.Len(t, got, 4, "anchor exposes exactly add, sunset, rename, and backfill-ids")
+	assert.Len(t, got, len(want), "anchor exposes exactly %v", want)
 }
 
 // TestFocusCmd_HasSubcommands guards the focus command tree: a dropped
 // registration would ship a missing verb silently, since the group itself still
-// renders. Mirrors TestAnchorCmd_HasFourSubcommands one level down.
+// renders. Mirrors TestAnchorCmd_HasEverySubcommand one level down.
 func TestFocusCmd_HasSubcommands(t *testing.T) {
 	got := map[string]bool{}
 	for _, c := range newFocusCmd().Commands() {

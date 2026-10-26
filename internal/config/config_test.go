@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1112,4 +1113,132 @@ func TestGratitudeMatch_Tier3ProviderConfig(t *testing.T) {
 	assert.Equal(t, DefaultGratitudeMatch().Tier3ProviderConfig(base), GratitudeMatchConfig{}.Tier3ProviderConfig(base),
 		"a zero block reads as the defaults")
 	assert.Equal(t, 120, base.TimeoutSeconds, "the base block is not mutated")
+}
+
+// TestAnchorsConfigDefaults covers the anchors block end to end: the documented
+// defaults (never miss twice; 90 accounted days to graduate) written under the
+// documented keys, an absent or partial block reading its defaults without a
+// clip warning, valid overrides surviving a write/read cycle, and a threshold
+// below its floor rejected by Validate with the field named — never clipped,
+// because a miss alarm of 1 would let one isolated miss alarm.
+func TestAnchorsConfigDefaults(t *testing.T) {
+	assert.Equal(t, AnchorsConfig{MissAlarm: 2, GraduationDays: 90}, Default().Anchors)
+	assert.Equal(t, Default().Anchors, DefaultAnchors())
+
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+	var m struct {
+		Anchors map[string]any `json:"anchors"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.Len(t, m.Anchors, 2, "exactly the two documented thresholds")
+	assert.EqualValues(t, 2, m.Anchors["miss_alarm"])
+	assert.EqualValues(t, 90, m.Anchors["graduation_days"])
+
+	absent, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14}`))
+	require.NoError(t, err)
+	assert.Equal(t, DefaultAnchors(), absent.Anchors, "an absent block reads the defaults")
+	_, warnings := absent.Clip()
+	assert.Empty(t, warnings, "an absent block is not a clip")
+
+	partial, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14,
+		"anchors": {"miss_alarm": 3}}`))
+	require.NoError(t, err)
+	assert.Equal(t, AnchorsConfig{MissAlarm: 3, GraduationDays: 90}, partial.Anchors,
+		"a set key wins, a missing key keeps its default")
+
+	zero := Default()
+	zero.Anchors = AnchorsConfig{}
+	clipped, warnings := zero.Clip()
+	assert.Empty(t, warnings)
+	assert.Equal(t, DefaultAnchors(), clipped.Anchors, "a config built without the block clips to the defaults")
+	require.NoError(t, zero.Validate(), "an absent block validates as the defaults")
+
+	override := Default()
+	override.Anchors = AnchorsConfig{MissAlarm: 3, GraduationDays: 60}
+	require.NoError(t, override.Validate())
+	raw, err := override.Marshal()
+	require.NoError(t, err)
+	got, err := Unmarshal(raw)
+	require.NoError(t, err)
+	assert.Equal(t, override.Anchors, got.Anchors, "valid overrides round-trip")
+
+	invalid := map[string]struct {
+		anchors AnchorsConfig
+		field   string
+	}{
+		"a miss alarm of 1":         {AnchorsConfig{MissAlarm: 1, GraduationDays: 90}, "anchors.miss_alarm must be >= 2"},
+		"a zero miss alarm":         {AnchorsConfig{MissAlarm: 0, GraduationDays: 90}, "anchors.miss_alarm must be >= 2"},
+		"a negative miss alarm":     {AnchorsConfig{MissAlarm: -2, GraduationDays: 90}, "anchors.miss_alarm must be >= 2"},
+		"a zero graduation bar":     {AnchorsConfig{MissAlarm: 2, GraduationDays: 0}, "anchors.graduation_days must be >= 1"},
+		"a negative graduation bar": {AnchorsConfig{MissAlarm: 2, GraduationDays: -5}, "anchors.graduation_days must be >= 1"},
+	}
+	for name, tc := range invalid {
+		t.Run(name, func(t *testing.T) {
+			c := Default()
+			c.Anchors = tc.anchors
+			verr := c.Validate()
+			require.Error(t, verr)
+			assert.Contains(t, verr.Error(), tc.field)
+			clipped, warnings := c.Clip()
+			assert.Empty(t, warnings, "an out-of-range threshold is rejected, never clipped")
+			assert.Equal(t, tc.anchors, clipped.Anchors)
+		})
+	}
+
+	explicit, err := Unmarshal([]byte(`{"version": 1, "anchors": {"miss_alarm": 1}}`))
+	require.NoError(t, err)
+	assert.Equal(t, 1, explicit.Anchors.MissAlarm, "decoding never coerces; Validate is what refuses it")
+}
+
+// TestWitnessReportAnchorDetailConfig covers witness_report.anchor_detail end
+// to end: the shipped default is summary, written under the documented key; a
+// lucid.json that never mentions the key (an older one) reads as summary; full
+// survives a write/read cycle and is the only value that opts in; and any other
+// value is a config error naming the two — whether or not the report is
+// enabled, because the key is a privacy choice a typo must never decide.
+func TestWitnessReportAnchorDetailConfig(t *testing.T) {
+	def := Default().WitnessReport
+	assert.Equal(t, WitnessReportAnchorDetailSummary, def.AnchorDetail, "summary is the shipped default")
+	assert.False(t, def.AnchorDetailFull())
+
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+	assert.Contains(t, string(b), `"anchor_detail": "summary"`)
+
+	t.Run("an absent key reads as summary", func(t *testing.T) {
+		got, err := Unmarshal([]byte(`{"witness_report": {"enabled": false, "mode": "preview"}}`))
+		require.NoError(t, err)
+		assert.Empty(t, got.WitnessReport.AnchorDetail)
+		assert.False(t, got.WitnessReport.AnchorDetailFull(), "no key never opts in")
+		require.NoError(t, got.WitnessReport.validate())
+	})
+
+	t.Run("full round-trips and opts in", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport.AnchorDetail = WitnessReportAnchorDetailFull
+		raw, err := c.Marshal()
+		require.NoError(t, err)
+		got, err := Unmarshal(raw)
+		require.NoError(t, err)
+		assert.Equal(t, WitnessReportAnchorDetailFull, got.WitnessReport.AnchorDetail)
+		assert.True(t, got.WitnessReport.AnchorDetailFull())
+		require.NoError(t, got.Validate())
+	})
+
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("an unknown value is rejected (enabled=%t)", enabled), func(t *testing.T) {
+			c := Default()
+			c.WitnessReport = WitnessReportConfig{
+				Enabled: enabled, Mode: WitnessReportModePreview, Time: "09:00", Weekday: 1,
+				SystemPrompt: "s.md", Template: "t.md", AnchorDetail: "verbose",
+			}
+			err := c.Validate()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "witness_report.anchor_detail")
+			assert.Contains(t, err.Error(), `"summary"`)
+			assert.Contains(t, err.Error(), `"full"`)
+			assert.False(t, c.WitnessReport.AnchorDetailFull())
+		})
+	}
 }

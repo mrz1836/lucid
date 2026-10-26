@@ -25,11 +25,6 @@ const (
 	// dip. It sits under the chain's gate threshold so a passing chain does not
 	// nag, but a genuine slide still shows.
 	adherenceFloor = 0.80
-	// agingAnchorMark is the days-since count past which a recorded anchor is
-	// surfaced as "worth a check-in". It is deliberately high so a normal anchor
-	// never trips it; the operator reviews every report during the preview
-	// period, so an ambiguous anchor is caught before it reaches friends.
-	agingAnchorMark = 45
 )
 
 // Report is the witness-safe weekly report data model — the "deterministic
@@ -51,6 +46,14 @@ type Report struct {
 	WeekMisses    int                      `json:"week_misses"`
 	ErrorBudget   engine.ErrorBudget       `json:"error_budget"`
 	Anchors       []engine.AnchorDaysSince `json:"anchors"`
+
+	// AnchorDetail is the opt-in full anchor detail: the week's anchor events,
+	// notes verbatim. It is filled only when witness_report.anchor_detail is
+	// full — the composer's one note-reaching reader is wired in no other mode
+	// — and only after the model pass, so it is never part of the model's input
+	// and never reaches the witness-safe scan. It is omitted from --json when
+	// empty, so a summary-mode report carries no anchor_detail key.
+	AnchorDetail []router.AnchorDetailEvent `json:"anchor_detail,omitempty"`
 
 	// Derived deterministically from the signals above.
 	WatchOuts []string `json:"watch_outs"`
@@ -143,7 +146,7 @@ func BuildReport(now time.Time, numbers NumbersReader, records RecordsReader) (R
 		Anchors:       m.Anchors,
 	}
 	r.LowSignal = week.DaysAccounted < quietWeekThreshold
-	r.WatchOuts = buildWatchOuts(r)
+	r.WatchOuts = buildWatchOuts(r, mr.Thresholds.WithDefaults().MissAlarm)
 	r.Asks = DraftAsks(r)
 	return r, nil
 }
@@ -152,8 +155,9 @@ func BuildReport(now time.Time, numbers NumbersReader, records RecordsReader) (R
 // entry names a concrete number from the report, so the section is honest and
 // omitted entirely (nil, not an empty header) when the record supports nothing
 // — a strong week shows no watch-outs. A quiet week is never suppressed: its
-// thin logging is itself the first watch-out.
-func buildWatchOuts(r Report) []string {
+// thin logging is itself the first watch-out. missAlarm is the miss-run length
+// the projection's habit math alarmed at, so the habit line agrees with it.
+func buildWatchOuts(r Report, missAlarm int) []string {
 	var out []string
 
 	// Thin logging / quiet week — the low signal is itself the accountability
@@ -188,16 +192,51 @@ func buildWatchOuts(r Report) []string {
 		))
 	}
 
-	// An anchor aging past its mark — surfaced neutrally as worth a check-in.
+	// The kind-aware anchor signals, in projection order.
 	for _, a := range r.Anchors {
-		if a.DaysSince >= agingAnchorMark {
-			out = append(out, fmt.Sprintf(
-				"%d days since %s — worth a check-in.", a.DaysSince, a.Label,
-			))
-		}
+		out = append(out, anchorWatchOuts(a, missAlarm)...)
 	}
 
 	return out
+}
+
+// anchorWatchOuts derives one anchor's watch-outs from its kind's note-free
+// numbers in the projection — never a note, never an event date, so the lines
+// are the same in both anchor-detail modes (usage/witness-report.md §"Anchors
+// in the report"). A limit over its allowance, a habit miss run reaching
+// missAlarm that touches the week (miss_run_7d, so a mid-week slide is not
+// hidden by a recovery before the report), and any slip this week on a quit or
+// a limit each raise a line. A planned use is spend, never a signal, and a
+// milestone or a long quit run raises nothing: a long run is a win, not a
+// worry.
+func anchorWatchOuts(a engine.AnchorDaysSince, missAlarm int) []string {
+	var out []string
+	if l := a.Limit; l != nil && l.OverAllowance {
+		out = append(out, fmt.Sprintf("%s: over allowance — %d of %d in the last %s.",
+			a.Label, l.Used, l.Allowance, plural(l.WindowDays, "day", "days")))
+	}
+	if h := a.Habit; h != nil && h.MissRun7d >= missAlarm {
+		out = append(out, fmt.Sprintf("%s: missed %d days in a row.", a.Label, h.MissRun7d))
+	}
+	slips := 0
+	switch {
+	case a.Quit != nil:
+		slips = a.Quit.Slips7d
+	case a.Limit != nil:
+		slips = a.Limit.Slips7d
+	}
+	if slips > 0 {
+		out = append(out, fmt.Sprintf("%s on %s this week.", plural(slips, "slip", "slips"), a.Label))
+	}
+	return out
+}
+
+// plural renders a count with its noun, singular at exactly 1.
+func plural(n int, singular, pluralNoun string) string {
+	if n == 1 {
+		return "1 " + singular
+	}
+	return fmt.Sprintf("%d %s", n, pluralNoun)
 }
 
 // pct renders a 0..1 ratio as a whole-number percent for the honest-number

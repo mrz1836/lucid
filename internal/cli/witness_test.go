@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/mrz1836/lucid/internal/engine"
 	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/provider"
+	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -402,3 +405,154 @@ func assertAnErr() error { return errWitnessTest }
 
 // errWitnessTest is a fixed sentinel for the delivery-failure tests.
 var errWitnessTest = errors.New("witness transport failure")
+
+// multiEmbedDeliverer is an embedDeliverer that records every embed it is
+// handed, in order, and fails a read-back per verifyErrFor — for a report whose
+// full anchor detail spans several messages.
+type multiEmbedDeliverer struct {
+	channels     []string
+	embeds       []notify.Embed
+	verified     []string
+	verifyErrFor map[string]error
+}
+
+func (f *multiEmbedDeliverer) SendEmbedReturningID(_ context.Context, channel string, e notify.Embed) (string, error) {
+	f.channels = append(f.channels, channel)
+	f.embeds = append(f.embeds, e)
+	return fmt.Sprintf("msg-%d", len(f.embeds)), nil
+}
+
+func (f *multiEmbedDeliverer) VerifyPresent(_ context.Context, _, messageID string) error {
+	f.verified = append(f.verified, messageID)
+	return f.verifyErrFor[messageID]
+}
+
+// seedAnchorDetailHome scaffolds an isolated Ledger with an enabled witness
+// report in preview mode and the given anchor_detail, then writes a synthetic
+// habit with a long-noted miss on each day of the 07-14..07-20 report week —
+// enough verbatim text that full detail must continue past the report card.
+func seedAnchorDetailHome(t *testing.T, detail string) {
+	t.Helper()
+	home := isolatedHome(t)
+	store := storage.New(home)
+	_, err := store.Scaffold()
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	sys := filepath.Join(dir, "system_prompt.md")
+	tmpl := filepath.Join(dir, "template.md")
+	require.NoError(t, os.WriteFile(sys, []byte("WITNESS VOICE"), 0o600))
+	require.NoError(t, os.WriteFile(tmpl, []byte("WITNESS TEMPLATE"), 0o600))
+	cfg := config.Default()
+	cfg.WitnessReport = config.WitnessReportConfig{
+		Enabled: true, Mode: config.WitnessReportModePreview, Time: "09:00", Weekday: 1,
+		SystemPrompt: sys, Template: tmpl, AnchorDetail: detail,
+	}
+	b, err := cfg.Marshal()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(store.ConfigPath(), b, 0o600))
+
+	r := router.New(store)
+	_, err = r.Boot()
+	require.NoError(t, err)
+	_, err = r.AnchorAdd(router.AnchorAddRequest{
+		Label: "morning-walk", Date: "2026-07-01", Kind: engine.AnchorKindHabit,
+		Now: time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	for d := 14; d <= 19; d++ {
+		_, err = r.AnchorMiss(router.AnchorMissRequest{
+			Label: "morning-walk",
+			Note:  fmt.Sprintf("day %d: ", d) + strings.Repeat("travel ran long, no walk. ", 60),
+			Now:   time.Date(2026, 7, d, 12, 0, 0, 0, time.UTC),
+		})
+		require.NoError(t, err)
+	}
+}
+
+// TestAnchorDetailMultipartDelivery (CLI): with full anchor detail opted in, a
+// --deliver whose detail outgrows the report card sends every numbered part in
+// order through the one transport to the one channel, reads each back, and
+// reports every message id; a part that cannot be read back is a loud partial
+// failure naming how many parts verified.
+func TestAnchorDetailMultipartDelivery(t *testing.T) {
+	t.Run("every part is sent and read back", func(t *testing.T) {
+		seedAnchorDetailHome(t, config.WitnessReportAnchorDetailFull)
+		withClock(t, time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
+		withServeProvider(t, &provider.Fake{Script: []provider.Exchange{{Content: witnessSlotReply}}})
+		d := &multiEmbedDeliverer{}
+		withWitnessDeliverer(t, d)
+
+		out, _, err := runWitness(t, "report", "--deliver")
+		require.NoError(t, err)
+
+		require.Greater(t, len(d.embeds), 1, "the detail continued past the card")
+		for i, ch := range d.channels {
+			assert.Equal(t, engine.ChannelUser, ch, "part %d goes to the preview channel", i+1)
+		}
+		ids := make([]string, 0, len(d.embeds))
+		for i := range d.embeds {
+			ids = append(ids, fmt.Sprintf("msg-%d", i+1))
+		}
+		assert.Equal(t, ids, d.verified, "every part is read back, in order")
+		assert.Equal(t, fmt.Sprintf("witness report delivered to the user channel — %d messages: %s.\n",
+			len(ids), strings.Join(ids, ", ")), out)
+		for i, e := range d.embeds[1:] {
+			assert.Equal(t, fmt.Sprintf("⚓ Anchor detail · part %d of %d", i+2, len(d.embeds)), e.Title)
+		}
+		var all strings.Builder
+		for _, e := range d.embeds {
+			for _, f := range e.Fields {
+				all.WriteString(f.Value)
+			}
+		}
+		for day := 14; day <= 19; day++ {
+			assert.Contains(t, all.String(), fmt.Sprintf("day %d: travel ran long", day), "no note is dropped")
+		}
+	})
+
+	t.Run("a part that cannot be read back is a loud partial failure", func(t *testing.T) {
+		seedAnchorDetailHome(t, config.WitnessReportAnchorDetailFull)
+		withClock(t, time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
+		withServeProvider(t, &provider.Fake{Script: []provider.Exchange{{Content: witnessSlotReply}}})
+		d := &multiEmbedDeliverer{verifyErrFor: map[string]error{"msg-2": errors.New("discord 503")}}
+		withWitnessDeliverer(t, d)
+
+		_, _, err := runWitness(t, "report", "--deliver")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "partial delivery — 1 of")
+		assert.Contains(t, err.Error(), "parts verified (msg-1): read-back verify part 2 of")
+		assert.Len(t, d.embeds, 2, "the delivery stops at the part it could not confirm")
+	})
+}
+
+// TestAnchorDetailWiredOnlyInFullMode: the note-reaching reader exists only
+// under the explicit full opt-in — summary and an absent key wire a nil
+// interface — and the dry-run --json carries anchor_detail only then.
+func TestAnchorDetailWiredOnlyInFullMode(t *testing.T) {
+	r := router.New(storage.New(t.TempDir()))
+	for _, detail := range []string{"", config.WitnessReportAnchorDetailSummary} {
+		assert.Nil(t, witnessAnchorDetail(config.WitnessReportConfig{AnchorDetail: detail}, r), "anchor_detail %q wires no reader", detail)
+	}
+	assert.NotNil(t, witnessAnchorDetail(config.WitnessReportConfig{AnchorDetail: config.WitnessReportAnchorDetailFull}, r))
+
+	for detail, wantKey := range map[string]bool{
+		config.WitnessReportAnchorDetailSummary: false,
+		config.WitnessReportAnchorDetailFull:    true,
+	} {
+		t.Run(detail, func(t *testing.T) {
+			seedAnchorDetailHome(t, detail)
+			withClock(t, time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
+			withServeProvider(t, &provider.Fake{Script: []provider.Exchange{{Content: witnessSlotReply}, {Content: witnessSlotReply}}})
+
+			out, _, err := runWitness(t, "report", "--dry-run", "--json")
+			require.NoError(t, err)
+			assert.Equal(t, wantKey, strings.Contains(out, `"anchor_detail"`))
+			assert.Equal(t, wantKey, strings.Contains(out, "travel ran long"), "a note reaches the output only in full mode")
+
+			md, _, err := runWitness(t, "report")
+			require.NoError(t, err)
+			assert.Equal(t, wantKey, strings.Contains(md, "⚓ Anchor detail"))
+		})
+	}
+}

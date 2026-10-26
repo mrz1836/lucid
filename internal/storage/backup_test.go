@@ -96,6 +96,61 @@ const selfLogFixture = `{
 }
 `
 
+// anchorEventsFixture is a synthetic anchor event store: a kind event, a
+// planned use carrying a note, and the pair intent of a completed slip. Like
+// the self store it rides the manifest's whole-engine/ walk by construction, so
+// it needs no manifest entry of its own — and must not get one.
+const anchorEventsFixture = `{
+  "version": 1,
+  "events": [
+    {
+      "id": "anchorev_2026_07_29_a",
+      "anchor_id": "anchor_2026_07_01_a",
+      "type": "kind",
+      "day": "2026-07-29",
+      "recorded_at": "2026-07-29T09:00:00Z",
+      "kind": "limit",
+      "allowance": 4,
+      "window_days": 90
+    },
+    {
+      "id": "anchorev_2026_07_29_b",
+      "anchor_id": "anchor_2026_07_01_a",
+      "type": "use",
+      "day": "2026-07-29",
+      "recorded_at": "2026-07-29T21:00:00Z",
+      "intent": "planned",
+      "note": "a slice of cake at a birthday"
+    },
+    {
+      "id": "anchorev_2026_07_29_c",
+      "anchor_id": "anchor_2026_07_01_b",
+      "type": "slip",
+      "day": "2026-07-28",
+      "recorded_at": "2026-07-29T22:00:00Z"
+    }
+  ],
+  "pair_intents": [
+    {
+      "order": "compat_first",
+      "event": {
+        "id": "anchorev_2026_07_29_c",
+        "anchor_id": "anchor_2026_07_01_b",
+        "type": "slip",
+        "day": "2026-07-28",
+        "recorded_at": "2026-07-29T22:00:00Z"
+      },
+      "compat": {
+        "id": "anchor_2026_07_01_b",
+        "label": "sobriety",
+        "date": "2026-07-28",
+        "recorded_at": "2026-07-29T22:00:00Z"
+      }
+    }
+  ]
+}
+`
+
 // seedBackupHome populates a home with a file in every manifest tree plus the
 // excluded status, a rebuildable tree, and lucid.json — the latter three must
 // never ride along in a backup. It returns the home and the expected
@@ -113,6 +168,7 @@ func seedBackupHome(t *testing.T) (home string, want map[string]string) {
 		"engine/chain.json":           `{"bell_time":"21:30"}`,
 		"engine/days/2026-07-29.json": `{"closed":true}`,
 		"engine/self.json":            selfLogFixture,
+		"engine/anchor_events.json":   anchorEventsFixture,
 		"projections/exports.log":     "2026-07-29 export series\n",
 	}
 	for rel, content := range want {
@@ -229,6 +285,35 @@ func TestBackupRestore_CarriesTheSelfStore(t *testing.T) {
 	// and an append-only history is exactly the thing that must come back as
 	// it went in.
 	assert.True(t, bytes.Equal([]byte(selfLogFixture), got), "the restored self store is byte-identical")
+}
+
+// TestBackupRestore_CarriesTheAnchorEventsStore names the anchor event store's
+// place in the backup set: every kind, every logged fact and every pair intent
+// backs up and restores byte-for-byte. As with the self store this is a free
+// ride on the whole-engine/ manifest entry, and the test keeps it honest if the
+// manifest is ever narrowed — losing this file would silently turn every quit,
+// limit and habit back into a milestone on restore.
+func TestBackupRestore_CarriesTheAnchorEventsStore(t *testing.T) {
+	srcHome, _ := seedBackupHome(t)
+
+	var buf bytes.Buffer
+	res, err := New(srcHome).BackupTo(&buf, backupManifest())
+	require.NoError(t, err)
+	assert.Contains(t, res.Files, "engine/anchor_events.json", "the anchor event store is in the backup set")
+
+	dstHome := t.TempDir()
+	rres, err := New(dstHome).RestoreFrom(&buf, RestoreOptions{AllowedRoots: manifestRoots()})
+	require.NoError(t, err)
+	assert.Contains(t, rres.Files, "engine/anchor_events.json", "the anchor event store is in the restore set")
+
+	got, err := os.ReadFile(filepath.Join(dstHome, "engine", "anchor_events.json"))
+	require.NoError(t, err)
+	assert.True(t, bytes.Equal([]byte(anchorEventsFixture), got), "the restored anchor event store is byte-identical")
+
+	log, err := New(dstHome).ReadAnchorEvents()
+	require.NoError(t, err)
+	assert.Len(t, log.Events, 3, "and it reads back whole")
+	assert.Len(t, log.PairIntents, 1)
 }
 
 // TestBackupTo_Deterministic pins the reproducibility property: two in-process

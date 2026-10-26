@@ -52,7 +52,8 @@ These rules trace directly to
 │   ├── witness.json
 │   ├── storm.json
 │   ├── profile.json
-│   ├── anchors.json
+│   ├── anchors.json        # anchor definitions (label, date, state) — append-only history, v3
+│   ├── anchor_events.json  # anchor event store — kinds, slips, uses, misses, confirms, voids, graduations (append-only)
 │   ├── self.json
 │   ├── days/2026/07/day_2026_07_02.json
 │   └── status.json
