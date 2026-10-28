@@ -20,9 +20,9 @@ streak, adherence over the trailing 30-day window (with the 30/60/90 gate
 rollups under --json), misses in that window, the isolated-miss error budget,
 and one line per active anchor in its kind's language: days since a milestone,
 days since a quit's last slip, a limit's use-days against its allowance, a
-habit's kept days out of its accounted days. Every number comes from the
-engine, so a harness reads one deterministic surface and never recomputes
-downstream.`,
+habit's days running beside its kept days out of the accounted days in its
+window. Every number comes from the engine, so a harness reads one
+deterministic surface and never recomputes downstream.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := bootedRouter(cmd)

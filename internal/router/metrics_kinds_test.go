@@ -22,7 +22,7 @@ func metricsDocsToday() time.Time { return time.Date(2026, time.January, 25, 18,
 func metricsDocsAnchorLines() []string {
 	return []string{
 		"Late-night snacks: 1 of 4 in the last 90 days (1 planned, 0 slips); 7 days since last.",
-		"Morning walk: kept 29 of 30 accounted days, 1 miss; confirmed through 2026-01-24.",
+		"Morning walk: running 83 days (since 2025-11-03); last 30 days: kept 29 of 30 accounted, 1 miss; confirmed through 2026-01-24.",
 		"Days since first gate: 40.",
 		"Days since sobriety: 102 (longest 140, 1 slip).",
 	}
@@ -118,7 +118,7 @@ func TestMetricsKindLines(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{
 			"late-night-snacks: 0 of 4 in the last 90 days (0 planned, 0 slips); no uses yet.",
-			"morning-walk: no accounted days yet; not confirmed yet.",
+			"morning-walk: running 9 days (since 2026-04-01; a habit since 2026-04-10); no accounted days yet; first confirm pending.",
 			"Days since sobriety: 40 (no slips).",
 		}, anchorLines(t, res.Lines), "no hollow 100%: a habit nobody confirmed has nothing accounted")
 	})
@@ -184,38 +184,44 @@ func TestMetricsKindLines(t *testing.T) {
 			{
 				name: "habit with no miss",
 				row: engine.AnchorDaysSince{
-					Label: "morning-walk", Kind: engine.AnchorKindHabit,
-					Habit: &engine.HabitStats{Accounted: 1, Kept: 1, LastConfirmed: "2026-01-24"},
+					Label: "morning-walk", Date: "2026-01-02", DaysSince: 23, Kind: engine.AnchorKindHabit,
+					Habit: &engine.HabitStats{
+						WindowDays: 30, HabitSince: "2026-01-02", Accounted: 1, Kept: 1, LastConfirmed: "2026-01-24",
+					},
 				},
-				want: "morning-walk: kept 1 of 1 accounted day, 0 misses; confirmed through 2026-01-24.",
+				want: "morning-walk: running 23 days (since 2026-01-02); last 30 days: kept 1 of 1 accounted, 0 misses; confirmed through 2026-01-24.",
 			},
 			{
 				name: "habit never confirmed, misses only",
 				row: engine.AnchorDaysSince{
-					Label: "morning-walk", Kind: engine.AnchorKindHabit,
-					Habit: &engine.HabitStats{Accounted: 1, Misses: 1, CurrentMissRun: 1},
+					Label: "morning-walk", Date: "2026-01-02", DaysSince: 23, Kind: engine.AnchorKindHabit,
+					Habit: &engine.HabitStats{
+						WindowDays: 30, HabitSince: "2026-01-02", Accounted: 1, Misses: 1, CurrentMissRun: 1,
+					},
 				},
-				want: "morning-walk: kept 0 of 1 accounted day, 1 miss; not confirmed yet.",
+				want: "morning-walk: running 23 days (since 2026-01-02); last 30 days: kept 0 of 1 accounted, 1 miss; first confirm pending.",
 			},
 			{
 				name: "habit at the miss alarm",
 				row: engine.AnchorDaysSince{
-					Label: "morning-walk", Kind: engine.AnchorKindHabit,
+					Label: "morning-walk", Date: "2026-01-02", DaysSince: 23, Kind: engine.AnchorKindHabit,
 					Habit: &engine.HabitStats{
+						WindowDays: 30, HabitSince: "2026-01-02",
 						Accounted: 20, Kept: 17, Misses: 3, CurrentMissRun: 3, Alarm: true, LastConfirmed: "2026-01-21",
 					},
 				},
-				want: "morning-walk: kept 17 of 20 accounted days, 3 misses; confirmed through 2026-01-21; missed 3 days in a row.",
+				want: "morning-walk: running 23 days (since 2026-01-02); last 30 days: kept 17 of 20 accounted, 3 misses; confirmed through 2026-01-21; missed 3 days in a row.",
 			},
 			{
 				name: "habit eligible to graduate",
 				row: engine.AnchorDaysSince{
-					Label: "morning-walk", Kind: engine.AnchorKindHabit,
+					Label: "morning-walk", Date: "2026-01-02", DaysSince: 23, Kind: engine.AnchorKindHabit,
 					Habit: &engine.HabitStats{
+						WindowDays: 30, HabitSince: "2026-01-02",
 						Accounted: 30, Kept: 30, LastConfirmed: "2026-01-24", GraduationEligible: true,
 					},
 				},
-				want: "morning-walk: kept 30 of 30 accounted days, 0 misses; confirmed through 2026-01-24; eligible to graduate.",
+				want: "morning-walk: running 23 days (since 2026-01-02); last 30 days: kept 30 of 30 accounted, 0 misses; confirmed through 2026-01-24; eligible to graduate.",
 			},
 		}
 		for _, tt := range tests {
@@ -397,7 +403,7 @@ func TestMetricsThresholdsFromConfig(t *testing.T) {
 		require.NotNil(t, res.Metrics.Anchors[0].Habit)
 		return res
 	}
-	const head = "morning-walk: kept 27 of 29 accounted days, 2 misses; confirmed through 2026-04-07"
+	const head = "morning-walk: running 40 days (since 2026-03-01); last 30 days: kept 27 of 29 accounted, 2 misses; confirmed through 2026-04-07"
 
 	tests := []struct {
 		name                      string

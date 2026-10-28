@@ -125,7 +125,7 @@ func anchorMetricsLine(a engine.AnchorDaysSince) string {
 	case a.Limit != nil:
 		return limitMetricsLine(a.Label, *a.Limit)
 	case a.Habit != nil:
-		return habitMetricsLine(a.Label, *a.Habit)
+		return habitMetricsLine(a)
 	}
 	return fmt.Sprintf("Days since %s: %d.", a.Label, a.DaysSince)
 }
@@ -158,20 +158,24 @@ func limitMetricsLine(label string, l engine.LimitStats) string {
 	return line + "."
 }
 
-// habitMetricsLine: kept days out of accounted days, then how far the habit is
+// habitMetricsLine: how long the habit has been running — elapsed time since
+// the anchor date, labeled as such and never a kept count — then kept days out
+// of accounted days over the named rolling window, then how far the habit is
 // confirmed, then the two signals worth a look — a miss run at the alarm and
 // graduation eligibility. A habit with nothing accounted says so, never a
 // hollow 100%: an unconfirmed day is unaccounted, not kept.
-func habitMetricsLine(label string, h engine.HabitStats) string {
-	parts := make([]string, 0, 4)
+func habitMetricsLine(a engine.AnchorDaysSince) string {
+	h := *a.Habit
+	parts := make([]string, 0, 5)
+	parts = append(parts, habitRunningSegment(a.Date, a.DaysSince, h.HabitSince))
 	if h.Accounted == 0 {
 		parts = append(parts, "no accounted days yet")
 	} else {
-		parts = append(parts, fmt.Sprintf("kept %d of %s, %s",
-			h.Kept, countOf(h.Accounted, "accounted day"), countOfPlural(h.Misses, "miss", "misses")))
+		parts = append(parts, fmt.Sprintf("last %s: kept %d of %d accounted, %s",
+			countOf(h.WindowDays, "day"), h.Kept, h.Accounted, countOfPlural(h.Misses, "miss", "misses")))
 	}
 	if h.LastConfirmed == "" {
-		parts = append(parts, "not confirmed yet")
+		parts = append(parts, "first confirm pending")
 	} else {
 		parts = append(parts, "confirmed through "+h.LastConfirmed)
 	}
@@ -181,7 +185,26 @@ func habitMetricsLine(label string, h engine.HabitStats) string {
 	if h.GraduationEligible {
 		parts = append(parts, "eligible to graduate")
 	}
-	return label + ": " + strings.Join(parts, "; ") + "."
+	return a.Label + ": " + strings.Join(parts, "; ") + "."
+}
+
+// habitRunningSegment: the days since the anchor date — days_since, exactly
+// what --json reports — with the date beside it, and the day it became a habit
+// when that differs. Day 0 reads "started today" and a future date "starts
+// in", so a negative count is never printed.
+func habitRunningSegment(date string, daysSince int, habitSince string) string {
+	dates := date
+	if habitSince != "" && habitSince != date {
+		dates += "; a habit since " + habitSince
+	}
+	switch {
+	case daysSince > 0:
+		return fmt.Sprintf("running %s (since %s)", countOf(daysSince, "day"), dates)
+	case daysSince == 0:
+		return fmt.Sprintf("started today (%s)", dates)
+	default:
+		return fmt.Sprintf("starts in %s (on %s)", countOf(-daysSince, "day"), dates)
+	}
 }
 
 // countOfPlural is countOf for a noun whose plural is not noun+"s".
