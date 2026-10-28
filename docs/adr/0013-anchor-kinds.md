@@ -352,8 +352,8 @@ since last.` The quit object carries the same `slips_7d` count.
   `graduation_days`. This reads the anchor's full history, so an old rough
   patch does not disqualify a habit forever.
 
-A synthetic example: `Morning walk: kept 29 of 30 accounted days, 1 miss;
-confirmed through 2026-01-24.`
+A synthetic example:
+`Morning walk: running 83 days (since 2025-11-03); last 30 days: kept 29 of 30 accounted, 1 miss; confirmed through 2026-01-24.`
 
 **The `confirm` span.** One confirm attests a span of days per habit:
 
@@ -463,7 +463,7 @@ stay the person's call.
 Days since first gate: 40.
 Days since sobriety: 102 (longest 140, 1 slip).
 Late-night snacks: 1 of 4 in the last 90 days (1 planned, 0 slips); 7 days since last.
-Morning walk: kept 29 of 30 accounted days, 1 miss; confirmed through 2026-01-24.
+Morning walk: running 83 days (since 2025-11-03); last 30 days: kept 29 of 30 accounted, 1 miss; confirmed through 2026-01-24.
 ```
 
 `lucid metrics --json` keeps every existing field and its meaning. `date` and
@@ -475,6 +475,22 @@ milestone**, so absence means milestone, the same convention `state` uses.
 Graduated anchors appear in a new `anchors_graduated[]`, separate from
 `anchors_sunset[]`, which is omitted when empty. Together these keep a Ledger
 with no kind events byte-identical to today, `--json` included.
+
+**Amendment (2026-10-27): the habit line leads with days running.** The first
+cut of this surface rendered a habit only through its windowed kept figure, so
+a months-old habit with nothing accounted yet — typically one reclassified
+recently, whose confirms start at `habit_since` — read as empty. The habit line
+now leads with `running <N> day[s] (since <date>)`, from the row's `date` and
+`days_since`; day 0 reads `started today (<date>)` and a future date reads
+`starts in <N> day[s] (on <date>)`, so a negative count is never printed. When
+`habit_since` differs from `date`, the parenthetical adds
+`; a habit since <habit_since>`. The kept figure names its window:
+`last <window_days> day[s]: kept <k> of <a> accounted, <m> miss[es]`. A habit
+never confirmed reads `first confirm pending`, which replaces the earlier
+never-confirmed wording. **Two numbers, never one:** days running is elapsed
+time, not adherence, and the two never merge into one figure. The §4 rule — a
+habit with no accounted days reads "no accounted days yet" — is unchanged. This
+is a prose change only; `--json` is byte-identical.
 
 ### 7. Witness visibility: kind-aware watch-outs, summary by default, full detail by opt-in
 

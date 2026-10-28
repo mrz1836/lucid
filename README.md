@@ -296,7 +296,7 @@ error or breached gate, `2` usage / flag-parse error. Usage errors print on stde
 |---------|-------|--------------|
 | `day [date\|yesterday]` | — | The joined day view — engine record + observations + enrichment + raw entries. |
 | `status` | — | Ambient Engine state: streak, adherence vs. declared mode with its honest co-numbers, error-budget burn, days to the next gate. |
-| `metrics` | — | Practice-quality rollup: current/longest streak, 30-day adherence (30/60/90 gate rollups under `--json`), misses, error budget, and one line per anchor in its kind's language — days since, days since the last slip, allowance spent, or kept-of-accounted days. |
+| `metrics` | — | Practice-quality rollup: current/longest streak, 30-day adherence (30/60/90 gate rollups under `--json`), misses, error budget, and one line per anchor in its kind's language — days since, days since the last slip, allowance spent, or a habit's days running beside its windowed kept-of-accounted days. |
 | `stats` | `--last` `--from` `--to` | Ledger volume over a window of logical days — counts only, never content. |
 | `reflect [gate]` | — | Recall your validated insights; never proposes a new pattern. |
 | `reflect week` | `--days` `--since` `--week` | Read-only weekly deep-dive since your last reflection. `reflect week apply` persists a candidate through the resonance gate (JSON on stdin); `reflect week close` stamps the cursor. |
