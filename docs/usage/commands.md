@@ -477,7 +477,7 @@ beyond the silent engine scaffold.
 Days since first gate: 40.
 Days since sobriety: 102 (longest 140, 1 slip).
 Late-night snacks: 1 of 4 in the last 90 days (1 planned, 0 slips); 7 days since last.
-Morning walk: kept 29 of 30 accounted days, 1 miss; confirmed through 2026-01-24.
+Morning walk: running 83 days (since 2025-11-03); last 30 days: kept 29 of 30 accounted, 1 miss; confirmed through 2026-01-24.
 ```
 
 | Kind | Line | Variants |
@@ -485,13 +485,25 @@ Morning walk: kept 29 of 30 accounted days, 1 miss; confirmed through 2026-01-24
 | `milestone` | `Days since <label>: <days>.` — exactly today's line | — |
 | `quit` | `Days since <label>: <current run> (longest <longest run>, <n> slip[s]).` | No slips yet: `Days since <label>: <days> (no slips).` |
 | `limit` | `<label>: <used> of <allowance> in the last <window> days (<p> planned, <s> slip[s]); <d> day[s] since last.` | No use yet: `…; no uses yet.` Over the allowance: `… since last — over allowance.` |
-| `habit` | `<label>: kept <k> of <a> accounted day[s], <m> miss[es]; confirmed through <date>.` | Never confirmed: `…; not confirmed yet.` Nothing accounted: `<label>: no accounted days yet; …`. A miss run at the alarm: `…; missed <n> days in a row.` Eligible to graduate: `…; eligible to graduate.` |
+| `habit` | `<label>: running <N> day[s] (since <date>); last <window> day[s]: kept <k> of <a> accounted, <m> miss[es]; confirmed through <date>.` | Started today: `<label>: started today (<date>); …`. A future start: `<label>: starts in <N> day[s] (on <date>); …`. Became a habit after its start: `(since <date>; a habit since <habit_since>)`, the same clause inside the started-today and starts-in forms. Never confirmed: `…; first confirm pending.` Nothing accounted: `<label>: running …; no accounted days yet; …`. A miss run at the alarm: `…; missed <n> days in a row.` Eligible to graduate: `…; eligible to graduate.` |
 
 A count takes its singular at exactly 1 (`1 slip`, `1 miss`, `1 day since
-last`) and its plural otherwise (`0 slips`). A habit never reads as a hollow
-100%: a day nobody confirmed is unaccounted, not kept. A milestone line is
-byte-for-byte what it has always been, so a Ledger with no kinds prints exactly
-what it printed before.
+last`, `running 1 day`) and its plural otherwise (`0 slips`). A habit never
+reads as a hollow 100%: a day nobody confirmed is unaccounted, not kept. A
+milestone line is byte-for-byte what it has always been, so a Ledger with no
+kinds prints exactly what it printed before.
+
+**A habit's two numbers.** A habit line leads with how long the anchor has been
+running: the days since its `date`, the same `days_since` that `--json` reports.
+That is elapsed time, not adherence. The kept figure after it is the verified
+number: it names the habit's own rolling window (`last 30 days: …`, from
+`window_days`), and by default a confirm never claims a day before
+`habit_since`. When the anchor became a habit after its start date
+(`anchor kind … habit`), the parenthetical names both dates, so a long-running
+anchor with nothing accounted reads as days never tracked, not days kept:
+`evening-stretch: running 23 days (since 2026-01-02; a habit since 2026-01-24); no accounted days yet; first confirm pending.`
+Day 0 reads `started today (<date>)` and a future date reads
+`starts in <N> day[s] (on <date>)`, so a negative count is never printed.
 
 `--json` emits the metrics projection:
 
