@@ -61,6 +61,7 @@ These rules trace directly to
 ├── reframes/               # append-only catch→flip inner-work entries + surface_state.json projection — owned by reframes.md
 ├── focus/                   # append-only focus work-ons (+ retirement events) + surface_state.json projection — owned by focus.md
 ├── reps/                    # append-only practice reps (+ retirement events) + surface_state.json projection — owned by reps.md
+├── contacts/                # append-only contact events — cadence, contact, snooze, void — plus weekly_receipt.json; owned by ADR-0014
 ├── retro/                   # append-only retro parking-lot events (park + resolve/defer transitions), folded to open/resolved/deferred items — owned by retro.md
 ├── registries/             # injuries, threads, places, eras, pets, gratitude — same key derivation as people/ — plus wheel (month-keyed, owned by wheel.md)
 ├── links/                  # append-only media↔subject association ledger (links.jsonl)
@@ -275,6 +276,7 @@ remain on disk as the audit trail.
 | Wheel receipt id | `wheel_YYYY_MM_<seq>` — one per appended `snapshot`, assigned single-writer as max-seq+1 over that month's history (zero-padded to three digits, wider values legal); returned by every `wheel add`, distinct from the stable entry id. A second `add` for the same month mints the next receipt and wins on read (latest-wins). See [`wheel.md`](../wheel.md). | `wheel_2026_09_001` |
 | Retro item id | `R-NNN` — the parked-item id, minted **globally monotonic** as the max `R-NNN` across all `park` lines plus one (zero-padded to three digits, wider values legal; `park` auto-mints, `import` supplies explicit ids). A `resolve` / `defer` references it without advancing the counter. Shown by `list`, targeted by `show` / `resolve` / `defer`. See [`retro.md`](../retro.md). | `R-012` |
 | Retro receipt id | `retro_event_YYYY_MM_DD_<seq>` — one per appended retro event (`park` / `resolve` / `defer`), assigned single-writer per logical-day as max-seq+1; returned by every write, distinct from the stable `R-NNN` item id. See [`retro.md`](../retro.md). | `retro_event_2026_08_23_001` |
+| Contact event id | `contact_YYYY_MM_DD_<slot>` — one per appended contact event (`cadence` / `contact` / `snooze` / `void`), dated by the event's logical day (a backdated contact takes its own day) and minted single-writer as the first unused per-day slot (`a`, `b`, … `z`, `aa` — the anchor-event `SlotLabel` grammar) in that day's shard, never the line count. A correction appends a `void` whose `refs.voids` names the target; cadence events are never voided. Returned by every `lucid contact` write. See [ADR-0014](../adr/0014-contact-check-ins.md). | `contact_2026_10_29_a` |
 
 People keys deliberately do not encode real names; the storage adapter
 maintains a `display_name` field separately so the on-disk filenames
@@ -386,6 +388,11 @@ The single global config file. Tiny, hand-editable, agent-readable.
     "system_prompt": "",
     "template": "",
     "model": ""
+  },
+  "contact_weekly": {
+    "enabled": false,
+    "weekday": 1,
+    "time": "09:00"
   },
   "gratitude": {
     "match": {
@@ -503,6 +510,21 @@ The single global config file. Tiny, hand-editable, agent-readable.
   [`../observations.md`](../observations.md) §3), enable-gated and off by default;
   `~/.lucid/` gains no new top-level tree for the workout module — the program
   file it reads is the operator's, outside the Ledger.
+* `contact_weekly` configures the optional **Monday contact check-in post**
+  ([`../usage/contact.md`](../usage/contact.md),
+  [ADR-0014](../adr/0014-contact-check-ins.md)) — a fixed, model-free list of
+  who is due this week and who is still open from before, plus the week's
+  birthdays, posted to the user's own channel. It ships **off**
+  (`enabled: false`). `weekday` is the cron weekday of the fire mark (`0`=Sunday
+  … `6`=Saturday, default `1`) and `time` the local `HH:MM` mark (default
+  `"09:00"`). An absent block, or an absent key, reads those defaults; when
+  `enabled` is true, a `time` that is not `HH:MM` or a `weekday` outside `0`–`6`
+  is rejected at load, naming the key — the same validation as
+  `witness_report`. Like `companion`, it is credential-dumb: the channel stays
+  env-only (`LUCID_USER_CHANNEL_ID`) and no token lives here. The cadences and
+  contacts it reads live in `~/.lucid/contacts/`, and its per-week delivery
+  receipt in `contacts/weekly_receipt.json`; its job database is disposable
+  machinery outside the Ledger (`LUCID_CONTACT_WEEKLY_DB`).
 * `gratitude.match` tunes how a nightly `lucid gratitude add` decides which
   tally entry a phrase lands on ([`../gratitude.md`](../gratitude.md) §7).
   `tier2_high` / `tier2_margin` and `tier3_high` / `tier3_margin` are each
