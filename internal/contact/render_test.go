@@ -242,7 +242,7 @@ func refusalCopy(t *testing.T) []string {
 			}
 		}
 	}
-	for _, se := range []*SnoozeError{{}, {Already: true}} {
+	for _, se := range []*SnoozeError{{}, {Already: true}, {Already: true, ID: "contact_2026_11_03_a"}} {
 		out = append(out, se.Error(), se.Message("Sam Rivera"))
 	}
 

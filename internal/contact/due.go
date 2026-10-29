@@ -280,6 +280,9 @@ type SnoozeError struct {
 	// Already is true when the person is already snoozed this week; otherwise
 	// the cadence is not active.
 	Already bool
+	// ID names the snooze already recorded this week, when the caller knows
+	// it ("" otherwise), so the refusal points at the receipt to void.
+	ID string
 }
 
 // Error renders the refusal for an unnamed person.
@@ -296,6 +299,9 @@ func (e *SnoozeError) Unwrap() error {
 // Message renders the refusal naming the person.
 func (e *SnoozeError) Message(name string) string {
 	if e.Already {
+		if e.ID != "" {
+			return name + " is already snoozed this week (" + e.ID + ")."
+		}
 		return name + " is already snoozed this week."
 	}
 	return name + " has no active check-in cadence to snooze."

@@ -476,6 +476,9 @@ func TestValidateSnooze_ActiveOncePerWeek(t *testing.T) {
 	var se *SnoozeError
 	require.ErrorAs(t, err, &se)
 	assert.Equal(t, "Sam Rivera is already snoozed this week.", se.Message("Sam Rivera"))
+	se.ID = "contact_2026_11_03_a"
+	assert.Equal(t, "Sam Rivera is already snoozed this week (contact_2026_11_03_a).", se.Message("Sam Rivera"),
+		"a caller that knows the snooze names its receipt (error-states Ct-10)")
 	require.NoError(t, ValidateSnooze(b.fold()[keySam], "2026-11-09"), "next week is a new week")
 
 	sam.pause(docToday)
