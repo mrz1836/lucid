@@ -85,7 +85,7 @@ func unknownHost() []schedstatus.Check {
 // seedScheduler points LUCID_HOME at a fresh scaffolded Ledger, writes a
 // lucid.json whose companion block is enabled/disabled per the flag with three
 // real prompt files (bodies set to promptBody so a redaction test can plant a
-// sentinel), points the four disposable job-DB env overrides at temp paths so the
+// sentinel), points the five disposable job-DB env overrides at temp paths so the
 // command never resolves the real OS user-config dir — the witness-report and
 // workout stores are read by the compose-fallback scan, so leaving them at their
 // defaults would read this host's real stores — and returns the home plus the
@@ -124,6 +124,7 @@ func seedScheduler(t *testing.T, companionEnabled bool, promptBody string) (home
 	t.Setenv("LUCID_COMPANION_DB", companionDB)
 	t.Setenv("LUCID_WITNESS_REPORT_DB", filepath.Join(t.TempDir(), "witness-report.db"))
 	t.Setenv("LUCID_WORKOUT_DB", filepath.Join(t.TempDir(), "workout.db"))
+	t.Setenv("LUCID_CONTACT_WEEKLY_DB", filepath.Join(t.TempDir(), "contact-weekly.db"))
 	return home, schedulerDB, companionDB
 }
 
@@ -277,12 +278,13 @@ func TestSchedulerStatus_CompanionDisabled_Warn(t *testing.T) {
 // hard error (exit 2) (AC-6).
 func TestSchedulerStatus_NeverRun_Error_NoPanic(t *testing.T) {
 	isolatedHome(t)
-	// Point all four DB overrides at nonexistent temp paths so the never-run
+	// Point all five DB overrides at nonexistent temp paths so the never-run
 	// command never resolves the real OS user-config dir.
 	t.Setenv("LUCID_SCHEDULER_DB", filepath.Join(t.TempDir(), "never.db"))
 	t.Setenv("LUCID_COMPANION_DB", filepath.Join(t.TempDir(), "never.db"))
 	t.Setenv("LUCID_WITNESS_REPORT_DB", filepath.Join(t.TempDir(), "never.db"))
 	t.Setenv("LUCID_WORKOUT_DB", filepath.Join(t.TempDir(), "never.db"))
+	t.Setenv("LUCID_CONTACT_WEEKLY_DB", filepath.Join(t.TempDir(), "never.db"))
 	withClock(t, statusMorning())
 	withHostProbe(t, unknownHost()...)
 
@@ -319,34 +321,38 @@ func TestSchedulerStatus_JSON_HasVerdictAndShape(t *testing.T) {
 	require.NotEmpty(t, v.Checks, "the flat check list is present in the JSON document")
 }
 
-// TestSchedulerStatus_NamesEveryJobStore proves the report names all four
+// TestSchedulerStatus_NamesEveryJobStore proves the report names all five
 // disposable job stores — in text and in `--json` — resolved through each
 // daemon's own DefaultDBPath, so the printed path is the file that daemon
 // actually opens.
 //
 // It matters because only the Engine store is pinned into the launchd plist:
-// the companion, witness-report, and workout stores each resolve their own
-// default under the OS user-config dir. Nothing about the pinned path reveals
-// the other three exist, so a schema repair or a backup keyed on it alone reads
-// as complete while covering a quarter of the surface.
+// the companion, witness-report, workout, and contact-weekly stores each
+// resolve their own default under the OS user-config dir. Nothing about the
+// pinned path reveals the other four exist, so a schema repair or a backup
+// keyed on it alone reads as complete while covering a fifth of the surface.
 func TestSchedulerStatus_NamesEveryJobStore(t *testing.T) {
 	home, schedulerDB, companionDB := seedScheduler(t, true, "PROMPT BODY")
 	seedHealthyDBs(t, home, schedulerDB, companionDB)
 	withClock(t, statusMorning())
 	withHostProbe(t, unknownHost()...)
 
-	// Pin the two stores read only by the compose-fallback scan to fresh paths so
-	// the assertion is about wiring rather than about this host's user-config dir.
+	// Pin the two stores read only by the compose-fallback scan, and the
+	// contact-weekly store listed for its path alone, to fresh paths so the
+	// assertion is about wiring rather than about this host's user-config dir.
 	witnessDB := filepath.Join(t.TempDir(), "witness-report.db")
 	workoutDB := filepath.Join(t.TempDir(), "workout.db")
+	contactDB := filepath.Join(t.TempDir(), "contact-weekly.db")
 	t.Setenv("LUCID_WITNESS_REPORT_DB", witnessDB)
 	t.Setenv("LUCID_WORKOUT_DB", workoutDB)
+	t.Setenv("LUCID_CONTACT_WEEKLY_DB", contactDB)
 
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "scheduler", "status")
 	require.NoError(t, err, "naming the stores never changes the verdict")
 	for _, want := range []string{
-		"Job stores (4;", schedulerDB, companionDB, witnessDB, workoutDB,
+		"Job stores (5;", schedulerDB, companionDB, witnessDB, workoutDB, contactDB,
 		"LUCID_SCHEDULER_DB", "LUCID_COMPANION_DB", "LUCID_WITNESS_REPORT_DB", "LUCID_WORKOUT_DB",
+		"LUCID_CONTACT_WEEKLY_DB",
 	} {
 		assert.Contains(t, out, want, "text report omits %q", want)
 	}
@@ -364,7 +370,7 @@ func TestSchedulerStatus_NamesEveryJobStore(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(jsonOut), &doc))
 	assert.Equal(t, "ok", doc.Verdict, "the job-store block classifies nothing")
-	require.Len(t, doc.JobStores, 4)
+	require.Len(t, doc.JobStores, 5)
 
 	got := map[string]string{}
 	for _, s := range doc.JobStores {
@@ -376,6 +382,7 @@ func TestSchedulerStatus_NamesEveryJobStore(t *testing.T) {
 		"companion":      "LUCID_COMPANION_DB",
 		"witness-report": "LUCID_WITNESS_REPORT_DB",
 		"workout":        "LUCID_WORKOUT_DB",
+		"contact-weekly": "LUCID_CONTACT_WEEKLY_DB",
 	}, got)
 }
 

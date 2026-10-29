@@ -199,12 +199,12 @@ type DBInput struct {
 // environment variable that relocates it.
 //
 // It is reported purely for legibility — it is never classified and can never
-// lower the verdict. It exists because the scheduler runs *four* independent job
+// lower the verdict. It exists because the scheduler runs *five* independent job
 // stores and only the Engine one is pinned into the launchd plist; the other
-// three follow the OS user-config default on their own. That asymmetry is
+// four follow the OS user-config default on their own. That asymmetry is
 // invisible from any single path, so a repair, relocation, or backup keyed on
-// the Engine store alone silently covers a quarter of the surface. Naming all
-// four in one command is what makes it visible.
+// the Engine store alone silently covers a fifth of the surface. Naming all
+// five in one command is what makes it visible.
 type JobStorePath struct {
 	Name string `json:"name"`
 	Path string `json:"path"`

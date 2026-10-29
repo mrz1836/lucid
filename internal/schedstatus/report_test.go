@@ -58,7 +58,7 @@ func okCompanionDB() DBInput {
 }
 
 // okJobStores builds the full set of resolved job-store paths the CLI hands the
-// report — the four independent stores the supervised scheduler writes to, each
+// report — the five independent stores the supervised scheduler writes to, each
 // with the environment variable that relocates it. It is informational input
 // only: no case here should ever see it change a verdict.
 func okJobStores() []JobStorePath {
@@ -67,6 +67,7 @@ func okJobStores() []JobStorePath {
 		{Name: "companion", Path: "/var/lucid/companion.db", Env: "LUCID_COMPANION_DB"},
 		{Name: "witness-report", Path: "/var/lucid/witness-report.db", Env: "LUCID_WITNESS_REPORT_DB"},
 		{Name: "workout", Path: "/var/lucid/workout.db", Env: "LUCID_WORKOUT_DB"},
+		{Name: "contact-weekly", Path: "/var/lucid/contact-weekly.db", Env: "LUCID_CONTACT_WEEKLY_DB"},
 	}
 }
 

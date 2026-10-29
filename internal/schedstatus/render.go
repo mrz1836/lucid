@@ -124,7 +124,7 @@ func dbLines(label string, db DBReport) []string {
 // that, so an index-drift repair, a relocation, or a backup keyed on the Engine
 // store alone reads as complete while leaving the others untouched, which is
 // exactly how one such repair left three daemons still failing on boot. Listing
-// the whole set costs four lines and removes the guesswork.
+// the whole set costs five lines and removes the guesswork.
 //
 // The count is rendered rather than asserted so the header can never claim more
 // stores than it lists, and an unresolvable path degrades to a dash rather than
