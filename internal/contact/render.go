@@ -222,3 +222,96 @@ func birthdayDate(day string) string {
 	}
 	return t.Format(birthdayLayout)
 }
+
+// The Monday post's fixed copy (ADR-0014 §8). The headings are the read view's,
+// in bold; the opening and the birthdays prefix are the post's own.
+const (
+	// MondayOpening opens every Monday post.
+	MondayOpening = "Here's your week for staying in touch — no rush, the whole week is yours."
+	// MondayBirthdaysPrefix leads the post's single birthdays line.
+	MondayBirthdaysPrefix = "🎂 Birthdays this week: "
+	// MondayMoreTail ends a post cut at [MondayPostCap].
+	MondayMoreTail = "…plus more in lucid contact due."
+	// MondayPostCap is the most characters a Monday post carries, safely under
+	// Discord's 2000-character message limit.
+	MondayPostCap = 1900
+)
+
+// RenderMondayPost renders the fixed, model-free Monday post (ADR-0014 §8):
+// [MondayOpening], the bold "Due this week" and "Still open from before" lists
+// in the read view's line form, and one birthdays line naming everyone whose
+// birthday falls this week ("Jordan Lee (Wed Nov 4)", several joined with ", ").
+// Sections are joined by a blank line and an empty one is left out; "Coming up
+// next week" never appears. ok is false, and the post "", when both lists and
+// the birthdays line are empty — an empty week posts nothing. A post longer than
+// [MondayPostCap] characters is cut at a line boundary and ends with
+// [MondayMoreTail]. There is no trailing newline.
+func RenderMondayPost(v DueView) (post string, ok bool) {
+	parts := []string{MondayOpening}
+	for _, s := range []section{
+		{HeadingDueThisWeek, v.DueThisWeek},
+		{HeadingStillOpen, v.StillOpen},
+	} {
+		if len(s.rows) == 0 {
+			continue
+		}
+		lines := make([]string, 0, len(s.rows)+1)
+		lines = append(lines, "**"+s.heading+"**")
+		for _, row := range s.rows {
+			lines = append(lines, "- "+RenderDueLine(row, v.Day))
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(v.Birthdays) > 0 {
+		names := make([]string, 0, len(v.Birthdays))
+		for _, b := range v.Birthdays {
+			names = append(names, b.DisplayName+" ("+birthdayDate(b.Date)+")")
+		}
+		parts = append(parts, MondayBirthdaysPrefix+strings.Join(names, ", "))
+	}
+	if len(parts) == 1 {
+		return "", false
+	}
+	return capPost(strings.Join(parts, "\n\n")), true
+}
+
+// capPost returns post unchanged when it fits [MondayPostCap] characters, and
+// otherwise keeps the longest run of whole lines that, with [MondayMoreTail] on
+// its own line after it, still fits — dropping any blank line or bare heading
+// the cut leaves dangling at the end. Characters are counted as runes, the way
+// a person reads them.
+func capPost(post string) string {
+	if runeCount(post) <= MondayPostCap {
+		return post
+	}
+	budget := MondayPostCap - runeCount(MondayMoreTail) - 1 // the newline before the tail
+	lines := strings.Split(post, "\n")
+	kept := make([]string, 0, len(lines))
+	used := 0
+	for _, line := range lines {
+		cost := runeCount(line)
+		if len(kept) > 0 {
+			cost++ // the newline joining it to the line before
+		}
+		if used+cost > budget {
+			break
+		}
+		kept = append(kept, line)
+		used += cost
+	}
+	for len(kept) > 0 && danglingLine(kept[len(kept)-1]) {
+		kept = kept[:len(kept)-1]
+	}
+	return strings.Join(append(kept, MondayMoreTail), "\n")
+}
+
+// danglingLine reports whether a line left last by a cut is a blank separator
+// or a bold heading with no list under it.
+func danglingLine(line string) bool {
+	return line == "" || strings.HasPrefix(line, "**")
+}
+
+// runeCount counts the characters in s.
+func runeCount(s string) int {
+	return len([]rune(s))
+}

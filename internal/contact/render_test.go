@@ -3,6 +3,7 @@ package contact
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -301,8 +302,7 @@ func refusalCopy(t *testing.T) []string {
 // TestContactCopy_NoShameLanguage renders every contact surface — person lines,
 // the due text and the wrap over full and empty fixtures, birthday lines, the
 // fixed constants, every ack and every refusal, and the person-view check-in
-// line — and asserts none carries the
-// deny-list. The Monday post joins this test when it lands.
+// line, and the Monday post — and asserts none carries the deny-list.
 func TestContactCopy_NoShameLanguage(t *testing.T) {
 	states, people := docWeek(t)
 	full := Due(states, people, docToday, false)
@@ -312,14 +312,19 @@ func TestContactCopy_NoShameLanguage(t *testing.T) {
 		Due(nil, nil, docToday, false),
 		Due(nil, nil, docToday, true),
 		Due(states, people, "2026-12-07", false), // weeks on: everyone carried over
+		manyRowsView(80),                         // long enough to be cut
 	}
 
 	surfaces := []string{
 		HeadingDueThisWeek, HeadingStillOpen, HeadingComingUp, HeadingBirthdays,
 		NoCadencesYet, NobodyDue, WrapOpening, NobodyStillOpen, NotLoggedYet,
+		MondayOpening, MondayBirthdaysPrefix, MondayMoreTail,
 	}
 	for _, v := range views {
 		surfaces = append(surfaces, RenderDueText(v), RenderWrapText(v))
+		if post, ok := RenderMondayPost(v); ok {
+			surfaces = append(surfaces, post)
+		}
 		for _, rows := range [][]DueRow{v.DueThisWeek, v.StillOpen, v.ComingUp} {
 			for _, r := range rows {
 				surfaces = append(surfaces, RenderDueLine(r, v.Day))
@@ -347,4 +352,114 @@ func TestContactCopy_NoShameLanguage(t *testing.T) {
 		require.NotEmpty(t, s)
 		assert.Empty(t, shameHits(s), "shame language in contact copy: %q", s)
 	}
+}
+
+// TestRenderMondayPost_ExactTemplate pins the Monday post (ADR-0014 §8): the
+// warm opening, the bold "Due this week" and "Still open from before" lists in
+// the read view's line form, and one birthdays line — sections joined by a
+// blank line, an empty one left out, and "Coming up next week" never shown.
+func TestRenderMondayPost_ExactTemplate(t *testing.T) {
+	t.Run("full", func(t *testing.T) {
+		states, people := docWeek(t)
+		post, ok := RenderMondayPost(Due(states, people, docToday, false))
+		require.True(t, ok)
+		assert.Equal(t, `Here's your week for staying in touch — no rush, the whole week is yours.
+
+**Due this week**
+- Sam Rivera (every 4 weeks), last caught up Oct 8
+
+**Still open from before**
+- Alex Kim (every 2 weeks), not logged yet
+
+🎂 Birthdays this week: Jordan Lee (Wed Nov 4)`, post)
+		assert.NotContains(t, post, HeadingComingUp, "coming up shows only in the read view")
+	})
+
+	t.Run("birthdays only", func(t *testing.T) {
+		people := index(info(keyJordan, "Jordan Lee", "1990-11-04"), info(keySam, "Sam Rivera", "1990-11-06"))
+		post, ok := RenderMondayPost(Due(nil, people, docToday, false))
+		require.True(t, ok, "a week with only a birthday still posts")
+		assert.Equal(t, "Here's your week for staying in touch — no rush, the whole week is yours.\n\n"+
+			"🎂 Birthdays this week: Jordan Lee (Wed Nov 4), Sam Rivera (Fri Nov 6)", post)
+	})
+
+	t.Run("lists only", func(t *testing.T) {
+		b := newBook(t)
+		b.person(keyAlex).every("2026-10-14", "2w") // closed Oct 28: still open
+		v := Due(b.fold(), index(info(keyAlex, "Alex Kim", "")), docToday, false)
+		post, ok := RenderMondayPost(v)
+		require.True(t, ok)
+		assert.Equal(t, "Here's your week for staying in touch — no rush, the whole week is yours.\n\n"+
+			"**Still open from before**\n- Alex Kim (every 2 weeks), not logged yet", post)
+	})
+}
+
+// TestRenderMondayPost_EmptyIsEmpty: with both lists and the birthdays empty
+// there is nothing to post — "" and ok false — even when someone is coming up
+// next week or a cadence exists.
+func TestRenderMondayPost_EmptyIsEmpty(t *testing.T) {
+	post, ok := RenderMondayPost(Due(nil, nil, docToday, false))
+	assert.False(t, ok)
+	assert.Empty(t, post)
+
+	b := newBook(t)
+	b.person(keyJordan).every("2026-10-26", "2w") // closes Nov 9: coming up only
+	post, ok = RenderMondayPost(Due(b.fold(), index(info(keyJordan, "Jordan Lee", "")), docToday, false))
+	assert.False(t, ok, "coming up next week alone posts nothing")
+	assert.Empty(t, post)
+}
+
+// manyRowsView is a due view far longer than one message: n synthetic people
+// split between the two lists, plus a birthday.
+func manyRowsView(n int) DueView {
+	names := []string{"Sam Rivera", "Alex Kim", "Jordan Lee", "Casey Park", "Riley Moss"}
+	v := DueView{Day: docToday, WeekStart: "2026-11-02", WeekEnd: "2026-11-08"}
+	for i := range n {
+		row := DueRow{
+			PersonKey:    fmt.Sprintf("person_synthetic-%02d", i),
+			DisplayName:  names[i%len(names)],
+			Cadence:      "4w",
+			CadenceDays:  28,
+			Human:        "every 4 weeks",
+			LastContact:  "2026-10-08",
+			WindowCloses: "2026-11-05",
+		}
+		if i%2 == 0 {
+			v.DueThisWeek = append(v.DueThisWeek, row)
+		} else {
+			v.StillOpen = append(v.StillOpen, row)
+		}
+	}
+	v.Birthdays = []BirthdayRow{{PersonKey: keyJordan, DisplayName: "Jordan Lee", Date: "2026-11-04"}}
+	return v
+}
+
+// TestRenderMondayPost_StaysUnderDiscordLimit: a post that would run past one
+// Discord message is cut at a line boundary to at most 1900 characters and ends
+// with the pointer to the full list — never mid-line, never on a bare heading.
+func TestRenderMondayPost_StaysUnderDiscordLimit(t *testing.T) {
+	v := manyRowsView(80)
+	require.Greater(t, len([]rune(RenderDueText(v))), MondayPostCap, "the fixture is longer than one message")
+
+	post, ok := RenderMondayPost(v)
+	require.True(t, ok)
+	assert.LessOrEqual(t, len([]rune(post)), MondayPostCap)
+	assert.True(t, strings.HasPrefix(post, MondayOpening+"\n\n**Due this week**\n- "))
+	assert.True(t, strings.HasSuffix(post, "\n…plus more in lucid contact due."))
+
+	lines := strings.Split(post, "\n")
+	beforeTail := lines[len(lines)-2]
+	assert.True(t, strings.HasPrefix(beforeTail, "- "), "the cut lands after a whole person line, got %q", beforeTail)
+	for _, line := range lines[:len(lines)-1] {
+		if strings.HasPrefix(line, "- ") {
+			assert.True(t, strings.HasSuffix(line, " (every 4 weeks), last caught up Oct 8"), "no line is cut short: %q", line)
+		}
+	}
+
+	again, _ := RenderMondayPost(v)
+	assert.Equal(t, post, again, "the cut is deterministic")
+
+	short, ok := RenderMondayPost(manyRowsView(4))
+	require.True(t, ok)
+	assert.NotContains(t, short, MondayMoreTail, "a post that fits is never cut")
 }

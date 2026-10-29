@@ -1242,3 +1242,97 @@ func TestWitnessReportAnchorDetailConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestContactWeeklyConfig_DefaultsAndValidation covers the contact_weekly block
+// (ADR-0014 §8): it ships off on a Monday 09:00 mark, written under the
+// documented keys; a disabled block always validates, whatever it carries; and
+// an enabled block with a malformed time or an out-of-range weekday is refused
+// with the key named, exactly as witness_report's mark is checked. The block
+// carries no channel id and no token.
+func TestContactWeeklyConfig_DefaultsAndValidation(t *testing.T) {
+	assert.Equal(t, ContactWeeklyConfig{Enabled: false, Weekday: 1, Time: "09:00"}, Default().ContactWeekly)
+	assert.Equal(t, Default().ContactWeekly, DefaultContactWeekly())
+
+	b, err := Default().Marshal()
+	require.NoError(t, err)
+	var m struct {
+		ContactWeekly map[string]any `json:"contact_weekly"`
+	}
+	require.NoError(t, json.Unmarshal(b, &m))
+	assert.Equal(t, map[string]any{"enabled": false, "weekday": float64(1), "time": "09:00"}, m.ContactWeekly,
+		"exactly the three documented keys — credential-dumb, no channel id or token")
+
+	disabled := map[string]ContactWeeklyConfig{
+		"the default":      DefaultContactWeekly(),
+		"the zero block":   {},
+		"a malformed time": {Time: "9:00x", Weekday: 1},
+		"a bogus weekday":  {Time: "09:00", Weekday: 9},
+	}
+	for name, cw := range disabled {
+		t.Run("disabled/"+name, func(t *testing.T) {
+			c := Default()
+			c.ContactWeekly = cw
+			require.NoError(t, c.Validate(), "a disabled block always validates")
+		})
+	}
+
+	enabled := Default()
+	enabled.ContactWeekly = ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: "09:30"}
+	require.NoError(t, enabled.Validate())
+
+	invalid := map[string]struct {
+		cw    ContactWeeklyConfig
+		field string
+	}{
+		"a malformed time":       {ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: "9:00x"}, "contact_weekly.time"},
+		"an out-of-range hour":   {ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: "25:00"}, "contact_weekly.time"},
+		"an empty time":          {ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: ""}, "contact_weekly.time"},
+		"a weekday past Sunday":  {ContactWeeklyConfig{Enabled: true, Weekday: 7, Time: "09:00"}, "contact_weekly.weekday"},
+		"a negative weekday":     {ContactWeeklyConfig{Enabled: true, Weekday: -1, Time: "09:00"}, "contact_weekly.weekday"},
+		"a weekday far past six": {ContactWeeklyConfig{Enabled: true, Weekday: 42, Time: "09:00"}, "contact_weekly.weekday"},
+	}
+	for name, tc := range invalid {
+		t.Run("enabled/"+name, func(t *testing.T) {
+			c := Default()
+			c.ContactWeekly = tc.cw
+			verr := c.Validate()
+			require.Error(t, verr)
+			assert.Contains(t, verr.Error(), tc.field)
+		})
+	}
+
+	zero := Default()
+	zero.ContactWeekly = ContactWeeklyConfig{}
+	clipped, warnings := zero.Clip()
+	assert.Empty(t, warnings, "an absent block is not a clip")
+	assert.Equal(t, DefaultContactWeekly(), clipped.ContactWeekly, "a config built without the block clips to the defaults")
+}
+
+// TestUnmarshal_ContactWeeklyAbsentReadsDefaults: Unmarshal pre-seeds the
+// contact_weekly block exactly as it does anchors and gratitude, so a lucid.json
+// written before the block existed — or one that only flips enabled — reads the
+// Monday 09:00 defaults for every missing key, and a set key wins.
+func TestUnmarshal_ContactWeeklyAbsentReadsDefaults(t *testing.T) {
+	absent, err := Unmarshal([]byte(`{"version": 1, "recent_window": 7, "recent_window_max": 14}`))
+	require.NoError(t, err)
+	assert.Equal(t, DefaultContactWeekly(), absent.ContactWeekly, "an absent block reads the defaults")
+	assert.False(t, absent.ContactWeekly.Enabled, "an absent block is off")
+
+	enabledOnly, err := Unmarshal([]byte(`{"version": 1, "contact_weekly": {"enabled": true}}`))
+	require.NoError(t, err)
+	assert.Equal(t, ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: "09:00"}, enabledOnly.ContactWeekly,
+		"flipping enabled alone keeps the Monday 09:00 mark")
+
+	partial, err := Unmarshal([]byte(`{"version": 1, "contact_weekly": {"enabled": true, "time": "09:30"}}`))
+	require.NoError(t, err)
+	assert.Equal(t, ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: "09:30"}, partial.ContactWeekly,
+		"a set key wins, a missing key keeps its default")
+
+	override := Default()
+	override.ContactWeekly = ContactWeeklyConfig{Enabled: true, Weekday: 2, Time: "18:15"}
+	raw, err := override.Marshal()
+	require.NoError(t, err)
+	got, err := Unmarshal(raw)
+	require.NoError(t, err)
+	assert.Equal(t, override.ContactWeekly, got.ContactWeekly, "valid overrides round-trip")
+}
