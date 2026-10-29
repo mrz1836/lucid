@@ -235,7 +235,9 @@ Check-ins: every 4 weeks — last caught up 2026-10-08
 
 (or `Check-ins: paused (every 4 weeks) — …`, `Check-ins: retired — …`, or
 `Last caught up 2026-10-08 (no check-in cadence)` for someone with contacts and
-no cadence). A person with no contact events looks exactly as before.
+no cadence; `not logged yet` stands in when nothing is logged). Under `--json`
+the view carries a `contact` object, `{state, cadence, cadence_days,
+last_contact}`. A person with no contact events looks exactly as before.
 
 ## Birthdays
 

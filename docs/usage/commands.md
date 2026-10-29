@@ -2924,7 +2924,11 @@ text}`. When the person has [`contact`](#contact) events, the view adds one
 check-in line — the cadence (or paused / retired) and the last contact, e.g.
 `Check-ins: every 4 weeks — last caught up 2026-09-28` — and an omitempty
 `contact` object under `--json`, in the off-limits raw view too, since it is
-your own record; a person with no contact events renders exactly as before.
+your own record; a person with no contact events renders exactly as before. The
+object is `{state, cadence, cadence_days, last_contact}`: `state` is `active`,
+`paused`, `retired` or `none` (contact logged, no cadence); `cadence` and
+`cadence_days` are the most recent window, left out when none was ever set; and
+`last_contact` is the last non-voided contact day, or `null`.
 
 ```sh
 lucid person "Sam Rivera"
