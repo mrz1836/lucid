@@ -131,6 +131,33 @@ func renderSections(sections []section, today string) []string {
 	return out
 }
 
+// RenderPersonLine renders the check-in line `lucid person <name>` shows
+// (ADR-0014 §6): "Check-ins: every 4 weeks — last caught up 2026-09-28", the
+// paused form "Check-ins: paused (every 4 weeks) — …", the retired form
+// "Check-ins: retired — …", or "Last caught up 2026-09-28 (no check-in
+// cadence)" for someone with contacts and no cadence. Days are YYYY-MM-DD, as
+// the rest of the person view prints them. ok is false when there is nothing
+// to say — no cadence and no contact that still counts — so the view adds no
+// line.
+func RenderPersonLine(st PersonState) (line string, ok bool) {
+	last := NotLoggedYet
+	if st.LastContact != nil {
+		last = "last caught up " + st.LastContact.Day
+	}
+	switch st.State {
+	case StateActive:
+		return "Check-ins: " + st.Window.Human() + " — " + last, true
+	case StatePaused:
+		return "Check-ins: paused (" + st.Window.Human() + ") — " + last, true
+	case StateRetired:
+		return "Check-ins: retired — " + last, true
+	}
+	if st.LastContact == nil {
+		return "", false
+	}
+	return "Last caught up " + st.LastContact.Day + " (no check-in cadence)", true
+}
+
 // RenderAck renders the inventory-only acknowledgement for a write that was
 // just appended (ADR-0014 §4, §5): e is the stored event with its id, name the
 // person's display name, after the person's folded state including e, and

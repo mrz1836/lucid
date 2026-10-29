@@ -160,6 +160,45 @@ Still open from before
 		RenderWrapText(Due(only.fold(), index(info(keySam, "Sam Rivera", "")), docToday, true)))
 }
 
+// personLineStates is one folded state per person-line form: active, paused,
+// retired, contact without a cadence, a cadence with nothing logged, and the
+// silent case — no cadence and no contact that still counts.
+func personLineStates() map[string]PersonState {
+	w := Window{Text: "4w", Days: 28}
+	last := &Contact{Day: "2026-09-28", Via: ViaCall}
+	return map[string]PersonState{
+		"active":      {State: StateActive, Window: w, LastContact: last},
+		"paused":      {State: StatePaused, Window: w, LastContact: last},
+		"retired":     {State: StateRetired, Window: w, LastContact: last},
+		"no cadence":  {State: StateNone, LastContact: last},
+		"not logged":  {State: StateActive, Window: Window{Text: "10d", Days: 10}},
+		"nothing yet": {State: StateNone},
+	}
+}
+
+// TestRenderPersonLine_ExactCopy pins the check-in line `lucid person` shows
+// (ADR-0014 §6): the cadence or its state and the last contact as a date, and
+// no line at all when there is nothing to say.
+func TestRenderPersonLine_ExactCopy(t *testing.T) {
+	want := map[string]string{
+		"active":     "Check-ins: every 4 weeks — last caught up 2026-09-28",
+		"paused":     "Check-ins: paused (every 4 weeks) — last caught up 2026-09-28",
+		"retired":    "Check-ins: retired — last caught up 2026-09-28",
+		"no cadence": "Last caught up 2026-09-28 (no check-in cadence)",
+		"not logged": "Check-ins: every 10 days — not logged yet",
+	}
+	for label, st := range personLineStates() {
+		line, ok := RenderPersonLine(st)
+		if label == "nothing yet" {
+			assert.False(t, ok, label)
+			assert.Empty(t, line, label)
+			continue
+		}
+		assert.True(t, ok, label)
+		assert.Equal(t, want[label], line, label)
+	}
+}
+
 // lastEvent is the most recent event a ledger wrote.
 func lastEvent(l *ledger) Event { return l.events[len(l.events)-1] }
 
@@ -261,7 +300,8 @@ func refusalCopy(t *testing.T) []string {
 
 // TestContactCopy_NoShameLanguage renders every contact surface — person lines,
 // the due text and the wrap over full and empty fixtures, birthday lines, the
-// fixed constants, every ack and every refusal — and asserts none carries the
+// fixed constants, every ack and every refusal, and the person-view check-in
+// line — and asserts none carries the
 // deny-list. The Monday post joins this test when it lands.
 func TestContactCopy_NoShameLanguage(t *testing.T) {
 	states, people := docWeek(t)
@@ -296,6 +336,11 @@ func TestContactCopy_NoShameLanguage(t *testing.T) {
 		surfaces = append(surfaces, a.got)
 	}
 	surfaces = append(surfaces, refusalCopy(t)...)
+	for _, st := range personLineStates() {
+		if line, ok := RenderPersonLine(st); ok {
+			surfaces = append(surfaces, line)
+		}
+	}
 
 	require.Greater(t, len(surfaces), 40, "every surface is rendered")
 	for _, s := range surfaces {

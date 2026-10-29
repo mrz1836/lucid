@@ -73,7 +73,7 @@ func TestVersion_RejectsArgs(t *testing.T) {
 
 func TestSpine_AllVerbsRegistered(t *testing.T) {
 	root := newRootCmd(BuildInfo{Version: "dev"})
-	want := []string{"init", "log", "attach", "link", "unlink", "annotate", "closeout", "mode", "status", "obs", "reframe", "wheel", "focus", "rep", "retro", "day", "stats", "validate", "export", "backup", "restore", "version", "update", "scheduler", "companion", "anchor", "metrics", "storm", "profile", "person", "bootstrap", "serve", "reflect", "ask", "injury", "era", "thread", "structure"}
+	want := []string{"init", "log", "attach", "link", "unlink", "annotate", "closeout", "mode", "status", "obs", "reframe", "wheel", "focus", "rep", "contact", "retro", "day", "stats", "validate", "export", "backup", "restore", "version", "update", "scheduler", "companion", "anchor", "metrics", "storm", "profile", "person", "bootstrap", "serve", "reflect", "ask", "injury", "era", "thread", "structure"}
 	got := map[string]bool{}
 	for _, c := range root.Commands() {
 		got[c.Name()] = true
@@ -168,4 +168,20 @@ func TestRepCmd_HasSubcommands(t *testing.T) {
 		assert.Truef(t, got[want], "rep group missing %q", want)
 	}
 	assert.Len(t, got, 4, "rep exposes exactly add, list, surface, and retire")
+}
+
+// TestContactCmd_HasSubcommands guards the contact command tree: exactly every,
+// pause, resume, retire, snooze, void and due beneath the parent's own capture
+// form, so a dropped registration fails loudly.
+func TestContactCmd_HasSubcommands(t *testing.T) {
+	cmd := newContactCmd()
+	got := map[string]bool{}
+	for _, c := range cmd.Commands() {
+		got[c.Name()] = true
+	}
+	for _, want := range []string{"every", "pause", "resume", "retire", "snooze", "void", "due"} {
+		assert.Truef(t, got[want], "contact group missing %q", want)
+	}
+	assert.Len(t, got, 7, "contact exposes exactly every, pause, resume, retire, snooze, void, and due")
+	assert.NotNil(t, cmd.RunE, "the bare form is the capture")
 }

@@ -150,11 +150,12 @@ func assertReceiptJSON(t *testing.T, out, prose, ridPrefix string) {
 	}
 }
 
-// TestWriteVerbsJSON_Inner is the reframe/focus/rep half of the write-verb --json
-// contract (AC-10, AC-11, AC-13). Each inner-work write verb routes through the
-// same emitReceipt choke point, so under --json it emits the bare
-// {receipt_id, logical_date} object with no prose ack; the focus retire row
-// proves the retirement event's own id + day is the receipt.
+// TestWriteVerbsJSON_Inner is the reframe/focus/rep/contact half of the
+// write-verb --json contract (AC-10, AC-11, AC-13). Each inner-work write verb
+// emits the {receipt_id, logical_date} receipt with no prose ack — the contact
+// verbs extend it with person_key and the stored event, the way the anchor
+// event verbs do; the focus retire row proves the retirement event's own id +
+// day is the receipt.
 func TestWriteVerbsJSON_Inner(t *testing.T) {
 	cases := []writeVerbJSONCase{
 		{
@@ -206,6 +207,48 @@ func TestWriteVerbsJSON_Inner(t *testing.T) {
 				return []string{"rep", "retire", resolveRepID(t)}
 			},
 		},
+		{
+			name:      "contact",
+			prose:     "Logged contact",
+			ridPrefix: "contact_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				seedContactPerson(t)
+				return []string{"contact", "Sam", "Rivera", "--via", "call"}
+			},
+		},
+		{
+			name:      "contact every",
+			prose:     "every 4 weeks",
+			ridPrefix: "contact_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				seedContactPerson(t)
+				return []string{"contact", "every", "Sam", "Rivera", "4w"}
+			},
+		},
+		{
+			name:      "contact snooze",
+			prose:     "Snoozed",
+			ridPrefix: "contact_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				seedContactPerson(t)
+				_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "contact", "every", "Sam Rivera", "4w")
+				require.NoError(t, err)
+				return []string{"contact", "snooze", "Sam Rivera"}
+			},
+		},
+		{
+			name:      "contact void",
+			prose:     "Voided",
+			ridPrefix: "contact_",
+			setup: func(t *testing.T) []string {
+				isolatedHome(t)
+				seedContactPerson(t)
+				return []string{"contact", "void", resolveContactID(t)}
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -249,6 +292,27 @@ func resolveRepID(t *testing.T) string {
 	require.NoError(t, json.Unmarshal([]byte(out), &listed))
 	require.NotEmpty(t, listed.Reps, "expected a seeded rep to retire")
 	return listed.Reps[0].ID
+}
+
+// seedContactPerson records the synthetic person the contact rows write about.
+func seedContactPerson(t *testing.T) {
+	t.Helper()
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "person", "create", "Sam Rivera")
+	require.NoError(t, err)
+}
+
+// resolveContactID logs one contact and reads its receipt id back from the
+// --json receipt, the target a void row corrects.
+func resolveContactID(t *testing.T) string {
+	t.Helper()
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "contact", "Sam Rivera", "--json")
+	require.NoError(t, err)
+	var receipt struct {
+		ReceiptID string `json:"receipt_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &receipt))
+	require.NotEmpty(t, receipt.ReceiptID, "expected a logged contact to void")
+	return receipt.ReceiptID
 }
 
 // TestModeJSON_EmitsModeShape pins mode's minimal --json shape (AC-12, AC-13):

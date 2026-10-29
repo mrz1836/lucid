@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -674,4 +675,269 @@ func TestContactAcks_InventoryOnly(t *testing.T) {
 		}
 		assert.Contains(t, ack, "(contact_", "every ack names its receipt")
 	}
+}
+
+// dueKeys returns each row's person key, in order.
+func dueKeys(rows []contact.DueRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.PersonKey)
+	}
+	return out
+}
+
+// TestContactDue_JSONDeterministicOrder: the due view is byte-identical across
+// calls (and across a fresh router over the same Ledger), and each group is
+// ordered by close date, then display name, then person key. Today is
+// Wednesday 2026-11-04, in ISO week 2026-W45 (Mon Nov 2 – Sun Nov 8).
+func TestContactDue_JSONDeterministicOrder(t *testing.T) {
+	r, a, home := newContactRouter(t)
+	seen := ctAt(time.October, 1)
+	writePersonFile(t, home, "person_s-river", "Sam Rivera", []string{}, seen)
+	writePersonFile(t, home, "person_s-river-2", "Sam Rivera", []string{}, seen)
+	casey := createPerson(t, r, "Casey Park")
+	riley := createPerson(t, r, "Riley Moss")
+	alex := createPerson(t, r, "Alex Kim")
+	jordan := createPerson(t, r, "Jordan Lee")
+
+	oct8 := ctAt(time.October, 8)
+	cadence(t, r, "person_s-river-2", contact.ActionSet, "4w", oct8) // closes Thu Nov 5
+	cadence(t, r, "person_s-river", contact.ActionSet, "28d", oct8)  // closes Thu Nov 5
+	cadence(t, r, "Casey Park", contact.ActionSet, "4w", oct8)       // closes Thu Nov 5
+	cadence(t, r, "Riley Moss", contact.ActionSet, "1w", ctAt(time.October, 27))
+	cadence(t, r, "Alex Kim", contact.ActionSet, "2w", ctAt(time.October, 14))   // closed Wed Oct 28
+	cadence(t, r, "Jordan Lee", contact.ActionSet, "3w", ctAt(time.October, 20)) // closes Tue Nov 10
+	logContact(t, r, ContactLogRequest{Subject: "Riley Moss", DayArg: "2026-10-27", Now: ctAt(time.October, 27)})
+
+	now := ctAt(time.November, 4)
+	v, err := r.ContactDue(now, false)
+	require.NoError(t, err)
+	first, err := json.Marshal(v)
+	require.NoError(t, err)
+	again, err := r.ContactDue(now, false)
+	require.NoError(t, err)
+	second, err := json.Marshal(again)
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(second), "the same Ledger and day render the same bytes")
+
+	fresh := New(a)
+	_, err = fresh.Boot()
+	require.NoError(t, err)
+	third, err := fresh.ContactDue(now, false)
+	require.NoError(t, err)
+	b3, err := json.Marshal(third)
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(b3), "a fresh router over the same Ledger agrees")
+
+	assert.Equal(t, "2026-11-04", v.Day)
+	assert.Equal(t, "2026-W45", v.Week)
+	assert.Equal(t, []string{riley, casey, "person_s-river", "person_s-river-2"}, dueKeys(v.DueThisWeek),
+		"close date first (Nov 3 before Nov 5), then name, then key")
+	assert.Equal(t, []string{alex}, dueKeys(v.StillOpen))
+	assert.Equal(t, []string{jordan}, dueKeys(v.ComingUp))
+	assert.Equal(t, "2026-11-03", v.DueThisWeek[0].WindowCloses)
+	assert.Equal(t, "2026-10-27", v.DueThisWeek[0].LastContact)
+	assert.Equal(t, "28d", v.DueThisWeek[2].Cadence, "the window as typed is kept")
+	assert.Empty(t, v.DueThisWeek[1].LastContact)
+	assert.Contains(t, string(first), `"last_contact":null`)
+
+	wrap, err := r.ContactDue(now, true)
+	require.NoError(t, err)
+	assert.True(t, wrap.Wrap)
+	assert.Equal(t, dueKeys(v.DueThisWeek), dueKeys(wrap.DueThisWeek), "the wrap shares the due view's grouping")
+	assert.Equal(t, dueKeys(v.StillOpen), dueKeys(wrap.StillOpen))
+	assert.Empty(t, wrap.ComingUp)
+}
+
+// TestContactDue_OffLimitsExcludedEverywhere: an off-limits person with an
+// active cadence and a birthday this week appears in no group, not among the
+// birthdays, and not in the wrap — while contact writes for them still
+// succeed, since it is the user's own record.
+func TestContactDue_OffLimitsExcludedEverywhere(t *testing.T) {
+	r, _, _ := newContactRouter(t)
+	rileyDob, samDob := "1990-11-04", "1991-11-05"
+	created, err := r.PersonCreate(PersonCreateRequest{Name: "Riley Moss", Dob: &rileyDob, Now: ctAt(time.October, 1)})
+	require.NoError(t, err)
+	riley := created.Record.PersonKey
+	_, err = r.PersonCreate(PersonCreateRequest{Name: "Sam Rivera", Dob: &samDob, Now: ctAt(time.October, 1)})
+	require.NoError(t, err)
+	cadence(t, r, "Riley Moss", contact.ActionSet, "1w", ctAt(time.October, 20)) // closed Oct 27: still open
+	cadence(t, r, "Sam Rivera", contact.ActionSet, "4w", ctAt(time.October, 8))  // closes Nov 5: due
+	_, err = r.PersonOffLimits(PersonOffLimitsRequest{Subject: "Riley Moss"})
+	require.NoError(t, err)
+
+	now := ctAt(time.November, 4)
+	_, err = r.ContactLog(ContactLogRequest{Subject: "Riley Moss", DayArg: "@yesterday", Now: now})
+	require.NoError(t, err, "an off-limits person stays writable")
+	_, err = r.ContactCadence(ContactCadenceRequest{Subject: "Riley Moss", Action: contact.ActionSet, Window: "3d", Now: now})
+	require.NoError(t, err)
+	st := contactStates(t, r)[riley]
+	require.Equal(t, contact.StateActive, st.State)
+	require.Equal(t, "2026-11-06", st.Closes, "their cadence would be due this week")
+
+	for _, wrap := range []bool{false, true} {
+		v, err := r.ContactDue(now, wrap)
+		require.NoError(t, err)
+		for _, group := range [][]contact.DueRow{v.DueThisWeek, v.StillOpen, v.ComingUp} {
+			assert.NotContains(t, dueKeys(group), riley, "wrap=%v", wrap)
+		}
+		for _, b := range v.Birthdays {
+			assert.NotEqual(t, riley, b.PersonKey, "wrap=%v", wrap)
+		}
+		raw, err := json.Marshal(v)
+		require.NoError(t, err)
+		text := contact.RenderDueText(v)
+		if wrap {
+			text = contact.RenderWrapText(v)
+		}
+		for _, surface := range []string{string(raw), text} {
+			assert.NotContains(t, surface, "Riley", "wrap=%v", wrap)
+			assert.NotContains(t, surface, riley, "wrap=%v", wrap)
+			assert.Contains(t, surface, "Sam Rivera", "the view is not simply empty (wrap=%v)", wrap)
+		}
+		if !wrap {
+			require.Len(t, v.Birthdays, 1)
+			assert.Equal(t, "Sam Rivera", v.Birthdays[0].DisplayName)
+		}
+	}
+}
+
+// TestContactDue_UsesCanonicalDisplayNameAfterRename: a row shows the live
+// canonical record's current display name — after a rename, and after a merge,
+// where history recorded under the merged-away key folds onto the target.
+func TestContactDue_UsesCanonicalDisplayNameAfterRename(t *testing.T) {
+	r, _, home := newContactRouter(t)
+	riley := createPerson(t, r, "Riley Moss")
+	seen := ctAt(time.October, 1)
+	const keep, dup = "person_a-kim", "person_j-lee-old"
+	writePersonFile(t, home, keep, "Alex Kim", []string{}, seen)
+	writePersonFile(t, home, dup, "Jordan Lee", []string{}, seen)
+	cadence(t, r, "Riley Moss", contact.ActionSet, "4w", ctAt(time.October, 8))  // closes Nov 5
+	cadence(t, r, "Jordan Lee", contact.ActionSet, "2w", ctAt(time.October, 14)) // closed Oct 28
+
+	_, err := r.PersonRename(PersonRenameRequest{Subject: "Riley Moss", NewName: "Casey Park"})
+	require.NoError(t, err)
+	_, err = r.PersonMerge(PersonMergeRequest{Source: dup, Target: keep})
+	require.NoError(t, err)
+
+	v, err := r.ContactDue(ctAt(time.November, 4), false)
+	require.NoError(t, err)
+	require.Len(t, v.DueThisWeek, 1)
+	assert.Equal(t, riley, v.DueThisWeek[0].PersonKey, "a rename keeps the key")
+	assert.Equal(t, "Casey Park", v.DueThisWeek[0].DisplayName)
+	require.Len(t, v.StillOpen, 1)
+	assert.Equal(t, keep, v.StillOpen[0].PersonKey, "the merged-away key folds onto the target")
+	assert.Equal(t, "Alex Kim", v.StillOpen[0].DisplayName)
+	text := contact.RenderDueText(v)
+	assert.NotContains(t, text, "Riley Moss", "the old name is gone from the view")
+	assert.NotContains(t, text, "Jordan Lee", "the merged-away name is gone from the view")
+}
+
+// personLines returns a person view's text, one line per element.
+func personLines(t *testing.T, r *Router, name string) (PersonResult, []string) {
+	t.Helper()
+	res, err := r.Person(PersonRequest{Name: name})
+	require.NoError(t, err)
+	require.True(t, res.Matched, name)
+	return res, strings.Split(res.Text, "\n")
+}
+
+// TestPersonView_ShowsCadenceAndLastContact: `lucid person` adds one check-in
+// line after the mention counts — the cadence, or that it is paused or
+// retired, and the last contact as a date — plus the Contact summary, in the
+// off-limits raw view too. A person with no contact events, or none that still
+// counts, renders byte-identically to before (S-22).
+func TestPersonView_ShowsCadenceAndLastContact(t *testing.T) {
+	r, _, _ := newContactRouter(t)
+	createPerson(t, r, "Sam Rivera")
+	createPerson(t, r, "Alex Kim")
+	createPerson(t, r, "Jordan Lee")
+	createPerson(t, r, "Casey Park")
+	createPerson(t, r, "Riley Moss")
+	untouched := map[string]string{}
+	for _, name := range []string{"Jordan Lee", "Casey Park"} {
+		res, err := r.Person(PersonRequest{Name: name})
+		require.NoError(t, err)
+		untouched[name] = res.Text
+	}
+
+	oct29 := ctAt(time.October, 29)
+	cadence(t, r, "Sam Rivera", contact.ActionSet, "4w", ctAt(time.September, 1))
+	logContact(t, r, ContactLogRequest{Subject: "Sam Rivera", Via: contact.ViaCall, DayArg: "2026-09-28", Now: oct29})
+	logContact(t, r, ContactLogRequest{Subject: "Alex Kim", DayArg: "2026-09-28", Now: oct29})
+	mistaken := logContact(t, r, ContactLogRequest{Subject: "Casey Park", Now: oct29})
+	_, err := r.ContactVoid(ContactVoidRequest{ID: mistaken.ID, Now: oct29})
+	require.NoError(t, err)
+
+	t.Run("active", func(t *testing.T) {
+		res, lines := personLines(t, r, "Sam Rivera")
+		require.GreaterOrEqual(t, len(lines), 3)
+		assert.Equal(t, "Sam Rivera", lines[0])
+		assert.True(t, strings.HasPrefix(lines[1], "Mentioned in "), lines[1])
+		assert.Equal(t, "Check-ins: every 4 weeks — last caught up 2026-09-28", lines[2])
+		require.NotNil(t, res.Contact)
+		assert.Equal(t, PersonContact{
+			State:       contact.StateActive,
+			Window:      contact.Window{Text: "4w", Days: 28},
+			LastContact: "2026-09-28",
+			Line:        "Check-ins: every 4 weeks — last caught up 2026-09-28",
+		}, *res.Contact)
+	})
+
+	t.Run("paused", func(t *testing.T) {
+		cadence(t, r, "Sam Rivera", contact.ActionPause, "", oct29)
+		res, lines := personLines(t, r, "Sam Rivera")
+		assert.Equal(t, "Check-ins: paused (every 4 weeks) — last caught up 2026-09-28", lines[2])
+		require.NotNil(t, res.Contact)
+		assert.Equal(t, contact.StatePaused, res.Contact.State)
+	})
+
+	t.Run("retired", func(t *testing.T) {
+		cadence(t, r, "Sam Rivera", contact.ActionRetire, "", oct29)
+		res, lines := personLines(t, r, "Sam Rivera")
+		assert.Equal(t, "Check-ins: retired — last caught up 2026-09-28", lines[2])
+		require.NotNil(t, res.Contact)
+		assert.Equal(t, contact.StateRetired, res.Contact.State)
+		assert.Equal(t, "4w", res.Contact.Window.Text, "the last window is kept for display")
+	})
+
+	t.Run("contact without a cadence", func(t *testing.T) {
+		res, lines := personLines(t, r, "Alex Kim")
+		assert.Equal(t, "Last caught up 2026-09-28 (no check-in cadence)", lines[2])
+		require.NotNil(t, res.Contact)
+		assert.Equal(t, contact.StateNone, res.Contact.State)
+		assert.Equal(t, contact.Window{}, res.Contact.Window)
+		assert.Equal(t, "2026-09-28", res.Contact.LastContact)
+	})
+
+	t.Run("cadence with nothing logged", func(t *testing.T) {
+		cadence(t, r, "Riley Moss", contact.ActionSet, "10d", oct29)
+		res, lines := personLines(t, r, "Riley Moss")
+		assert.Equal(t, "Check-ins: every 10 days — not logged yet", lines[2])
+		require.NotNil(t, res.Contact)
+		assert.Empty(t, res.Contact.LastContact)
+	})
+
+	t.Run("off-limits raw view", func(t *testing.T) {
+		_, err := r.PersonOffLimits(PersonOffLimitsRequest{Subject: "Riley Moss"})
+		require.NoError(t, err)
+		res, lines := personLines(t, r, "Riley Moss")
+		require.True(t, res.OffLimits)
+		assert.True(t, strings.HasPrefix(lines[0], "Riley Moss is off-limits to inference"), lines[0])
+		assert.True(t, strings.HasPrefix(lines[1], "Mentioned in "), lines[1])
+		assert.Equal(t, "Check-ins: every 10 days — not logged yet", lines[2],
+			"the check-in line is the user's own record, not an inference")
+		require.NotNil(t, res.Contact)
+	})
+
+	t.Run("no contact events, or none that counts, renders as before", func(t *testing.T) {
+		for name, before := range untouched {
+			res, err := r.Person(PersonRequest{Name: name})
+			require.NoError(t, err)
+			assert.Equal(t, before, res.Text, name)
+			assert.Nil(t, res.Contact, name)
+			assert.NotContains(t, res.Text, "Check-ins", name)
+			assert.NotContains(t, res.Text, "caught up", name)
+		}
+	})
 }

@@ -275,6 +275,65 @@ func (r *Router) ContactVoid(req ContactVoidRequest) (ContactWriteResult, error)
 	return contactResult(stored, rec, after, today), nil
 }
 
+// ContactDue builds the due view for the logical day of now (ADR-0014 §6): the
+// three groups over the ISO Monday–Sunday week, plus the week's birthdays, or
+// under wrap the Sunday wrap's two lists alone (§9). It is computed fresh on
+// every call — there is no stored snapshot — and it is the one read the CLI's
+// `contact due` and the weekly node share. Events fold through merge
+// redirects, only live canonical records are grouped, and off-limits people
+// appear nowhere in it. It never calls a model and appends nothing; the
+// idempotent contacts/ scaffold may run.
+func (r *Router) ContactDue(now time.Time, wrap bool) (contact.DueView, error) {
+	if err := r.prepareContacts(); err != nil {
+		return contact.DueView{}, err
+	}
+	idx, err := r.contactIndex()
+	if err != nil {
+		return contact.DueView{}, err
+	}
+	events, err := r.readContactEvents(idx)
+	if err != nil {
+		return contact.DueView{}, err
+	}
+	return contact.Due(contact.Fold(events), idx.info, contact.LogicalDay(whenOr(now)), wrap), nil
+}
+
+// PersonContact is the check-in summary a person view carries (ADR-0014 §6):
+// the cadence State ([contact.StateActive], [contact.StatePaused],
+// [contact.StateRetired], or [contact.StateNone] for contact logged with no
+// cadence), the most recent Window set (zero when none ever was), the last
+// non-voided contact day ("" when none counts), and the rendered Line.
+type PersonContact struct {
+	State       string
+	Window      contact.Window
+	LastContact string
+	Line        string
+}
+
+// personContact folds the contact stream for one canonical person and returns
+// their check-in summary, or nil when there is nothing to show — no contact
+// events, or none that still counts — so such a person's view renders exactly
+// as before (S-22). It is a read: it neither scaffolds nor appends.
+func (r *Router) personContact(personKey string) (*PersonContact, error) {
+	_, states, err := r.foldContacts()
+	if err != nil {
+		return nil, fmt.Errorf("person: read check-ins: %w", err)
+	}
+	st, ok := states[personKey]
+	if !ok {
+		return nil, nil //nolint:nilnil // no contact events: the view adds nothing
+	}
+	line, ok := contact.RenderPersonLine(st)
+	if !ok {
+		return nil, nil //nolint:nilnil // nothing that still counts: the view adds nothing
+	}
+	pc := &PersonContact{State: st.State, Window: st.Window, Line: line}
+	if st.LastContact != nil {
+		pc.LastContact = st.LastContact.Day
+	}
+	return pc, nil
+}
+
 // contactResult assembles a write's result and its ack.
 func contactResult(stored contact.Event, rec storage.PersonRecord, after contact.PersonState, today string) ContactWriteResult {
 	return ContactWriteResult{
