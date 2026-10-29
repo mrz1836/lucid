@@ -114,6 +114,9 @@ companion's — and it is **structural first, not a filter bolted on afterward.*
    numbers — counts only, never a note or an event date) and the engine **day
    records** for the 7-day window. It has **no reader for observations, journal
    entries, or raw log content at all** — that seam does not exist in the package.
+   Contact check-in data ([`contact.md`](contact.md)) — who you keep in touch
+   with, your cadences and contacts — is never read by the witness report either,
+   and there is no setting to include it.
    Private detail is not filtered out; it is structurally unreachable. The model,
    in turn, is handed **only** the witness-safe report data model — the honest
    numbers, the derived watch-outs, and the drafted asks. It never sees a journal

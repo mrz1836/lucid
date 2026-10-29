@@ -40,16 +40,28 @@ floor — if a doc and a passing test disagree, stop and surface it rather than
 
 | …do this | Read first | Touch |
 |----------|------------|-------|
-| add/change a CLI verb | [`agent-contracts.md`](docs/mvp/agent-contracts.md), [ADR-0007](docs/adr/0007-cli-conventions.md) | `internal/cli` + `internal/router` |
+| add/change a CLI verb | [`agent-contracts.md`](docs/mvp/agent-contracts.md), [ADR-0007](docs/adr/0007-cli-conventions.md) | `internal/cli` + `internal/router` — then sync the three surface docs (see *CLI surface stays in sync* below) |
 | change what leaves the machine (a send) | [`engine-module.md`](docs/mvp/engine-module.md) | `internal/scheduler` + `internal/engine/templates` — and confirm it's a pre-committed template |
 | change `~/.lucid/` layout or a record | [`data-model.md`](docs/mvp/data-model.md) | `internal/storage` **only** |
 | add/adjust enrichment or any network call | [`observations.md`](docs/observations.md) §5, [ADR-0006](docs/adr/0006-model-access.md) | `internal/storage/fetch_enrichment.go` + `internal/observations` |
 | change model/agent behavior | [`agent-contracts.md`](docs/mvp/agent-contracts.md) | `internal/agents/*` + `internal/provider` (never elsewhere) |
 | add a failure/error path | [`error-states.md`](docs/mvp/error-states.md) **first** | the owning package |
+| back up / restore the Ledger | [`data-model.md`](docs/mvp/data-model.md), [`local-runtime.md`](docs/mvp/local-runtime.md) §Rebuildability | `internal/storage` (archive IO) + `internal/cli` (the external sink) |
+| install/uninstall the scheduler daemon | [`local-runtime.md`](docs/mvp/local-runtime.md) §Installing the supervised scheduler, [ADR-0005](docs/adr/0005-secrets-management.md) | `internal/schedinstall` (launchctl host seam) + `internal/cli` + `deploy` (render+lint) |
 
 ## Invariants — never violate (most are enforced by tests)
 
 - **Docs-first.** A behavior change is a doc diff before a code diff.
+- **CLI surface stays in sync.** Any Go change that adds, removes, or renames a
+  verb, subcommand, flag, or `LUCID_*` env var updates all three user-facing
+  surfaces in the **same** change: the canonical reference
+  [`docs/usage/commands.md`](docs/usage/commands.md), the harness command map
+  [`skills/lucid/SKILL.md`](skills/lucid/SKILL.md) (its command map, non-chat
+  verb table, and `min_lucid_version`), and the root
+  [`README.md`](README.md) (its Command reference + Environment tables). A verb
+  that exists in code but not in all three is a docs-first violation. (The CI
+  env doc [`.github/env/README.md`](.github/env/README.md) is **not** part of
+  this set — it is upstream-synced `.github/**` and holds no CLI surface.)
 - **`personal/` is private.** Gitignored; never in any commit, example,
   fixture, or shared context. Do not read it unless the user explicitly
   directs you to.
@@ -88,7 +100,7 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
 
 - [`cmd/lucid/main.go`](cmd/lucid/main.go) → [`internal/cli`](internal/cli) —
   Cobra entry; verbs: `init log closeout mode status obs day validate export
-  version update` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
+  backup restore version update` ([ADR-0007](docs/adr/0007-cli-conventions.md)).
 - [`internal/router`](internal/router) — dispatch spine; verb→intent 1:1;
   holds the storage adapter + resolved config; orders agent calls.
 - [`internal/engine`](internal/engine) — pure, deterministic, agent-free Engine
@@ -96,21 +108,57 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `templates/` = the fixed send templates.
 - [`internal/scheduler`](internal/scheduler) — the **only** send path
   off-machine (evening bell + morning tripwire); takes an explicit `now`.
+- [`internal/schedinstall`](internal/schedinstall) — the macOS host-install
+  seam for the supervised daemon: writes the launchd plist + `hush supervise`
+  TOML (outside `~/.lucid/`) and drives `launchctl bootstrap`/`bootout`. All
+  decisions live in the untagged `apply.go` (Linux-covered); the darwin shell is
+  a thin `runLaunchctl` closure. Transport-free; renders nothing itself — the
+  top-level `deploy` package renders + lints the artifacts, reached only from
+  `internal/cli` (the junction that owns the `deploy` dependency; `storage`
+  never imports it).
+- [`internal/flynode`](internal/flynode) — the flywheel-node scaffolding every
+  daemon (Engine, companion, workout, witness report, contact weekly) shares:
+  `Boot` is the job-DB open/migrate/scaffold/reconcile/run spine each `Run`
+  previously carried inline, and `Fire[P]` is the send-path reliability order
+  (past-cutoff → idempotency → compose → late-note → send → verify → receipt →
+  post-send) the four message daemons share. Transport- and model-free by
+  construction (reconcile/send/verify/compose/alert are injected closures);
+  *enforced by [`flynode/purity_test.go`](internal/flynode/purity_test.go)*.
+- [`internal/composekit`](internal/composekit) — the small compose/provider-
+  adjacent helpers the three message composers share: `ReadPromptFile` (open one
+  explicit operator prompt path, never a dir walk), `WithModelOverride` (layer a
+  feature's optional `model` onto `provider.model`), the shared `ProviderBuilder`
+  backend-constructor type, and `StripBullet` (trim one reply line's bullet
+  framing). Names `config.ProviderConfig`/`provider.Provider`, so it is kept out
+  of `flynode` so that package stays provider-free.
 - [`internal/observations`](internal/observations) — micro-logs, salted
   registries, day-view join, curiosity, enrichment; `exports/` = CSV +
   clinician packet.
+- `internal/contact` — the pure, agent-free core of contact check-ins
+  ([ADR-0014](docs/adr/0014-contact-check-ins.md)): the event schema and
+  `contact_…` receipt ids, the `Nd`/`Nw` window grammar, the cadence fold and
+  its window-start rules, the ISO Monday–Sunday due grouping, birthdays, and the
+  one renderer for every contact string. No IO, no model.
+- `internal/contactweekly` — the config-gated Monday who's-due node: the witness
+  report's weekly-job shape over `flynode.Fire`, a fixed template rendered by
+  `internal/contact`, its own disposable job DB (`LUCID_CONTACT_WEEKLY_DB`), and
+  no model call anywhere in the package.
 - [`internal/storage`](internal/storage) — the **only** reader/writer of
   `~/.lucid/` (`LUCID_HOME` override); frontmatter + one file per record
   family; `fetch_enrichment.go` = the single audited network op.
 - [`internal/agents`](internal/agents)`/{intake,structuring,reflection,safety}`
-  — the LLM-backed agents.
+  — the LLM-backed agents; `agentutil/` holds the shared call-the-model-and-
+  decode-JSON helper (`CompleteJSON`), reachable only through `provider`.
 - [`internal/provider`](internal/provider) — the single model seam
   (`iface.go`, `fake.go`).
 - [`internal/validate`](internal/validate) — `lucid validate`, the read-only
   architecture-gate sweep (boundary, diagnostic-language, links, schema).
-- `internal/{config,isoweek,deps}` + `data/` — config, ISO-week math,
-  pinned core deps (`go-flywheel`, `go-foundation`), embedded
-  person-key wordlist. (Self-update is wired into `internal/cli`.)
+- `internal/{config,isoweek,deps,keyderive,clockmark}` + `data/` —
+  config, ISO-week math, pinned core deps (`go-flywheel`,
+  `go-foundation`), the pure salted slug-derivation core shared by person_keys
+  and registry keys, the embedded person-key wordlist, and the single strict
+  `HH:MM` clock-mark parse/render rule shared by the Engine, config, and the
+  daemons.
 
 ## Build, verify, commit
 

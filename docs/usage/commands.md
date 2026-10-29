@@ -34,9 +34,12 @@ this reference stays the precise baseline.
   ([`wheel`](#wheel)). The anchor event verbs (`anchor kind`, `slip`, `use`,
   `miss`, `void`) extend the receipt to `{receipt_id, logical_date, label,
   event}` — plus `compat` when a definition record was appended alongside —
-  where `receipt_id` is the event id ([`anchor`](#anchor)). In every case stdout
-  carries JSON only — diagnostics stay on stderr — so a `--json` stream is
-  always parseable.
+  where `receipt_id` is the event id ([`anchor`](#anchor)). The contact write
+  verbs (`contact`, `contact every`, `pause`, `resume`, `retire`, `snooze`,
+  `void`) extend it the same way to `{receipt_id, logical_date, person_key,
+  event}`, where `receipt_id` is the `contact_…` event id
+  ([`contact`](#contact)). In every case stdout carries JSON only — diagnostics
+  stay on stderr — so a `--json` stream is always parseable.
 - **Exit codes** (stable, so scripts and supervised ops can branch on them):
 
   | Code | Meaning |
@@ -75,6 +78,7 @@ works on `lucid log` works identically on `lucid workout log`, `lucid mode`, and
 the registry's `--start` / `--end` / `--onset`. The commands carrying the `--day`
 flag are [`log`](#log), [`attach`](#attach), [`memory`](#memory), [`obs`](#obs),
 [`reframe add`](#reframe), [`focus add`](#focus), [`rep add`](#rep),
+[`contact`](#contact) (the bare capture form),
 [`gratitude add`](#gratitude), [`gratitude thank`](#gratitude), [`workout log`](#workout),
 [`workout amend`](#workout), [`mode`](#mode),
 [`storm`](#storm), [`closeout`](#closeout), and the anchor event verbs
@@ -164,9 +168,13 @@ registry now carries the future ceiling, so it is not on this list:
 | `self set`'s date is optional entirely | It is the one write surface where a date is not required at all. A self fact is atemporal by definition — most have no origin worth recording, and inventing one would be worse than the silence. |
 
 **The closed write surface.** Every verb that stamps a logical day is named
-above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `rep add`, `gratitude add`,
-`gratitude thank`, `memory`, `workout log`, `workout amend` (a re-date), `era`,
-`injury`, `anchor`, `mode`, `storm`, `closeout`. Four write verbs are deliberately N/A —
+above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `rep add`, `contact`,
+`gratitude add`, `gratitude thank`, `memory`, `workout log`, `workout amend` (a
+re-date), `era`, `injury`, `anchor`, `mode`, `storm`, `closeout`. The other
+[`contact`](#contact) writes — `every`, `pause`, `resume`, `retire`, `snooze` and
+`void` — stamp the current logical day by design and take no `--day`: a cadence
+change, a snooze or a correction is about now, and a snooze must never reach
+into another week. Four write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
 id or window, rather than capturing a new one, [`self`](#self) records
@@ -1346,6 +1354,252 @@ lucid rep surface
 lucid rep retire rep_2026_08_20_001
 ```
 
+### contact
+
+```
+lucid contact <subject...> [--via <call|text|video|in-person>] [--note <text> | --note-file <path>] [--day <date>] [--json]
+lucid contact every <subject...> <window> [--json]
+lucid contact pause <subject...> [--json]
+lucid contact resume <subject...> [--json]
+lucid contact retire <subject...> [--json]
+lucid contact snooze <subject...> [--json]
+lucid contact void <id> [--json]
+lucid contact due [--wrap] [--json]
+```
+
+Keep in touch with the people who matter to you, inside a time frame you choose:
+a per-person **check-in cadence**, a one-line capture for "we were in touch",
+and a deterministic **due view** over Monday–Sunday weeks. Deterministic, no
+LLM, an append-only record family under `~/.lucid/contacts/`, laid out like
+`reps/`. It is a reminder for you and never a message to anyone else: Lucid
+never contacts, messages or schedules anything with a person you track here.
+The user guide is [`contact.md`](contact.md); the design record is
+[ADR-0014](../adr/0014-contact-check-ins.md).
+
+- **`contact <subject>`** — the bare form — records that you and this person
+  were in touch on a logical day, and prints its receipt. It is a **capture**,
+  like `obs`: it runs immediately, and `void` corrects a mistake. Contact in
+  either direction counts; nothing asks who reached out, and no content is
+  required.
+  - `--via <call|text|video|in-person>` is optional. Any other value is a usage
+    error (exit `2`) that lists the four, and nothing is written.
+  - `--note <text>` or `--note-file <path>` (`-` reads stdin) adds one optional
+    line, trimmed. The two are mutually exclusive, and a note with more than one
+    line is refused.
+  - `--day` backdates on the **strict** tier
+    ([Backdating with --day](#backdating-with---day)): `--day @yesterday` and
+    `--day @YYYY-MM-DD` set the event's `logical_date`; an unreadable token or a
+    future day is a clean error and nothing is written. `recorded_at` is always
+    the real write time.
+  - Logging contact **never creates a person**: an unknown subject is refused
+    (§P-4) with a pointer to `lucid person create <name>`. A person with no
+    cadence can still be logged — the contact shows in `lucid person <name>` and
+    has no effect on any list.
+- **`every <subject> <window>`** sets a cadence, or changes the window of an
+  existing one. The window is the **last** argument; everything before it is the
+  subject. On a paused cadence it changes the window and stays paused.
+- **`pause <subject>`** takes an **active** cadence off the lists and keeps its
+  window; **`resume <subject>`** puts a **paused** one back;
+  **`retire <subject>`** ends a live cadence (active or paused) and keeps its
+  history. A transition from the wrong state — pausing a cadence that is not
+  active, resuming one that is not paused, retiring with no live cadence — is
+  refused and writes nothing.
+- **`snooze <subject>`** keeps a person with an **active** cadence off the lists
+  for the ISO week (Monday–Sunday) of the current logical day, leaving their
+  window and anchor untouched: next Monday they appear where their window puts
+  them. It takes no `--day`, so it can never reach into another week, and a
+  second snooze in the same week is refused. It is a capture, like the bare form.
+- **`void <id>`** corrects a `contact` or a `snooze` by its receipt id. A voided
+  contact stops counting toward the window, a voided snooze stops hiding the
+  person, and both records stay in the history. An unknown id, an
+  already-voided event, a void, or a cadence event is refused — a cadence is
+  corrected with `every`, `pause`, `resume` or `retire`, never voided.
+- **`due`** is the read view and **`due --wrap`** the Sunday wrap, both below.
+  A read appends nothing.
+
+State is a fold, never a mutation: every write appends one event and nothing is
+rewritten. Events follow `person merge` redirects at read time, so a cadence, a
+contact or a snooze recorded before a merge stays with the merged person.
+
+**The window grammar.** `Nd` or `Nw`, a whole number N ≥ 1 of days or weeks.
+`28d` and `4w` are the same 28-day window; the form as typed is kept for display
+(`every 4 weeks`, `every 28 days`, `every week`, `every day`). Zero, negative,
+fractional, unit-less or unreadable input (`0d`, `-2w`, `1.5w`, `4`,
+`four weeks`) is a usage error that carries the grammar —
+`a window is Nd or Nw — a whole number ≥ 1 of days or weeks, e.g. 28d or 4w` —
+and nothing is written.
+
+**Where the window starts.** A window closes N days after its **anchor**:
+
+- On a first set, or a set after `retire`, the anchor is the most recent
+  non-voided contact, or the day the cadence was set when no contact exists. A
+  new `4w` with nothing logged first comes due four weeks later.
+- A backdated contact logged after the set moves the anchor to that day, and any
+  later contact moves it forward.
+- `resume` anchors on the later of the last contact and the resume day, so a
+  pause never puts someone straight past their window.
+- Changing the window with `every` keeps the anchor.
+- An old contact logged before a first set can put someone straight into "Still
+  open from before". That is honest, and the `every` ack says so
+  (`… — open now; they'll be on Monday's list`).
+
+The close date is the anchor plus the window in civil-date arithmetic, so a DST
+change never shifts it. A voided contact drops out, and the anchor falls back to
+the next rule that applies.
+
+**Receipts.** Every write gets its own id, `contact_YYYY_MM_DD_<slot>`: the
+event's logical day plus the anchor-event slot grammar (`a`, `b`, … `z`, `aa`),
+so the first event filed under 2026-10-29 is `contact_2026_10_29_a`, and a
+backdated contact takes its own day's id. The prose ack is inventory-only and
+names the receipt:
+
+```text
+Logged contact with Sam Rivera on 2026-10-29 (contact_2026_10_29_a).
+```
+
+Under `--json` every write emits one shared receipt shape, extending the global
+`{receipt_id, logical_date}` receipt:
+
+```json
+{
+  "receipt_id": "contact_2026_10_28_a",
+  "logical_date": "2026-10-28",
+  "person_key": "person_s-river",
+  "event": {"id": "contact_2026_10_28_a", "schema": 1, "type": "contact",
+            "person_key": "person_s-river", "logical_date": "2026-10-28",
+            "recorded_at": "2026-10-29T08:15:00-04:00", "source": "contact",
+            "via": "call", "note": ""}
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `receipt_id` | The event's id — the receipt to echo back. |
+| `logical_date` | The day the event is about: the `--day` of a backdated contact, otherwise the current logical day. |
+| `person_key` | The canonical key the subject resolved to. |
+| `event` | The stored event, verbatim. `type` is `cadence`, `contact`, `snooze` or `void`, with its type's own fields: `action` (`set`, `pause`, `resume` or `retire`) on a cadence event, plus `window` and `window_days` on a `set`; `via` and `note` on a contact (each `""` when unset); `refs.voids` on a void. The record has no direction, initiator, content, score or streak field. |
+
+**The due view.** `lucid contact due` groups people against the ISO
+Monday–Sunday week of the current logical day (the 04:00 rollover applies).
+Only people with an **active** cadence, not snoozed this week and not
+off-limits are grouped:
+
+| Group | `--json` key | The window closes… |
+|-------|--------------|--------------------|
+| Due this week | `due_this_week` | this Monday through this Sunday |
+| Still open from before | `still_open` | before this Monday |
+| Coming up next week | `coming_up` | next Monday through next Sunday |
+
+A window that closes later than next Sunday is not shown. Each group is ordered
+by close date, then case-folded display name, then `person_key`. Each line shows
+the cadence and the last contact, and never a count of days:
+`Sam Rivera (every 4 weeks), last caught up Sep 28`, or `not logged yet` when
+nothing is logged; the year is added only when the last contact fell in another
+year (`last caught up Dec 30, 2025`). The human form opens with the week
+(`Week of Nov 2 – Nov 8`), then the sections `Due this week`,
+`Still open from before`, `Coming up next week` and `Birthdays this week`, each
+line prefixed `- `, with empty sections left out. With no active cadences at all
+it reads `No check-in cadences yet — set one with lucid contact every <name> 4w.`;
+with nobody in the three groups it reads `Nobody's due this week.`, and
+birthdays are still listed.
+
+**Birthdays.** Anyone with a `dob` who is not off-limits — cadence or not,
+snoozed or paused — shows in the birthdays block when their birthday falls this
+Monday–Sunday. A Feb 29 `dob` is observed on Feb 28 in non-leap years, and a
+week that crosses New Year works. Birthdays show in the due view and the Monday
+post, never in the wrap.
+
+**`--json`** is byte-deterministic for a given Ledger and day:
+
+```json
+{
+  "day": "2026-11-04",
+  "week": "2026-W45",
+  "week_start": "2026-11-02",
+  "week_end": "2026-11-08",
+  "wrap": false,
+  "due_this_week": [
+    {"person_key": "person_s-river", "display_name": "Sam Rivera",
+     "cadence": "4w", "cadence_days": 28,
+     "last_contact": "2026-10-08", "window_closes": "2026-11-05"}
+  ],
+  "still_open": [],
+  "coming_up": [],
+  "birthdays": [
+    {"person_key": "person_j-lantern", "display_name": "Jordan Lee",
+     "date": "2026-11-04"}
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `day` | The current logical day. |
+| `week` · `week_start` · `week_end` | The ISO week label, and its Monday and Sunday. |
+| `wrap` | `true` under `--wrap`, else `false`. |
+| `due_this_week` · `still_open` · `coming_up` | The three groups. Each row is `{person_key, display_name, cadence, cadence_days, last_contact, window_closes}`: `cadence` is the window as typed, `last_contact` the last non-voided contact day or `null`, and `window_closes` a date — the ordering key, never a count. |
+| `birthdays` | `{person_key, display_name, date}` rows, `date` being the day the birthday is observed this week; ordered by date, then name. |
+
+Arrays are never `null`; an empty group is `[]`.
+
+**The Sunday wrap.** `due --wrap` is the due view with only the two lists, "Due
+this week" and "Still open from before". It leaves out "Coming up next week" and
+birthdays (under `--json`, `wrap` is `true` and the `coming_up` and `birthdays`
+keys are absent), and it is computed fresh on every call — there is no stored
+Monday snapshot. Its human form opens
+`Still open this week — no pressure; anyone here rolls into Monday's list.`, and
+reads `Nobody's still open this week.` when both lists are empty. A harness's
+existing Sunday pass can read `lucid contact due --wrap --json` and fold it into
+a message it already sends; Lucid itself adds no Sunday post. Anyone left
+unchecked rolls into next Monday's "Still open from before" on their own.
+
+**The Monday post.** The same two lists, plus the week's birthdays, can be
+posted once a week to your own channel by the contact weekly node inside
+[`scheduler run`](#scheduler-run). It is config-gated and ships off
+(`contact_weekly.enabled: false`; Monday `09:00` by default), renders a fixed
+template with no model call, posts nothing on an empty week, and never addresses
+anyone but you. Setup and the exact template:
+[`contact.md`](contact.md#turning-the-monday-post-on).
+
+**Off-limits people** can still be written about — a contact, a cadence and a
+snooze for them are your own record — but they never appear in the due view, the
+birthdays block, the Monday post or the wrap. The witness report never reads
+contact data.
+
+**Resolving a subject.** Every contact verb resolves its subject exactly as the
+person write verbs do ([Resolving a subject](#resolving-a-subject)): an exact
+`person_key` wins, then a `display_name`/`aka[]` match, with redirect tombstones
+followed forward. No match is refused with the `lucid person create` pointer
+(§P-4), more than one is refused naming the candidate keys (§P-5), and the verb
+never guesses. A multi-word subject joins into one name.
+
+The subcommand names shadow a person with the same literal name — reach such a person by their `person_key`.
+`every`, `pause`, `resume`, `retire`, `snooze`, `void` and `due` always run the
+subcommand, so `lucid contact due` is always the due view — the same rule
+[`person`](#a-subcommand-shadows-a-literal-name) follows.
+
+**Errors.** Every refusal is decided before any append, writes nothing, and ends
+"Nothing was saved."; the exact copy is rows Ct-1 to Ct-11 of
+[`../mvp/error-states.md`](../mvp/error-states.md#contact-check-ins-deterministic-agent-free).
+An invalid window, `--via` or note is a usage error (exit `2`); every other
+refusal also exits non-zero.
+
+```sh
+lucid contact every Sam Rivera 4w
+lucid contact Sam Rivera --day 2026-10-12        # record a real last contact
+lucid contact Sam Rivera --via call
+lucid contact Alex Kim --via text --note-file /tmp/note.txt
+lucid contact Jordan Lee --day @yesterday --json
+lucid contact snooze Alex Kim
+lucid contact void contact_2026_10_29_a
+lucid contact pause Jordan Lee
+lucid contact resume Jordan Lee
+lucid contact retire Casey Park
+lucid contact due
+lucid contact due --json
+lucid contact due --wrap --json
+```
+
 ### retro
 
 ```
@@ -2028,8 +2282,10 @@ evening bell and the morning tripwire (the L1/L2 escalation ladder) on the
 active chain profile's clocks (`bell_time`, `tripwire_time`) — pre-committed
 Engine templates, never model-authored. The retired monthly heartbeat is
 absorbed by the weekly [witness report](witness-report.md), which runs beside
-the Engine alongside the daily [companion](companion.md) when configured. The
-jobs are durable: a daemon killed mid-evening still fires the missed
+the Engine alongside the daily [companion](companion.md) when configured. When
+`contact_weekly` is enabled, the [contact check-in](contact.md) node runs beside
+them too, posting the Monday who's-due list — a fixed, model-free template — to
+the user channel only. The jobs are durable: a daemon killed mid-evening still fires the missed
 tripwire on its next supervised start (bounded missed-fire catch-up). The
 path is deterministic and agent-free — no LLM, ever. It is meant to run
 under `hush supervise` as a launchd sibling of the harness gateway,
@@ -2062,6 +2318,25 @@ in its **own** job store, on the same chain marks, idempotently by slug:
 | `lucid-companion-morning` | `tripwire_time` | the companion is **enabled** |
 | `lucid-companion-night` | `bell_time` | the companion is **enabled** |
 | `lucid-companion-morning-backstop` | the [morning backstop mark](#the-morning-backstop-lucid-companion-morning-backstop) | the companion is **enabled** |
+
+**The contact weekly node seeds one.** When `contact_weekly.enabled` is set,
+the contact weekly node ([`contact`](#contact),
+[ADR-0014](../adr/0014-contact-check-ins.md)) seeds exactly one periodic in its
+**own** job store (`LUCID_CONTACT_WEEKLY_DB`), idempotently by slug; while the
+block is off the node does not start and its store is never created:
+
+| Slug | Fires | Active when |
+|------|-------|-------------|
+| `lucid-contact-weekly` | `contact_weekly.weekday` at `contact_weekly.time` (cron `0 9 * * 1` by default) | `contact_weekly` is **enabled** |
+
+Each fire reads the same due view as `lucid contact due` and renders the fixed
+"Due this week" / "Still open from before" / birthdays template with no model
+call. A week with nothing to post sends nothing and records a quiet
+`nothing-due` skip. It inherits the witness report's reliability shape: one
+bounded late attempt, a 48-hour stale cut-off that skips and alerts the user
+channel instead of posting a list days late, and idempotency per ISO week
+through `contacts/weekly_receipt.json` (see
+[`../mvp/error-states.md`](../mvp/error-states.md), rows Sc-13 to Sc-15).
 
 **Startup self-heal.** After seeding, the daemon runs the same reconcile pass
 that [`scheduler reconcile`](#scheduler-reconcile) exposes: any periodic that is
@@ -2201,23 +2476,25 @@ The command resolves the two disposable job-store paths exactly as the daemon do
 (flag → env → OS-user-config default) and **always prints the resolved paths**, so
 an environment / launchd path drift is visible rather than silently green.
 
-**It names all four job stores, not just the two it fully inspects.** The scheduler runs
-**four** independent disposable job stores — one each for the Engine, the companion,
-the weekly witness report, and the workout companion — and only the Engine store is
-pinned into the launchd plist as `LUCID_SCHEDULER_DB`. The other three resolve their
-own default under the OS user-config dir, independently of it. So a schema repair,
-a relocation, or a backup keyed on the pinned path alone is a fix applied to a
-**quarter** of the surface, and nothing about that path reveals the other three
-exist. `status` therefore prints the whole set — each store's resolved path beside
-the environment variable that moves it — resolved through each daemon's own
-resolver, so a printed path is the file that daemon actually opens:
+**It names all five job stores, not just the two it fully inspects.** The scheduler runs
+**five** independent disposable job stores — one each for the Engine, the companion,
+the weekly witness report, the workout companion, and the weekly contact check-in
+post — and only the Engine store is pinned into the launchd plist as
+`LUCID_SCHEDULER_DB`. The other four resolve their own default under the OS
+user-config dir, independently of it. So a schema repair, a relocation, or a backup
+keyed on the pinned path alone is a fix applied to a **fifth** of the surface, and
+nothing about that path reveals the other four exist. `status` therefore prints the
+whole set — each store's resolved path beside the environment variable that moves
+it — resolved through each daemon's own resolver, so a printed path is the file
+that daemon actually opens:
 
 ```
-Job stores (4; only the Engine store is pinned by the launchd plist):
+Job stores (5; only the Engine store is pinned by the launchd plist):
   engine           /path/to/flywheel.db        (LUCID_SCHEDULER_DB)
   companion        /path/to/companion.db       (LUCID_COMPANION_DB)
   witness-report   /path/to/witness-report.db  (LUCID_WITNESS_REPORT_DB)
   workout          /path/to/workout.db         (LUCID_WORKOUT_DB)
+  contact-weekly   /path/to/contact-weekly.db  (LUCID_CONTACT_WEEKLY_DB)
 ```
 
 The block is **informational**: it is reported in both the text and `--json`
@@ -2229,7 +2506,9 @@ The Engine and companion stores — the two with inspection flags
 workout stores have no flags: they are read only for the compose-fallback scan
 below, opened read-only at the path printed here, and relocated only by
 `LUCID_WITNESS_REPORT_DB` / `LUCID_WORKOUT_DB`. Their periodics and failures are
-not inspected.
+not inspected. The contact-weekly store is listed for its path alone: its post
+is a fixed template with no model compose, so it has no fallbacks to scan, and
+it is relocated only by `LUCID_CONTACT_WEEKLY_DB`.
 
 **Recent compose fallbacks.** A scheduled compose — the morning and night
 companion, the daily workout, the weekly witness report — that cannot use the
@@ -2641,7 +2920,11 @@ identifiers. It **always exits `0`**: a no-match (§P-1), several matches
 only — mentions and dates, nothing derived) are all read outcomes carried in the
 result, never errors. `--json` emits `{query, matched, multiple_matches,
 candidates:[{person_key, display_name, first_seen_at}], off_limits, person_key,
-text}`.
+text}`. When the person has [`contact`](#contact) events, the view adds one
+check-in line — the cadence (or paused / retired) and the last contact, e.g.
+`Check-ins: every 4 weeks — last caught up 2026-09-28` — and an omitempty
+`contact` object under `--json`, in the off-limits raw view too, since it is
+your own record; a person with no contact events renders exactly as before.
 
 ```sh
 lucid person "Sam Rivera"
@@ -3668,8 +3951,9 @@ other verb (see [`../harness-integration.md`](../harness-integration.md) §D):
 stdin/JSON protocol — while `/reflect [gate]` and `/ask` map one-shot to
 [`lucid reflect`](#reflect) and [`lucid ask`](#ask). They differ from the
 deterministic verbs only in needing a configured `provider` block (an LLM backend,
-ADR-0006). The deterministic `/storm`, `/profile`, `/person`, and `/bootstrap` shell
-to their CLI verbs above (listed under [Verbatim passthroughs](#verbatim-passthroughs)).
+ADR-0006). The deterministic `/storm`, `/profile`, `/person`, `/contact`, and
+`/bootstrap` shell to their CLI verbs above (listed under
+[Verbatim passthroughs](#verbatim-passthroughs)).
 
 | Command | Does |
 |---------|------|
@@ -3697,12 +3981,15 @@ embellished, or celebrated):
 | `/storm <label\|unwritten>` · `/storm end` | `lucid storm <label\|unwritten\|end>` |
 | `/profile <name>` | `lucid profile <name>` |
 | `/person <name>` | `lucid person <name>` |
+| `/contact <name>` · `/contact due [--wrap]` · `/contact every\|pause\|resume\|retire\|snooze <name>` · `/contact void <id>` | `lucid contact …` |
 | `/bootstrap` · `/bootstrap done` | `lucid bootstrap [done]` |
 
 The scheduled Engine sends — the bell and the morning tripwire (L1/L2) — are the
 scheduler's, not a command's: pre-committed templates. The config-gated
 Mirror-side sends (the daily companion and the weekly witness report, which
-replaced the retired monthly heartbeat) run beside them. See
+replaced the retired monthly heartbeat) run beside them, as does the config-gated
+Monday contact check-in post — a fixed, model-free template to the user channel
+([`contact`](#contact)). See
 [`../mvp/engine-module.md`](../mvp/engine-module.md).
 
 ## Environment variables
@@ -3712,9 +3999,10 @@ replaced the retired monthly heartbeat) run beside them. See
 | `LUCID_HOME` | Override the Ledger location (default `~/.lucid/`). |
 | `LUCID_NO_UPDATE_CHECK` | Silence the passive "a new version is available" notice (`1`/`true`); the shared `NO_UPDATE_CHECK` and `CI` also disable it. |
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `lucid scheduler run` posts with (a Discord bot token). Injected at spawn — vaulted in `hush` and never committed (ADR-0005); the binary reads it only from the environment. |
-| `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1). Injected, never committed. |
+| `LUCID_USER_CHANNEL_ID` | Real channel ID the scheduler's logical `"user"` sends resolve to — the primary Lucid channel (bell, L1, and the Monday contact check-in post when enabled). Injected, never committed. |
 | `LUCID_WITNESS_CHANNEL_ID` | Real channel ID the logical `"witness"` sends resolve to — the dedicated witness channel (L2 escalation, weekly witness report). Injected, never committed. |
 | `LUCID_SCHEDULER_DB` | Optional override for the scheduler's durable Engine job-store path; `--db` (on `run` and `reconcile`) or `--scheduler-db` (on `status`) overrides it. Defaults outside `~/.lucid/` (disposable machinery, ADR-0004). |
 | `LUCID_COMPANION_DB` | Optional override for the companion's disposable job-store path, read by `lucid scheduler status` and `lucid scheduler reconcile`; the `--companion-db` flag on either command overrides it. Defaults under the OS user-config dir, outside `~/.lucid/`. |
 | `LUCID_WITNESS_REPORT_DB` | Optional override for the weekly witness report's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). Also read (read-only) by `lucid scheduler status` for its compose-fallback scan. |
 | `LUCID_WORKOUT_DB` | Optional override for the workout companion's disposable job-store path. Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). Also read (read-only) by `lucid scheduler status` for its compose-fallback scan. |
+| `LUCID_CONTACT_WEEKLY_DB` | Optional override for the weekly contact check-in post's disposable job-store path (default `contact-weekly.db`). Defaults under the OS user-config dir, outside `~/.lucid/` (disposable machinery, never the record). `lucid scheduler status` lists its resolved path. |

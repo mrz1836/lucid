@@ -117,13 +117,13 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   `internal/cli` (the junction that owns the `deploy` dependency; `storage`
   never imports it).
 - [`internal/flynode`](internal/flynode) — the flywheel-node scaffolding every
-  daemon (Engine, companion, workout, witness report) shares: `Boot` is the job-DB
-  open/migrate/scaffold/reconcile/run spine each `Run` previously carried inline,
-  and `Fire[P]` is the send-path reliability order (past-cutoff → idempotency →
-  compose → late-note → send → verify → receipt → post-send) the three message
-  daemons share. Transport- and model-free by construction (reconcile/send/
-  verify/compose/alert are injected closures); *enforced by
-  [`flynode/purity_test.go`](internal/flynode/purity_test.go)*.
+  daemon (Engine, companion, workout, witness report, contact weekly) shares:
+  `Boot` is the job-DB open/migrate/scaffold/reconcile/run spine each `Run`
+  previously carried inline, and `Fire[P]` is the send-path reliability order
+  (past-cutoff → idempotency → compose → late-note → send → verify → receipt →
+  post-send) the four message daemons share. Transport- and model-free by
+  construction (reconcile/send/verify/compose/alert are injected closures);
+  *enforced by [`flynode/purity_test.go`](internal/flynode/purity_test.go)*.
 - [`internal/composekit`](internal/composekit) — the small compose/provider-
   adjacent helpers the three message composers share: `ReadPromptFile` (open one
   explicit operator prompt path, never a dir walk), `WithModelOverride` (layer a
@@ -134,6 +134,15 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
 - [`internal/observations`](internal/observations) — micro-logs, salted
   registries, day-view join, curiosity, enrichment; `exports/` = CSV +
   clinician packet.
+- `internal/contact` — the pure, agent-free core of contact check-ins
+  ([ADR-0014](docs/adr/0014-contact-check-ins.md)): the event schema and
+  `contact_…` receipt ids, the `Nd`/`Nw` window grammar, the cadence fold and
+  its window-start rules, the ISO Monday–Sunday due grouping, birthdays, and the
+  one renderer for every contact string. No IO, no model.
+- `internal/contactweekly` — the config-gated Monday who's-due node: the witness
+  report's weekly-job shape over `flynode.Fire`, a fixed template rendered by
+  `internal/contact`, its own disposable job DB (`LUCID_CONTACT_WEEKLY_DB`), and
+  no model call anywhere in the package.
 - [`internal/storage`](internal/storage) — the **only** reader/writer of
   `~/.lucid/` (`LUCID_HOME` override); frontmatter + one file per record
   family; `fetch_enrichment.go` = the single audited network op.

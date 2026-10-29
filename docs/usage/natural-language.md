@@ -42,7 +42,9 @@ voice-to-text is lossy, and a write lands an immutable day record. Lifecycle
 state changes (`storm`, `profile`, and the anchor verbs that set up, confirm,
 correct or retire an anchor) are echoed the same way. The one anchor exception
 is the **capture tier** — a slip, a use, or a missed day — which runs at once,
-like a capture ([Anchors, by kind](#anchors-by-kind)).
+like a capture ([Anchors, by kind](#anchors-by-kind)). Contact check-ins split
+the same way: saying you were in touch, or skipping a week, runs at once, and a
+cadence change is echoed ([Contact check-ins](#contact-check-ins)).
 
 ### Reads — run immediately
 
@@ -153,6 +155,52 @@ moves your clocks. The harness echoes these for a confirm too.
   clock."*
 - **the harness assembles** `lucid profile travel` (or `lucid profile default`).
 
+### Contact check-ins
+
+Sam keeps a check-in cadence with a few people ([`contact.md`](contact.md)). The
+split follows the anchors: **saying you were in touch runs at once**, and
+**changing what the lists mean is echoed** for a *"yes"*.
+
+**Capture — run at once, receipt first.** Logging contact, or skipping one week,
+can only make the record more truthful, so the harness runs it as soon as it
+understands you and leads with the `contact_…` receipt. Either direction counts —
+they called, you texted, you ran into each other — so the harness never asks who
+reached out. A note goes through `--note-file`.
+
+- *"Talked to Alex Kim yesterday."*
+  → `lucid contact Alex Kim --day @yesterday`
+- *"Jordan Lee called tonight — we caught up about the move."*
+  → `lucid contact Jordan Lee --via call --note-file <note>` (note: "caught up
+  about the move")
+- *"Skip Casey Park this week, they're traveling."*
+  → `lucid contact snooze Casey Park`
+
+**Reads — run at once.**
+
+- *"Who do I need to catch up with?"* / *"Who's due this week?"*
+  → `lucid contact due`, relayed as printed
+- *"Who's still open this week?"* — a Sunday look back
+  → `lucid contact due --wrap`
+
+**Cadence changes and corrections — echoed and confirmed.**
+
+- *"Check in with Jordan Lee every 3 weeks."*
+  → `lucid contact every Jordan Lee 3w`
+- *"Every month or so for Riley Moss."* — the window grammar has days and weeks,
+  not months, so the harness proposes `lucid contact every Riley Moss 4w` in its
+  echo, and your *"yes"* or your correction decides.
+- *"Pause Casey Park for now."* → `lucid contact pause Casey Park` (and later
+  `lucid contact resume Casey Park`)
+- *"That wasn't Jordan, I meant Riley."*
+  → `lucid contact void <receipt>`, naming the earlier receipt, and then the
+  capture `lucid contact Riley Moss`
+
+The lists use one status word, "due", and the harness relays them as printed:
+no count of days, no question about why someone was not reached, never "overdue".
+A name that matches no one is refused with a pointer to `lucid person create`;
+a name that matches several people comes back with the candidates, and the
+harness asks which one.
+
 ## Anchors, by kind
 
 An anchor's **kind** decides both its honest number and what is worth saying
@@ -258,7 +306,9 @@ One rule keeps voice-first both fast and honest:
   day), so the harness runs them the moment it understands you — no confirmation
   step. The anchor **capture tier** — `anchor slip`, `anchor use`, `anchor miss` —
   runs the same way, leading with the receipt: logging a lapse can only make the
-  record more honest, and `anchor void` fixes a mishearing.
+  record more honest, and `anchor void` fixes a mishearing. So do the contact
+  captures — `contact` and `contact snooze` — and the read `contact due`;
+  `contact void` fixes a mishearing there.
 - **State-writing verbs are echoed and confirmed.** `closeout`,
   `closeout backfill`, `mode`, and `skip` land or move an Engine day record, so
   the harness **assembles the compact command, shows it back, and waits for a
@@ -270,7 +320,9 @@ line. A one-word confirm is cheap insurance that the record stays true to what
 you actually did. The lifecycle verbs `storm` and `profile`, and the anchor verbs
 that change what a number means — `anchor add`, `kind`, `confirm`, `void`,
 `sunset` (including `--graduated`) and `rename` — are consequential state changes
-and are echoed for the same one-word confirm.
+and are echoed for the same one-word confirm, as are the contact verbs that
+change what the due lists mean — `contact every`, `pause`, `resume`, `retire`
+and `void`.
 
 ## When the harness asks instead of guesses
 
