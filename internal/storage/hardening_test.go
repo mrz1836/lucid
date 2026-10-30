@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/contact"
 	"github.com/mrz1836/lucid/internal/observations"
 )
 
@@ -152,6 +153,7 @@ func TestDayPaths_RejectMalformedDate(t *testing.T) {
 	require.NoError(t, a.ScaffoldFocus())
 	require.NoError(t, a.ScaffoldReframes())
 	require.NoError(t, a.ScaffoldReps())
+	require.NoError(t, a.ScaffoldContacts())
 
 	for _, bad := range []string{"", "2026", "2026-07", "../../etc", "2026-07-02/../x", `2026\07\02`} {
 		_, oerr := a.obsDayPath(bad)
@@ -162,6 +164,8 @@ func TestDayPaths_RejectMalformedDate(t *testing.T) {
 		require.Error(t, rerr, "reframeDayPath(%q)", bad)
 		_, perr := a.repDayPath(bad)
 		require.Error(t, perr, "repDayPath(%q)", bad)
+		_, cerr := a.contactDayPath(bad)
+		require.Error(t, cerr, "contactDayPath(%q)", bad)
 	}
 
 	_, aerr := a.AppendObservation(observations.Event{
@@ -172,6 +176,11 @@ func TestDayPaths_RejectMalformedDate(t *testing.T) {
 	require.Error(t, aerr, "AppendObservation must reject a malformed logical_date before any write")
 	_, _, rderr := a.ReadObservationsDay("../../etc")
 	require.Error(t, rderr, "ReadObservationsDay must reject a malformed date before any read")
+
+	_, cerr := a.AppendContactEvent(contact.NewContact("person_s-river", "../../etc", "2026-10-29T10:15:00-04:00", "", ""))
+	require.Error(t, cerr, "AppendContactEvent must reject a malformed logical_date before any write")
+	_, _, crerr := a.ReadContactDay("../../etc")
+	require.Error(t, crerr, "ReadContactDay must reject a malformed date before any read")
 }
 
 // ── Batch 1d: the two wrapped write errors carry the storage: prefix ────────

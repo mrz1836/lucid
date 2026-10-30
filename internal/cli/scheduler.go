@@ -13,6 +13,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/companion"
 	"github.com/mrz1836/lucid/internal/config"
+	"github.com/mrz1836/lucid/internal/contactweekly"
 	"github.com/mrz1836/lucid/internal/flynode"
 	"github.com/mrz1836/lucid/internal/notify"
 	"github.com/mrz1836/lucid/internal/router"
@@ -392,7 +393,8 @@ func missedSuffix(firesMissed bool) string {
 // Engine runs with its user-channel send suppressed and the companion node runs
 // beside it under one canceled context; when the workout slot is enabled its
 // node runs beside it too; when the weekly witness report is enabled its node
-// runs beside it too. When no companion-class node is enabled only the Engine
+// runs beside it too; and when the Monday contact post is enabled its node runs
+// beside it too. When no companion-class node is enabled only the Engine
 // runs — byte-for-byte today's behavior. Every startup error is funneled through a
 // single "lucid: scheduler: <message>" stderr line (mirroring `upgrade`) before
 // being returned, so exitCodeForError still classifies it.
@@ -436,7 +438,7 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 	ctx, stop := signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if !cfg.Companion.Enabled && !cfg.Workout.Enabled && !cfg.WitnessReport.Enabled {
+	if !cfg.Companion.Enabled && !cfg.Workout.Enabled && !cfg.WitnessReport.Enabled && !cfg.ContactWeekly.Enabled {
 		// Engine only: bell + tripwire both deliver to the user, exactly as before.
 		if err := schedrun.Run(ctx, schedrun.Options{Store: store, Notifier: notifier, DBPath: dbPath}); err != nil {
 			_, _ = fmt.Fprintf(stderr, "lucid: scheduler: %s\n", err)
@@ -466,9 +468,10 @@ func runScheduler(parent context.Context, stderr io.Writer, dbPath string) error
 // companion reads the send-free tripwire verdict through its own scheduler (a
 // no-op notifier — the verdict read never sends), the workout slot reads its
 // deterministic recommendation through the router's metrics/observation seams,
-// and the weekly witness report reads the same honest metrics projection plus the
-// engine day records for its 7-day window. All nodes deliver through the same
-// env-injected Discord transport the Engine uses.
+// the weekly witness report reads the same honest metrics projection plus the
+// engine day records for its 7-day window, and the Monday contact post reads
+// the router's due view. All nodes deliver through the same env-injected
+// Discord transport the Engine uses.
 func runSchedulerWithCompanions(
 	ctx context.Context,
 	store *storage.Adapter,
@@ -528,6 +531,23 @@ func runSchedulerWithCompanions(
 				Records:      store,
 				AnchorDetail: witnessAnchorDetail(cfg.WitnessReport, r),
 				Notifier:     notifier,
+			})
+		})
+	}
+	if cfg.ContactWeekly.Enabled {
+		g.Go(func() error {
+			// The Monday contact post keeps its own disposable job DB
+			// (LUCID_CONTACT_WEEKLY_DB, or a contact-weekly.db under the OS config
+			// dir), separate from every other node's file for the same
+			// single-writer reason. It reads the router's due view — the same one
+			// `lucid contact due` prints — renders the fixed, model-free template,
+			// and posts only to the user channel; it never suppresses the Engine
+			// (an additive send, like the workout slot).
+			return contactweekly.Run(gctx, contactweekly.Options{
+				Store:    store,
+				Config:   cfg.ContactWeekly,
+				Due:      r,
+				Notifier: notifier,
 			})
 		})
 	}

@@ -24,3 +24,4 @@ new one; records are append-only, like everything else here
 | [0011](0011-person-alias-resolution.md) | Person alias resolution: extend the redirect-tombstone mechanism, tighten reconcile precision | Accepted |
 | [0012](0012-gratitude-semantic-matching.md) | Gratitude by-meaning matching and outward expression: three tiers behind the canonical-key seam, an opt-in judge, a tally-neutral "expressed" record | Accepted |
 | [0013](0013-anchor-kinds.md) | Anchor kinds: milestone, quit, limit, habit — each kind its own honest number, kinds and events in a separate append-only store | Proposed |
+| [0014](0014-contact-check-ins.md) | Contact check-ins: per-person cadences in a separate append-only store, a native Monday who's-due post, and the Sunday wrap as a read view | Accepted |

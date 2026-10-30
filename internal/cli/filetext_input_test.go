@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -542,4 +543,48 @@ func TestPersonSet_CLI_RelationshipFileEmpty(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is empty")
 	assert.Contains(t, err.Error(), "--relationship-file")
+}
+
+// TestContact_CLI_NoteFile: --note-file supplies the contact's one-line note
+// off the command line — shell metacharacters stay data — and - reads it from
+// stdin. It is mutually exclusive with the inline --note, and a note of more
+// than one line is a usage error (exit 2). Every refusal writes nothing.
+func TestContact_CLI_NoteFile(t *testing.T) {
+	home := isolatedHome(t)
+	seedPeople(t, "Sam Rivera")
+	withClock(t, ctClock(time.October, 29))
+
+	nf := writeTemp(t, metaPayload+"\n")
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "contact", "Sam Rivera", "--note-file", nf, "--json")
+	require.NoError(t, err)
+	rc := decodeReceipt(t, out)
+	assert.Equal(t, metaPayload, rc.Event["note"], "the one terminal newline is stripped, the payload kept as data")
+
+	out, _, err = runRootWithStdin(t, "  dinner, then a walk  \n", "contact", "Sam Rivera", "--note-file", "-", "--json")
+	require.NoError(t, err)
+	assert.Equal(t, "dinner, then a walk", decodeReceipt(t, out).Event["note"], "- reads stdin; the note is trimmed")
+
+	before := contactEventLines(t, home)
+	require.Len(t, before, 2)
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "contact", "Sam Rivera", "--note", "inline", "--note-file", nf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not both")
+
+	multi := writeTemp(t, "first line\nsecond line\n")
+	stdout, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "contact", "Sam Rivera", "--note-file", multi)
+	require.Error(t, err)
+	assert.Equal(t, ExitUsage, exitCodeForError(err))
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "a contact note is one line. Nothing was saved.")
+
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "contact", "Sam Rivera", "--note", "first\nsecond")
+	assert.Equal(t, ExitUsage, exitCodeForError(err), "the inline form is held to one line too")
+
+	empty := writeTemp(t, "")
+	_, _, err = runRoot(t, BuildInfo{Version: "dev"}, "contact", "Sam Rivera", "--note-file", empty)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--note-file")
+
+	assert.Equal(t, before, contactEventLines(t, home), "every refusal writes nothing")
 }

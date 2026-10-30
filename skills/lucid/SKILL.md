@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.40.0"
+min_lucid_version: "0.42.0"
 ---
 
 # Lucid
@@ -67,6 +67,9 @@ its output. Acknowledge *after* the binary persists, never before.
 | a slip on a `quit` anchor ("slipped last night") | anchor event capture | `lucid anchor slip <label> [--day <date>] [--note-file <path>]` — **capture tier**: run immediately, lead with the `anchorev_…` receipt |
 | a use of a `limit` anchor ("had a planned slice at the party") | anchor event capture | `lucid anchor use <label> (--planned \| --slip) [--day <date>] [--note-file <path>]` — **capture tier**; the intent is required and **never guessed** — ask "planned, or a slip?" when it was not said |
 | a missed day on a `habit` anchor ("skipped the walk, I'm traveling") | anchor event capture | `lucid anchor miss <label> [--day <date>] [--note-file <path>]` — **capture tier** |
+| `/contact <name>` / being in touch with someone ("talked to Sam yesterday") | contact capture | `lucid contact <name> [--via <call\|text\|video\|in-person>] [--note-file <path>] [--day <date>]` — **capture tier**: run immediately, lead with the `contact_…` receipt; either direction counts, and it never creates a person |
+| `/contact snooze <name>` ("skip Alex Kim this week") | skip this week's check-in | `lucid contact snooze <name>` — **capture tier**; covers the current Monday–Sunday week only and leaves the cadence untouched |
+| `/contact due [--wrap]` ("who do I need to catch up with") | who's-due read view | `lucid contact due [--wrap]` — read-only, runs immediately; relay the lists as printed (`--wrap` is the Sunday view: "Due this week" and "Still open from before" only) |
 | `/reflect week` | Sunday weekly recall deep-dive | `lucid reflect week` — read-only weekly deep-dive, never writes |
 | `/excavate` | select the next memory cluster to excavate | `lucid excavate` — read-only, never writes |
 | `/companion [morning\|night]` | compose one companion message on demand | `lucid companion fire --mode <morning\|night>` — dry-run by default; scheduled sends stay scheduler-owned |
@@ -96,6 +99,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid reframe` | Keep and rotate your self-talk reframes (a *catch → flip* pair) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`, where `surface` returns one reframe per logical day (least-recently-surfaced, idempotent within the day). Deterministic, no model in any path. |
 | `lucid focus` | Keep and rotate your daily focus work-ons (a work-on plus an optional success criterion) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`/`retire`, where `surface` returns one active item per logical day (least-recently-surfaced, idempotent within the day) and `retire` deactivates without deleting (`list --all` is the audit view). Deterministic, no model in any path. |
 | `lucid rep` | Keep and rotate your daily practice reps (one concrete thing to try, an optional solo variant that works with nobody around, and an optional `level` — your own label for the step size, never a grade) — an append-only inner-work record family reached by its CLI form: `add`/`list`/`surface`/`retire`. `add` takes `--solo`/`--solo-file`, `--level N` (a positive integer) and `--body-file`; `surface` returns one active rep per logical day **with its solo variant** (least-recently-surfaced, idempotent within the day, never level-aware, never guessing whether the day is solo); `retire` deactivates without deleting (`list --all` is the audit view). It never asks whether a rep was done and keeps no streak. Deterministic, no model in any path. |
+| `lucid contact` (cadence and correction) | Set and keep per-person check-in cadences — `every <name> <Nd\|Nw>` sets or changes the window (`28d` and `4w` are the same; on a paused cadence it changes the window and stays paused), `pause` / `resume` / `retire <name>` move the cadence, and `void <contact_…>` corrects a logged contact or snooze by its receipt (append-only, both records kept; a cadence is corrected with the cadence verbs, never voided). These change what the due lists mean: **echo-and-confirm**. The capture (`lucid contact <name>`), `snooze` and `due` forms are in the command map above. The only status word is "due"; there is no streak, score or percentage, and a person not reached simply rolls into next Monday's "Still open from before". Lucid never contacts anyone you track; it only reminds you. Deterministic, no model in any path. |
 | `lucid gratitude` | Keep a running gratitude tally (the count of things you return to gratitude for) — an append-only **registry** kind reached by its CLI form: `add`/`list`/`merge`/`import`/`reconcile`/`thank`. `add "<thing>"` matches the wording to an existing entry in up to three tiers — canonical key, a deterministic word match, then an optional, opt-in by-meaning model judge — and bumps a clear match automatically, creates a new entry for a new thing, or **suggests** when it is unsure. A non-interactive or `--json` caller in that ambiguous band gets exit `1`, nothing written, and the suggestion (candidate ids, scores); relay it to the person and re-run with their answer — `add --into <id>` (bump that entry) or `add --new` (start a new one) — never guess. `add --person <subject>` also links a person (link-only); `merge <src> <dst>` folds a duplicate; `reconcile` proposes folds (dry-run unless `--apply`); `import` seeds an existing count via explicit `--count`/`--first`/`--last`; `thank <id> --person <subject>` links a person and privately notes you told them — tally-neutral, and Lucid sends nothing. `list` may offer a gentle "You might tell …" line, never counted and never an off-limits person. Every write returns a receipt id, distinct from the stable entry id `list` shows. The verbatim nightly gratitude stays a separate, unchanged `lucid log` (`#gratitude`). Deterministic except the optional tier-3 judge; with no model it runs on the deterministic tiers alone. |
 | `lucid retro` | Keep the retro parking lot — the `R-NNN` queue of things parked to revisit at the weekly Retro or a Gate — an append-only inner-work record family reached by its CLI form: `park`/`list`/`show`/`resolve`/`defer`. `park "<item>"` mints the next global `R-NNN` and returns it plus a per-write receipt (the id an agent echoes back — `parked as R-012`); `list` defaults to open **and** deferred (`--all` adds resolved, `--resolved` shows only it), `show <R-NNN>` renders one item, `resolve <R-NNN> "<resolution>"` moves it to `resolved` **without deleting** (the append-only audit trail), and `defer <R-NNN> "<reason>"` sets the first-class `deferred` status while keeping it in the default `list`. Transitions reference the affected `R-NNN` without consuming a new id. Deterministic, no model in any path. |
 | `lucid wheel` | Keep the monthly Wheel of Life — your own integer **1–10** rating of eight pillars (health, relationships, career/work, finances, personal growth, fun/recreation, environment, contribution) — an append-only **registry** kind, one file per calendar month, reached by its CLI form: `add`/`show`/`list`. It is a monthly state write assembled from a guided conversation, so it is never chat-mapped: gather all eight ratings **from the person** (never propose, infer, or default a number — any evidence shown before they rate is facts only, with no number), echo the assembled wheel, and run `add` only on their confirmation. `add` requires all eight ratings (a missing, out-of-range, or non-integer one writes nothing); `add --input <path\|->` takes the whole wheel as strict JSON, keeping notes and the reflection off the command line. `--suggested <pillar>=<1-10>` stores an optional calibration value beside a rating — accepted only with all eight ratings, never the score, never in the trend, and never shown back before the person rates; any gap between it and their number is raised only **after** they rate, as an optional talking point, never a correction. `--vision-reviewed` / `--vision-reflection` record the monthly vision re-read (no link to any document is stored). A second `add` for the same month appends a new snapshot that wins on read — nothing is mutated, and every write returns its own receipt id. `show` renders the trend (rating, signed delta vs the prior stored month, sparkline, lowest and biggest-drop callouts) as `key: value` lines with no table; `list` shows months, and both say `no prior month` rather than invent a delta. No balance score, streak, or target. Deterministic, no model in any path. |
@@ -130,11 +134,14 @@ never re-decided here. In brief:
 
 * **Which verbs carry it.** `log`, `obs`, `attach`, `mode`, `storm`, `memory`,
   `workout log`, `workout amend` (a re-date of the logged session),
-  `anchor slip` / `use` / `miss`, `rep add`, and `closeout` (where `--day` is
-  an alias onto `closeout backfill`); `anchor confirm` reads the same grammar
-  through `--through` / `--from`. `obs` also accepts an inline `@yesterday`
-  token in its value stream. The anchor event verbs default to the current logical day and
-  reject a partial date or a day before the anchor's start.
+  `anchor slip` / `use` / `miss`, `rep add`, `contact` (the bare capture form),
+  and `closeout` (where `--day` is an alias onto `closeout backfill`);
+  `anchor confirm` reads the same grammar through `--through` / `--from`. `obs`
+  also accepts an inline `@yesterday` token in its value stream. The anchor
+  event verbs default to the current logical day and reject a partial date or a
+  day before the anchor's start. The other `contact` writes (`every`, `pause`,
+  `resume`, `retire`, `snooze`, `void`) take no `--day`: they stamp the current
+  logical day.
 * **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
   04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
   literally), a partial `2014` or `2014-09` (snaps to the period's first day),
@@ -172,17 +179,38 @@ differently:
   only make the record more honest. The skill runs them as soon as it
   understands the message, **leads its reply with the receipt** (the
   `anchorev_…` id), and fixes a mishearing with `anchor void` (echoed, below).
+* **Contact check-ins split the same way.** `contact` and `snooze` are the
+  **capture tier**: logging that you were in touch, or skipping one week, can
+  only make the record more truthful. The skill runs them as soon as it
+  understands the message, **leads its reply with the receipt** (the
+  `contact_…` id), and fixes a mishearing with `contact void`. The verbs that
+  change what the due lists mean — `every`, `pause`, `resume`, `retire` and
+  `void` — are **echoed and confirmed**. `contact due` is a read and runs
+  immediately. The mappings, with synthetic names:
+  * "talked to Sam yesterday" → `lucid contact Sam --day @yesterday`
+  * "who do I need to catch up with" → `lucid contact due`
+  * "skip Alex Kim this week" → `lucid contact snooze Alex Kim`
+  * "check in with Jordan Lee every 3 weeks" → `lucid contact every Jordan Lee 3w` (echo + confirm)
+
+  Either direction counts, so "Sam called me" logs the same contact. A how
+  (`call`, `text`, `video`, `in-person`) goes in `--via` only when it was said,
+  and a note goes through `--note-file`. A name that matches no one is refused
+  by the binary with a pointer to `lucid person create`; relay it and never
+  create the person yourself. Relay the due lists as printed: "due" is the only
+  status word — never say "overdue", never count days, never ask why someone was
+  not reached.
 * **State-writing verbs are echoed and confirmed.** For `closeout`,
   `closeout backfill`, `mode`, and `closeout skip`, the skill **assembles the
   compact command, shows it back, and waits for a one-word confirmation** before
   running it. The consequential lifecycle verbs `storm` and `profile`, and the
   anchor verbs that change what a number means — `anchor add`, `kind`,
   `confirm`, `void`, `sunset` (including `--graduated`) and `rename` — are
-  echoed for the same one-word confirm.
+  echoed for the same one-word confirm, as are the contact cadence verbs above.
 
 **Ask, don't guess.** When a required piece — a chain-link state, a capacity, an
-observation field, a limit use's intent (planned or slip), or which anchor a
-lapse belongs to — is missing or ambiguous, the skill asks **one** concise
+observation field, a limit use's intent (planned or slip), which anchor a
+lapse belongs to, or which person a contact names when the binary lists several
+candidates — is missing or ambiguous, the skill asks **one** concise
 question and waits. It never fabricates a link state, a capacity, an intent, or
 any value the user did not give. It never reclassifies, confirms or graduates an
 anchor on its own: `metrics` only surfaces eligibility and over-allowance.
@@ -206,7 +234,7 @@ every guarantee holds exactly as it does on the command line:
   `--journal-file` (closeout), `--body-file` (log/obs/memory/thread/gratitude/
   focus/rep), `--catch-file`/`--flip-file` (reframe), `--tone-file`/`--why-file`/
   `--followup-file`/`--caption-file` (memory), `--intent-file`/`--domain-file`/
-  `--note-file` (thread/era/self, and anchor add/kind/slip/use/miss),
+  `--note-file` (thread/era/self, anchor add/kind/slip/use/miss, and contact),
   `--value-file` (self), `--reason-file` (anchor sunset/void),
   `--success-file` (focus), `--solo-file` (rep), `--input` /
   `--vision-reflection-file` (wheel). **Fallback** for any shell-only
@@ -223,8 +251,11 @@ every guarantee holds exactly as it does on the command line:
 
 **Coverage.** The voice-first layer maps the everyday verbs plus the live
 practice-lifecycle verbs `storm`, `anchor` (all four kinds — `milestone`,
-`quit`, `limit`, `habit` — and every subverb), `profile`, and `metrics` (each a
-documented verb in the [command reference](../../docs/usage/commands.md)). The
+`quit`, `limit`, `habit` — and every subverb), `profile`, `metrics`, and
+`contact` (each a documented verb in the
+[command reference](../../docs/usage/commands.md)). `contact` is the contact
+check-ins — capture, `snooze`, `due` and the cadence verbs — and is unrelated
+to the `/checkin` guided capture. The
 three **provider-backed** Mirror verbs are **shipped** and driven by their
 documented forms: `/ask` runs `lucid ask <question…>` (grounded, cited Q&A over
 your validated insights); `/reflect` runs `lucid reflect [gate]` (recall that
@@ -266,8 +297,11 @@ stdout, while `mode` emits the minimal `{mode}` shape. The anchor event verbs
 (`anchor kind`, `slip`, `use`, `miss`, `void`) extend that receipt to
 `{receipt_id, logical_date, label, event}`, plus `compat` when a definition
 record was appended alongside; `anchor confirm` emits `{through, confirmed,
-already_confirmed}`. Diagnostics stay on stderr, so the `--json` stdout is
-always parseable.
+already_confirmed}`. The contact writes (`contact`, `contact every`, `pause`,
+`resume`, `retire`, `snooze`, `void`) extend it the same way to
+`{receipt_id, logical_date, person_key, event}`, `receipt_id` being the
+`contact_…` id. Diagnostics stay on stderr, so the `--json` stdout is always
+parseable.
 
 ## Verbatim passthrough on Engine verbs
 
@@ -287,8 +321,14 @@ provider from the user's own opaque prompt files and the chain's honest live
 numbers, never fabricated). All are posted by the harness's native scheduler (or
 the standalone `go-flywheel` path). The `companion fire` and `witness report`
 verbs above only ever preview these on demand; delivery stays scheduler-owned.
-The enrichment job likewise runs on its own schedule and posts nothing. This
-skill only handles user-initiated commands.
+The Monday contact check-in post is scheduler-owned the same way: when the user
+enables `contact_weekly`, the scheduler posts a fixed, model-free template of
+the week's "Due this week" and "Still open from before" lists and birthdays to
+the user channel only, and never to anyone the user tracks. This skill never
+posts or re-posts it; `lucid contact due` shows the same lists on demand, and a
+harness's own Sunday pass may fold in `lucid contact due --wrap --json`. The
+enrichment job likewise runs on its own schedule and posts nothing. This skill
+only handles user-initiated commands.
 
 ## Scheduler health (read-only diagnostics)
 

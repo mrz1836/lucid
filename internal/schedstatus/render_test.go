@@ -166,7 +166,7 @@ func TestPeriodicStatusTimeOmitzero(t *testing.T) {
 // store together with the environment variable that relocates it. Seeing the
 // whole set in one place is the point: only the Engine store is pinned by the
 // launchd plist, so a reader who knows just that one path has no way to tell
-// there are three more, and a repair applied to it alone looks complete.
+// there are four more, and a repair applied to it alone looks complete.
 func TestTextLinesJobStores(t *testing.T) {
 	now := fixedNow()
 	in := healthyEnabled(now)
@@ -175,12 +175,13 @@ func TestTextLinesJobStores(t *testing.T) {
 	r := Assemble(in, now)
 	out := strings.Join(r.TextLines(), "\n")
 
-	require.Contains(t, out, "Job stores (4;")
+	require.Contains(t, out, "Job stores (5;")
 	require.Contains(t, out, "only the Engine store is pinned by the launchd plist")
 	for _, want := range []string{
-		"engine", "companion", "witness-report", "workout",
+		"engine", "companion", "witness-report", "workout", "contact-weekly",
 		"LUCID_SCHEDULER_DB", "LUCID_COMPANION_DB", "LUCID_WITNESS_REPORT_DB", "LUCID_WORKOUT_DB",
-		"/var/lucid/witness-report.db", "/var/lucid/workout.db",
+		"LUCID_CONTACT_WEEKLY_DB",
+		"/var/lucid/witness-report.db", "/var/lucid/workout.db", "/var/lucid/contact-weekly.db",
 	} {
 		require.Contains(t, out, want, "job-store block omits %q", want)
 	}
@@ -225,7 +226,7 @@ func TestReportJSONJobStores(t *testing.T) {
 		JobStores []JobStorePath `json:"job_stores"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &doc))
-	require.Len(t, doc.JobStores, 4)
+	require.Len(t, doc.JobStores, 5)
 
 	names := make([]string, 0, len(doc.JobStores))
 	for _, s := range doc.JobStores {
@@ -233,7 +234,7 @@ func TestReportJSONJobStores(t *testing.T) {
 		require.NotEmpty(t, s.Env, "%s names no override env var", s.Name)
 		names = append(names, s.Name)
 	}
-	require.Equal(t, []string{"engine", "companion", "witness-report", "workout"}, names)
+	require.Equal(t, []string{"engine", "companion", "witness-report", "workout", "contact-weekly"}, names)
 }
 
 // lineIndex returns the index of the first rendered line starting with prefix,

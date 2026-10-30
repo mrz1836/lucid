@@ -271,7 +271,8 @@ on a provider (P9).
 **Everywhere:** `--json` is persistent on every command — read verbs emit their
 structured shape and write verbs emit a receipt (`log`, `closeout`, `obs`,
 `reframe add`, `focus add` / `retire`, and `rep add` / `retire` emit a bare
-`{receipt_id, logical_date}` object; `mode` emits `{mode}`) — and `-h` /
+`{receipt_id, logical_date}` object; the `contact` writes extend it to
+`{receipt_id, logical_date, person_key, event}`; `mode` emits `{mode}`) — and `-h` /
 `--help` works at every level. Exit codes are stable: `0` success, `1` runtime
 error or breached gate, `2` usage / flag-parse error. Usage errors print on stderr as
 `<command path>: <reason>` plus a `Run '<command path> --help' for usage.` hint.
@@ -320,6 +321,7 @@ error or breached gate, `2` usage / flag-parse error. Usage errors print on stde
 | `reframe add <catch> <flip>`<br>`reframe list` · `reframe surface` | `--day` (on `add`) `--json` (on `list`/`surface`) | Keep and rotate your self-talk reframes — a *catch → flip* pair. Append-only; `surface` shows one per logical day, least-recently-surfaced (idempotent within the day). |
 | `focus add <text>`<br>`focus list` · `focus surface` · `focus retire <id>` | `--success` `--day` (on `add`) `--all` `--json` (on `list`) | Keep and rotate your daily focus work-ons — a thing to work on, with an optional success criterion. Append-only; `surface` shows one active item per logical day, least-recently-surfaced (idempotent within the day); `retire` deactivates without deleting (audit view via `list --all`). |
 | `rep add <text>`<br>`rep list` · `rep surface` · `rep retire <id>` | `--solo` `--solo-file` `--level` `--body-file` `--day` (on `add`) `--all` `--json` (on `list`) | Keep and rotate your daily practice reps — one concrete thing to try, with an optional solo variant that works with nobody around and an optional level (your own label for the step size, never a grade). Append-only; `surface` shows one active rep per logical day **with its solo variant**, least-recently-surfaced (idempotent within the day, never level-aware); `retire` deactivates without deleting (audit view via `list --all`). Never asks whether a rep was done, never counts a streak. |
+| `contact <subject>`<br>`contact every\|pause\|resume\|retire\|snooze <subject>` · `contact void <id>` · `contact due [--wrap]` | `--via` `--note` `--note-file` `--day` (on the capture) `--wrap` (on `due`) `--json` | Stay in touch within a time frame you choose. `every <subject> 4w` gives a person a check-in cadence (`Nd` or `Nw`); `contact <subject>` logs that you were in touch — either direction counts, no content needed — and returns a `contact_…` receipt; `snooze` skips one week; `void` corrects a contact or snooze. `due` lists who is due this week, who is still open from before, and who is coming up, plus the week's birthdays; `--wrap` is the Sunday view. A reminder for you only — Lucid never contacts anyone. Append-only, no streaks or scores; an optional, config-gated Monday post sends the same lists to your own channel. |
 | `gratitude add <thing>`<br>`gratitude list` · `gratitude merge <src> <dst>` · `gratitude import <thing>` · `gratitude reconcile` · `gratitude thank <id>` | `--into` `--new` `--person` `--day` `--body-file` (on `add`) `--count` `--first` `--last` (on `add`/`import`) `--apply` (on `reconcile`) `--person` `--day` (on `thank`) `--json` | Keep a running gratitude tally — the count of things you return to gratitude for. Append-only registry; `add` matches tonight's wording to an existing entry in up to three tiers — canonical key, a deterministic word match, then an optional, opt-in by-meaning model judge — and bumps a clear match automatically, creates a new entry for a new thing, or suggests when it's unsure (non-interactive callers resolve with `--into <id>` or `--new`); with no model it runs on the deterministic tiers alone. `merge` folds a duplicate, `reconcile` proposes folds (dry-run unless `--apply`), `import` seeds an existing count with explicit first/last, and `thank` links a person and privately notes you told them — tally-neutral, with only a gentle, never-counted reminder in `list`. Every write returns a receipt id; the verbatim nightly gratitude stays a separate `lucid log`. |
 | `retro park <item>`<br>`retro list` · `retro show <R-NNN>` · `retro resolve <R-NNN>` · `retro defer <R-NNN>` | `--source` `--day` (on `park`) `--all` `--resolved` `--json` (on `list`) | Keep the retro parking lot — the `R-NNN` queue of things parked to revisit at the weekly Retro or a Gate. Append-only; `park` mints the next global `R-NNN` and returns it plus a per-write receipt (the id an agent echoes back), `list` defaults to open **and** deferred (`--all` adds resolved), `resolve` records what you did **without deleting** (the audit trail), and `defer` sets a first-class `deferred` status that stays in the walk. |
 | `wheel add`<br>`wheel show` · `wheel list` | `--health` `--relationships` `--career` `--finances` `--growth` `--fun` `--environment` `--contribution` `--note` `--suggested` `--vision-reviewed` `--vision-reflection` `--vision-reflection-file` `--month` `--input` (on `add`) `--month` (on `show`) `--json` | Keep a monthly Wheel of Life — your own 1–10 rating of eight life pillars, read back as a month-over-month trend. Append-only registry, one file per month; `add` requires all eight ratings and never defaults or infers one, and a second `add` for the same month appends a snapshot that wins on read. An optional per-pillar `suggested` calibration value is stored separately — never the score, never in the trend. `show` renders each pillar's rating, signed delta vs the prior month, and a sparkline, with lowest and biggest-drop callouts (no tables, no balance score); `list` shows the months. Deterministic, no model. |
@@ -391,21 +393,22 @@ error or breached gate, `2` usage / flag-parse error. Usage errors print on stde
 | `LUCID_NO_UPDATE_CHECK` | Silence the passive "a new version is available" notice (`1`/`true`); the shared `NO_UPDATE_CHECK` and `CI` also disable it. |
 | `LUCID_HARNESS_TOKEN` | The chat-bot token `scheduler run` posts with. Injected at spawn — vaulted in `hush`, never committed. |
 | `LUCID_USER_CHANNEL_ID` · `LUCID_WITNESS_CHANNEL_ID` | Real channel IDs the logical `user` and `witness` sends resolve to. Injected, never committed. |
-| `LUCID_SCHEDULER_DB` · `LUCID_COMPANION_DB` · `LUCID_WITNESS_REPORT_DB` · `LUCID_WORKOUT_DB` | Override a disposable job-store path. All default **outside** `~/.lucid/` — machinery, never the record. |
+| `LUCID_SCHEDULER_DB` · `LUCID_COMPANION_DB` · `LUCID_WITNESS_REPORT_DB` · `LUCID_WORKOUT_DB` · `LUCID_CONTACT_WEEKLY_DB` | Override a disposable job-store path. All default **outside** `~/.lucid/` — machinery, never the record. |
 | `LUCID_SOURCE` · `LUCID_HARNESS` · `LUCID_CHANNEL` · `LUCID_THREAD` · `LUCID_AGENT` · `LUCID_MODEL` | Default capture provenance so a relaying harness attributes an entry without repeating flags. Resolution is flag > env > default; each capture verb reads the ones it exposes as flags. |
 
 Full synopsis, examples, and error behavior for every command live in
 [`docs/usage/commands.md`](docs/usage/commands.md); the config-gated sends have
 their own guides ([companion](docs/usage/companion.md),
 [witness report](docs/usage/witness-report.md),
-[workout](docs/usage/workout.md)).
+[workout](docs/usage/workout.md),
+[contact check-ins](docs/usage/contact.md)).
 
 > 💬 **Chat-driven, optionally.** `lucid serve` speaks a stdin/JSON protocol so a
 > chat client can drive the interactive close-out. Three provider-backed Mirror
 > verbs ride it — `/checkin`, `/reflect`, `/ask` — structuring entries, proposing
 > one resonance-gated pattern, and recalling it later; the rest (`/log`,
 > `/closeout`, `/mode`, `/status`, `/day`, `/storm`, `/profile`, `/person`,
-> `/bootstrap`) are verbatim passthroughs to the CLI verbs above. Every one is
+> `/contact`, `/bootstrap`) are verbatim passthroughs to the CLI verbs above. Every one is
 > also a direct command, so the CLI is fully usable standalone.
 
 <br/>
@@ -502,6 +505,7 @@ govern both halves, is in [`docs/architecture.md`](docs/architecture.md).
 | [`docs/usage/weekly-reflection.md`](docs/usage/weekly-reflection.md) | `lucid reflect week` — the read-only weekly deep-dive, the window it resolves, and the resonance gate behind `week apply`. |
 | [`docs/usage/life-archive.md`](docs/usage/life-archive.md) | Excavating the past: the injury/body-history track and the story track, kept separate so a session opens exactly one. |
 | [`docs/usage/companion.md`](docs/usage/companion.md) · [`witness-report.md`](docs/usage/witness-report.md) · [`workout.md`](docs/usage/workout.md) | The three config-gated, off-by-default sends: the daily companion, the friend-facing weekly report, and the training loop. |
+| [`docs/usage/contact.md`](docs/usage/contact.md) · [ADR-0014](docs/adr/0014-contact-check-ins.md) | Staying in touch: per-person check-in cadences, one-line contact capture, the who's-due view and the Sunday wrap, birthdays, and the optional Monday post — a reminder for you only, never a message to anyone else. |
 | [`docs/usage/harness-setup.md`](docs/usage/harness-setup.md) | Driving Lucid's deterministic loop from a chat surface — no LLM provider and no secrets inside Lucid. |
 
 </details>

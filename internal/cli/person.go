@@ -23,11 +23,25 @@ type personCandidateView struct {
 	FirstSeenAt string `json:"first_seen_at"`
 }
 
+// personContactView is the person view's check-in summary under --json
+// (usage/commands.md §person; ADR-0014 §6): the cadence state (active, paused,
+// retired, or none for contact logged with no cadence), the most recent window
+// as typed and its length — left out when no window was ever set — and the
+// last non-voided contact day, or null.
+type personContactView struct {
+	State       string  `json:"state"`
+	Cadence     string  `json:"cadence,omitempty"`
+	CadenceDays int     `json:"cadence_days,omitempty"`
+	LastContact *string `json:"last_contact"`
+}
+
 // personView is the machine-readable projection of a [router.PersonResult]
 // under --json (harness-integration.md §C). It is built CLI-side with stable
 // snake_case names so a shelling harness branches on the outcome fields —
 // matched (§P-0), multiple_matches (§P-2), off_limits (§P-3), or neither (§P-1
 // no-match) — rather than parsing the prose; the router package stays untouched.
+// contact is present only when the person has contact events, so a person with
+// none projects exactly as before.
 type personView struct {
 	Query           string                `json:"query"`
 	Matched         bool                  `json:"matched"`
@@ -35,6 +49,7 @@ type personView struct {
 	Candidates      []personCandidateView `json:"candidates"`
 	OffLimits       bool                  `json:"off_limits"`
 	PersonKey       string                `json:"person_key"`
+	Contact         *personContactView    `json:"contact,omitempty"`
 	Text            string                `json:"text"`
 }
 
@@ -57,8 +72,23 @@ func personViewFrom(res router.PersonResult) personView {
 		Candidates:      cands,
 		OffLimits:       res.OffLimits,
 		PersonKey:       res.PersonKey,
+		Contact:         personContactViewFrom(res.Contact),
 		Text:            res.Text,
 	}
+}
+
+// personContactViewFrom projects a person's check-in summary, or nil when they
+// have none.
+func personContactViewFrom(pc *router.PersonContact) *personContactView {
+	if pc == nil {
+		return nil
+	}
+	v := &personContactView{State: pc.State, Cadence: pc.Window.Text, CadenceDays: pc.Window.Days}
+	if pc.LastContact != "" {
+		last := pc.LastContact
+		v.LastContact = &last
+	}
+	return v
 }
 
 // newPersonCmd wires `lucid person <name>` (data-model.md §"People references";

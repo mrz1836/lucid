@@ -34,6 +34,9 @@ func setSchedulerEnv(t *testing.T) {
 	// Guard the resolveDBPath fallback: never let an unset --db reach the real
 	// OS user-config dir during a test.
 	t.Setenv("LUCID_SCHEDULER_DB", filepath.Join(t.TempDir(), "fallback.db"))
+	// Likewise the Monday contact post's store, should a test enable it without
+	// pinning its own path.
+	t.Setenv("LUCID_CONTACT_WEEKLY_DB", filepath.Join(t.TempDir(), "contact-weekly-fallback.db"))
 }
 
 // slugsIn lists the periodic slugs a job store holds, or nil while the store is
@@ -255,6 +258,95 @@ func TestSchedulerRun_WorkoutEnabled_StartsSlotNode(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("scheduler run did not return after cancellation")
 	}
+}
+
+// enableContactWeeklyInScheduler turns the Monday contact post on in the
+// LUCID_HOME the scheduler env points at, on its default Monday 09:00 mark.
+func enableContactWeeklyInScheduler(t *testing.T) {
+	t.Helper()
+	home := os.Getenv("LUCID_HOME")
+	require.NotEmpty(t, home, "setSchedulerEnv must run first")
+	a := storage.New(home)
+	_, err := a.Scaffold()
+	require.NoError(t, err)
+
+	cfg, err := a.LoadConfig()
+	require.NoError(t, err)
+	cfg.ContactWeekly = config.ContactWeeklyConfig{Enabled: true, Weekday: 1, Time: "09:00"}
+	require.NoError(t, a.SaveConfig(cfg))
+}
+
+// TestSchedulerRun_ContactWeeklyEnabled_StartsNode proves the config gate: with
+// contact_weekly enabled the daemon starts the Monday contact node, which
+// reconciles its one weekly periodic into its own disposable job DB
+// (LUCID_CONTACT_WEEKLY_DB), and a cancel drains the whole set cleanly.
+func TestSchedulerRun_ContactWeeklyEnabled_StartsNode(t *testing.T) {
+	setSchedulerEnv(t)
+	enableContactWeeklyInScheduler(t)
+	dbPath := filepath.Join(t.TempDir(), "flywheel.db")
+	contactDB := filepath.Join(t.TempDir(), "contact-weekly.db")
+	t.Setenv("LUCID_CONTACT_WEEKLY_DB", contactDB)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	var stderr bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- runScheduler(ctx, &stderr, dbPath) }()
+
+	// Both nodes must be up before the cancel, for the same reason as the workout
+	// test: canceling on the smaller store alone could interrupt the engine
+	// mid-startup.
+	require.Eventually(t, func() bool {
+		return len(slugsIn(contactDB)) == 1 && len(slugsIn(dbPath)) == 3
+	}, 15*time.Second, 25*time.Millisecond, "the daemon starts the contact weekly node beside the engine")
+	assert.Equal(t, []string{"lucid-contact-weekly"}, slugsIn(contactDB), "the node reconciles its one weekly periodic")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err, "a canceled daemon with the contact weekly node drains cleanly")
+		assert.Empty(t, stderr.String())
+	case <-time.After(10 * time.Second):
+		t.Fatal("scheduler run did not return after cancellation")
+	}
+}
+
+// TestSchedulerRun_ContactWeeklyDisabled_NoNode is the paired "off → never
+// started" proof: with another node (the workout slot) enabled and
+// contact_weekly left at its shipped default (off), the daemon runs the engine
+// and the workout node, and the contact weekly job DB is never created.
+func TestSchedulerRun_ContactWeeklyDisabled_NoNode(t *testing.T) {
+	setSchedulerEnv(t)
+	enableWorkoutInScheduler(t)
+	dbPath := filepath.Join(t.TempDir(), "flywheel.db")
+	workoutDB := filepath.Join(t.TempDir(), "workout.db")
+	contactDB := filepath.Join(t.TempDir(), "contact-weekly.db")
+	t.Setenv("LUCID_WORKOUT_DB", workoutDB)
+	t.Setenv("LUCID_CONTACT_WEEKLY_DB", contactDB)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	var stderr bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- runScheduler(ctx, &stderr, dbPath) }()
+
+	require.Eventually(t, func() bool {
+		return len(slugsIn(workoutDB)) == 1 && len(slugsIn(dbPath)) == 3
+	}, 15*time.Second, 25*time.Millisecond, "the engine and the workout node start")
+	_, statErr := os.Stat(contactDB)
+	assert.True(t, os.IsNotExist(statErr), "with contact_weekly off its job DB is never created")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("scheduler run did not return after cancellation")
+	}
+	_, statErr = os.Stat(contactDB)
+	assert.True(t, os.IsNotExist(statErr), "nothing creates the contact weekly job DB on the way down either")
 }
 
 // ── scheduler reconcile ──────────────────────────────────────────────────────

@@ -27,9 +27,11 @@ type PersonCandidate struct {
 
 // PersonResult reports what /person resolved. Matched is false for the empty
 // state (§P-1) and the multi-match state (§P-2, with Candidates set). OffLimits
-// marks the redacted raw-record-only view (§P-3). Text is the full rendered,
-// byte-stable output the user sees — the same input always renders the same
-// bytes (S-22).
+// marks the redacted raw-record-only view (§P-3). Contact is the person's
+// check-in summary (ADR-0014 §6), nil when they have no contact events — it is
+// set in the off-limits view too, since it is the user's own record. Text is
+// the full rendered, byte-stable output the user sees — the same input always
+// renders the same bytes (S-22).
 type PersonResult struct {
 	Query           string
 	Matched         bool
@@ -37,6 +39,7 @@ type PersonResult struct {
 	Candidates      []PersonCandidate
 	OffLimits       bool
 	PersonKey       string
+	Contact         *PersonContact
 	Text            string
 }
 
@@ -138,15 +141,22 @@ func (r *Router) renderCandidates(query string, matches []storage.PersonRecord) 
 // §P-3 raw-record-only view (mentions and dates, nothing derived); everyone
 // else gets the full deterministic join: the record header, mention counts, the
 // accepted insights citing entries that mention them, and a dominance line only
-// when their share of entries exceeds person_dominance_threshold.
+// when their share of entries exceeds person_dominance_threshold. Both views
+// add the check-in line after the mention counts when the person has contact
+// events (ADR-0014 §6) — it is the user's own record, not an inference.
 func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonResult, error) {
 	offLimits, err := r.store.ReadOffLimitsPersonKeys()
 	if err != nil {
 		return PersonResult{}, fmt.Errorf("person: read off-limits: %w", err)
 	}
+	checkIns, err := r.personContact(rec.PersonKey)
+	if err != nil {
+		return PersonResult{}, err
+	}
 	if toSet(offLimits)[rec.PersonKey] {
 		return PersonResult{
-			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey, Text: renderOffLimits(rec),
+			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey, Contact: checkIns,
+			Text: renderOffLimits(rec, checkIns),
 		}, nil
 	}
 
@@ -162,6 +172,7 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + "\n")
 	b.WriteString(mentionSummary(rec) + "\n")
+	writeCheckInLine(&b, checkIns)
 	if len(insightIDs) > 0 {
 		b.WriteString("Referenced by accepted insights: " + strings.Join(insightIDs, ", ") + "\n")
 	} else {
@@ -177,7 +188,19 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 	if linked != "" {
 		b.WriteString(linked + "\n")
 	}
-	return PersonResult{Query: query, Matched: true, PersonKey: rec.PersonKey, Text: strings.TrimRight(b.String(), "\n")}, nil
+	return PersonResult{
+		Query: query, Matched: true, PersonKey: rec.PersonKey, Contact: checkIns,
+		Text: strings.TrimRight(b.String(), "\n"),
+	}, nil
+}
+
+// writeCheckInLine adds the person's check-in line to a view, or nothing when
+// they have no contact events — so their view renders byte-identically to
+// before (S-22).
+func writeCheckInLine(b *strings.Builder, checkIns *PersonContact) {
+	if checkIns != nil {
+		b.WriteString(checkIns.Line + "\n")
+	}
 }
 
 // personLinkedMediaLine renders the "Media linked to them" line: the media
@@ -203,13 +226,15 @@ func (r *Router) personLinkedMediaLine(rec storage.PersonRecord) (string, error)
 }
 
 // renderOffLimits builds the §P-3 raw-record-only view: the standing header,
-// the mention summary, and the raw entry ids — mentions and dates, nothing
+// the mention summary, the check-in line when there are contact events (the
+// user's own record), and the raw entry ids — mentions and dates, nothing
 // derived (no insights, no dominance).
-func renderOffLimits(rec storage.PersonRecord) string {
+func renderOffLimits(rec storage.PersonRecord, checkIns *PersonContact) string {
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + " is off-limits to inference — what follows is your raw record only: " +
 		"mentions and dates, nothing derived.\n")
 	b.WriteString(mentionSummary(rec) + "\n")
+	writeCheckInLine(&b, checkIns)
 	if len(rec.EntryRefs) > 0 {
 		b.WriteString("Entries: " + strings.Join(rec.EntryRefs, ", ") + "\n")
 	}

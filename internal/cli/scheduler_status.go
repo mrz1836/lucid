@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/companion"
+	"github.com/mrz1836/lucid/internal/contactweekly"
 	"github.com/mrz1836/lucid/internal/schedrun"
 	"github.com/mrz1836/lucid/internal/schedstatus"
 	"github.com/mrz1836/lucid/internal/witnessreport"
@@ -28,6 +29,7 @@ const (
 	envCompanionDB     = "LUCID_COMPANION_DB"
 	envWitnessReportDB = "LUCID_WITNESS_REPORT_DB"
 	envWorkoutDB       = "LUCID_WORKOUT_DB"
+	envContactWeeklyDB = "LUCID_CONTACT_WEEKLY_DB"
 )
 
 // newHostProbe builds the best-effort host/supervisor probe for a resolved
@@ -140,6 +142,9 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 	// cannot answer blanks both (the scan skips a blank path).
 	witnessReportDB := resolvedPathOrBlank(witnessreport.DefaultDBPath)
 	workoutDB := resolvedPathOrBlank(workout.DefaultDBPath)
+	// The contact-weekly store is listed for its path alone: its post is a fixed
+	// template with no model compose, so it has no fallbacks to scan.
+	contactWeeklyDB := resolvedPathOrBlank(contactweekly.DefaultDBPath)
 
 	// One instant anchors both the compose-fallback scan window and the
 	// classification, so the two can never disagree about "recent".
@@ -152,7 +157,7 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 		CompanionDB:     companionDB,
 		WorkoutDB:       workoutDB,
 		WitnessReportDB: witnessReportDB,
-		JobStores:       jobStorePaths(schedulerDB, companionDB, witnessReportDB, workoutDB),
+		JobStores:       jobStorePaths(schedulerDB, companionDB, witnessReportDB, workoutDB, contactWeeklyDB),
 		Probe:           newHostProbe(schedulerDB),
 		Now:             now,
 	})
@@ -176,28 +181,29 @@ func runSchedulerStatus(cmd *cobra.Command, schedulerDBFlag, companionDBFlag str
 
 // jobStorePaths lists every disposable job store the supervised scheduler
 // writes to, resolved through each daemon's own DefaultDBPath so a printed path
-// is exactly the file that daemon opens. All four paths are resolved once by the
+// is exactly the file that daemon opens. All five paths are resolved once by the
 // caller and reused here: the Engine and companion stores are the two this
-// report fully inspects, and the witness-report and workout stores are the two
+// report fully inspects, the witness-report and workout stores are the two
 // read only by the compose-fallback scan — so each printed path is exactly the
-// one that was read.
+// one that was read — and the contact-weekly store is listed for its path alone.
 //
-// The report names all four because only the Engine store is pinned into the
-// launchd plist (`LUCID_SCHEDULER_DB`); the witness-report and workout stores,
-// and the companion's, each resolve their own default under the OS user-config
-// dir. A repair or a backup keyed on the pinned path alone therefore reads as
-// complete while covering a quarter of the surface — the asymmetry is invisible
-// from any single path and costs real time to rediscover from a crash loop.
+// The report names all five because only the Engine store is pinned into the
+// launchd plist (`LUCID_SCHEDULER_DB`); the other four each resolve their own
+// default under the OS user-config dir. A repair or a backup keyed on the
+// pinned path alone therefore reads as complete while covering a fifth of the
+// surface — the asymmetry is invisible from any single path and costs real time
+// to rediscover from a crash loop.
 //
 // A resolver that cannot answer blanks its own row (rendered as a dash) instead
 // of failing the command: `status` is what you run when things are already
 // broken, so it must not become the next broken thing.
-func jobStorePaths(schedulerDB, companionDB, witnessReportDB, workoutDB string) []schedstatus.JobStorePath {
+func jobStorePaths(schedulerDB, companionDB, witnessReportDB, workoutDB, contactWeeklyDB string) []schedstatus.JobStorePath {
 	return []schedstatus.JobStorePath{
 		{Name: "engine", Path: schedulerDB, Env: envSchedulerDB},
 		{Name: "companion", Path: companionDB, Env: envCompanionDB},
 		{Name: "witness-report", Path: witnessReportDB, Env: envWitnessReportDB},
 		{Name: "workout", Path: workoutDB, Env: envWorkoutDB},
+		{Name: "contact-weekly", Path: contactWeeklyDB, Env: envContactWeeklyDB},
 	}
 }
 

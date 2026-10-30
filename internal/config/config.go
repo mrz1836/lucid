@@ -216,6 +216,65 @@ func (c WitnessReportConfig) AnchorDetailFull() bool {
 	return c.AnchorDetail == WitnessReportAnchorDetailFull
 }
 
+// The contact_weekly block's defaults (ADR-0014 §8): a Monday (cron weekday 1)
+// 09:00 mark.
+const (
+	DefaultContactWeeklyWeekday = 1
+	DefaultContactWeeklyTime    = "09:00"
+)
+
+// ContactWeeklyConfig configures the Monday contact check-in post — a fixed,
+// model-free list of who is due this week and who is still open from before,
+// plus the week's birthdays, posted to the user's own channel (ADR-0014 §8;
+// usage/contact.md). Enabled gates the whole node and ships false, so a fresh
+// Ledger never posts it. Weekday (0=Sunday … 1=Monday … 6=Saturday) and Time
+// (HH:MM, local) set the weekly fire mark, Monday 09:00 by default. Like the
+// witness_report block it is credential-dumb: no channel id and no token — the
+// post goes only to LUCID_USER_CHANNEL_ID, read from the environment. The block
+// is optional: [Unmarshal] pre-seeds it, so an absent block or key reads the
+// defaults, and an older binary ignores it, because lucid.json decoding is
+// non-strict.
+type ContactWeeklyConfig struct {
+	Enabled bool   `json:"enabled"`
+	Weekday int    `json:"weekday"`
+	Time    string `json:"time"`
+}
+
+// DefaultContactWeekly returns the documented contact_weekly defaults: off, on
+// a Monday 09:00 mark.
+func DefaultContactWeekly() ContactWeeklyConfig {
+	return ContactWeeklyConfig{Weekday: DefaultContactWeeklyWeekday, Time: DefaultContactWeeklyTime}
+}
+
+// OrDefault returns c, or [DefaultContactWeekly] when c is the zero value — a
+// config that never carried the block (one built in code rather than loaded).
+// A loaded lucid.json is pre-seeded by [Unmarshal], so a missing block or key
+// already reads its default there.
+func (c ContactWeeklyConfig) OrDefault() ContactWeeklyConfig {
+	if c == (ContactWeeklyConfig{}) {
+		return DefaultContactWeekly()
+	}
+	return c
+}
+
+// validate reports whether the contact_weekly block is structurally usable,
+// exactly as witness_report's mark is checked: a disabled block always
+// validates, and an enabled one needs a valid HH:MM time and a real cron
+// weekday (0=Sunday … 6=Saturday), or the config is rejected at load naming the
+// key rather than building a bogus weekly cron. There is no clip rule.
+func (c ContactWeeklyConfig) validate() error {
+	if !c.Enabled {
+		return nil
+	}
+	if !validClockHM(c.Time) {
+		return fmt.Errorf("config: contact_weekly.time %q must be a valid HH:MM when contact_weekly.enabled is true", c.Time)
+	}
+	if c.Weekday < 0 || c.Weekday > 6 {
+		return fmt.Errorf("config: contact_weekly.weekday %d must be 0 (Sunday) to 6 (Saturday) when contact_weekly.enabled is true", c.Weekday)
+	}
+	return nil
+}
+
 // The anchors block's defaults and floors (usage/commands.md §metrics;
 // engine-module.md §"Anchor event store" → "Thresholds").
 const (
@@ -510,6 +569,11 @@ type Config struct {
 	Companion                CompanionConfig     `json:"companion"`
 	Workout                  WorkoutConfig       `json:"workout"`
 	WitnessReport            WitnessReportConfig `json:"witness_report"`
+	// ContactWeekly gates and schedules the Monday contact check-in post
+	// (ADR-0014 §8). It ships off; like Anchors, [Unmarshal] pre-seeds it and
+	// [Config.Clip] fills an absent block, so a lucid.json written before the
+	// block existed reads the defaults.
+	ContactWeekly ContactWeeklyConfig `json:"contact_weekly"`
 	// Anchors carries the anchor kinds' two thresholds (ADR-0013). Like
 	// Gratitude, [Unmarshal] pre-seeds it and [Config.Clip] fills an absent
 	// block, so a lucid.json written before the block existed reads the
@@ -597,6 +661,10 @@ func Default() Config {
 			Weekday:      1,
 			AnchorDetail: WitnessReportAnchorDetailSummary,
 		},
+		// The Monday contact check-in post ships off, with its Monday 09:00 mark
+		// pre-filled so the seam is discoverable; flipping enabled is the one
+		// change that turns it on.
+		ContactWeekly: DefaultContactWeekly(),
 		// The anchor thresholds ship their documented defaults: never miss
 		// twice, and a habit is surfaced as eligible to graduate after 90
 		// accounted days.
@@ -709,6 +777,8 @@ func (c Config) Clip() (Config, []string) {
 	// gratitude block; an out-of-range threshold is a Validate error, not a
 	// clip.
 	out.Anchors = out.Anchors.OrDefault()
+	// An absent contact_weekly block reads its defaults silently too.
+	out.ContactWeekly = out.ContactWeekly.OrDefault()
 
 	return out, warnings
 }
@@ -756,6 +826,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := c.WitnessReport.validate(); err != nil {
+		return err
+	}
+	if err := c.ContactWeekly.validate(); err != nil {
 		return err
 	}
 	if err := c.Anchors.validate(); err != nil {
@@ -924,13 +997,18 @@ func (c Config) Marshal() ([]byte, error) {
 }
 
 // Unmarshal parses lucid.json bytes into a Config. It does not clip or
-// validate — callers decide when to apply [Clip] and [Validate]. The gratitude
-// and anchors blocks are pre-seeded with their defaults before decoding, so a
-// file written before a block existed — or one that sets only some of its keys —
-// reads the documented default for every missing key; a missing key is not an
-// out-of-range value, so it raises no clip warning and never rewrites the file.
+// validate — callers decide when to apply [Clip] and [Validate]. The gratitude,
+// anchors and contact_weekly blocks are pre-seeded with their defaults before
+// decoding, so a file written before a block existed — or one that sets only
+// some of its keys — reads the documented default for every missing key; a
+// missing key is not an out-of-range value, so it raises no clip warning and
+// never rewrites the file.
 func Unmarshal(b []byte) (Config, error) {
-	c := Config{Gratitude: GratitudeConfig{Match: DefaultGratitudeMatch()}, Anchors: DefaultAnchors()}
+	c := Config{
+		Gratitude:     GratitudeConfig{Match: DefaultGratitudeMatch()},
+		Anchors:       DefaultAnchors(),
+		ContactWeekly: DefaultContactWeekly(),
+	}
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("config: unmarshal: %w", err)
 	}
