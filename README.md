@@ -284,7 +284,7 @@ error or breached gate, `2` usage / flag-parse error. Usage errors print on stde
 | Command | Flags | What it does |
 |---------|-------|--------------|
 | `log [text]` | `--day` `--source` `--channel` `--thread` `--agent` `--model` `--harness` | Capture one immutable raw entry — no structure imposed at capture time. |
-| `obs [kind] [value…]` | *same as `log`* | One-line health/context micro-log — pain, mood, sleep, place. Inventory, never obligation. |
+| `obs [kind] [value…]`<br>`obs void <obs-id>` | *same as `log`* (none on `void`) | One-line health/context micro-log — pain, mood, sleep, place, a measurement (`obs measurement <metric> <value> <unit>`). Inventory, never obligation. `obs void` retracts a mistaken measurement reading by its receipt — append-only, both records kept; re-log the right value with `--day`. |
 | `attach <path>` | `--caption` `--day` `--source` `--channel` `--harness` `--to` | Attach a photo or file to a logical day — optionally linking it to what it's about at capture time (`--to <kind>:<key>`, repeatable). |
 | `mode <green\|yellow\|red>` | `--day` | Declare today's capacity mode; the floor drops with it (rejected after the bell). |
 | `closeout [today\|skip\|backfill] [compact form…]` | `--day` | The two-minute nightly close-out — record the day's committed practice. Idempotent per logical day. |
@@ -373,7 +373,7 @@ error or breached gate, `2` usage / flag-parse error. Usage errors print on stde
 | Command | Flags | What it does |
 |---------|-------|--------------|
 | `init` | — | Scaffold the `~/.lucid/` Ledger (idempotent; most verbs also self-scaffold). |
-| `export [series \| packet clinician [@date\|all]]` | — | Export a CSV series or a clinician packet — zero journal content by default. |
+| `export [series \| measurements [@date\|all] \| packet clinician [@date\|all]]` | `--metric` (on `measurements`) | Export a CSV series, a long-format measurement CSV (`logical_date,metric,value,unit,id`, one row per reading, voided readings dropped), or a clinician packet — zero journal content by default. |
 | `backup` | `--out` | Write the must-keep Ledger trees to a single `.tar.gz`. Never writes into `~/.lucid/`, never clobbers an existing file. |
 | `restore [<file>]` | `--in` `--force` | Overlay a backup archive back into the Ledger; refuses an occupied home without `--force`. |
 | `secret <add\|list\|note\|remove>` | `--note` `--clear` | Maintain a names-only catalog of hush secret handles — a handle and an optional note, never a value. `note` updates a live handle's note (or removes it with `--clear`), keeping its creation time; `remove` tombstones it. History stays append-only. No reveal, no fetch, no storage. |

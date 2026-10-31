@@ -181,3 +181,45 @@ func TestDayView_Lines_ByteStableAndInventoryOnly(t *testing.T) {
 			"the day view is inventory, never obligation — %q must not appear", banned)
 	}
 }
+
+// TestEventLine_MeasurementVoidRendersAsVoid: a measurement void renders as a
+// retraction naming its target — never as an empty reading — while a plain
+// valueless measurement still renders the old way.
+func TestEventLine_MeasurementVoidRendersAsVoid(t *testing.T) {
+	void := Event{
+		ID: "obs_2026_07_03_001", Kind: KindMeasurement, Payload: map[string]any{},
+		Refs: map[string]any{RefCorrects: "obs_2026_07_02_002", RefVoid: true},
+	}
+	assert.Equal(t, "measurement void of obs_2026_07_02_002 (obs_2026_07_03_001)", eventLine(void, false))
+
+	empty := Event{ID: "obs_2026_07_03_002", Kind: KindMeasurement, Payload: map[string]any{}}
+	assert.Equal(t, "measurement (obs_2026_07_03_002)", eventLine(empty, false))
+
+	notVoid := void
+	notVoid.Refs = map[string]any{RefCorrects: "obs_2026_07_02_002", RefVoid: "true"}
+	assert.Equal(t, "measurement (obs_2026_07_03_001)", eventLine(notVoid, false),
+		"only a JSON boolean true marks a void")
+}
+
+// TestAssembleDayView_KeepsVoidedReadingAndVoid: the day view is raw history —
+// it never folds voids, so a voided reading and its void both stay, each on its
+// own line.
+func TestAssembleDayView_KeepsVoidedReadingAndVoid(t *testing.T) {
+	dayEvents := []Event{
+		{
+			ID: "obs_2026_07_02_002", Kind: KindMeasurement,
+			Refs: map[string]any{RefCorrects: "obs_2026_07_02_001", RefVoid: true}, Payload: map[string]any{},
+		},
+		{
+			ID: "obs_2026_07_02_001", Kind: KindMeasurement,
+			Payload: map[string]any{"metric": "weight", "value": "70.5", "unit": "kg"},
+		},
+	}
+	dv := AssembleDayView("2026-07-02", dayEvents, nil, loc)
+
+	require.Len(t, dv.Events, 2, "neither the reading nor its void is folded away")
+	assert.Equal(t, []string{
+		"measurement metric=weight, unit=kg, value=70.5 (obs_2026_07_02_001)",
+		"measurement void of obs_2026_07_02_001 (obs_2026_07_02_002)",
+	}, dv.Lines())
+}

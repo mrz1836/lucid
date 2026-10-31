@@ -19,8 +19,8 @@ this reference stays the precise baseline.
 - **`--json`** is a persistent flag on every command: *"Emit machine-readable
   JSON output."* Read verbs emit their structured shape, and the **write verbs
   emit a receipt**. The write verbs `log`, `closeout` (plus its `amend` /
-  `backfill` sub-forms), `obs`, `reframe add`, `focus add`, `focus retire`,
-  `rep add`, and `rep retire` emit a bare snake_case object on stdout carrying
+  `backfill` sub-forms), `obs` (plus `obs void`), `reframe add`, `focus add`,
+  `focus retire`, `rep add`, and `rep retire` emit a bare snake_case object on stdout carrying
   two string fields: `receipt_id` (the write's id) and `logical_date` (the day it belongs to, in
   `YYYY-MM-DD` form). For `closeout skip` and an idempotent `closeout` — which
   write no new raw entry — `receipt_id` carries the returned day-record id, so
@@ -172,9 +172,9 @@ above: `log`, `attach`, `obs`, `reframe add`, `focus add`, `rep add`, `contact`,
 `gratitude add`, `gratitude thank`, `memory`, `workout log`, `workout amend` (a
 re-date), `era`, `injury`, `anchor`, `mode`, `storm`, `closeout`. The other
 [`contact`](#contact) writes — `every`, `pause`, `resume`, `retire`, `snooze` and
-`void` — stamp the current logical day by design and take no `--day`: a cadence
-change, a snooze or a correction is about now, and a snooze must never reach
-into another week. Four write verbs are deliberately N/A —
+`void` — and [`obs void`](#obs-void) stamp the current logical day by design and
+take no `--day`: a cadence change, a snooze or a correction is about now, and a
+snooze must never reach into another week. Four write verbs are deliberately N/A —
 [`thread`](#thread) is a lifecycle registry with no dated occurrence,
 [`structure`](#structure) distills raw entries that already exist, selected by
 id or window, rather than capturing a new one, [`self`](#self) records
@@ -1137,6 +1137,7 @@ plus the kind object), and the retired ones with `metrics --json`
 
 ```
 lucid obs [kind] [value...] [--day <date>]
+lucid obs void <obs-id>
 ```
 
 Log a health/context observation micro-log. Deterministic, no LLM. The first
@@ -1147,7 +1148,8 @@ ack is inventory only (never a streak or score). A kind must be enabled in
 `drank`), `elimination` (`bm`), `mood`).
 
 Common kinds and aliases: `pain`, `symptom`, `ate`/`drank` (intake), `bm`
-(elimination), `mood`, `slept` (sleep), `med`, `where` (sticky location).
+(elimination), `mood`, `slept` (sleep), `med`, `measurement`, `where` (sticky
+location).
 
 `obs` is the one verb that carries **both** backdating tiers, because it accepts
 a date two ways ([Backdating with --day](#backdating-with---day)):
@@ -1171,10 +1173,70 @@ lucid obs ate eggs, toast, coffee @yesterday 19:30
 lucid obs mood 4 restless
 lucid obs ate eggs, toast --day @yesterday
 lucid obs where Lisbon    # enable context.location first
+lucid obs measurement weight 70.5 kg
+lucid obs measurement bp-systolic 121 mmHg
 ```
 
 `@`-backdating, `#tags`, and the full micro-log grammar are in
 [`../observations.md`](../observations.md).
+
+**Measurements.** `lucid obs measurement <metric> <value> <unit> [note]` logs one
+numeric reading — a weight, a blood-pressure number, a lab value. The token order
+is `metric value unit`, then an optional note: the unit is the third token, before
+any note or `#tag` (a reading with no unit stops at the value). The value is kept
+as typed, as text — `7.20` stays `7.20` — and so is the unit. Recommended stable
+slugs are `weight`, `bp-systolic`, `bp-diastolic`, `resting-hr`, and lab slugs such
+as `ldl-c` and `a1c`, so a series stays one series; a blood-pressure reading with a
+pulse is three captures. Lucid does not enforce a metric vocabulary — any slug is
+accepted, and reusing the one you already log under keeps a series whole. The
+`measurement` kind is off by default; enable it in `observations/config.json`.
+Readings project through [`lucid export measurements`](#export) and the clinician
+packet's "Measurements in range" section; a wrong reading is corrected with
+[`obs void`](#obs-void) and a re-log.
+
+#### `obs void`
+
+`lucid obs void <obs-id>` retracts one `measurement` reading without rewriting
+anything: it appends a void naming the reading, and both records are kept. The
+voided reading drops out of [`lucid export measurements`](#export) and the
+packet's "Measurements in range" section; [`lucid day`](#day) shows both — the
+reading on its own day, the void as a void on the day it was filed. A void is
+only a retraction, never an overlay: there is no `obs amend`. To fix a wrong
+value, unit, metric or day, void the reading, then re-log the right value with
+`lucid obs measurement <metric> <value> <unit> --day @YYYY-MM-DD`.
+
+- **No `--day`, no reason.** The void files under the current logical day — a
+  correction is about now — and takes no reason text.
+- **Measurement readings only.** `workout` and `memory` observations are
+  corrected with [`lucid workout amend`](#workout) and
+  [`lucid memory amend`](#memory); other kinds aren't voidable yet. A void
+  can't itself be voided — to restore a reading, log it again.
+- **Enable-gated.** A disabled `measurement` kind prints the enable hint and
+  writes nothing (exit `0`), exactly like a disabled micro-log.
+- **Echo-and-confirm tier.** A harness names the reading it will void (date,
+  metric, value, unit), shows the command, and waits for a yes, as for
+  [`anchor void`](#anchor-void) and [`contact void`](#contact).
+
+The ack is inventory — the voided id, its day, and the void's own id, never the
+value:
+
+```text
+Voided measurement `obs_2026_03_04_002` (2026-03-04) as `obs_2026_03_05_001` — it no longer counts in the measurement export or the packet; both records are kept.
+```
+
+`--json` emits the `{receipt_id, logical_date}` receipt for the void
+(`receipt_id` is the void's own event id). Refused — non-zero exit, a `lucid obs
+void:` reason on stderr, **nothing written**: an unknown id, an id that is itself
+a void, an already-voided reading, a `workout` or `memory` id (the reason names
+its `amend` verb), and any other kind. No id, a second id, or `--day` is a usage
+error (exit `2`). Full table: [`../mvp/error-states.md`](../mvp/error-states.md)
+Ov-1..Ov-7; the record: [`../mvp/data-model.md`](../mvp/data-model.md)
+§"Measurement voids".
+
+```sh
+lucid obs void obs_2026_03_04_002
+lucid obs measurement weight 70.3 kg --day @2026-03-04   # re-log the right value
+```
 
 ### reframe
 
@@ -2109,22 +2171,79 @@ lucid validate --json
 ### export
 
 ```
-lucid export [series | packet clinician [@date|all]]
+lucid export [series | measurements [@date|all] [--metric <slug>] | packet clinician [@date|all]]
 ```
 
-Write a projection to disk and print **only the path** (never the body). Two
-forms:
+Write a projection to disk and print **only the path** (never the body).
+Three forms:
 
 | Form | Writes |
 |------|--------|
-| `lucid export series` | A pain/mood/capacity CSV series. |
-| `lucid export packet clinician [@date\|all]` | The clinician packet. Optional `@<date>` anchors the window; `all` exports the full history. Notes, location, and weather are excluded from the packet body by default. |
+| `lucid export series` | The pain/mood/capacity CSV series (`projections/series.csv`), unchanged; measurements have their own long-format form. |
+| `lucid export measurements [@date\|all] [--metric <slug>]` | A long-format measurement CSV, `projections/measurements.csv` (fixed name, overwritten each run), header `logical_date,metric,value,unit,id`, one row per kept reading. Rules below. |
+| `lucid export packet clinician [@date\|all]` | The clinician packet. Optional `@<date>` anchors the window; `all` exports the full history. Notes, location, and weather are excluded from the packet body by default. In-window measurement readings render in a **Measurements in range** section after the header — values and units only, never notes or ids — and the section is omitted when no reading falls in the window. |
 
-`--json` emits `{command, what, path, window_start, window_end}`. The packet body
-never rides the chat surface — only the path is posted.
+`--json` emits `{command, what, path, window_start, window_end}` (a filtered
+measurement export adds `metric`). No projection body ever rides the chat
+surface — only the path is posted.
+
+#### Measurement export rules
+
+Metric names are user-chosen and unbounded, so measurements project in **long
+format** — one row per reading — rather than one column per metric. Every rule
+is deterministic; no model is in the path.
+
+- **Window.** The default is all history. `@YYYY-MM-DD` starts the window on
+  that day (inclusive); `all` is explicit all history. The window always ends
+  today, so a reading dated after today is outside every window. This is the
+  packet's positional grammar; a start after today gives a header-only file.
+- **Same-day readings.** Every reading is kept, never aggregated — no max, mean
+  or last. Two blood-pressure readings on one day are four rows.
+- **Values.** A reading is exported only when its stored value is a text token
+  matching `^-?[0-9]+(\.[0-9]+)?$`, emitted byte-verbatim (`7.20` stays
+  `7.20`). `heavy`, `1,128`, `.5`, `<10`, `>60`, an empty value and partial
+  readings are skipped, never coerced.
+- **Units.** The unit is carried byte-exact and never converted. A numeric
+  reading logged with no unit is kept with an empty unit cell. One metric
+  logged in two units yields rows that each carry their own unit.
+- **Voids.** Readings retracted with [`lucid obs void`](#obs-void) are dropped,
+  whatever day the void itself was filed on.
+- **Order.** Rows sort by `logical_date`, then `metric` (byte order), then
+  `id`. A trailing newline ends the file, and a cell holding a comma, a double
+  quote or a line break is RFC 4180-quoted. An empty Ledger gives a header-only
+  file, and a rerun over the same Ledger writes the same bytes.
+- **`--metric <slug>`.** One exact, case-sensitive match (`weight` never matches
+  `Weight`); an unknown slug gives a header-only file, not an error. It applies
+  only to `measurements` — on `series` or `packet` it is a usage error.
+- **Not exported.** Notes and tags never appear — only the day, metric, value,
+  unit and the reading's `obs_…` id.
+- **Kind state.** Enabling the `measurement` kind gates capture, not
+  projection: readings already in the Ledger export even if the kind has since
+  been disabled.
+- **Disclosure log.** Each run appends one `projections/exports.log` line whose
+  `what` is `measurements`, or `measurements:<slug>` when filtered, with the
+  window `<start>..<today>`, or `all..<today>` when unbounded.
+- **`--json`.** Emits `{command, what, path, window_start, window_end}`, plus
+  `metric` when filtered. Rows never ride stdout.
+
+A malformed window, a second window argument, an empty `--metric` or one holding
+a space, and `--metric` on another form are usage errors (exit `2`) that write no
+file and no log line ([`../mvp/error-states.md`](../mvp/error-states.md)
+Mx-1..Mx-4).
+
+```csv
+logical_date,metric,value,unit,id
+2026-03-03,ldl-c,104,mg/dL,obs_2026_03_03_001
+2026-03-04,bp-diastolic,79,mmHg,obs_2026_03_04_003
+2026-03-04,bp-systolic,121,mmHg,obs_2026_03_04_001
+2026-03-04,weight,70.5,kg,obs_2026_03_04_002
+```
 
 ```sh
 lucid export series
+lucid export measurements
+lucid export measurements @2026-03-01 --metric weight
+lucid export measurements all --json
 lucid export packet clinician all
 lucid export packet clinician @2026-06-30 --json
 ```
@@ -3981,6 +4100,7 @@ embellished, or celebrated):
 | `/mode <…>` | `lucid mode <…>` |
 | `/status` | `lucid status` |
 | `/day [date]` | `lucid day [date]` |
+| `/obs void <obs-id>` | `lucid obs void <obs-id>` (echo-and-confirm; measurement readings only) |
 | `/packet clinician [@date\|all]` | `lucid export packet clinician …` (posts only the path) |
 | `/storm <label\|unwritten>` · `/storm end` | `lucid storm <label\|unwritten\|end>` |
 | `/profile <name>` | `lucid profile <name>` |

@@ -69,6 +69,11 @@ type ClinicianInput struct {
 	EpisodeCount    int
 	Episodes        []Episode
 	Days            []PacketDayRow
+	// Measurements are the in-window readings for the "Measurements in range"
+	// section, built by [BuildMeasurementRows] — values and units only, never
+	// notes or ids. Empty omits the section, leaving the packet's bytes as they
+	// were before measurements existed.
+	Measurements []MeasurementRow
 }
 
 // DeriveRegimen computes the current regimen from med events (observations.md
@@ -242,6 +247,7 @@ func RenderClinician(in ClinicianInput) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Clinician packet — %s to %s\n\n", in.WindowStart, in.WindowEnd)
 	renderPacketHeader(&b, in)
+	renderPacketMeasurements(&b, in.Measurements)
 	b.WriteString("\nDaily record:\n")
 	for _, d := range in.Days {
 		renderPacketDay(&b, d)
@@ -275,6 +281,24 @@ func renderPacketHeader(b *strings.Builder, in ClinicianInput) {
 	fmt.Fprintf(b, "Pain episodes in range: %d\n", in.EpisodeCount)
 	for _, ep := range in.Episodes {
 		fmt.Fprintf(b, "  %s..%s (%d days)\n", ep.Start, ep.End, ep.DaysSpanned)
+	}
+}
+
+// renderPacketMeasurements renders the "Measurements in range" section: one
+// line per kept reading (`  <date>  <metric> <value>[ <unit>]`), in the shared
+// row builder's order. It carries no ids and no notes, and writes nothing when
+// no reading falls in range.
+func renderPacketMeasurements(b *strings.Builder, rows []MeasurementRow) {
+	if len(rows) == 0 {
+		return
+	}
+	b.WriteString("\nMeasurements in range:\n")
+	for _, r := range rows {
+		b.WriteString("  " + r.Date + "  " + r.Metric + " " + r.Value)
+		if r.Unit != "" {
+			b.WriteString(" " + r.Unit)
+		}
+		b.WriteByte('\n')
 	}
 }
 

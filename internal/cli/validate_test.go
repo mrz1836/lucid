@@ -283,6 +283,26 @@ func TestValidateCLI_AnchorKindsClean(t *testing.T) {
 	}
 }
 
+// TestValidateCLI_MeasurementVoidClean: a measurement reading and its void,
+// written through the command tree, leave a Ledger validate sweeps clean — a
+// void is an ordinary observation event, never a defect.
+func TestValidateCLI_MeasurementVoidClean(t *testing.T) {
+	enableMeasurementCapture(t)
+	id, _ := captureReading(t, "measurement", "weight", "70.5", "kg")
+	captureReading(t, "measurement", "weight", "70.3", "kg")
+	voidReading(t, id)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "validate", "--json")
+	require.NoError(t, err, out)
+	var payload validateJSON
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	assert.True(t, payload.OK)
+	assert.Zero(t, payload.Errors)
+	for _, f := range payload.Findings {
+		assert.NotEqual(t, validate.SeverityError, f.Severity, "unexpected error finding: %+v", f)
+	}
+}
+
 // TestValidateCLI_HalfWrittenPairRetryFinishes is the recovery path end to
 // end: a slip interrupted after its pair intent landed is reported as a
 // half-written pair naming the retry, running exactly that command finishes
