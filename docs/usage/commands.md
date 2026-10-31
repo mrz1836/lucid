@@ -1184,7 +1184,7 @@ lucid obs measurement bp-systolic 121 mmHg
 numeric reading — a weight, a blood-pressure number, a lab value. The token order
 is `metric value unit`, then an optional note: the unit is the third token, before
 any note or `#tag` (a reading with no unit stops at the value). The value is kept
-as typed, as text — `5.50` stays `5.50` — and so is the unit. Recommended stable
+as typed, as text — `7.20` stays `7.20` — and so is the unit. Recommended stable
 slugs are `weight`, `bp-systolic`, `bp-diastolic`, `resting-hr`, and lab slugs such
 as `ldl-c` and `a1c`, so a series stays one series; a blood-pressure reading with a
 pulse is three captures. Lucid does not enforce a metric vocabulary — any slug is
@@ -2200,8 +2200,8 @@ is deterministic; no model is in the path.
 - **Same-day readings.** Every reading is kept, never aggregated — no max, mean
   or last. Two blood-pressure readings on one day are four rows.
 - **Values.** A reading is exported only when its stored value is a text token
-  matching `^-?[0-9]+(\.[0-9]+)?$`, emitted byte-verbatim (`5.50` stays
-  `5.50`). `heavy`, `1,128`, `.5`, `<10`, `>60`, an empty value and partial
+  matching `^-?[0-9]+(\.[0-9]+)?$`, emitted byte-verbatim (`7.20` stays
+  `7.20`). `heavy`, `1,128`, `.5`, `<10`, `>60`, an empty value and partial
   readings are skipped, never coerced.
 - **Units.** The unit is carried byte-exact and never converted. A numeric
   reading logged with no unit is kept with an empty unit cell. One metric
