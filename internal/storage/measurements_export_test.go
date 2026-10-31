@@ -14,7 +14,7 @@ import (
 
 // measurementsNow is the export clock every measurement export test shares, so
 // the window end and the disclosure-log stamp are fixed.
-var measurementsNow = time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+func measurementsNow() time.Time { return time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC) }
 
 // seedMeasurementLedger writes a synthetic spread of readings: three on one
 // day (out of sort order), a lab value, a percent unit, and one non-numeric
@@ -50,7 +50,7 @@ func TestExportMeasurementsCSV_WritesFixedFileAndLog(t *testing.T) {
 	a := newObsStore(t)
 	seedMeasurementLedger(t, a)
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.NoError(t, err)
 
 	assert.Equal(t, filepath.Join(a.projectionsDir(), "measurements.csv"), res.Path)
@@ -69,7 +69,7 @@ func TestExportMeasurementsCSV_NilLocationIsUTC(t *testing.T) {
 	a := newObsStore(t)
 	seedMeasurementLedger(t, a)
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, nil, "", "")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), nil, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "2026-07-05", res.WindowEnd)
 	assert.Equal(t, wantMeasurementsCSV, readMeasurementsFile(t, res))
@@ -80,7 +80,7 @@ func TestExportMeasurementsCSV_MetricFilterLogsSlug(t *testing.T) {
 	seedMeasurementLedger(t, a)
 	appendMeasurementObs(t, a, "2026-07-04", "weight", "70.3", "kg")
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "weight")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "weight")
 	require.NoError(t, err)
 
 	assert.Equal(t, "logical_date,metric,value,unit,id\n"+
@@ -97,7 +97,7 @@ func TestExportMeasurementsCSV_MetricFilterLogsSlug(t *testing.T) {
 	// The filter is an exact, case-sensitive match: a different case or an
 	// unknown slug is a header-only file, not an error.
 	for _, slug := range []string{"Weight", "no-such-metric"} {
-		res, err = a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", slug)
+		res, err = a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", slug)
 		require.NoError(t, err, slug)
 		assert.Equal(t, "logical_date,metric,value,unit,id\n", readMeasurementsFile(t, res), slug)
 		assert.Equal(t, "measurements:"+slug, res.What)
@@ -112,7 +112,7 @@ func TestExportMeasurementsCSV_WindowOverrideAndAll(t *testing.T) {
 	appendMeasurementObs(t, a, "2026-07-06", "weight", "165.2", "lb") // after today
 
 	t.Run("at_start", func(t *testing.T) {
-		res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "2026-07-02", "")
+		res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "2026-07-02", "")
 		require.NoError(t, err)
 		assert.Equal(t, "logical_date,metric,value,unit,id\n"+
 			"2026-07-02,weight,70.5,kg,obs_2026_07_02_001\n"+
@@ -122,7 +122,7 @@ func TestExportMeasurementsCSV_WindowOverrideAndAll(t *testing.T) {
 	})
 
 	t.Run("all", func(t *testing.T) {
-		res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+		res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 		require.NoError(t, err)
 		assert.Equal(t, "logical_date,metric,value,unit,id\n"+
 			"2026-07-01,weight,70.3,kg,obs_2026_07_01_001\n"+
@@ -133,7 +133,7 @@ func TestExportMeasurementsCSV_WindowOverrideAndAll(t *testing.T) {
 	})
 
 	t.Run("future_start", func(t *testing.T) {
-		res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "2026-07-06", "")
+		res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "2026-07-06", "")
 		require.NoError(t, err)
 		assert.Equal(t, "logical_date,metric,value,unit,id\n", readMeasurementsFile(t, res))
 	})
@@ -150,7 +150,7 @@ func TestExportMeasurementsCSV_WindowOverrideAndAll(t *testing.T) {
 func TestExportMeasurementsCSV_EmptyLedgerHeaderOnly(t *testing.T) {
 	a := newObsStore(t)
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "logical_date,metric,value,unit,id\n", readMeasurementsFile(t, res))
 
@@ -164,11 +164,11 @@ func TestExportMeasurementsCSV_RerunByteStable(t *testing.T) {
 	a := newObsStore(t)
 	seedMeasurementLedger(t, a)
 
-	first, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	first, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.NoError(t, err)
 	firstBody := readMeasurementsFile(t, first)
 
-	later := measurementsNow.Add(time.Hour)
+	later := measurementsNow().Add(time.Hour)
 	second, err := a.ExportMeasurementsCSV(later, time.UTC, "", "")
 	require.NoError(t, err)
 
@@ -192,7 +192,7 @@ func TestExportMeasurementsCSV_ReadsWhileKindDisabled(t *testing.T) {
 
 	seedMeasurementLedger(t, a)
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, wantMeasurementsCSV, readMeasurementsFile(t, res),
 		"enabling gates capture, not projection")
@@ -204,7 +204,7 @@ func TestExportMeasurementsCSV_SameDayVoidKeepsSurvivor(t *testing.T) {
 	appendMeasurementObs(t, a, "2026-07-02", "bp-systolic", "119", "mmHg")
 	appendMeasurementVoidObs(t, a, "2026-07-04", first.ID)
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "logical_date,metric,value,unit,id\n"+
 		"2026-07-02,bp-systolic,119,mmHg,obs_2026_07_02_002\n", readMeasurementsFile(t, res))
@@ -224,7 +224,7 @@ func TestExportMeasurementsCSV_NotesAndTagsNeverExported(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	res, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	res, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.NoError(t, err)
 	body := readMeasurementsFile(t, res)
 	assert.Equal(t, "logical_date,metric,value,unit,id\n"+
@@ -238,7 +238,7 @@ func TestExportMeasurementsCSV_WriteError(t *testing.T) {
 	// A directory sitting where measurements.csv should be forces the write to
 	// fail, and no disclosure line is appended for a projection never written.
 	mkdirAt(t, filepath.Join(a.projectionsDir(), measurementsFileName))
-	_, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	_, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.Error(t, err)
 
 	log, err := a.ReadExportsLog()
@@ -249,7 +249,7 @@ func TestExportMeasurementsCSV_WriteError(t *testing.T) {
 func TestExportMeasurementsCSV_ExportsLogWriteError(t *testing.T) {
 	a := newObsStore(t)
 	mkdirAt(t, a.exportsLogPath())
-	_, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	_, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.Error(t, err)
 }
 
@@ -261,7 +261,7 @@ func TestExportMeasurementsCSV_ReadError(t *testing.T) {
 	require.NoError(t, os.Chmod(sub, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(sub, 0o700) })
 
-	_, err := a.ExportMeasurementsCSV(measurementsNow, time.UTC, "", "")
+	_, err := a.ExportMeasurementsCSV(measurementsNow(), time.UTC, "", "")
 	require.Error(t, err, "an unreadable Ledger is surfaced, never exported as empty")
 	_, statErr := os.Stat(filepath.Join(a.projectionsDir(), measurementsFileName))
 	assert.True(t, os.IsNotExist(statErr), "no projection is written")

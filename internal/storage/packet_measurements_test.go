@@ -14,13 +14,13 @@ import (
 
 // packetNow is the export clock the packet measurement tests share; the window
 // override below starts 2026-07-01, so the packet covers 2026-07-01..2026-07-05.
-var packetNow = time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+func packetNow() time.Time { return time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC) }
 
 // readPacket exports the clinician packet with an @2026-07-01 start and returns
 // its body.
 func readPacket(t *testing.T, a *Adapter) string {
 	t.Helper()
-	res, err := a.ExportClinicianPacket(packetNow, time.UTC, "2026-07-01", false)
+	res, err := a.ExportClinicianPacket(packetNow(), time.UTC, "2026-07-01", false)
 	require.NoError(t, err)
 	body, err := os.ReadFile(res.Path)
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestExportClinicianPacket_AllWindowIncludesEveryReading(t *testing.T) {
 	appendMeasurementObs(t, a, "2026-06-20", "ldl-c", "104", "mg/dL")
 	appendMeasurementObs(t, a, "2026-07-02", "weight", "70.5", "kg")
 
-	res, err := a.ExportClinicianPacket(packetNow, time.UTC, "", true)
+	res, err := a.ExportClinicianPacket(packetNow(), time.UTC, "", true)
 	require.NoError(t, err)
 	body, err := os.ReadFile(res.Path)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestExportClinicianPacket_MeasurementsExportKeepsSinceLastWindow(t *testing
 	a := newObsStore(t)
 	require.NoError(t, a.ScaffoldEngine())
 
-	first, err := a.ExportClinicianPacket(packetNow, time.UTC, "", false)
+	first, err := a.ExportClinicianPacket(packetNow(), time.UTC, "", false)
 	require.NoError(t, err)
 	require.Equal(t, "2026-07-05", first.WindowEnd)
 
