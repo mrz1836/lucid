@@ -51,6 +51,16 @@ func TestWriteVerbsJSON_Trio(t *testing.T) {
 			},
 		},
 		{
+			name:      "obs void",
+			prose:     "Voided",
+			ridPrefix: "obs_",
+			setup: func(t *testing.T) []string {
+				enableMeasurementCapture(t)
+				id, _ := captureReading(t, "measurement", "weight", "70.5", "kg")
+				return []string{"obs", "void", id}
+			},
+		},
+		{
 			name:      "closeout compact",
 			prose:     "streak",
 			ridPrefix: "raw_",

@@ -113,17 +113,23 @@ func (dv DayView) Lines() []string {
 }
 
 // eventLine renders one event as "<kind> <k=v, …> (<id>)". A spanning range
-// event is marked so the reader knows it began earlier.
+// event is marked so the reader knows it began earlier. A measurement void
+// renders as "measurement void of <target> (<id>)" — a retraction, never an
+// empty or partial reading; the view keeps both it and the reading it names
+// (mvp/data-model.md §"Measurement voids").
 func eventLine(e Event, spanning bool) string {
+	prefix := e.Kind
+	if spanning {
+		prefix = e.Kind + " (spanning)"
+	}
+	if target, isVoid := MeasurementVoidTarget(e); isVoid {
+		return fmt.Sprintf("%s void of %s (%s)", prefix, target, e.ID)
+	}
 	parts := make([]string, 0, len(e.Payload))
 	for _, k := range sortedKeys(e.Payload) {
 		parts = append(parts, fmt.Sprintf("%s=%v", k, e.Payload[k]))
 	}
 	body := strings.Join(parts, ", ")
-	prefix := e.Kind
-	if spanning {
-		prefix = e.Kind + " (spanning)"
-	}
 	if body == "" {
 		return fmt.Sprintf("%s (%s)", prefix, e.ID)
 	}
