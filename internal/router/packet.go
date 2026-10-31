@@ -15,6 +15,8 @@ type ExportOutcome struct {
 	WindowStart string
 	WindowEnd   string
 	Message     string
+	// Metric is the --metric slug, set only by a filtered measurement export.
+	Metric string
 }
 
 // ClinicianPacket executes `/packet clinician [@<date>|all]` (observations.md

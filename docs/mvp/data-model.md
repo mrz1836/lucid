@@ -256,6 +256,64 @@ Folded, the session reads as one `climbing` session of 60 minutes at RPE 4 on
 2026-01-14 — even though the re-date's id sorts first — while all three lines
 remain on disk as the audit trail.
 
+### Measurement voids — append-only retraction of a reading
+
+A measurement reading is one `KindMeasurement` observation event, and like a story
+or a session it is never rewritten. `lucid obs void <obs-id>`
+([`../usage/commands.md`](../usage/commands.md#obs-void)) retracts one by appending
+a **void** — a new `KindMeasurement` event that carries:
+
+- `refs.corrects: <obs_id>` — the reading it retracts, by its stable `obs_…` id.
+- `refs.void: true` — the reserved boolean modifier
+  ([`../observations.md`](../observations.md) §2) that marks the correction as a
+  retraction rather than an overlay. Like `refs.redate` it is a modifier, not an
+  id.
+- an **empty payload** and **no tags** — no metric, value, unit or reason text, so
+  a void carries nothing a projection could leak.
+- its own `occurred_at` (now, `exact` precision) and the current `logical_date`,
+  so it files in the current day's file however old the reading is.
+
+**Retract, never overlay.** There is no `obs amend`: a void drops a reading whole.
+A wrong value, unit, metric or day is fixed by void + re-log — void the reading,
+then capture the right one with `lucid obs measurement <metric> <value> <unit>
+--day @YYYY-MM-DD`, a new event with a new id on the right day. The metric is part
+of a reading's identity, so an overlay could not repair a reading logged under the
+wrong one anyway.
+
+**The fold rule.** The readers that project measurements — the measurement export
+and the clinician packet's "Measurements in range" section — fold voids over the
+**whole** measurement history before any window applies: they collect every void's
+target, then drop both the voids and those targets. A void filed today therefore
+drops a reading from months ago even when today is outside the requested window,
+and a void whose target is absent drops only itself. The fold touches measurement
+events only; every other kind passes through untouched, and neither the `series`
+export nor the packet's pain/med/intervention timeline reads measurement events.
+
+**The day view keeps both.** `/day` is raw history and does not fold voids: the
+reading still lists on its own day, and the void lists on the day it was filed as
+`measurement void of <target> (<id>)` — a void, never an empty or partial reading.
+An older `lucid` that does not know `refs.void` sees a valueless reading, which the
+export's numeric rule skips.
+
+**Measurement-only scope.** `obs void` voids `measurement` readings only. `workout`
+and `memory` keep their overlay verbs (`workout amend` and `memory amend`, above),
+and every other kind is not voidable yet. A void can't be voided, and a reading is
+voided once. Every refusal is decided before any write:
+[`error-states.md`](error-states.md) Ov-1..Ov-7.
+
+Synthetic example — a weight logged wrong, voided the next morning, then re-logged
+on its own day:
+
+```jsonl
+{"id":"obs_2026_03_04_002","kind":"measurement","recorded_at":"2026-03-04T07:40:00-05:00","occurred_at":"2026-03-04T07:40:00-05:00","occurred_at_precision":"exact","logical_date":"2026-03-04","payload":{"metric":"weight","value":"70.5","unit":"kg"},"tags":[],"refs":{}}
+{"id":"obs_2026_03_05_001","kind":"measurement","recorded_at":"2026-03-05T08:10:00-05:00","occurred_at":"2026-03-05T08:10:00-05:00","occurred_at_precision":"exact","logical_date":"2026-03-05","payload":{},"tags":[],"refs":{"corrects":"obs_2026_03_04_002","void":true}}
+{"id":"obs_2026_03_04_003","kind":"measurement","recorded_at":"2026-03-05T08:11:00-05:00","occurred_at":"2026-03-04T00:00:00-05:00","occurred_at_precision":"approximate","logical_date":"2026-03-04","payload":{"metric":"weight","value":"70.3","unit":"kg"},"tags":[],"refs":{}}
+```
+
+Projected, the measurement export reads one `weight` row —
+`2026-03-04,weight,70.3,kg,obs_2026_03_04_003` — while all three lines remain on
+disk: `/day 2026-03-04` lists both readings, and `/day 2026-03-05` the void.
+
 ### Naming conventions
 
 | Kind | Convention | Example |

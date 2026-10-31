@@ -393,6 +393,44 @@ in the messages below are synthetic.
 | Ct-10 | `contact snooze` on a person **without an active cadence**, or one **already snoozed this ISO week** | Reject. A snooze hides an active cadence for the current week only, once per week. | `Alex Kim has no active check-in cadence to snooze. Nothing was saved.` / `Alex Kim is already snoozed this week (contact_2026_11_03_a). Nothing was saved.` | None |
 | Ct-11 | `contact void <id>` naming an **unknown** id, an event that is **already voided**, a `void`, or a **`cadence` event** | Reject. A `void` corrects a `contact` or a `snooze` only. Cadence events are never voided — the dated cadence events *are* the history — so a wrong window or state is corrected with the cadence verbs. | Unknown: `no contact event "contact_2026_10_29_c"`. Already voided: `"contact_2026_10_29_a" is already voided (by "contact_2026_10_30_a")`. A void: `a void can't itself be voided`. A cadence event: `a cadence event is never voided — change it with lucid contact every, pause, resume or retire`. Each ends "Nothing was saved." | None |
 
+### Observation corrections and the measurement export (deterministic, agent-free)
+
+These cover [`lucid obs void <obs-id>`](../usage/commands.md#obs-void), the
+measurement-only retraction of one reading, and the arguments of
+[`lucid export measurements`](../usage/commands.md#measurement-export-rules): an
+id that names nothing or the wrong thing, a reading already retracted, a kind the
+verb does not correct, a window the grammar does not take, and a `--metric` that
+cannot be one slug. Every row is on the **strict tier**: the rejection is decided
+from the input and the observation store *before* any append, the copy is fixed
+and model-free, and nothing reaches the Ledger. The `obs void` refusals Ov-1..Ov-5
+exit non-zero with the reason on stderr, prefixed `lucid obs void:` once, and end
+with the nothing-was-saved clause of St-1. The enable gate (Ov-6) is checked first,
+before the id is read, and behaves like a disabled micro-log: the hint and exit
+`0`. Ov-7 and Mx-1..Mx-4 are usage errors — exit `2`, the reason on stderr in the
+usage-error form, then the `--help` pointer. "None" in the disk column means **no
+event is appended under `observations/`**; the export rows write **no
+`measurements.csv` and no `projections/exports.log` line**. Ids in the messages
+below are synthetic.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect |
+|---|---------|-----------------|----------------------|------------------|
+| Ov-1 | `obs void` with an unparseable id, or an id no event holds | Reject before any write; never guess a nearby reading. | `lucid obs void: no observation "obs_2026_03_04_009"; nothing was saved.` | None |
+| Ov-2 | `obs void` naming an id that is itself a void | Reject. A void can't be voided; to restore a reading, log it again. | `lucid obs void: "obs_2026_03_05_001" is itself a void — a void can't be voided; log the reading again to restore it; nothing was saved.` | None |
+| Ov-3 | `obs void` naming a reading that is already voided | Reject — a reading is retracted once; the message names the void that did it. | `lucid obs void: "obs_2026_03_04_002" is already voided (by "obs_2026_03_05_001"); nothing was saved.` | None |
+| Ov-4 | `obs void` naming a `workout` or `memory` id | Reject, naming the amend verb — those kinds correct by overlay, never by void. | `lucid obs void: "obs_…" is a workout observation — correct it with lucid workout amend; nothing was saved.` (memory → `lucid memory amend`) | None |
+| Ov-5 | `obs void` naming any other non-measurement kind (`pain`, `mood`, `med`, …) | Reject; not voidable yet. | `lucid obs void: "obs_…" is a pain observation — only measurement readings can be voided yet; nothing was saved.` | None |
+| Ov-6 | `obs void` while the `measurement` kind is disabled (checked first, before the id is read) | The enable hint, exit `0`, exactly like a disabled micro-log. | "`measurement` isn't enabled — add it to observations/config.json" | None |
+| Ov-7 | `obs void` with no id, more than one id, or `--day` | Usage error, exit `2`, with the `--help` pointer. A void files under the current logical day, so it takes no `--day`. | The cobra arity / unknown-flag reason. | None |
+| Mx-1 | `export measurements` with a window argument that is neither `@YYYY-MM-DD` nor `all` | Usage error, decided before any write. | `measurements window must be @YYYY-MM-DD or all, got "<arg>"` | No file, no log line |
+| Mx-2 | `export measurements` with more than one window argument | Usage error. | `lucid export measurements takes at most one window argument` | No file, no log line |
+| Mx-3 | `--metric` given empty, or holding whitespace or a control character | Usage error — a captured slug never holds one, and a tab would break the tab-separated `exports.log`. | `--metric needs one slug with no spaces` | No file, no log line |
+| Mx-4 | `--metric` on `export series` or `export packet clinician` | Usage error — the filter belongs to the measurement export only. | ``--metric applies only to `lucid export measurements` `` | No file, no log line |
+
+Two measurement-export paths are deliberately **not** refusals: an unknown
+`--metric` slug and an empty Ledger both write a header-only `measurements.csv`
+(E-7 below), and a non-numeric or partial reading is skipped from the rows, never
+an error.
+
 ### Scheduler daemon (the send schedule — deterministic, agent-free)
 
 The rows above cover a *message* that fails. These cover the **schedule**
@@ -464,6 +502,7 @@ explicitly so the user never sees an empty UI.
 | E-4 | `/ask` over an empty store | Reflection returns `outcome: "insufficient"` without an LLM call (R-10). | "I don't have anything validated yet — try `/checkin` or `/log` first." | None. |
 | E-5 | `/bootstrap` mode active | Reflection.propose suppressed; ack-only at capture. | "Saved as `raw_<id>` (bootstrap)." | `raw/<id>.md` with `bootstrap: true`. |
 | E-6 | `/bootstrap done` exit | `lucid.json` flips `bootstrap_mode: false`. **No** consolidation pass runs (deferred). | "Done. Pattern proposals will resume on the next `/checkin`." | `lucid.json` updated. |
+| E-7 | `lucid export measurements` over an empty Ledger, with an unknown `--metric` slug, or with a window that holds no reading | Not an error: write a header-only `measurements.csv` (`logical_date,metric,value,unit,id` and a newline) and print its path, exactly as for a full export. | The path only. | `projections/measurements.csv` (header only) + one `projections/exports.log` line. |
 
 ## Cross-references
 
