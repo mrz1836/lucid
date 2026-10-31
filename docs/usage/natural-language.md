@@ -44,7 +44,9 @@ correct or retire an anchor) are echoed the same way. The one anchor exception
 is the **capture tier** — a slip, a use, or a missed day — which runs at once,
 like a capture ([Anchors, by kind](#anchors-by-kind)). Contact check-ins split
 the same way: saying you were in touch, or skipping a week, runs at once, and a
-cadence change is echoed ([Contact check-ins](#contact-check-ins)).
+cadence change is echoed ([Contact check-ins](#contact-check-ins)). Measurement
+captures run at once like any `obs`, and voiding a reading is echoed
+([Measurements](#measurements)).
 
 ### Reads — run immediately
 
@@ -64,12 +66,21 @@ understands you.
 - **`log`** (backdated capture) — *"Jot this down for yesterday — the power was
   out all evening."*
   → runs `lucid log "the power was out all evening" --day @yesterday`
-- **`obs`** — pain / intake / elimination / mood micro-logs:
+- **`obs`** — pain / intake / elimination / mood / measurement micro-logs:
   - *"Log pain four in my knee."* → `lucid obs pain 4 knee`
   - *"I ate oatmeal and a coffee."* → `lucid obs ate oatmeal, coffee`
   - *"Log a BM, Bristol four."* → `lucid obs bm 4`
   - *"Mood's about a three, kind of restless."* → `lucid obs mood 3 restless`
   - *"I ate eggs and toast yesterday evening."* → `lucid obs ate eggs, toast @yesterday 19:30`
+  - *"Weighed 151.4 this morning."* → `lucid obs measurement weight 151.4 lb`
+    (for someone whose weight unit is lb; otherwise the harness asks
+    *"lb or kg?"* first)
+  - *"BP 118 over 76, pulse 62."* → three runs:
+    - `lucid obs measurement bp-systolic 118 mmHg`
+    - `lucid obs measurement bp-diastolic 76 mmHg`
+    - `lucid obs measurement resting-hr 62 bpm`
+  - *"My LDL from the March 3rd draw was 104 mg/dL."*
+    → `lucid obs measurement ldl-c 104 mg/dL --day @2026-03-03`
 - **`workout log`** (backdated capture) — *"Log the bike ride I did yesterday —
   about two miles, easy."*
   → runs `lucid workout log "2 mile bike ride, easy" --day @yesterday`
@@ -77,6 +88,10 @@ understands you.
   together the whole history for my doctor."*
   → runs `lucid export packet clinician` (or `… clinician all`) — and posts
   **only the file path**, never the packet body.
+- **measurement `export`** — *"Export my measurements."*
+  → runs `lucid export measurements`; *"Just my weight since March."*
+  → runs `lucid export measurements @2026-03-01 --metric weight` — and posts
+  **only the file path**, never the rows.
 
 ### Writes — assembled, echoed, and confirmed
 
@@ -201,6 +216,43 @@ A name that matches no one is refused with a pointer to `lucid person create`;
 a name that matches several people comes back with the candidates, and the
 harness asks which one.
 
+### Measurements
+
+Sam logs a weight, a blood-pressure number, or a lab value as
+`lucid obs measurement <metric> <value> <unit>`, one run per metric
+([`commands.md`](commands.md#obs)). **Capture runs at once, receipt first**,
+like every `obs`: a reading is additive and overwrites nothing, so the harness
+runs it as soon as it understands you and leads with the `obs_…` receipt. The
+unit is always the third token, before any note or `#tag`.
+
+- **Units.** A unit is implied only where it is universal for the metric
+  (blood pressure → `mmHg`, pulse or heart rate → `bpm`); any other missing
+  unit, and any missing value, gets one question — never a guess. A
+  deployment's own notes may fix a default unit (for example, weight in lb).
+- **Slugs.** Keep them stable — `weight`, `bp-systolic`, `bp-diastolic`,
+  `resting-hr`, and lab slugs like `ldl-c` and `a1c` — so a series stays one
+  series. Lucid does not enforce a metric vocabulary; the harness reuses the
+  slug you already log under.
+- **Relayed, never read into.** The harness relays the receipt and never calls
+  a value high, low or abnormal.
+
+**Fixing a reading — echoed and confirmed.** A reading is never edited in
+place: it is voided, and the right value is logged again. A void makes a
+reading stop counting, so the harness echoes it for a *"yes"*, like
+`anchor void` and `contact void`.
+
+- *"That weight was wrong — it should've been 165.0."*
+  → the harness finds the reading (from the capture receipt or
+  `lucid day <date>`), echoes it — date, metric, value, unit — with the two
+  commands, waits for *"yes"*, then runs `lucid obs void <obs-id>` and
+  `lucid obs measurement weight 165.0 lb --day @<that date>`.
+
+The void files under today and takes no `--day` and no reason; the re-log's
+`--day` puts the right value back on the day it was measured. `lucid day` keeps
+both records, and only the re-logged value counts in `lucid export measurements`
+and the clinician packet. Only measurement readings can be voided — a workout or
+a memory is corrected with its own `amend`.
+
 ## Anchors, by kind
 
 An anchor's **kind** decides both its honest number and what is worth saying
@@ -308,7 +360,8 @@ One rule keeps voice-first both fast and honest:
   runs the same way, leading with the receipt: logging a lapse can only make the
   record more honest, and `anchor void` fixes a mishearing. So do the contact
   captures — `contact` and `contact snooze` — and the read `contact due`;
-  `contact void` fixes a mishearing there.
+  `contact void` fixes a mishearing there. A measurement is an `obs` capture
+  and runs the same way; `obs void` fixes a wrong reading.
 - **State-writing verbs are echoed and confirmed.** `closeout`,
   `closeout backfill`, `mode`, and `skip` land or move an Engine day record, so
   the harness **assembles the compact command, shows it back, and waits for a
@@ -322,14 +375,14 @@ that change what a number means — `anchor add`, `kind`, `confirm`, `void`,
 `sunset` (including `--graduated`) and `rename` — are consequential state changes
 and are echoed for the same one-word confirm, as are the contact verbs that
 change what the due lists mean — `contact every`, `pause`, `resume`, `retire`
-and `void`.
+and `void` — and `obs void`, which makes a measurement reading stop counting.
 
 ## When the harness asks instead of guesses
 
 The harness never fabricates a missing detail to avoid a question. When a
 **required** piece is absent or ambiguous, it asks **one** concise question and
-waits — it does not guess a link state, a capacity, or an observation field you
-didn't give.
+waits — it does not guess a link state, a capacity, an observation field, or a
+unit you didn't give.
 
 - **A missing link state** — *"Close me out, I mostly got through it."*
   "Mostly" isn't a state, so the harness asks which links landed rather than
@@ -337,6 +390,11 @@ didn't give.
   to the floor or got skipped?"*
 - **An ambiguous observation** — *"Log some pain."* No location or level, so it
   asks *"Where, and how bad?"* instead of writing a placeholder.
+- **A unit that isn't universal** — *"Log my weight, 70.5."* Weight comes in
+  more than one unit, so it asks *"lb or kg?"* — unless the deployment's own
+  notes fix a default unit.
+- **A reading with no value** — *"Log my blood pressure."* There are no numbers
+  to log, so it asks *"What were the two numbers?"*
 - **A count that doesn't fit the chain** — if the states you give don't total
   your chain's link count (three characters for a three-link chain), the harness
   flags the mismatch and asks, rather than padding or trimming to fit.

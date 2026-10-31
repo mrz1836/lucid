@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.42.0"
+min_lucid_version: "0.43.0"
 ---
 
 # Lucid
@@ -60,8 +60,10 @@ its output. Acknowledge *after* the binary persists, never before.
 | `/person <name>` | deterministic person join | `lucid person <name>` (no model) |
 | `/pain` `/ate` `/drank` `/bm` `/mood` `/slept` `/obs <kind> …` | observation micro-log | `lucid obs <kind> … [--day <date>]` (also an inline `@yesterday` token) |
 | `/obs where <place>` | sticky stated location | `lucid obs where <place>` |
+| a measurement ("weighed 151.4 this morning", "BP 118 over 76, pulse 62") | measurement capture | `lucid obs measurement <metric> <value> <unit> [--day <date>]` — runs immediately, receipt first, like every `obs`; one run per metric (a blood-pressure reading with a pulse is three runs) |
 | `/day [date]` | read-only day view | `lucid day [date]` |
 | `/packet clinician [@<date>\|all]` | clinician packet export | `lucid export packet clinician …` (post only the path) |
+| "export my measurements" | measurement export | `lucid export measurements [@date\|all] [--metric <slug>]` — post only the path, never the rows |
 | `/stats [--last N \| --from --to]` | Ledger volume (counts only) | `lucid stats [--last N \| --from --to]` — read-only, counts only, no journal content |
 | `/metrics` | derived practice metrics | `lucid metrics` — streak / adherence (trailing 30d) / one line per anchor in its kind's language, read-only |
 | a slip on a `quit` anchor ("slipped last night") | anchor event capture | `lucid anchor slip <label> [--day <date>] [--note-file <path>]` — **capture tier**: run immediately, lead with the `anchorev_…` receipt |
@@ -108,6 +110,7 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid unlink` | Retire a media↔subject association by appending an unlink event — nothing is destroyed, the pair just stops being live. |
 | `lucid annotate` | Attach a free-text note to a media↔subject association without changing whether it is linked. |
 | `lucid workout` | Recommend, log, and review your training (config-gated). `workout amend <obs_id>` corrects or fills in a logged session after the fact (`--rpe`/`--duration`/`--type`/`--movements`/`--parts`/`--notes`/`--notes-file`, or `--day` to re-date it) by appending one append-only correction — the original line is never rewritten, and reads fold the correction in. Use it instead of re-logging, which double-counts the session. Only the passed fields change; list flags replace; anchors and soreness/pain aren't amendable. |
+| `lucid obs void` | Retract a mistaken **measurement** reading by its `obs_…` receipt — `<obs-id>`; append-only, both records kept. The reading drops out of `lucid export measurements` and the packet's "Measurements in range", and `lucid day` shows both. Then re-log the right value with `lucid obs measurement <metric> <value> <unit> --day @YYYY-MM-DD`. It takes no `--day` and no reason text, and a void can't be voided. `workout` and `memory` observations use their own `amend`; other kinds aren't voidable yet. It makes a reading stop counting, so it runs only on an explicit correction: **echo-and-confirm**. |
 | `lucid structure` | Structure a raw entry you did not just capture, or a window of them. |
 | `lucid self` | Read and record durable facts about yourself. |
 | `lucid person create` | Deliberately record a known person with **no** model call — the deterministic import/backfill primitive (people otherwise appear only as `lucid structure` extracts a mention). Idempotent on an already-recorded name (an "already recorded" no-op, never a fork); accepts the `person set` durable-field flags (`--dob`/`--relationship`/`--note`, plus `-file` siblings) to create-and-enrich in one call. Reached by its CLI form, not chat-mapped — `/person <name>` above stays a read. |
@@ -141,7 +144,8 @@ never re-decided here. In brief:
   event verbs default to the current logical day and reject a partial date or a
   day before the anchor's start. The other `contact` writes (`every`, `pause`,
   `resume`, `retire`, `snooze`, `void`) take no `--day`: they stamp the current
-  logical day.
+  logical day. `obs void` takes no `--day` either: a void files under the
+  current logical day, and the re-log carries the reading's own day.
 * **The grammar.** `@yesterday` / `yesterday` (the logical day before this one,
   04:00-rollover aware), `@YYYY-MM-DD` / `YYYY-MM-DD` (a civil day, taken
   literally), a partial `2014` or `2014-09` (snaps to the period's first day),
@@ -199,20 +203,56 @@ differently:
   create the person yourself. Relay the due lists as printed: "due" is the only
   status word — never say "overdue", never count days, never ask why someone was
   not reached.
+* **Measurements are `obs` captures.** A weight, a blood-pressure number or a
+  lab value is `lucid obs measurement <metric> <value> <unit>`, one run per
+  metric. Like every `obs`, it runs as soon as the skill understands the
+  message and **leads its reply with the receipt** (the `obs_…` id). The
+  mappings:
+  * "Weighed 151.4 this morning" →
+    `lucid obs measurement weight 151.4 lb`, shown *for a user whose weight
+    unit is lb*. With no known weight unit, ask once: "lb or kg?"
+  * "BP 118 over 76, pulse 62" → three runs:
+    * `lucid obs measurement bp-systolic 118 mmHg`
+    * `lucid obs measurement bp-diastolic 76 mmHg`
+    * `lucid obs measurement resting-hr 62 bpm`
+
+  "This morning" on the current logical day needs no `@` token; a lab result
+  from another day uses `--day @YYYY-MM-DD`. The unit is always the third
+  token, before any note or `#tag`.
+  A unit is implied only where it is universal for the metric (blood
+  pressure → `mmHg`, pulse or heart rate → `bpm`); any other missing unit, and
+  any missing value, gets one question — never a guess. A deployment's own
+  notes may fix a default unit (for example, weight in lb). Keep slugs stable —
+  `weight`, `bp-systolic`, `bp-diastolic`, `resting-hr`, plus lab slugs like
+  `ldl-c` and `a1c` — so a series stays one series.
+  Lucid does not enforce a metric vocabulary, so reuse the slug the person
+  already uses. Never interpret a value or call it high, low or abnormal; relay
+  the receipt only.
+
+  To fix a reading, `lucid obs void <obs-id>` is echo-and-confirm, like
+  `anchor void` and `contact void`:
+  name the reading (date, metric, value, unit), show the command, and wait for
+  a yes. Find the id from the capture receipt or `lucid day <date>`. After the
+  void, re-log the right value with `--day`
+  (`lucid obs measurement <metric> <value> <unit> --day @YYYY-MM-DD`). Only
+  measurement readings can be voided; a workout or a memory is corrected with
+  its own `amend`.
 * **State-writing verbs are echoed and confirmed.** For `closeout`,
   `closeout backfill`, `mode`, and `closeout skip`, the skill **assembles the
   compact command, shows it back, and waits for a one-word confirmation** before
   running it. The consequential lifecycle verbs `storm` and `profile`, and the
   anchor verbs that change what a number means — `anchor add`, `kind`,
   `confirm`, `void`, `sunset` (including `--graduated`) and `rename` — are
-  echoed for the same one-word confirm, as are the contact cadence verbs above.
+  echoed for the same one-word confirm, as are the contact cadence verbs above
+  and `obs void`, which makes a measurement reading stop counting.
 
 **Ask, don't guess.** When a required piece — a chain-link state, a capacity, an
-observation field, a limit use's intent (planned or slip), which anchor a
-lapse belongs to, or which person a contact names when the binary lists several
-candidates — is missing or ambiguous, the skill asks **one** concise
-question and waits. It never fabricates a link state, a capacity, an intent, or
-any value the user did not give. It never reclassifies, confirms or graduates an
+observation field (including a measurement's value, or its unit when the unit
+isn't universal for the metric), a limit use's intent (planned or slip), which
+anchor a lapse belongs to, or which person a contact names when the binary
+lists several candidates — is missing or ambiguous, the skill asks **one**
+concise question and waits. It never fabricates a link state, a capacity, an
+intent, a unit, or any value the user did not give. It never reclassifies, confirms or graduates an
 anchor on its own: `metrics` only surfaces eligibility and over-allowance.
 
 **The boundaries do not change.** This is a phrasing layer over the same core;
@@ -291,7 +331,7 @@ an existing media at more subjects, `lucid unlink` retires a pair, and `lucid
 annotate` notes one — all append-only, and the stored binary is never touched.
 
 Under `--json` the write verbs emit a receipt, not prose: `log`, `closeout`
-(and its `amend` / `backfill`), `obs`, `reframe add`, `focus add` / `retire`, and
+(and its `amend` / `backfill`), `obs` (and `obs void`), `reframe add`, `focus add` / `retire`, and
 `rep add` / `retire` emit a bare `{receipt_id, logical_date}` JSON object on
 stdout, while `mode` emits the minimal `{mode}` shape. The anchor event verbs
 (`anchor kind`, `slip`, `use`, `miss`, `void`) extend that receipt to
