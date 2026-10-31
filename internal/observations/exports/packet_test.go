@@ -134,3 +134,80 @@ func TestExportsIsPure(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderClinician_MeasurementsSectionAfterHeader proves the "Measurements
+// in range" section renders after the header's episode lines and before the
+// daily record, one line per in-window, non-voided, numeric reading from the
+// shared row builder — values and units only, never an id or a note.
+func TestRenderClinician_MeasurementsSectionAfterHeader(t *testing.T) {
+	noted := measEvent("obs_2026_07_03_001", "2026-07-03", "weight", "70.5", "kg")
+	noted.Payload["note"] = "SENTINEL-NOTE-XYZ after the run"
+	events := []observations.Event{
+		measEvent("obs_2026_06_20_001", "2026-06-20", "weight", "70.1", "kg"), // before the window
+		measEvent("obs_2026_07_01_001", "2026-07-01", "bp-systolic", "121", "mmHg"),
+		measEvent("obs_2026_07_01_002", "2026-07-01", "bp-diastolic", "79", "mmHg"),
+		measEvent("obs_2026_07_02_001", "2026-07-02", "weight", "75.0", "kg"),
+		measEvent("obs_2026_07_02_002", "2026-07-02", "flow", "heavy", ""),
+		noted,
+		measVoid("obs_2026_07_04_001", "2026-07-04", "obs_2026_07_02_001"),
+	}
+	in := ClinicianInput{
+		WindowStart:  "2026-07-01",
+		WindowEnd:    "2026-07-05",
+		Injuries:     []string{"left knee (managed)"},
+		EpisodeCount: 1,
+		Episodes:     []Episode{{Start: "2026-07-01", End: "2026-07-02", DaysSpanned: 2}},
+		Days:         []PacketDayRow{{Date: "2026-07-01", Capacity: 4, Mode: "green", Pains: []string{"6 (knee)"}}},
+		Measurements: BuildMeasurementRows(events, MeasurementFilter{Start: "2026-07-01", End: "2026-07-05"}),
+	}
+	const want = "Clinician packet — 2026-07-01 to 2026-07-05\n\n" +
+		"Active injuries: left knee (managed)\n" +
+		"Pain episodes in range: 1\n" +
+		"  2026-07-01..2026-07-02 (2 days)\n" +
+		"\nMeasurements in range:\n" +
+		"  2026-07-01  bp-diastolic 79 mmHg\n" +
+		"  2026-07-01  bp-systolic 121 mmHg\n" +
+		"  2026-07-03  weight 70.5 kg\n" +
+		"\nDaily record:\n" +
+		"  2026-07-01  capacity 4, mode green  pain 6 (knee)\n"
+	out := RenderClinician(in)
+	assert.Equal(t, want, out)
+
+	section := out[strings.Index(out, "Measurements in range:"):strings.Index(out, "Daily record:")]
+	assert.NotContains(t, section, "obs_", "packet lines carry no event ids")
+	assert.NotContains(t, out, "SENTINEL-NOTE-XYZ", "a measurement note never reaches the packet")
+}
+
+// TestRenderClinician_NoMeasurementsOmitsSection proves a packet with no
+// in-range reading renders byte-identical to one built without the field, so
+// a Ledger with no in-window measurements keeps today's packet bytes.
+func TestRenderClinician_NoMeasurementsOmitsSection(t *testing.T) {
+	without := ClinicianInput{
+		WindowStart:  "2026-07-01",
+		WindowEnd:    "2026-07-05",
+		Regimen:      []RegimenLine{{What: "ibuprofen", Detail: "400"}},
+		EpisodeCount: 0,
+		Days:         []PacketDayRow{{Date: "2026-07-01", Capacity: 4, Mode: "green"}},
+	}
+	withNil := without
+	withNil.Measurements = nil
+	withEmpty := without
+	withEmpty.Measurements = []MeasurementRow{}
+
+	out := RenderClinician(without)
+	assert.Equal(t, out, RenderClinician(withNil))
+	assert.Equal(t, out, RenderClinician(withEmpty))
+	assert.NotContains(t, out, "Measurements in range")
+}
+
+// TestRenderClinician_MeasurementLineEmptyUnit proves a reading logged without
+// a unit renders its line ending at the value, with no trailing space.
+func TestRenderClinician_MeasurementLineEmptyUnit(t *testing.T) {
+	out := RenderClinician(ClinicianInput{
+		WindowStart:  "2026-07-01",
+		WindowEnd:    "2026-07-05",
+		Measurements: []MeasurementRow{{Date: "2026-07-02", Metric: "steps", Value: "0", ID: "obs_2026_07_02_001"}},
+	})
+	assert.Contains(t, out, "\nMeasurements in range:\n  2026-07-02  steps 0\n\nDaily record:\n")
+	assert.NotContains(t, out, "steps 0 \n")
+}
