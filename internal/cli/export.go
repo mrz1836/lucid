@@ -23,11 +23,12 @@ const metricFlag = "metric"
 //
 // On the chat surface `/packet clinician` maps here (Phase 14 skill). Only the
 // written path is posted; the packet body excludes notes, location, and
-// weather by default, and the measurement CSV carries no notes or tags. Under
-// --json the machine-readable path/window is emitted (ADR-0007); no projection
-// body ever rides the chat surface. A malformed measurement window, a second
-// window argument, a bad --metric, and --metric on another form are usage
-// errors decided before anything is written (error-states.md Mx-1..Mx-4).
+// weather by default. Under --json the machine-readable path/window is emitted
+// (ADR-0007); the packet body itself never rides the chat surface.
+// The measurement CSV carries no notes or tags, and its readings never ride
+// stdout either. A malformed measurement window, a second window argument, a
+// bad --metric, and --metric on another form are usage errors decided before
+// anything is written (error-states.md Mx-1..Mx-4).
 func newExportCmd() *cobra.Command {
 	var metric string
 	cmd := &cobra.Command{
