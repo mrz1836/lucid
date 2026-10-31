@@ -106,6 +106,20 @@ Envelope semantics, binding:
   `recorded_at` order (event id breaks a tie), never by id alone. A
   reader that does not know `redate` ignores it (tolerate-unknown); no
   new envelope field is involved.
+* **Measurement voids carry `refs.void`.** `lucid obs void`
+  ([`usage/commands.md`](usage/commands.md), §obs) retracts a
+  `measurement` reading by writing an ordinary `refs.corrects` event of
+  kind `measurement` carrying the reserved boolean modifier
+  `refs.void: true` — like `redate`, a modifier rather than a link, so
+  its value is not an id — with an empty payload and no tags, filed
+  under the current logical day. Readers that project measurements (the
+  measurement export and the clinician packet's measurement section, §7)
+  drop both the void and the reading it names, across all history, so a
+  void filed today still drops a reading from months ago. Raw history
+  (`/day`) keeps both and shows the void as a void. A reader that does
+  not know `void` sees a valueless reading, which the export's numeric
+  rule skips (tolerate-unknown). No envelope field is involved, and the
+  semantics of `corrects` are unchanged.
 * **Bitemporal.** `recorded_at` is always now; `occurred_at` (with the
   same precision/range fields as raw entries) can be any time in the
   past — this is what makes memory excavation (§8) an ordinary write.
@@ -207,7 +221,7 @@ payload accepts `note?` (the grammar routes trailing text there).
 | `sleep` | `bed?`, `wake?`, `quality?`, `note?` | quality 1–5. A sleep event always describes **the night ending on the morning it is logged**: bed → `occurred_at`, wake → `occurred_at_end`, precision `range` — so `logical_date` is the night's *start* day, regardless of input form (a time-less `/slept q2` at 09:00 anchors approximately to the prior logical day). Correlates pair sleep on night D with day D+1. Wearable import is a future enricher, never a nightly duty. |
 | `med` | `what`, `dose?`, `taken` (boolean, default true; false = deliberately logged skip), `effect?` (helped/partial/none), `note?` | Adherence *record*, not adherence *enforcement* (§0). |
 | `intervention` | `what`, `provider?`, `body_site?`, `note?` | PT session, injection, procedure, appointment — the "what have you tried since last visit" record; renders as timeline markers in the clinician packet (§7). |
-| `measurement` | `metric`, `value`, `unit`, `note?` | Weight, BP, HRV, anything numeric. Reviewed at gate cadence only (P4). |
+| `measurement` | `metric`, `value`, `unit`, `note?` | Weight, BP, HRV, anything numeric. Reviewed at gate cadence only (P4). `value` is the token as typed, stored as text (`5.50` stays `5.50`); `unit` is free text, never converted. Stable slugs keep a series one series — `weight`, `bp-systolic`, `bp-diastolic`, `resting-hr`, and lab slugs such as `ldl-c` and `a1c`; Lucid does not enforce a metric vocabulary. A wrong reading is corrected by `lucid obs void` plus a re-log (§2). Projects in long format (§7). |
 | `withdrawal` | `substance?`, `severity?`, `note?` | severity **0–10** when given; `substance` free text. A body/state signal for a substance being reduced or stopped — inventory of how the withdrawal is landing, never a compliance chart (§0). Enable-gated, **off by default**. |
 | `habit_change` | `load?`, `what?`, `note?` | `load` **0–10** — the felt weight of a habit being added or dropped; `what` free text. The change-load signal the companion renders, never a streak or a target (§0). Enable-gated, **off by default**. |
 | `commitment` | `what`, `note?` | `what` free text — a commitment logged as **context**, surfaced by the companion with an "as logged &lt;date&gt;" freshness stamp. Testimony the user chose to record, **not** a tracked task: no streak, no due date, no "you didn't do it" (§0). Enable-gated, **off by default**. |
@@ -421,6 +435,12 @@ projections at review cadence, per P9). Named projection kinds:
   answer.
 * **Series** — any observation field over time as CSV/JSON: pain by
   site, Bristol, mood, capacity (see cross-tree rule below), weather.
+  Measurements project in long format, one row per reading
+  (`lucid export measurements` → `projections/measurements.csv`,
+  `logical_date,metric,value,unit,id`), because metric names are
+  user-chosen and unbounded; the clinician packet carries in-window
+  readings in a "Measurements in range" section (values and units only,
+  never notes or ids). Voided readings (§2) drop out of both.
 * **Episodes** — auto-segmented runs (a flare = consecutive days above
   a user-set threshold), segmented **per site/injury ref** (falling
   back to all-pain only when site is absent), with a gap tolerance —
@@ -464,7 +484,9 @@ projections at review cadence, per P9). Named projection kinds:
   most recent `taken: true` event per distinct med; a med whose most
   recent event is `taken: false` renders with `(last logged: skipped
   <date>)` rather than disappearing), episode count and durations in
-  range. Then: capacity/mode series (already promised by engine §2),
+  range — followed, when any measurement reading falls in the window, by
+  a "Measurements in range" section (one line per reading: day, metric,
+  value, unit; never notes or ids). Then: capacity/mode series (already promised by engine §2),
   pain and symptom series with med and intervention events as markers
   on the same timeline, and the user-selected subset of everything
   else. **Note fields are excluded by default** (per-export opt-in);
