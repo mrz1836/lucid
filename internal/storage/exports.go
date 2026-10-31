@@ -150,7 +150,9 @@ func (a *Adapter) resolvePacketWindowStart(windowEnd, startOverride string, all 
 // buildClinicianInput gathers the packet's data from the Ledger: clinical
 // context (verbatim), active/managed injuries, the current regimen (latest
 // event per med — never window-clipped, so "current" stays true), and the
-// in-window episodes, capacity/mode, and pain/med/intervention timeline.
+// in-window episodes, capacity/mode, and pain/med/intervention timeline, plus
+// the in-window measurement readings (values and units only) for the
+// "Measurements in range" section.
 func (a *Adapter) buildClinicianInput(cfg observations.Config, windowStart, windowEnd string, all bool) (exports.ClinicianInput, error) {
 	inWindow := func(date string) bool {
 		if date > windowEnd {
@@ -186,11 +188,20 @@ func (a *Adapter) buildClinicianInput(cfg observations.Config, windowStart, wind
 	if err != nil {
 		return exports.ClinicianInput{}, err
 	}
+	// Every measurement event is read, never window-clipped: the shared row
+	// builder folds voids over the whole history before it windows, so a void
+	// filed outside the window still drops its in-window target.
+	measAll, err := a.ReadObservationsKind(observations.KindMeasurement)
+	if err != nil {
+		return exports.ClinicianInput{}, err
+	}
 
 	epCount, episodes := exports.CountEpisodes(pain, exports.EpisodeThreshold, exports.EpisodeGapDays)
 	shownStart := windowStart
+	measStart := windowStart
 	if all || windowStart == "" {
 		shownStart = "all"
+		measStart = ""
 	}
 	return exports.ClinicianInput{
 		WindowStart:     shownStart,
@@ -201,6 +212,9 @@ func (a *Adapter) buildClinicianInput(cfg observations.Config, windowStart, wind
 		EpisodeCount:    epCount,
 		Episodes:        episodes,
 		Days:            exports.BuildPacketDayRows(pain, medWindow, interventions, engineByDate),
+		Measurements: exports.BuildMeasurementRows(measAll, exports.MeasurementFilter{
+			Start: measStart, End: windowEnd,
+		}),
 	}, nil
 }
 
