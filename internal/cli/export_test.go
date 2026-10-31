@@ -2,7 +2,10 @@ package cli
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,4 +65,26 @@ func TestExport_UsageErrors(t *testing.T) {
 		_, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
 		assert.Errorf(t, err, "args %v should error", args)
 	}
+}
+
+// TestExport_Series_AckAndJSONUnchanged pins the series export's two stdout
+// contracts: the human ack is the path alone, and --json carries exactly the
+// five metadata keys. Both must stay byte-identical as new export forms land.
+func TestExport_Series_AckAndJSONUnchanged(t *testing.T) {
+	home := enableAllObsKinds(t)
+	_, _, err := runRoot(t, BuildInfo{Version: "dev"}, "obs", "pain", "6", "knee")
+	require.NoError(t, err)
+
+	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, "export", "series")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, "projections", "series.csv")+"\n", out)
+
+	out, _, err = runRoot(t, BuildInfo{Version: "dev"}, "export", "series", "--json")
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &payload))
+	keys := slices.Sorted(maps.Keys(payload))
+	assert.Equal(t, []string{"command", "path", "what", "window_end", "window_start"}, keys)
+	assert.Equal(t, "series", payload["what"])
+	assert.Equal(t, "all", payload["window_start"])
 }
