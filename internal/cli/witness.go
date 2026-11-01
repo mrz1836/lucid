@@ -172,9 +172,11 @@ func witnessAnchorDetail(wr config.WitnessReportConfig, r *router.Router) witnes
 
 // renderWitnessDryRun prints a composed report for a person to read: with --json
 // it writes the report data model (the deterministic scaffold plus any composed
-// prose), otherwise the structured-markdown render under a dry-run banner. The
-// fallback and witness-safe-trip paths are named so a preview is never mistaken
-// for the model's warm output when it was not.
+// prose, and the week-notes status when notes_file is set), otherwise the
+// structured-markdown render under a dry-run banner. The fallback and
+// witness-safe-trip paths are named so a preview is never mistaken for the
+// model's warm output when it was not, and a configured week-notes file that
+// was not included is named too, so a preview without its notes says why.
 func renderWitnessDryRun(cmd *cobra.Command, r witnessreport.Report) error {
 	if asJSON, _ := cmd.Flags().GetBool(jsonFlag); asJSON {
 		return writeJSON(cmd.OutOrStdout(), r)
@@ -187,8 +189,28 @@ func renderWitnessDryRun(cmd *cobra.Command, r witnessreport.Report) error {
 	if r.SafetyTripped {
 		_, _ = fmt.Fprintln(out, "[witness-safe scan tripped — the model prose was discarded; the deterministic metrics-only report is shown]")
 	}
+	if s := notesNotIncluded(r); s != "" {
+		_, _ = fmt.Fprintf(out, "[week notes not included — the notes file is %s]\n", s)
+	}
 	_, _ = fmt.Fprintln(out, witnessreport.RenderMarkdown(r))
 	return nil
+}
+
+// notesNotIncluded describes why a configured week-notes file is not on the
+// report (ADR-0015 §13): the status, plus the fixed reason for invalid and
+// unreadable ("invalid: written is in the future"), or the bare status for the
+// normal stale and empty states. It returns "" when no notes_file is set (off)
+// or the notes are included — then there is nothing to say. The reason is one
+// of the reader's fixed phrases, so this never carries any of the notes text.
+func notesNotIncluded(r witnessreport.Report) string {
+	switch r.NotesStatus {
+	case "", witnessreport.NotesIncluded:
+		return ""
+	case witnessreport.NotesInvalid, witnessreport.NotesUnreadable:
+		return r.NotesStatus + ": " + r.NotesProblem
+	default:
+		return r.NotesStatus
+	}
 }
 
 // deliverWitnessReport renders the composed report as rich embeds and posts them to
@@ -200,7 +222,9 @@ func renderWitnessDryRun(cmd *cobra.Command, r witnessreport.Report) error {
 // transport, and a failure partway is a loud error naming how many parts
 // verified. This is the minimal manual delivery path; the weekly node wraps the
 // same SendEmbedReturningID + VerifyPresent shape with per-week receipt
-// idempotency, resumable part progress, and missed-fire handling.
+// idempotency, resumable part progress, missed-fire handling, and the private
+// alerts. A manual delivery never alerts: a configured week-notes file that was
+// not included is named on the confirmation line instead.
 func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Report) error {
 	channel, err := witnessreport.ChannelForMode(mode)
 	if err != nil {
@@ -225,6 +249,11 @@ func deliverWitnessReport(cmd *cobra.Command, mode string, r witnessreport.Repor
 	note := ""
 	if r.Fallback {
 		note = " (deterministic fallback)"
+	}
+	// A manual delivery has no alert path: a configured week-notes file that was
+	// not included is named on this line instead, never sent anywhere.
+	if s := notesNotIncluded(r); s != "" {
+		note += " (week notes: " + s + ")"
 	}
 	if len(ids) == 1 {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "witness report delivered to the %s channel%s — message %s.\n", channel, note, ids[0])
