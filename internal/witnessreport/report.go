@@ -55,6 +55,22 @@ type Report struct {
 	// empty, so a summary-mode report carries no anchor_detail key.
 	AnchorDetail []router.AnchorDetailEvent `json:"anchor_detail,omitempty"`
 
+	// Week notes — the optional operator-approved notes file
+	// (witness_report.notes_file, ADR-0015), the second deliberate, opt-in
+	// exception. Notes is the verbatim body, set only when NotesStatus is
+	// included: it is rendered by code, handed to the model as labeled
+	// grounding only then, and never scanned. NotesStatus is "" when no
+	// notes_file is configured (off), so an off report serializes exactly as it
+	// did before week notes existed; any other status is emitted. NotesWritten
+	// is the parsed written date (YYYY-MM-DD) whenever it parsed. NotesProblem
+	// is the fixed reason for invalid and unreadable — never any of the file's
+	// content. The compose pass sets all four before the model call, so every
+	// fallback path carries them.
+	Notes        string `json:"notes,omitempty"`
+	NotesStatus  string `json:"notes_status,omitempty"`
+	NotesWritten string `json:"notes_written,omitempty"`
+	NotesProblem string `json:"notes_problem,omitempty"`
+
 	// Derived deterministically from the signals above.
 	WatchOuts []string `json:"watch_outs"`
 	Asks      []string `json:"asks"`
