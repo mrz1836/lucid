@@ -76,8 +76,8 @@ type notesWiring struct {
 
 // notesComposer builds a Composer over a synthetic fixture week like
 // composerDeps, but its template file holds exactly the compose-golden template
-// bytes — so its request is comparable to the Task-9 goldens — and it is wired
-// with week notes and a Lucid home.
+// bytes — so its request is comparable to the compose-body goldens — and it is
+// wired with week notes and a Lucid home.
 func notesComposer(t *testing.T, fixture string, w notesWiring, script ...provider.Exchange) (*Composer, *provider.Fake) {
 	t.Helper()
 	dir := t.TempDir()
@@ -112,7 +112,7 @@ func requestBody(t *testing.T, fake *provider.Fake) string {
 	return fake.Requests[0].Messages[0].Content
 }
 
-// composeGolden reads the committed Task-9 compose-body golden for a week —
+// composeGolden reads the committed compose-body golden for a week —
 // the model input captured before week notes existed.
 func composeGolden(t *testing.T, week string) string {
 	t.Helper()
@@ -163,8 +163,8 @@ func notIncludedCases() []notIncludedCase {
 
 // TestCompose_NotesNotIncludedBodyByteIdentical is the off-path guarantee
 // (ADR-0015 §8): for every notes status except included, the request the model
-// receives is byte-identical to the Task-9 golden captured before week notes
-// existed, for every fixture week.
+// receives is byte-identical to the compose-body golden captured before week
+// notes existed, for every fixture week.
 func TestCompose_NotesNotIncludedBodyByteIdentical(t *testing.T) {
 	for _, tc := range notIncludedCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,9 +186,9 @@ func TestCompose_NotesNotIncludedBodyByteIdentical(t *testing.T) {
 }
 
 // TestCompose_NotesIncludedBlockAndVariants: with included notes the request is
-// the Task-9 golden plus exactly three edits — the drafted-asks header variant,
-// the labeled verbatim notes block before the slot instruction, and the ASKS
-// line variant — and nothing else.
+// the compose-body golden plus exactly three edits — the drafted-asks header
+// variant, the labeled verbatim notes block before the slot instruction, and
+// the ASKS line variant — and nothing else.
 func TestCompose_NotesIncludedBlockAndVariants(t *testing.T) {
 	for _, week := range composeWeeks {
 		t.Run(week, func(t *testing.T) {
