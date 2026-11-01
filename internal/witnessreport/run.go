@@ -96,12 +96,20 @@ type Runner struct {
 
 // NewRunner wires a Runner over the compose dependencies (from the witness_report
 // config block + provider), the delivery transport, and the Ledger store that
-// holds the per-week receipt.
+// holds the per-week receipt. The store's home is the Lucid home the week-notes
+// read refuses a path inside; with no store it is empty, and a configured
+// notes file then fails closed rather than being read.
 func NewRunner(o Options) *Runner {
+	home := ""
+	if o.Store != nil {
+		home = o.Store.Home()
+	}
 	deps := Deps{
 		SystemPrompt: o.Config.SystemPrompt,
 		Template:     o.Config.Template,
 		AsksFile:     o.Config.AsksFile,
+		NotesFile:    o.Config.NotesFile,
+		Home:         home,
 		Model:        o.Config.Model,
 		Provider:     o.Provider,
 		Numbers:      o.Numbers,

@@ -136,6 +136,8 @@ func runWitnessReport(cmd *cobra.Command, deliver bool) error {
 		SystemPrompt: wr.SystemPrompt,
 		Template:     wr.Template,
 		AsksFile:     wr.AsksFile,
+		NotesFile:    wr.NotesFile,
+		Home:         r.Store().Home(),
 		Model:        wr.Model,
 		Provider:     cfg.Provider,
 		Numbers:      r,
