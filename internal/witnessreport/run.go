@@ -160,7 +160,9 @@ type Outcome struct {
 // still reads back), compose (the deterministic report always lands — only the
 // warmth can be lost), deliver the embed with read-back, and persist the
 // per-week receipt. A tripped witness-safe scan still delivers the metrics-only
-// report but alerts the operator to review. Any total send failure fires a
+// report but alerts the operator to review, and a configured week-notes file
+// that was invalid or unreadable still delivers the report without its notes
+// but alerts the operator privately. Any total send failure fires a
 // best-effort alert and returns a loud error — silence is the one outcome it
 // never produces.
 //
@@ -341,9 +343,14 @@ func (f *weeklyFire) alert(ctx context.Context, text string) {
 	f.r.alert(ctx, text)
 }
 
-// postSend alerts the operator when the witness-safe scan tripped: the model
-// produced flagged prose that was discarded. It runs only after the receipt is
-// persisted and never unwinds the send.
+// postSend raises the two post-delivery alerts, each independent of the other,
+// so one week can raise both. It runs only after the receipt is persisted and
+// never unwinds the send. The safety-trip alert fires when the witness-safe
+// scan discarded flagged model prose. The week-notes alert (ADR-0015 §5) fires
+// when a configured notes file was invalid or unreadable, so the report went
+// out without its notes: it names the status and the fixed reason, never any
+// of the file's content. A resumed batch carries no composed report, so it
+// raises neither — the attempt that composed the week already did.
 func (f *weeklyFire) postSend(ctx context.Context, p weeklyPayload) {
 	if p.report.SafetyTripped {
 		f.r.alert(ctx, fmt.Sprintf(
@@ -351,6 +358,25 @@ func (f *weeklyFire) postSend(ctx context.Context, p weeklyPayload) {
 			f.week,
 		))
 	}
+	if notesAlertable(p.report.NotesStatus) {
+		f.r.alert(ctx, weekNotesAlert(f.week, p.report.NotesStatus, p.report.NotesProblem))
+	}
+}
+
+// notesAlertable reports whether a week-notes status is a problem the operator
+// is alerted to: invalid and unreadable. Off, stale, empty, and included never
+// alert — stale and empty are the normal states of a week without notes.
+func notesAlertable(status string) bool {
+	return status == NotesInvalid || status == NotesUnreadable
+}
+
+// weekNotesAlert is the private week-notes alert text (ADR-0015 §5). problem is
+// one of the fixed reason phrases, so the alert never carries the notes body.
+func weekNotesAlert(week, status, problem string) string {
+	return fmt.Sprintf(
+		"Lucid weekly witness report for %s went out without its week notes — the notes file is %s: %s. Check witness_report.notes_file.",
+		week, status, problem,
+	)
 }
 
 // weeklyPayload is one fire's composed delivery: the report and the ordered
@@ -519,8 +545,8 @@ func loggerOf(job *flywheel.Job[weeklyArgs]) *slog.Logger {
 const alertTimeout = 30 * time.Second
 
 // alert posts a best-effort loud ping to the user channel when a weekly report
-// cannot deliver its real report (or tripped the witness-safe scan) — the "never
-// silent" floor. It is deliberately best-effort: if the channel itself is
+// cannot deliver its real report (or tripped the witness-safe scan, or went out
+// without its configured week notes) — the "never silent" floor. It is deliberately best-effort: if the channel itself is
 // unreachable the returned error from [Runner.Fire] is the loud signal (it fails
 // the job and lands in the supervised daemon log), and a failed alert must not
 // mask that original error. A failed alert is itself logged at warn ("alert
