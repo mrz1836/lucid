@@ -63,8 +63,8 @@ const (
 		asksDelim + "\n- <ask>"
 )
 
-// The digest's drafted-asks header and its week-notes variant (ADR-0015 §8,
-// D3), built from one shared lead so the header without notes never changes.
+// The digest's drafted-asks header and its week-notes variant (ADR-0015 §8),
+// built from one shared lead so the header without notes never changes.
 // With notes included the model may replace a drafted ask with one grounded in
 // the notes, so the prompt never tells it both to add no ask and to ground the
 // asks in the notes.
@@ -259,8 +259,9 @@ func (c *Composer) compose(ctx context.Context, now time.Time) (Report, error) {
 	// Report — numbers digest, watch-outs, and drafted asks — plus, only when
 	// they are included, the operator-approved week notes as a labeled block.
 	// The model gets no observations, no journal, no raw entries: there is no
-	// reader wired to reach them, so a private detail cannot enter the request
-	// by construction.
+	// reader wired to reach them, and the week-notes read opens one operator
+	// file that is refused unread inside the Lucid home, so no Ledger content
+	// beyond the witness-safe Report can enter the request by construction.
 	resp, err := prov.Complete(ctx, provider.Request{
 		Intent:   intentWitnessReport,
 		System:   systemPrompt,

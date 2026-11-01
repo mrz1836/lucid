@@ -109,7 +109,8 @@ logging is surfaced as its own watch-out rather than suppressed.`,
 // runWitnessReport boots the Ledger + router, composes the weekly report through
 // the shared witnessreport.Composer (honest numbers from the router, the day
 // records for the 7-day window, the opaque prompt files + provider from
-// lucid.json), and either captures a dry-run or delivers one report per
+// lucid.json, and the optional week-notes file, refused inside the booted Lucid
+// home), and either captures a dry-run or delivers one report per
 // witness_report.mode. A --deliver on a disabled feature is a no-op — the
 // scheduler will not post it and a manual fire should not either — short-circuited
 // before compose so an unconfigured Ledger never errors trying to build one.

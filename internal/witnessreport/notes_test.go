@@ -368,7 +368,7 @@ func joinChunks(chunks []detailChunk) string {
 }
 
 // TestPlanRawChunks pins the pure chunk planner the reader validates with
-// (ADR-0015 §4, V1): every chunk is within the field budget and holds a
+// (ADR-0015 §4): every chunk is within the field budget and holds a
 // non-whitespace character, whole lines share a chunk while they fit,
 // boundaries shift so no chunk is whitespace-only, and the chunks reassemble
 // to the body byte for byte.
