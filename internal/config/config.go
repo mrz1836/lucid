@@ -196,7 +196,8 @@ const (
 // opt-in that wires the one note-reaching reader and adds the verbatim Anchor
 // detail section (usage/witness-report.md §"Anchors in the report"). An older
 // binary ignores the key, because lucid.json decoding is non-strict, and so
-// reads as summary.
+// reads as summary. NotesFile is the optional operator-approved week-notes file
+// (usage/witness-report.md §"Week notes"; ADR-0015).
 type WitnessReportConfig struct {
 	Enabled      bool   `json:"enabled"`
 	Mode         string `json:"mode"`
@@ -205,6 +206,12 @@ type WitnessReportConfig struct {
 	SystemPrompt string `json:"system_prompt"`
 	Template     string `json:"template"`
 	AsksFile     string `json:"asks_file"`
+	// NotesFile is the optional week-notes file: an operator file, opened on
+	// exactly this path and never dir-walked; empty is off. It is never
+	// checked at load — a missing, malformed, stale or misplaced file surfaces
+	// as the report's notes status, never as a config-load error (ADR-0015
+	// §1). An older binary ignores the key, because decoding is non-strict.
+	NotesFile    string `json:"notes_file"`
 	Model        string `json:"model"`
 	AnchorDetail string `json:"anchor_detail"`
 }
@@ -925,12 +932,13 @@ func (c WorkoutConfig) validate() error {
 // preview|auto, the fire time must be a valid HH:MM local clock, and weekday must
 // be a real cron day (0=Sunday … 6=Saturday), or the config is rejected at load
 // rather than silently posting to the wrong channel or building a bogus weekly
-// cron. asks_file is optional (an unset curated-asks override is valid) and the
-// optional model override is unconstrained — an unknown model surfaces at compose
-// time from the provider, exactly as provider.model does. anchor_detail is the
-// one key checked whether or not the block is enabled: it must be summary, full,
-// or absent. There is no clip rule; no witness-report bound is documented as
-// coercible.
+// cron. asks_file is optional (an unset curated-asks override is valid),
+// notes_file is optional and never checked here (a notes problem is a report
+// status, never a load error), and the optional model override is unconstrained
+// — an unknown model surfaces at compose time from the provider, exactly as
+// provider.model does. anchor_detail is the one key checked whether or not the
+// block is enabled: it must be summary, full, or absent. There is no clip rule;
+// no witness-report bound is documented as coercible.
 func (c WitnessReportConfig) validate() error {
 	// anchor_detail is checked even on a disabled block: it is a privacy
 	// choice, so a typo is never silently read as either mode. Empty is the

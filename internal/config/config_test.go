@@ -655,6 +655,58 @@ func TestValidate_WitnessReportEnabledRequiresPaths(t *testing.T) {
 	})
 }
 
+// TestWitnessReportConfig_NotesFile mirrors the asks_file cases for the
+// optional week-notes file (ADR-0015 §1): the key decodes from lucid.json, a
+// marshaled config always carries it, an enabled block validates without it —
+// and with a path that does not exist, because a notes problem is a report
+// status, never a load error — and a set value survives a round trip.
+func TestWitnessReportConfig_NotesFile(t *testing.T) {
+	const notesPath = "/home/you/lucid-prompts/witness-week-notes.md"
+	full := WitnessReportConfig{
+		Enabled:      true,
+		Mode:         WitnessReportModePreview,
+		Time:         "09:00",
+		Weekday:      1,
+		SystemPrompt: "s.md",
+		Template:     "t.md",
+	}
+
+	t.Run("decodes", func(t *testing.T) {
+		got, err := Unmarshal([]byte(`{"witness_report": {"enabled": false, "notes_file": "` + notesPath + `"}}`))
+		require.NoError(t, err)
+		assert.Equal(t, notesPath, got.WitnessReport.NotesFile)
+	})
+
+	t.Run("round_trip_key_present", func(t *testing.T) {
+		assert.Empty(t, Default().WitnessReport.NotesFile, "notes ship off — no file configured")
+		b, err := Default().Marshal()
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"notes_file": ""`, "the key is discoverable in a marshaled default config")
+	})
+
+	t.Run("optional_when_enabled", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport = full // notes_file empty
+		require.NoError(t, c.Validate())
+
+		c.WitnessReport.NotesFile = "/home/you/lucid-prompts/no-such-notes.md"
+		assert.NoError(t, c.Validate(), "notes_file is never checked at load")
+	})
+
+	t.Run("value_read_back", func(t *testing.T) {
+		c := Default()
+		c.WitnessReport = full
+		c.WitnessReport.NotesFile = notesPath
+		b, err := c.Marshal()
+		require.NoError(t, err)
+
+		got, err := Unmarshal(b)
+		require.NoError(t, err)
+		assert.Equal(t, c, got)
+		assert.Equal(t, notesPath, got.WitnessReport.NotesFile)
+	})
+}
+
 // TestValidate_WitnessReportDisabledIgnoresConfig confirms that while disabled
 // (the default), empty paths and even a bogus mode/time are tolerated — the block
 // is inert, so it never blocks a load.
