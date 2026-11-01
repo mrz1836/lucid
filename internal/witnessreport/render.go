@@ -9,13 +9,14 @@ import (
 
 // This file owns the report's *layout* — the split that keeps the friend-facing
 // surface honest. Lucid renders the whole embed deterministically: the title,
-// the colored risk sidebar, every number, the watch-outs, the asks, and the
-// footer. The model fills only the prose slots (Faults, Progress, Narrative),
-// which drop into fixed fields. Because the layout is code, not prose, a model
-// can never produce a wall of numbers or restate a metric — it never owns the
-// structure. RenderEmbed and RenderMarkdown are pure and byte-stable: the same
-// Report always renders identical bytes, which is what makes the render
-// golden-testable.
+// the colored risk sidebar, every number, the watch-outs, the asks, the footer,
+// and the verbatim sections (the week notes and any opted-in anchor detail),
+// which code renders exactly as they are. The model fills only the prose slots
+// (Faults, Progress, Narrative), which drop into fixed fields. Because the
+// layout is code, not prose, a model can never produce a wall of numbers or
+// restate a metric — it never owns the structure. RenderEmbed, RenderEmbeds and
+// RenderMarkdown are pure and byte-stable: the same Report always renders
+// identical bytes, which is what makes the render golden-testable.
 
 // The risk-sidebar colors. Green when the week surfaced no watch-out at all;
 // amber for a soft signal (a quiet week, or an anchor signal: a limit over its
@@ -39,13 +40,20 @@ const (
 	fieldWatchOuts = "⚠️ Watch-outs"
 )
 
+// fieldWeekNotes is the week-notes section header (ADR-0015 §6) the embed
+// fields, the continuation titles and the markdown section share. The section
+// follows the watch-outs (or the asks when there are none) and precedes the
+// anchor detail.
+const fieldWeekNotes = "📝 Week notes"
+
 // footerNote is the fixed cadence + honesty line every report carries — the
 // standing promise that the numbers above are exact, never softened.
 const footerNote = "Weekly · Monday after Sunday's reflection · numbers are exact, never softened"
 
 // RenderEmbed turns a Report into the Discord rich embed card the witness
-// channel receives — the whole report except any opted-in anchor detail, which
-// [RenderEmbeds] adds. Every number comes straight from the deterministic
+// channel receives — the whole report except its two verbatim sections, the
+// included week notes and any opted-in anchor detail, which [RenderEmbeds]
+// adds. Every number comes straight from the deterministic
 // Report — the model's prose lands only in the description (the warm read) and
 // the Faults / Progress fields. Empty prose fields are omitted (Discord rejects
 // an empty field value), so a deterministic fallback report still renders a
@@ -77,12 +85,46 @@ func RenderEmbed(r Report) notify.Embed {
 	return e
 }
 
+// RenderEmbeds renders the report as the ordered batch of embeds a delivery
+// sends, one per message. Without a verbatim section it is exactly
+// [RenderEmbed] — one card. With included week notes, full anchor detail, or
+// both, the sections' fields follow the card's own — the week notes first, then
+// the anchor detail — while the card stays within Discord's field-count and
+// total budgets; whatever does not fit continues in numbered continuation
+// embeds titled by the sections they carry (`📝 Week notes · part 2 of 3`,
+// `⚓ Anchor detail · part 2 of 3`) and carrying the card's sidebar color.
+// Nothing is ever dropped, reworded or summarized. It is pure and byte-stable.
+func RenderEmbeds(r Report) []notify.Embed {
+	return packVerbatim(RenderEmbed(r), verbatimSections(r))
+}
+
+// verbatimSections is the report's verbatim sections in render order: the week
+// notes when they were included, then the full anchor detail when opted in.
+func verbatimSections(r Report) []verbatimSection {
+	var sections []verbatimSection
+	if notes, ok := includedNotes(r); ok {
+		sections = append(sections, verbatimSection{name: fieldWeekNotes, lines: strings.Split(notes, "\n")})
+	}
+	if len(r.AnchorDetail) > 0 {
+		sections = append(sections, anchorDetailSection(r.AnchorDetail))
+	}
+	return sections
+}
+
+// includedNotes is the week-notes body to render, and whether there is one: it
+// is set only when the reader included the notes — valid, fresh, non-empty,
+// within the cap and packable losslessly (ADR-0015 §4).
+func includedNotes(r Report) (string, bool) {
+	return r.Notes, r.NotesStatus == NotesIncluded && r.Notes != ""
+}
+
 // RenderMarkdown renders the same report as a structured-markdown message — the
 // retained fallback path (AC-7) for a surface where the rich embed cannot be
 // used. It mirrors the embed's sections one-for-one so the two never drift: the
 // title, the optional warm read, the numbers, the faults, the optional progress,
-// the asks, any watch-outs, the full anchor detail when opted in (the same text
-// [RenderEmbeds] spreads across its parts), and the footer. It is pure and
+// the asks, any watch-outs, the included week notes (the raw body, not
+// bulleted) and the full anchor detail when opted in — the same text
+// [RenderEmbeds] spreads across its parts — and the footer. It is pure and
 // byte-stable.
 func RenderMarkdown(r Report) string {
 	var b strings.Builder
@@ -106,6 +148,9 @@ func RenderMarkdown(r Report) string {
 	section(fieldAsks, bulletList(r.Asks))
 	if len(r.WatchOuts) > 0 {
 		section(fieldWatchOuts, bulletList(r.WatchOuts))
+	}
+	if notes, ok := includedNotes(r); ok {
+		section(fieldWeekNotes, notes)
 	}
 	if len(r.AnchorDetail) > 0 {
 		section(fieldAnchorDetail, anchorDetailMarkdown(r.AnchorDetail))

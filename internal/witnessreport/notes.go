@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -285,141 +284,10 @@ func pathWithin(path, root string) bool {
 }
 
 // rawBodyPackable reports whether a notes body has a lossless packing into
-// Discord field values (ADR-0015 §4, V1).
+// Discord field values (ADR-0015 §4). It asks the same pure planner the
+// render packs the notes section with (planRawChunks, verbatim.go), so a body
+// the reader includes is exactly a body the render can lay out.
 func rawBodyPackable(body string) bool {
 	_, ok := planRawChunks(body)
 	return ok
-}
-
-// planRawChunks is the pure chunk planner for a verbatim raw-text section. It
-// partitions body into field values of at most maxFieldValueLen UTF-16 code
-// units, each holding at least one non-whitespace character, because Discord
-// rejects an empty or whitespace-only field value. A chunk boundary either
-// consumes one line break — the next chunk starts the next line, unmarked — or
-// falls mid-line at a character boundary, and the next chunk is marked cont.
-// Joining the chunks in order — a line break before an unmarked chunk, nothing
-// before a continued one — reproduces body byte for byte.
-//
-// Split points shift so whitespace rides with a neighboring non-whitespace
-// character: a greedy split that would strand a whitespace-only piece is not
-// proof the body cannot be packed. The planner first finds, back to front,
-// every position a valid packing of the rest can start at, then packs front to
-// back: each chunk takes as many whole lines as fit, and only a line longer
-// than a field is split mid-line, as late as a valid packing of the rest
-// allows. ok is false when no valid packing exists at all (or body is empty,
-// or not valid UTF-8, which cannot be sent byte for byte).
-func planRawChunks(body string) (chunks []detailChunk, ok bool) {
-	if body == "" || !utf8.ValidString(body) {
-		return nil, false
-	}
-	t := newRawText(body)
-	startable := t.startable()
-	if !startable[0] {
-		return nil, false
-	}
-	for k, cont := 0, false; ; {
-		end := t.chunkEnd(k, startable)
-		chunks = append(chunks, detailChunk{text: body[t.offs[k]:t.offs[end]], cont: cont})
-		if end == t.n {
-			return chunks, true
-		}
-		k, cont = t.next(end)
-	}
-}
-
-// rawText is a body indexed by character for the chunk planner: each
-// character's byte offset (then len(body)), UTF-16 width, and whether it is
-// non-whitespace or a line break.
-type rawText struct {
-	n     int
-	offs  []int
-	width []int
-	solid []bool
-	isNL  []bool
-}
-
-// newRawText indexes body by character.
-func newRawText(body string) rawText {
-	var t rawText
-	for i, r := range body {
-		t.offs = append(t.offs, i)
-		t.width = append(t.width, runeUnits(r))
-		t.solid = append(t.solid, !unicode.IsSpace(r))
-		t.isNL = append(t.isNL, r == '\n')
-	}
-	t.n = len(t.width)
-	t.offs = append(t.offs, len(body))
-	return t
-}
-
-// next is where the chunk after one ending before character e starts, and
-// whether that boundary is mid-line. A boundary at a line break consumes it.
-func (t rawText) next(e int) (start int, cont bool) {
-	if t.isNL[e] {
-		return e + 1, false
-	}
-	return e, true
-}
-
-// validEnds calls visit for every e such that characters [k, e) form a valid
-// chunk — within the field budget and holding a non-whitespace character — in
-// increasing order, until visit returns false.
-func (t rawText) validEnds(k int, visit func(e int) bool) {
-	units, hasSolid := 0, false
-	for e := k + 1; e <= t.n; e++ {
-		units += t.width[e-1]
-		if units > maxFieldValueLen {
-			return
-		}
-		hasSolid = hasSolid || t.solid[e-1]
-		if hasSolid && !visit(e) {
-			return
-		}
-	}
-}
-
-// startable reports, for each character k (and the end, which is never
-// startable — a chunk is never empty), whether the text from k to the end
-// packs validly with a chunk starting at k. It is filled back to front.
-func (t rawText) startable() []bool {
-	ok := make([]bool, t.n+1)
-	for k := t.n - 1; k >= 0; k-- {
-		t.validEnds(k, func(e int) bool {
-			ok[k] = t.endsCleanly(e, ok)
-			return !ok[k]
-		})
-	}
-	return ok
-}
-
-// endsCleanly reports whether a chunk ending before character e leaves a rest
-// that packs: nothing at all, or a startable next chunk.
-func (t rawText) endsCleanly(e int, startable []bool) bool {
-	if e == t.n {
-		return true
-	}
-	s, _ := t.next(e)
-	return startable[s]
-}
-
-// chunkEnd picks where the chunk starting at k ends: the last whole-line end
-// that fits and leaves a packable rest, else — a line longer than a field —
-// the latest mid-line end that does. startable[k] guarantees one exists.
-func (t rawText) chunkEnd(k int, startable []bool) int {
-	lineEnd, midEnd := -1, -1
-	t.validEnds(k, func(e int) bool {
-		if !t.endsCleanly(e, startable) {
-			return true
-		}
-		if e == t.n || t.isNL[e] {
-			lineEnd = e
-		} else {
-			midEnd = e
-		}
-		return true
-	})
-	if lineEnd >= 0 {
-		return lineEnd
-	}
-	return midEnd
 }
