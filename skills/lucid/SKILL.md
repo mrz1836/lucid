@@ -358,8 +358,10 @@ The autonomous messages are the scheduler's, never composed or initiated by this
 skill: the bell and the morning tripwire (pre-committed templates), plus the
 morning/night companion messages and the weekly witness report (composed by the
 provider from the user's own opaque prompt files and the chain's honest live
-numbers, never fabricated). All are posted by the harness's native scheduler (or
-the standalone `go-flywheel` path). The `companion fire` and `witness report`
+numbers, never fabricated; when the user opts in, the witness report is also
+grounded in one operator-approved week-notes file, which it renders verbatim).
+All are posted by the harness's native scheduler (or the standalone
+`go-flywheel` path). The `companion fire` and `witness report`
 verbs above only ever preview these on demand; delivery stays scheduler-owned.
 The Monday contact check-in post is scheduler-owned the same way: when the user
 enables `contact_weekly`, the scheduler posts a fixed, model-free template of
@@ -398,11 +400,16 @@ them when asked why a message felt generic or whether sends were degraded.
 
 ## Witness wiring (Ring 0)
 
-The witness sees exactly one thing: the L2 escalation template, which carries
-streak, mode, and storm state and **zero** journal or capacity content. The
-`#lucid` channel and its session threads are invisible to the witness role;
-the witness never gains a route into the Ledger. This boundary is instance
-configuration — the witness contact is never named in this skill.
+By default the witness sees exactly one thing: the L2 escalation template,
+which carries streak, mode, and storm state and **zero** journal or capacity
+content. The optional weekly witness report, once the user turns it on, adds
+one weekly card, and carries more only where the user deliberately opts in —
+full anchor detail, and operator-approved week notes from a file the user keeps
+outside the Ledger ([`../../docs/usage/witness-report.md`](../../docs/usage/witness-report.md)).
+Lucid reads no journal content for either. The `#lucid` channel and its session
+threads are invisible to the witness role; the witness never gains a route into
+the Ledger. This boundary is instance configuration — the witness contact is
+never named in this skill.
 
 ## Read-only verification
 
