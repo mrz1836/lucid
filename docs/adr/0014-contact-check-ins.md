@@ -24,7 +24,7 @@ things shape how the rest is built:
   anchor event store ([ADR-0013](0013-anchor-kinds.md)) already work.
 * **"Check-in" is taken.** `/checkin` is the guided-capture flow behind
   `lucid serve` (Intake asks follow-up questions and writes a raw entry), and a
-  harness may already keep a `checkin-sessions/` folder beside the Ledger. A
+  harness may already keep its own check-in session folder beside the Ledger. A
   verb or record family named "check-in" would collide with both, in code and in
   conversation.
 * **The send ceiling.** Lucid does not send messages on the user's behalf beyond

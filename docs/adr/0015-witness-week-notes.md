@@ -1,6 +1,6 @@
 # ADR-0015 — Witness week notes: one operator-approved file, rendered verbatim and handed to the model as labeled grounding
 
-**Status:** Proposed.
+**Status:** Accepted.
 
 ## Context
 
