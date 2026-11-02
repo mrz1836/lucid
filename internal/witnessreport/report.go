@@ -55,6 +55,22 @@ type Report struct {
 	// empty, so a summary-mode report carries no anchor_detail key.
 	AnchorDetail []router.AnchorDetailEvent `json:"anchor_detail,omitempty"`
 
+	// Week notes — the optional operator-approved notes file
+	// (witness_report.notes_file, ADR-0015), the second deliberate, opt-in
+	// exception. Notes is the verbatim body, set only when NotesStatus is
+	// included: it is rendered by code, handed to the model as labeled
+	// grounding only then, and never scanned. NotesStatus is "" when no
+	// notes_file is configured (off), so an off report serializes exactly as it
+	// did before week notes existed; any other status is emitted. NotesWritten
+	// is the parsed written date (YYYY-MM-DD) whenever it parsed. NotesProblem
+	// is the fixed reason for invalid and unreadable — never any of the file's
+	// content. The compose pass sets all four before the model call, so every
+	// fallback path carries them.
+	Notes        string `json:"notes,omitempty"`
+	NotesStatus  string `json:"notes_status,omitempty"`
+	NotesWritten string `json:"notes_written,omitempty"`
+	NotesProblem string `json:"notes_problem,omitempty"`
+
 	// Derived deterministically from the signals above.
 	WatchOuts []string `json:"watch_outs"`
 	Asks      []string `json:"asks"`
@@ -123,15 +139,11 @@ func BuildReport(now time.Time, numbers NumbersReader, records RecordsReader) (R
 		return Report{}, fmt.Errorf("witnessreport: read engine days: %w", err)
 	}
 
-	loc := now.Location()
-	if loc == nil {
-		loc = time.UTC
-	}
 	// "This week" ends at the current logical day, not the latest record, so a
 	// stretch of silence reads as a thin week rather than borrowing an older
 	// full one. Anchor the fold at civil midnight in loc, where the day records'
 	// dates are parsed.
-	ref := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	ref, loc := weekRef(now)
 	week := engine.WeekWindow(days, ref, loc)
 
 	m := mr.Metrics
@@ -149,6 +161,19 @@ func BuildReport(now time.Time, numbers NumbersReader, records RecordsReader) (R
 	r.WatchOuts = buildWatchOuts(r, mr.Thresholds.WithDefaults().MissAlarm)
 	r.Asks = DraftAsks(r)
 	return r, nil
+}
+
+// weekRef is the report's reference day and location: civil midnight of now in
+// now's location (UTC when it has none). BuildReport folds "this week" as the
+// seven calendar days ending at ref, and the week-notes freshness check reads
+// the same ref, so the card's "This week" and the notes window are one window
+// and can never drift apart (ADR-0015 §3).
+func weekRef(now time.Time) (ref time.Time, loc *time.Location) {
+	loc = now.Location()
+	if loc == nil {
+		loc = time.UTC
+	}
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc), loc
 }
 
 // buildWatchOuts derives the watch-outs section from real signals only. Each

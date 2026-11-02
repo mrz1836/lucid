@@ -219,6 +219,37 @@ re-sends. The on-demand verbs (`lucid companion fire`, `lucid workout`,
 | Cf-5 | The ping receipt is unreadable or unwritable | A warn line in the supervised daemon log; the ping fails open (sends anyway). The delivered send is unaffected. | The deterministic message and the note (possibly one extra that day). | The receipt may be left stale. | Restore read/write access under `~/.lucid/engine/`; the next fallback rewrites it. |
 | Cf-6 | The alert or ping send itself fails | A warn line `alert send failed` (with the error) in the supervised daemon log; the delivered send stands and the original failure is never masked. | (none — the note did not land) | None. | Restore the user channel; the log line is the record. |
 
+### Witness week notes (the optional notes file — deterministic, model-free read)
+
+These cover the weekly witness report's optional `witness_report.notes_file`
+([ADR-0015](../adr/0015-witness-week-notes.md),
+[`../usage/witness-report.md`](../usage/witness-report.md) §"Week notes"). The
+file is read once per compose by deterministic code — exactly the configured
+path, never a directory walk, no model — before the report is composed. A notes
+problem **never blocks, delays or changes the report**: it goes out on time,
+exactly as it would with no `notes_file` set, and only the `📝 Week notes`
+section and the notes' model grounding are missing. It is never a config-load
+error either; every problem surfaces as a notes status.
+
+The two rows below are the failure states. Each raises **one** private alert to
+your user channel — never the witness channel — fired from the runner's
+post-send step after the receipt is written, so it can never delay or unwind the
+delivered report. The alert is independent of the Cf-3 safety-trip alert (one
+week can raise both), names a fixed reason, and never quotes the notes body. A
+retry that resumes a partly delivered multi-message report does not repeat it
+(ADR-0015 §5), and a manual `lucid witness report --deliver` never sends it — it
+appends ` (week notes: <status>: <reason>)` to its printed line instead. If the
+alert send itself fails, Cf-6 applies.
+
+`stale` and `empty` are normal states, not errors — no section, no alert.
+`stale` is the usual state on a week nobody wrote or approved notes; `empty` is a
+deliberate blank body.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| Wn-1 | `invalid` — the file was read, or refused unread, and cannot be used. Reasons (fixed phrases): `no frontmatter`; `frontmatter is not closed`; `frontmatter is not valid YAML`; `written is missing`; `written is not a YYYY-MM-DD date`; `written is in the future`; `body is over the 4,000-code-point cap`; `body cannot be packed losslessly into Discord fields`; `notes_file is inside the Lucid home`; `the Lucid home is not set`. | The report composes and delivers without the notes section and without the notes block in the model input — byte-identical to a report with no `notes_file`. The body is excluded whole: never truncated, trimmed inside or normalized. A path inside the Lucid home (lexical or symlink-resolved) is refused before its bytes are read, and an unset home fails closed to this row. After the receipt is written, one alert to the user channel. `notes_status: invalid` and the reason in `notes_problem` in `lucid witness report --dry-run --json`. | The report as usual, then *Lucid weekly witness report for &lt;week&gt; went out without its week notes — the notes file is invalid: &lt;reason&gt;. Check witness_report.notes_file.* The markdown dry run prints `[week notes not included — the notes file is invalid: <reason>]`. | None beyond the report's normal witness receipt. Lucid never writes or moves the notes file. | Fix what the reason names: repair the `---` frontmatter; add `written: YYYY-MM-DD` with the calendar date, on or before the report's day; shorten a body over the cap; for `body cannot be packed losslessly into Discord fields`, edit the whitespace in the file (Lucid never changes approved text); move a file inside the Lucid home outside it and update `notes_file`. `the Lucid home is not set` means the read ran without a resolved home and failed closed rather than skip the inside-home check; run the binary normally (a resolved `LUCID_HOME` or the default home). The next fire, or a dry run, reads it again. |
+| Wn-2 | `unreadable` — reasons: `the path does not exist`; `the path is a directory`; `the file cannot be read` (e.g. a permission error). | Same as Wn-1: the report delivers without notes, then one alert to the user channel. `notes_status: unreadable` and the reason in `notes_problem` in the `--dry-run --json` output. | The report as usual, then the same alert with status `unreadable`. The markdown dry run prints `[week notes not included — the notes file is unreadable: <reason>]`. | None beyond the normal witness receipt. | Point `notes_file` at a readable file, create it, or fix its permissions — or remove the key to turn week notes off. |
+
 ### Workout module (config-gated — Mirror-side, model-allowed)
 
 The workout module's full degrade table lives in

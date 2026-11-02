@@ -1114,10 +1114,20 @@ delivery path — no new transport, destination or schedule, and no "and N more"
 omission. Every part is read back; the scheduled runner records per-part
 progress in the existing witness receipt, a retry resumes the frozen batch
 without re-sending verified parts, and the week is marked delivered only once
-every part has verified. This is the witness package's one deliberate, opt-in
-exception to its by-construction privacy. Any other `anchor_detail` value is a
-config error naming the two; an older binary ignores the key and reads as
-summary.
+every part has verified. This is the first of the witness package's two
+deliberate, opt-in exceptions to its by-construction privacy. Any other
+`anchor_detail` value is a config error naming the two; an older binary ignores
+the key and reads as summary.
+
+The second exception is **week notes** (`witness_report.notes_file`,
+[ADR-0015](../adr/0015-witness-week-notes.md),
+[`../usage/witness-report.md`](../usage/witness-report.md) §"Week notes"): one
+operator-approved file, kept outside the Lucid home, rendered verbatim beside
+anchor detail through the same lossless packer and never scanned. Unlike anchor
+detail, included week notes **are** handed to the model, as one labeled
+grounding block — so they reach the configured model provider. They are not an
+Engine read: the witness package gains no reader of the Engine tree or the
+Ledger for them, and the watch-outs above are unchanged.
 
 ### `self.json`
 

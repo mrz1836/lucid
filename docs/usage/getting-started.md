@@ -200,8 +200,11 @@ Two privacy notes worth internalizing:
 
 - **The Sanctuary holds by construction.** No agent ever reads `engine/`,
   `observations/`, or `registries/`; the Engine and observation writes invoke no
-  model at all. Your witness sees one thing — the L2 escalation template — with
-  zero journal or capacity content.
+  model at all. By default your witness sees one thing — the L2 escalation
+  template — with zero journal or capacity content. The optional
+  [weekly witness report](witness-report.md) adds one weekly card once you turn
+  it on, and carries more only where you deliberately opt in: full anchor
+  detail, and week notes you approve, from a file you keep outside the Ledger.
 - **A chat harness adds transit exposure.** If you drive Lucid through a chat
   provider, messages in transit (journal lines, check-in answers, health
   micro-logs) pass through that provider's servers even though the system of
