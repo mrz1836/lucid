@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	github.com/mrz1836/go-flywheel v0.40.2
+	github.com/mrz1836/go-flywheel v0.41.0
 	github.com/mrz1836/go-foundation v0.13.2
 	github.com/mrz1836/go-selfupdate v0.1.5
 	github.com/spf13/cobra v1.10.2
@@ -43,7 +43,7 @@ require (
 	gorm.io/datatypes v1.2.7 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.6.3 // indirect
-	modernc.org/libc v1.80.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.61.1 // indirect
