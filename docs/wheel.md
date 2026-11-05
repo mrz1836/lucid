@@ -2,9 +2,10 @@
 
 **Date:** 2026-09-29 · **Status:** Canonical — a living concept, evolving with the project
 **Scope:** The monthly **Wheel of Life**: a few-minute pulse-check where you
-rate each of eight life pillars on your own 1–10 scale, see which spokes are
-strong and which are sagging, and watch each pillar move month to month. This
-document defines the wheel record family, its append-only store under
+rate each of the current set's life pillars (nine since pillar set 2) on your
+own 1–10 scale, see which spokes are strong and which are sagging, and watch
+each pillar move month to month. This document defines the wheel record
+family, its versioned pillar sets, its append-only store under
 `~/.lucid/registries/wheel/`, the month-keyed snapshot history the trend is
 folded from, the separate `suggested` calibration field, the vision-reflection
 fields, and the `lucid wheel` CLI surface (`add` / `show` / `list`). It
@@ -62,10 +63,55 @@ The wheel lives under `registries/`, so it is primary, backup-critical data:
 ([`mvp/agent-contracts.md`](mvp/agent-contracts.md) §"Cross-cutting rules")
 covers it unchanged. A harness reaches it only through the `lucid wheel` verbs.
 
-## 2. The pillars
+## 2. The pillars — versioned pillar sets
 
-A wheel has exactly **eight pillars**, fixed for v1. Each has a short **key**
-(used by the flags and the JSON) and a **label** (used in human output):
+The pillars a wheel rates come from a **pillar set**: a fixed, numbered list of
+pillars in a fixed order. Every snapshot records the set it was rated in (§4),
+so a month is always read in its own set. Each pillar has a short **key** (used
+by the flags and the JSON) and a **label** (used in human output). Labels are
+stable per key across sets.
+
+### Pillar set 2 (current)
+
+A wheel recorded today has exactly **nine pillars**:
+
+| Key | Label | What you are rating |
+|-----|-------|---------------------|
+| `health` | health | Your body and energy — sleep, movement, food, and how you feel physically and mentally, day to day. |
+| `romance` | romance/partner | Your romantic life: a partner, or dating and the wish for one, and how much intimacy, closeness and partnership it holds. |
+| `friends` | friends & family | The friends and family closest to you, and how connected, honest and cared-for those bonds feel. |
+| `career` | career/work | The work you do — whether it is meaningful, how it is going, and whether it is headed where you want it to go. |
+| `finances` | finances | Your money — security, direction, and how at ease you are with where it stands. |
+| `growth` | personal growth | Learning and becoming — the skills, habits, and inner work that make you more of who you want to be. |
+| `fun` | fun/recreation | Play and rest — the things you do purely because you enjoy them, and whether there is room for them. |
+| `environment` | environment | Your surroundings — home, workspace, and the places you spend your days — and whether they support you. |
+| `contribution` | contribution | Giving beyond yourself — service, generosity, and the difference you make for others. |
+
+The order above is the **canonical order** for set 2: human output, `--json`
+arrays, the ack, and tie-breaks all follow it. Every set-2 snapshot rates all
+nine (§3); there is no partial wheel.
+
+**Why set 2 exists.**
+A single relationships spoke blends a romantic partner with friends and family; many Wheel of Life variants rate them separately.
+Set 2 splits that one spoke into two, in the slot it held, and leaves the other
+seven keys, labels, and definitions unchanged.
+
+**`relationships` is retired, never repurposed.** The set-1 key
+`relationships` is not reused for either new spoke — reusing it would compare
+a blended rating against a narrower one and fabricate a delta. It is retired
+for new writes: a set-2 write that names it, by flag, by `--note` /
+`--suggested` pillar name, or by `--input` key, is refused with
+
+```
+relationships was split into romance and friends in pillar set 2; rate both
+```
+
+and nothing is written (§7.1). Its history stays readable exactly as recorded.
+
+### Pillar set 1 (historical)
+
+Every snapshot written before set 2 was rated in set 1, the original **eight
+pillars**. The table is kept so set-1 months read exactly as recorded:
 
 | Key | Label | What you are rating |
 |-----|-------|---------------------|
@@ -78,10 +124,10 @@ A wheel has exactly **eight pillars**, fixed for v1. Each has a short **key**
 | `environment` | environment | Your surroundings — home, workspace, and the places you spend your days — and whether they support you. |
 | `contribution` | contribution | Giving beyond yourself — service, generosity, and the difference you make for others. |
 
-The order above is the **canonical order**: human output, `--json` arrays, and
-tie-breaks all follow it. Every snapshot rates all eight (§3); there is no
-partial wheel. Adding, removing, or renaming a pillar is a schema change (§4
-Versioning), never a silent edit.
+Set 1's canonical order is the order above. Set 2's change against it is one
+entry: `relationships` → `romance` + `friends`.
+
+Adding, removing, or renaming a pillar is a schema change: a new pillar set under §4 Versioning, never a silent edit.
 
 ## 3. The scale — its own 1–10
 
@@ -97,9 +143,11 @@ life gets for you, 10 is as good as you can imagine it. It is the wheel's
   no conversion between them exists.
 * **Integers only.** `6` is a rating; `6.5`, `6.0` written as a decimal, `"6"`
   as a JSON string, `0`, `11`, and a negative number are not.
-* **Every pillar is required.** A snapshot with any of the eight ratings
-  missing or blank is refused — the missing rating is never filled in from a
-  prior month, a `suggested` value, a default, or anything else.
+* **Every pillar in the snapshot's own pillar set is required** (§2). A
+  snapshot with any of that set's ratings missing or blank is refused — the
+  missing rating is never filled in from a prior month, a `suggested` value, a
+  default, or anything else. A pillar that is not in the snapshot's set —
+  including a retired one — is refused too.
 * A missing, out-of-range, or non-integer rating is a **clean error**: the
   command exits non-zero, names the pillar and the accepted range, and
   **nothing is written**.
@@ -117,22 +165,24 @@ only which months have a wheel.
 {
   "key": "wheel_2026-09",
   "kind": "wheel",
-  "schema": 1,
+  "schema": 2,
   "month": "2026-09",
   "history": [
     {
       "id": "wheel_2026_09_001",
       "at": "2026-09-06T17:12:40-04:00",
       "type": "snapshot",
+      "pillar_set": 2,
       "pillars": {
-        "health":        { "score": 6, "note": "moving most days", "suggested": 5 },
-        "relationships": { "score": 7 },
-        "career":        { "score": 5, "suggested": 6 },
-        "finances":      { "score": 4, "note": "one large repair" },
-        "growth":        { "score": 7 },
-        "fun":           { "score": 4 },
-        "environment":   { "score": 6 },
-        "contribution":  { "score": 5 }
+        "health":       { "score": 6, "note": "moving most days", "suggested": 5 },
+        "romance":      { "score": 4 },
+        "friends":      { "score": 7 },
+        "career":       { "score": 5, "suggested": 6 },
+        "finances":     { "score": 4, "note": "one large repair" },
+        "growth":       { "score": 7 },
+        "fun":          { "score": 4 },
+        "environment":  { "score": 6 },
+        "contribution": { "score": 5 }
       },
       "vision_reviewed": true,
       "vision_reflection": "Still true. The pace shifted, not the direction."
@@ -149,7 +199,7 @@ Fields, binding:
 |-------|----------|---------|
 | `key` | assigned | The stable entry id: `wheel_YYYY-MM`, derived from the month (§ Ids). |
 | `kind` | yes | Always `wheel`. |
-| `schema` | yes | The record schema version. `Schema = 1` today (§ Versioning). |
+| `schema` | yes | The record schema version. `Schema = 2` today (§ Versioning). Appending a set-2 snapshot to a schema-1 month raises the entry to `2`; a schema-1 file that is never amended is never rewritten. |
 | `month` | yes | The calendar month this wheel covers, `YYYY-MM`. |
 | `history` | yes | The **append-only** list of `snapshot` events. Each carries its own receipt id, a real write timestamp `at`, and the complete wheel as recorded by that write. The current wheel for the month is **derived** from it (§ Deriving the month); no "current" field is stored. |
 | `created_at` | yes | When the month's first snapshot was written — an ISO-8601 local-TZ timestamp. |
@@ -162,8 +212,9 @@ event is ever rewritten. A snapshot is a whole wheel, never a partial patch:
 |----------------|----------|---------|
 | `id` | yes | The write's receipt id (§ Ids). |
 | `at` | yes | The real write time, ISO-8601 with the host's local-TZ offset. |
-| `type` | yes | Always `snapshot` in schema 1. |
-| `pillars` | yes | A map of all eight pillar keys (§2) to a pillar object. |
+| `type` | yes | Always `snapshot` in schemas 1 and 2. |
+| `pillar_set` | no | The pillar set the snapshot was recorded in (§2). **Absent means set 1** — every snapshot written before set 2 has none. New writes always record the current set (`2`); a caller never chooses it. |
+| `pillars` | yes | A map of every pillar key of the snapshot's own pillar set (§2) to a pillar object — nine in set 2, eight in set 1. |
 | `pillars.<key>.score` | yes | **Your** rating for the pillar: an integer 1–10 (§3). The only number the trend reads. |
 | `pillars.<key>.note` | no | An optional one-line "why", in your words, stored verbatim. Omitted when unset. |
 | `pillars.<key>.suggested` | no | An optional calibration value, integer 1–10, kept **separate** from `score` (§5). Omitted when unset. |
@@ -203,6 +254,20 @@ or a new event `type` under a bumped `schema` — readers tolerate an unknown
 field and a higher schema version (read what you understand, skip what you
 don't).
 
+Schema 2 adds the snapshot's `pillar_set` (pillar set 2, §2). Stored wheels are
+**never migrated**: a set-1 snapshot stays set 1 forever, and is read,
+validated, and shown in its own set — no `pillar_set` is added to it and no
+rating is moved onto a new key. A month file may hold set-1 and set-2
+snapshots side by side (a set-1 month amended after set 2 shipped), and
+latest-wins applies unchanged: the month reads as its latest snapshot, in that
+snapshot's set.
+
+**Older builds.** A build that predates pillar set 2 refuses to show a set-2
+month or to append to a schema-2 file rather than invent a number; upgrade to
+read it. Likewise, a snapshot in a pillar set this build does not know is
+refused by `show` as recorded by a newer build — nothing is shown rather than
+a made-up number.
+
 **Append-only.** No snapshot is ever rewritten in place. The store is built to
 outlive its tools (P6): plain user-owned JSON, one file per month, exportable
 as a directory of files.
@@ -220,7 +285,7 @@ it is fenced off from everything that matters:
   into `score`, never used when a `score` is missing (a missing score is
   refused, §3), and never rendered as a pillar's rating.
 * **Never before you rate.** The binary accepts a `suggested` value **only**
-  in the same write that carries all eight of your own ratings — there is no
+  in the same write that carries every rating of the current pillar set — there is no
   way to store a suggestion for a month you have not rated, and nothing reads
   a suggestion back before its month is recorded. The conversational half of
   this rule — show evidence as *facts only, with no number*, before you rate —
@@ -261,8 +326,9 @@ the document.
 ## 7. The CLI surface — `lucid wheel`
 
 ```
-lucid wheel add --health <1-10> --relationships <1-10> --career <1-10> --finances <1-10>
-                --growth <1-10> --fun <1-10> --environment <1-10> --contribution <1-10>
+lucid wheel add --health <1-10> --romance <1-10> --friends <1-10> --career <1-10>
+                --finances <1-10> --growth <1-10> --fun <1-10> --environment <1-10>
+                --contribution <1-10>
                 [--note <pillar>=<text>]... [--suggested <pillar>=<1-10>]...
                 [--vision-reviewed] [--vision-reflection <text> | --vision-reflection-file <path>]
                 [--month <YYYY-MM>] [--json]
@@ -278,11 +344,20 @@ write's receipt id. It is the one write, and it is the same write whether you
 type it at a terminal or a companion runs it at the end of a guided
 conversation.
 
-* **The eight ratings are required flags** — `--health`, `--relationships`,
-  `--career`, `--finances`, `--growth`, `--fun`, `--environment`,
+* **The nine ratings are required flags** — `--health`, `--romance`,
+  `--friends`, `--career`, `--finances`, `--growth`, `--fun`, `--environment`,
   `--contribution` — each an integer 1–10 (§3). With any missing, `add` is a
   usage error naming the missing pillars, and nothing is written. v1 has no
-  interactive pillar-by-pillar prompt.
+  interactive pillar-by-pillar prompt. Every new snapshot is recorded in the
+  current pillar set (§2, §4); a late backfill of an earlier month is rated on
+  the nine too.
+* **The retired `relationships` is refused, never mapped.** The retired
+  `--relationships` flag (hidden from `--help`), a `--note` or `--suggested`
+  pillar name of `relationships`, and a `relationships` key under `--input`'s
+  `pillars` are each a clean error carrying the split message —
+  `relationships was split into romance and friends in pillar set 2; rate both`
+  — and nothing is written. The value is never copied onto `romance` or
+  `friends`.
 * **`--note <pillar>=<text>`** (repeatable) stores that pillar's optional
   one-line "why" verbatim. An unknown pillar key or an empty text is a clean
   error.
@@ -303,23 +378,26 @@ conversation.
   may be recorded, so a missed month can be filled in late.
 * **`--input <path>`** reads the whole wheel from a JSON document instead — a
   file, or `-` for stdin. It is the structured path a companion uses, keeping
-  eight notes and a reflection off the command line. It is mutually exclusive
-  with every other `add` flag except `--json`. The document is strict — an
-  unknown key, an unknown pillar, a missing pillar, or a non-integer value is
-  a clean error and nothing is written:
+  nine notes and a reflection off the command line. It is mutually exclusive
+  with every other `add` flag except `--json` — including `--month`, so the
+  document carries its own `month`. The document is strict — an unknown key,
+  an unknown pillar, a missing pillar, the retired `relationships` (refused
+  with the split message above), or a non-integer value is a clean error and
+  nothing is written:
 
   ```json
   {
     "month": "2026-09",
     "pillars": {
-      "health":        { "score": 6, "note": "moving most days", "suggested": 5 },
-      "relationships": { "score": 7 },
-      "career":        { "score": 5, "suggested": 6 },
-      "finances":      { "score": 4, "note": "one large repair" },
-      "growth":        { "score": 7 },
-      "fun":           { "score": 4 },
-      "environment":   { "score": 6 },
-      "contribution":  { "score": 5 }
+      "health":       { "score": 6, "note": "moving most days", "suggested": 5 },
+      "romance":      { "score": 4 },
+      "friends":      { "score": 7 },
+      "career":       { "score": 5, "suggested": 6 },
+      "finances":     { "score": 4, "note": "one large repair" },
+      "growth":       { "score": 7 },
+      "fun":          { "score": 4 },
+      "environment":  { "score": 6 },
+      "contribution": { "score": 5 }
     },
     "vision_reviewed": true,
     "vision_reflection": "Still true. The pace shifted, not the direction."
@@ -327,7 +405,9 @@ conversation.
   ```
 
   `month` is optional (the same default as `--month`); `note`, `suggested`,
-  `vision_reviewed`, and `vision_reflection` are optional.
+  `vision_reviewed`, and `vision_reflection` are optional. There is no
+  `pillar_set` key: the binary always records the current set, so a
+  `pillar_set` in the document is an unknown key and is refused.
 
 **Same month again — amend by append.** Recording a month that already has a
 wheel appends a second snapshot, which becomes the month's wheel on the next
@@ -335,14 +415,16 @@ read; the first stays on disk with its receipt (§4). `add` says so in its ack.
 
 **The ack.** `add` acknowledges only *after* the write lands — the same
 provenance-over-magic ack every capture gives — naming the month and the
-receipt, then echoing the eight stored ratings verbatim, one `label: N` line
-each (never the `suggested` values). On an amend it adds that the new snapshot
-replaces the earlier one when read, and that both are kept:
+receipt, then echoing the nine stored ratings verbatim, one `label: N` line
+each in canonical order (never the `suggested` values). On an amend it adds
+that the new snapshot replaces the earlier one when read, and that both are
+kept:
 
 ```
 Recorded the 2026-09 wheel as wheel_2026_09_002 (replaces wheel_2026_09_001 when read; both kept).
 health: 6
-relationships: 7
+romance/partner: 4
+friends & family: 7
 career/work: 5
 finances: 4
 personal growth: 7
@@ -357,11 +439,14 @@ contribution: 5
 for one month — by default the most recent — against the **most recent prior
 stored month**. It is a pure read: it writes nothing and calls no model.
 
-* **One line per pillar**, in canonical order: `label: N (±d) <sparkline>`.
+* **One line per pillar** of the shown month's pillar set, in that set's
+  canonical order (§2): `label: N (±d) <sparkline>`.
   `N` is your stored rating, printed exactly as stored — never rounded,
   averaged, smoothed, or softened. `(±d)` is the signed delta against the prior
   stored month (`(+1)`, `(-2)`, `(0)`, with an ASCII sign). The sparkline is
   that pillar's rating over up to the **last six stored months**, oldest first.
+  A pillar the prior month does not carry reads `(new)` instead of a delta
+  (§7.2 "Across a pillar-set change").
 * **The comparison month is named** in the header (`vs 2026-08`). A month with
   no wheel is skipped, not counted as zero — if the prior stored month is not
   the calendar month before, the header says which month the delta is against.
@@ -377,25 +462,27 @@ stored month**. It is a pure read: it writes nothing and calls no model.
   `- label: note` line each; then `vision reviewed: yes|no` and, when present,
   `vision reflection:` with the text verbatim.
 * **`--month <YYYY-MM>`** shows that month against its own prior stored month,
-  with the sparkline ending at that month. A month with no wheel is a clean
-  error.
+  with the sparkline ending at that month, in that month's own pillar set — a
+  set-1 month renders its eight exactly as stored. A month with no wheel is a
+  clean error.
 * **Discord-safe.** Human output is `key: value` lines and `- ` bullets only —
   **never a markdown table** — so it renders cleanly when relayed into a chat.
   There is no average, total, or balance score anywhere in the output (§0).
 
-Synthetic example:
+Synthetic example (every month shown recorded in pillar set 2):
 
 ```
 wheel: 2026-09 (vs 2026-08)
 health: 6 (+1) ▃▄▄▅
-relationships: 7 (0) ▆▆▆▆
+romance/partner: 4 (-1) ▃▄▄▃
+friends & family: 7 (0) ▆▆▆▆
 career/work: 5 (-1) ▅▅▅▄
 finances: 4 (-2) ▅▅▅▃
 personal growth: 7 (0) ▄▅▆▆
 fun/recreation: 4 (0) ▄▃▃▃
 environment: 6 (0) ▅▅▅▅
 contribution: 5 (0) ▃▃▄▄
-lowest: finances (4), fun/recreation (4)
+lowest: romance/partner (4), finances (4), fun/recreation (4)
 biggest drop: finances (-2)
 notes:
 - health: moving most days
@@ -424,11 +511,13 @@ null:
   "month": "2026-09",
   "prior_month": "2026-08",
   "receipt_id": "wheel_2026_09_002",
+  "pillar_set": 2,
+  "pillars_changed": null,
   "months": ["2026-06", "2026-07", "2026-08", "2026-09"],
   "pillars": [
     { "pillar": "health", "label": "health", "score": 6, "delta": 1, "trend": [4, 5, 5, 6], "sparkline": "▃▄▄▅", "note": "moving most days" }
   ],
-  "lowest": [ { "pillar": "finances", "score": 4 }, { "pillar": "fun", "score": 4 } ],
+  "lowest": [ { "pillar": "romance", "score": 4 }, { "pillar": "finances", "score": 4 }, { "pillar": "fun", "score": 4 } ],
   "biggest_drop": [ { "pillar": "finances", "delta": -2 } ],
   "vision_reviewed": true,
   "vision_reflection": "Still true. The pace shifted, not the direction.",
@@ -436,13 +525,104 @@ null:
 }
 ```
 
-`pillars` holds all eight in canonical order (one shown above). `trend[i]` is
-the rating in `months[i]`. `delta` is `null` and `prior_month` is `""` when
-there is no prior month; `biggest_drop` is `[]` then, and when nothing dropped.
-`note` and `vision_reflection` are `""` when unset. `calibration.suggested`
-carries the shown month's stored `suggested` values (§5) — `{}` when none — and
-is the only place they appear; nothing else in the payload is derived from
-them. With no wheel recorded, `month` is `""` and every array is `[]`.
+`pillars` holds every pillar of the shown month's set in that set's canonical
+order — nine in set 2 (one shown above). `pillar_set` is the shown month's
+pillar set (`1` for a month recorded before set 2). `pillars_changed` is
+`{"since", "from", "to"}` when the shown month's set differs from the prior
+stored month's — `since` the prior month, `from` the pillar keys the prior
+set had that the shown set lacks, `to` the keys the shown set adds, each in
+canonical order — and `null` when the set did not change or there is no prior
+month. `trend[i]` is the rating in `months[i]`, **or `null`** when that month
+lacks the pillar: `trend` is null-aligned to `months`, so a `trend` consumer
+must accept `null` elements — the one shape change from schema 1 (`trend` was
+`[]int`; with every month carrying every pillar it reads the same values as
+before). `delta` is `null` when there is no prior month, and for a pillar the
+prior month does not carry; `prior_month` is `""` when there is no prior
+month; `biggest_drop` is `[]` then, and when nothing dropped. `note` and
+`vision_reflection` are `""` when unset. `calibration.suggested` carries the
+shown month's stored `suggested` values (§5) — `{}` when none — and is the
+only place they appear; nothing else in the payload is derived from them. With
+no wheel recorded, `month` is `""`, `pillar_set` is the current set,
+`pillars_changed` is `null`, and every array is `[]`.
+
+#### Across a pillar-set change
+
+A trend window can span a pillar-set change — set-1 months recorded before set
+2 shipped, set-2 months after. `show` never errors on a mixed window and never
+shows a number that was not recorded:
+
+* **Each month is validated and rendered in its own set.** A set-1 month is
+  checked against the eight, a set-2 month against the nine. The **shown
+  month's set decides the lines**: one per pillar of that set, in its
+  canonical order.
+* **A delta exists only when the prior stored month carries the key.**
+  Otherwise the line reads `label: N (new) <sparkline>` — never `(+0)`, never
+  `(0)`, never a computed number — and `delta` is `null` in `--json`. (With no
+  prior month at all, the line carries no delta, as above.)
+* **Sparklines and trends cover only months that carry the key.** A new
+  pillar's human sparkline has one block per month that rated it, with no gap
+  glyph; its `--json` `trend` is `null` for the months before it existed.
+* **Callouts.** `biggest drop:` ignores pillars with no delta, so a new pillar
+  never appears there. `lowest:` covers every pillar of the shown month's set,
+  new ones included.
+* **The change is named.** When the shown month's set differs from the prior
+  stored month's, the line right after the `wheel:` header reads
+  `pillars changed since <YYYY-MM>: <retired labels> → <new labels joined by " + ">`,
+  generated from the pillar-set table (§2), never hand-written. Between set 1
+  and set 2 it reads
+  `pillars changed since <YYYY-MM>: relationships → romance/partner + friends & family`.
+* **The retired value is not shown beside the split spokes.** A set-2 view has
+  no `relationships` line and no blended number next to `romance/partner` and
+  `friends & family`. The retired spoke's history stays readable:
+  `show --month <set-1 month>` renders that month's eight exactly as stored.
+* **Notes and calibration** are the shown month's own — a retired pillar's
+  note or `suggested` value is never carried onto a new pillar.
+
+Synthetic boundary example — `2026-07` and `2026-08` recorded in set 1,
+`2026-09` the first month recorded in set 2:
+
+```
+wheel: 2026-09 (vs 2026-08)
+pillars changed since 2026-08: relationships → romance/partner + friends & family
+health: 6 (+1) ▄▄▅
+romance/partner: 3 (new) ▃
+friends & family: 7 (new) ▆
+career/work: 5 (-1) ▅▅▄
+finances: 6 (0) ▅▅▅
+personal growth: 7 (+1) ▅▅▆
+fun/recreation: 4 (0) ▃▃▃
+environment: 6 (0) ▅▅▅
+contribution: 5 (0) ▄▄▄
+lowest: romance/partner (3)
+biggest drop: career/work (-1)
+vision reviewed: no
+```
+
+The same month in `--json` (two pillars shown):
+
+```json
+{
+  "month": "2026-09",
+  "prior_month": "2026-08",
+  "receipt_id": "wheel_2026_09_001",
+  "pillar_set": 2,
+  "pillars_changed": { "since": "2026-08", "from": ["relationships"], "to": ["romance", "friends"] },
+  "months": ["2026-07", "2026-08", "2026-09"],
+  "pillars": [
+    { "pillar": "health", "label": "health", "score": 6, "delta": 1, "trend": [5, 5, 6], "sparkline": "▄▄▅", "note": "" },
+    { "pillar": "romance", "label": "romance/partner", "score": 3, "delta": null, "trend": [null, null, 3], "sparkline": "▃", "note": "" }
+  ],
+  "lowest": [ { "pillar": "romance", "score": 3 } ],
+  "biggest_drop": [ { "pillar": "career", "delta": -1 } ],
+  "vision_reviewed": false,
+  "vision_reflection": "",
+  "calibration": { "suggested": {} }
+}
+```
+
+`show --month 2026-08` on the same Ledger renders 2026-08's eight set-1
+pillars, `relationships` included, exactly as stored, with deltas against
+2026-07 and `pillar_set: 1`.
 
 ### 7.3 `wheel list` — the months
 
@@ -467,8 +647,8 @@ model.
 
 `add --json` emits `{receipt_id, entry_id, month, amended, scores}` — the
 snapshot's receipt, the month's stable id, the month, whether the month already
-had a wheel before this write, and the eight stored ratings as a
-`pillar key → integer` map. Like every `--json` stream, stdout carries JSON
+had a wheel before this write, and the current set's stored ratings (nine) as
+a `pillar key → integer` map. Like every `--json` stream, stdout carries JSON
 only; diagnostics stay on stderr.
 
 ## 8. Boundaries and defaults
@@ -495,8 +675,11 @@ only; diagnostics stay on stderr.
   reflections live only in the private Ledger under `~/.lucid/`, never in the
   repo. The schema holds no pointer to any private document (§6).
 
-**Defaults.** Eight fixed pillars in canonical order (§2) · integer 1–10 per
-pillar, every pillar required (§3) · month key calendar `YYYY-MM`, defaulting
+**Defaults.** Pillar set 2: nine fixed pillars in canonical order (§2); set-1
+months read as recorded · `relationships` retired in set 2, refused with the
+split message, never repurposed · integer 1–10 per pillar, every pillar of the
+snapshot's own set required (§3) · new snapshots always record the current
+`pillar_set`; stored wheels are never migrated (§4) · month key calendar `YYYY-MM`, defaulting
 to the month of the current logical day (04:00 rollover), future months
 rejected · one file per month under `registries/wheel/`, key `wheel_YYYY-MM`,
 receipt `wheel_YYYY_MM_<seq>` · same-month re-entry appends a snapshot,
@@ -504,6 +687,6 @@ latest-wins on read · delta against the most recent prior **stored** month ·
 sparkline over up to the last six stored months on a fixed 1–10 block scale ·
 `suggested` stored only alongside a full rating, surfaced only in
 `show --json`'s `calibration` block · `vision_reviewed` defaults to `false`; a
-reflection implies `true` · `schema` = 1. All timestamps are ISO-8601 with the
+reflection implies `true` · `schema` = 2. All timestamps are ISO-8601 with the
 host's local-TZ offset, the same rule as every record under `~/.lucid/`
 ([`mvp/data-model.md`](mvp/data-model.md) §"Time zone rule").
