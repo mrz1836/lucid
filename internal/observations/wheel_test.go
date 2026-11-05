@@ -2,6 +2,8 @@ package observations
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,4 +256,267 @@ func TestRegistryDir_Wheel(t *testing.T) {
 	dir, ok := RegistryDir(RegistryWheel)
 	require.True(t, ok)
 	assert.Equal(t, "wheel", dir)
+}
+
+// fullWheelSet2 returns a synthetic pillar-set-2 snapshot pillar map with all
+// nine pillars rated — every value is invented test data.
+func fullWheelSet2() map[string]PillarScore {
+	return map[string]PillarScore{
+		PillarHealth:       {Score: 6},
+		PillarRomance:      {Score: 3},
+		PillarFriends:      {Score: 9},
+		PillarCareer:       {Score: 5},
+		PillarFinances:     {Score: 4},
+		PillarGrowth:       {Score: 7},
+		PillarFun:          {Score: 4},
+		PillarEnvironment:  {Score: 6},
+		PillarContribution: {Score: 5},
+	}
+}
+
+func wheelSetKeysAndLabels(t *testing.T, set int) (keys, labels []string) {
+	t.Helper()
+	pillars, ok := WheelPillarsOf(set)
+	require.Truef(t, ok, "pillar set %d is known", set)
+	for _, p := range pillars {
+		keys = append(keys, p.Key)
+		labels = append(labels, p.Label)
+	}
+	return keys, labels
+}
+
+// TestWheelPillarSets_Table: the one pillar-set table holds set 1 (the
+// original eight) and set 2 (nine, relationships split into romance and
+// friends in its old slot) in canonical order with stable per-key labels, plus
+// set 2's change entry; the current-set accessors read the current set, and an
+// unknown set is unknown (wheel.md §2).
+func TestWheelPillarSets_Table(t *testing.T) {
+	keys1, labels1 := wheelSetKeysAndLabels(t, 1)
+	assert.Equal(t, []string{
+		"health", "relationships", "career", "finances", "growth", "fun", "environment", "contribution",
+	}, keys1)
+	assert.Equal(t, []string{
+		"health", "relationships", "career/work", "finances", "personal growth", "fun/recreation",
+		"environment", "contribution",
+	}, labels1)
+
+	keys2, labels2 := wheelSetKeysAndLabels(t, 2)
+	assert.Equal(t, []string{
+		"health", "romance", "friends", "career", "finances", "growth", "fun", "environment", "contribution",
+	}, keys2)
+	assert.Equal(t, []string{
+		"health", "romance/partner", "friends & family", "career/work", "finances", "personal growth",
+		"fun/recreation", "environment", "contribution",
+	}, labels2)
+
+	keysOf2, ok := WheelPillarKeysOf(2)
+	require.True(t, ok)
+	assert.Equal(t, keys2, keysOf2)
+
+	// Labels are stable per key: the all-sets lookup agrees with every set's row.
+	for _, set := range []int{1, 2} {
+		pillars, _ := WheelPillarsOf(set)
+		for _, p := range pillars {
+			got, found := WheelPillarLabel(p.Key)
+			require.Truef(t, found, "%s is a known key", p.Key)
+			assert.Equalf(t, p.Label, got, "set %d label for %s", set, p.Key)
+		}
+	}
+	label, ok := WheelPillarLabel(PillarRomance)
+	require.True(t, ok)
+	assert.Equal(t, "romance/partner", label)
+	label, ok = WheelPillarLabel(PillarFriends)
+	require.True(t, ok)
+	assert.Equal(t, "friends & family", label)
+	label, ok = WheelPillarLabel(PillarRelationships)
+	require.True(t, ok, "the retired set-1 key keeps its label so set-1 months read as recorded")
+	assert.Equal(t, "relationships", label)
+	_, ok = WheelPillarLabel("partner")
+	assert.False(t, ok)
+
+	// Membership is per set, by exact key.
+	assert.True(t, IsWheelPillarIn(1, PillarRelationships))
+	assert.False(t, IsWheelPillarIn(1, PillarRomance))
+	assert.False(t, IsWheelPillarIn(1, PillarFriends))
+	assert.True(t, IsWheelPillarIn(2, PillarRomance))
+	assert.True(t, IsWheelPillarIn(2, PillarFriends))
+	assert.False(t, IsWheelPillarIn(2, PillarRelationships), "relationships is retired in set 2, never repurposed")
+	assert.False(t, IsWheelPillarIn(3, PillarHealth), "an unknown set names no pillar")
+
+	// Unknown sets are unknown.
+	for _, set := range []int{-1, 0, 3} {
+		_, known := WheelPillarsOf(set)
+		assert.Falsef(t, known, "pillar set %d is not known", set)
+		_, known = WheelPillarKeysOf(set)
+		assert.Falsef(t, known, "pillar set %d is not known", set)
+		assert.Falsef(t, KnownWheelPillarSet(set), "pillar set %d", set)
+	}
+	assert.True(t, KnownWheelPillarSet(1))
+	assert.True(t, KnownWheelPillarSet(2))
+
+	// Each call returns a fresh slice.
+	first, _ := WheelPillarsOf(2)
+	first[1].Label = "mutated"
+	again, _ := WheelPillarsOf(2)
+	assert.Equal(t, "romance/partner", again[1].Label, "each call returns a fresh slice")
+
+	// The current-set accessors read the current set.
+	current, ok := WheelPillarsOf(CurrentWheelPillarSet)
+	require.True(t, ok, "the current set is a known set")
+	assert.Equal(t, current, WheelPillars())
+	currentKeys, _ := WheelPillarKeysOf(CurrentWheelPillarSet)
+	assert.Equal(t, currentKeys, WheelPillarKeys())
+	for _, key := range []string{PillarHealth, PillarRomance, PillarFriends, PillarRelationships, "wealth"} {
+		assert.Equalf(t, IsWheelPillarIn(CurrentWheelPillarSet, key), IsWheelPillar(key), "IsWheelPillar(%q) is current-set", key)
+	}
+
+	// Set 2's change entry: relationships → romance + friends, relative to the
+	// set that is current. At set 1 nothing is retired yet.
+	split, ok := wheelPillarRetirementAt(2, PillarRelationships)
+	require.True(t, ok)
+	assert.Equal(t, WheelPillarSplit{Set: 2, Retired: PillarRelationships, Into: []string{PillarRomance, PillarFriends}}, split)
+	for _, key := range []string{PillarRomance, PillarFriends, PillarHealth, "wealth"} {
+		_, ok = wheelPillarRetirementAt(2, key)
+		assert.Falsef(t, ok, "%q is not retired in set 2", key)
+	}
+	_, ok = wheelPillarRetirementAt(1, PillarRelationships)
+	assert.False(t, ok, "relationships is a live pillar of set 1")
+	_, ok = wheelPillarRetirementAt(3, PillarRelationships)
+	assert.False(t, ok, "an unknown current set retires nothing")
+
+	// The change entry agrees with the set rows it connects.
+	retired, added := WheelPillarSetChange(1, 2)
+	assert.Equal(t, []string{split.Retired}, retired)
+	assert.Equal(t, split.Into, added)
+
+	// The exported wrappers are the same lookup at the current set.
+	gotSplit, gotOK := WheelPillarRetirement(PillarRelationships)
+	wantSplit, wantOK := wheelPillarRetirementAt(CurrentWheelPillarSet, PillarRelationships)
+	assert.Equal(t, wantOK, gotOK)
+	assert.Equal(t, wantSplit, gotSplit)
+	into, gotOK := RetiredWheelPillar(PillarRelationships)
+	assert.Equal(t, wantOK, gotOK)
+	if wantOK {
+		assert.Equal(t, wantSplit.Into, into)
+	} else {
+		assert.Nil(t, into)
+	}
+}
+
+// TestWheelSnapshot_EffectivePillarSet: an absent pillar_set reads as set 1, so
+// every stored snapshot reads unchanged with no migration; a recorded set reads
+// as itself; and an unset set marshals no pillar_set key, while a set one sits
+// after type (wheel.md §4).
+func TestWheelSnapshot_EffectivePillarSet(t *testing.T) {
+	assert.Equal(t, 1, WheelSnapshot{}.EffectivePillarSet(), "absent reads as set 1")
+	assert.Equal(t, 1, WheelSnapshot{PillarSet: 1}.EffectivePillarSet())
+	assert.Equal(t, 2, WheelSnapshot{PillarSet: 2}.EffectivePillarSet())
+
+	var stored WheelSnapshot
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"id":"wheel_2026_08_001","at":"2026-08-30T10:00:00-04:00","type":"snapshot","pillars":{},"vision_reviewed":false}`,
+	), &stored))
+	assert.Equal(t, 0, stored.PillarSet)
+	assert.Equal(t, 1, stored.EffectivePillarSet(), "a schema-1 snapshot with no pillar_set is set 1")
+
+	var set2 WheelSnapshot
+	require.NoError(t, json.Unmarshal([]byte(
+		`{"id":"wheel_2026_09_001","at":"2026-09-06T17:12:40-04:00","type":"snapshot","pillar_set":2,"pillars":{},"vision_reviewed":false}`,
+	), &set2))
+	assert.Equal(t, 2, set2.EffectivePillarSet())
+
+	b, err := json.Marshal(WheelSnapshot{ID: "wheel_2026_08_001", Type: WheelEventSnapshot, Pillars: fullWheel()})
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "pillar_set", "an unset pillar set is omitted, so a set-1 write reads as before")
+
+	b, err = json.Marshal(WheelSnapshot{ID: "wheel_2026_09_001", Type: WheelEventSnapshot, PillarSet: 2, Pillars: fullWheelSet2()})
+	require.NoError(t, err)
+	out := string(b)
+	assert.Contains(t, out, `"pillar_set":2`)
+	typeAt := strings.Index(out, `"type"`)
+	setAt := strings.Index(out, `"pillar_set"`)
+	pillarsAt := strings.Index(out, `"pillars"`)
+	assert.Less(t, typeAt, setAt, "pillar_set follows type")
+	assert.Less(t, setAt, pillarsAt, "pillar_set precedes pillars")
+}
+
+// TestWheelSnapshot_ValidateOwnSet: a snapshot is validated against its OWN
+// pillar set — eight for set 1, nine for set 2 — so the retired key is unknown
+// in set 2, a set-2 pillar is unknown in set 1, a missing set-2 pillar is
+// refused by name, the range check covers the set's own pillars, and a set
+// this build does not know is refused (wheel.md §3, §4).
+func TestWheelSnapshot_ValidateOwnSet(t *testing.T) {
+	require.NoError(t, WheelSnapshot{Pillars: fullWheel()}.Validate(), "an absent set validates on the eight")
+	require.NoError(t, WheelSnapshot{PillarSet: 1, Pillars: fullWheel()}.Validate(), "set 1 validates on the eight")
+	require.NoError(t, WheelSnapshot{PillarSet: 2, Pillars: fullWheelSet2()}.Validate(), "set 2 validates on the nine")
+
+	// The eight are not a valid set-2 wheel, and the nine are not a valid set-1 wheel.
+	err := WheelSnapshot{PillarSet: 2, Pillars: fullWheel()}.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown pillar(s) relationships")
+	err = WheelSnapshot{Pillars: fullWheelSet2()}.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown pillar(s) friends, romance")
+
+	// The retired key beside the nine is still unknown in set 2.
+	withRetired := fullWheelSet2()
+	withRetired[PillarRelationships] = PillarScore{Score: 6}
+	err = WheelSnapshot{PillarSet: 2, Pillars: withRetired}.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown pillar(s) relationships")
+	assert.Equal(t, []string{PillarRelationships}, UnknownWheelPillarsIn(2, withRetired))
+	assert.Empty(t, UnknownWheelPillarsIn(1, fullWheel()))
+
+	// A missing set-2 pillar is refused by name, in canonical order.
+	noFriends := fullWheelSet2()
+	delete(noFriends, PillarFriends)
+	err = WheelSnapshot{PillarSet: 2, Pillars: noFriends}.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing rating(s) for friends")
+	noBoth := fullWheelSet2()
+	delete(noBoth, PillarFriends)
+	delete(noBoth, PillarRomance)
+	assert.Equal(t, []string{PillarRomance, PillarFriends}, MissingWheelPillarsIn(2, noBoth), "canonical order")
+	assert.Empty(t, MissingWheelPillarsIn(2, fullWheelSet2()))
+
+	// The range checks cover the set's own pillars.
+	offRomance := fullWheelSet2()
+	offRomance[PillarRomance] = PillarScore{Score: 0}
+	err = WheelSnapshot{PillarSet: 2, Pillars: offRomance}.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rating for romance")
+	offFriendsSuggested := fullWheelSet2()
+	offFriendsSuggested[PillarFriends] = PillarScore{Score: 7, Suggested: intPtr(11)}
+	err = WheelSnapshot{PillarSet: 2, Pillars: offFriendsSuggested}.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "suggestion for friends")
+
+	// A set this build does not know is refused, never read in the wrong set.
+	for _, set := range []int{3, -1} {
+		err = WheelSnapshot{PillarSet: set, Pillars: fullWheelSet2()}.Validate()
+		require.Errorf(t, err, "pillar set %d", set)
+		assert.Contains(t, err.Error(), fmt.Sprintf("pillar set %d is not known to this build", set))
+	}
+	assert.Empty(t, MissingWheelPillarsIn(3, fullWheelSet2()), "an unknown set names no pillar to miss")
+	assert.Len(t, UnknownWheelPillarsIn(3, fullWheelSet2()), 9, "an unknown set knows none of the keys")
+}
+
+// TestWheelPillarSetChange: the change between two pillar sets is the keys the
+// earlier one loses and the keys the later one gains, each in its own set's
+// canonical order; equal sets, and a set this build does not know, change
+// nothing (wheel.md §7.2).
+func TestWheelPillarSetChange(t *testing.T) {
+	retired, added := WheelPillarSetChange(1, 2)
+	assert.Equal(t, []string{PillarRelationships}, retired)
+	assert.Equal(t, []string{PillarRomance, PillarFriends}, added)
+
+	retired, added = WheelPillarSetChange(2, 1)
+	assert.Equal(t, []string{PillarRomance, PillarFriends}, retired, "the reverse")
+	assert.Equal(t, []string{PillarRelationships}, added)
+
+	for _, pair := range [][2]int{{1, 1}, {2, 2}, {1, 3}, {3, 2}, {0, 2}} {
+		retired, added = WheelPillarSetChange(pair[0], pair[1])
+		assert.Emptyf(t, retired, "%d→%d", pair[0], pair[1])
+		assert.Emptyf(t, added, "%d→%d", pair[0], pair[1])
+	}
 }
