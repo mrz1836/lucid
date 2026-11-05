@@ -16,8 +16,11 @@ import (
 	"github.com/mrz1836/lucid/internal/router"
 )
 
-// Flag names for the wheel verbs (wheel.md §7). The eight rating flags are the
-// pillar keys themselves ([observations.WheelPillarKeys]).
+// Flag names for the wheel verbs (wheel.md §7). The rating flags are the
+// current pillar set's keys themselves ([observations.WheelPillarKeys]) — nine
+// in pillar set 2. A key an earlier set carried and the current set retired
+// keeps a hidden flag of its own ([wheelRetiredPillarKeys]), so reaching for it
+// earns the split message instead of a bare "unknown flag".
 const (
 	wheelNoteFlag                 = "note"
 	wheelSuggestedFlag            = "suggested"
@@ -32,12 +35,12 @@ const (
 const wheelAddVerb = "wheel add"
 
 // newWheelCmd wires `lucid wheel` (wheel.md §7): the monthly Wheel of Life —
-// your own 1–10 rating of eight life pillars, kept as an append-only snapshot
-// per calendar month. It is a thin dispatch group, deterministic and agent-free
+// your own 1–10 rating of nine life pillars (pillar set 2), kept as an
+// append-only snapshot per calendar month. It is a thin dispatch group, deterministic and agent-free
 // (architecture P9): no wheel path reaches a model, so every subcommand
 // completes with no provider and no companion.
 //
-//	lucid wheel add --health 6 --relationships 7 --career 5 --finances 4 \
+//	lucid wheel add --health 6 --romance 4 --friends 7 --career 5 --finances 4 \
 //	  --growth 7 --fun 4 --environment 6 --contribution 5 --note health="moving most days"
 //	lucid wheel add --input wheel-2026-09.json --json
 //	lucid wheel show [--month 2026-08] [--json]
@@ -50,7 +53,7 @@ const wheelAddVerb = "wheel add"
 func newWheelCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wheel",
-		Short: "Keep a monthly Wheel of Life — your own 1–10 on eight life pillars",
+		Short: "Keep a monthly Wheel of Life — your own 1–10 on nine life pillars",
 	}
 	cmd.AddCommand(newWheelAddCmd(), newWheelShowCmd(), newWheelListCmd())
 	return cmd
@@ -109,17 +112,20 @@ func newWheelListCmd() *cobra.Command {
 }
 
 // newWheelAddCmd wires `lucid wheel add` (wheel.md §7.1). The wheel comes either
-// from flags — the eight required rating flags, repeatable --note and
+// from flags — the nine required rating flags, repeatable --note and
 // --suggested <pillar>=<value> pairs, the vision fields, and --month — or whole
 // from a strict JSON document via --input (a file, or - for stdin), which
 // excludes every other add flag but --json. A missing, blank, out-of-range, or
 // non-integer rating is refused before anything is written and is never filled
-// in. The human ack names the month and the receipt and echoes the eight stored
-// ratings; --json emits {receipt_id, entry_id, month, amended, scores}.
+// in. A retired pillar — the hidden --relationships flag, a --note or
+// --suggested pair naming it, or an --input key — is refused with the split
+// message (wheel.md §2), never as an unknown pillar. The human ack names the
+// month and the receipt and echoes the nine stored ratings; --json emits
+// {receipt_id, entry_id, month, amended, scores}.
 func newWheelAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: "Record one month's wheel — all eight pillars, each your own 1–10",
+		Short: "Record one month's wheel — all nine pillars, each your own 1–10",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			req, err := wheelAddRequest(cmd)
@@ -140,6 +146,12 @@ func newWheelAddCmd() *cobra.Command {
 	}
 	for _, p := range observations.WheelPillars() {
 		cmd.Flags().String(p.Key, "", fmt.Sprintf("Your own 1–10 rating for %s (required)", p.Label))
+	}
+	for _, key := range wheelRetiredPillarKeys() {
+		split, _ := observations.WheelPillarRetirement(key)
+		cmd.Flags().String(key, "", fmt.Sprintf("Retired in pillar set %d; refused (rate %s instead)",
+			split.Set, "--"+strings.Join(split.Into, " and --")))
+		_ = cmd.Flags().MarkHidden(key)
 	}
 	cmd.Flags().StringArray(wheelNoteFlag, nil, "An optional one-line why for a pillar, as <pillar>=<text> (repeatable)")
 	cmd.Flags().StringArray(wheelSuggestedFlag, nil,
@@ -177,7 +189,7 @@ func wheelAddRequest(cmd *cobra.Command) (router.AddWheelRequest, error) {
 // carries the whole wheel on its own (--json is an output switch, not part of
 // the wheel, so it is always allowed).
 func wheelFlagsBesideInput(cmd *cobra.Command) []string {
-	names := slices.Concat(observations.WheelPillarKeys(), []string{
+	names := slices.Concat(observations.WheelPillarKeys(), wheelRetiredPillarKeys(), []string{
 		wheelNoteFlag, wheelSuggestedFlag, wheelVisionReviewedFlag,
 		wheelVisionReflectionFlag, wheelVisionReflectionFileFlag, wheelMonthFlag,
 	})
@@ -190,15 +202,53 @@ func wheelFlagsBesideInput(cmd *cobra.Command) []string {
 	return set
 }
 
-// wheelRequestFromFlags builds the add request from the flag form. All eight
-// rating flags are required — a missing one is a usage error naming every
-// missing pillar, worded in cobra's own required-flag dialect — and each must
-// be a plain whole number 1–10. --note and --suggested pairs name a pillar
+// wheelRetiredPillarKeys lists, in canonical order, every pillar key an earlier
+// pillar set carried that the current set retired (wheel.md §2) — today just
+// relationships. It derives from the pillar-set table, so a future set's
+// retirement gets its hidden flag and its split refusal with no edit here.
+func wheelRetiredPillarKeys() []string {
+	var keys []string
+	for set := 1; set < observations.CurrentWheelPillarSet; set++ {
+		setKeys, _ := observations.WheelPillarKeysOf(set)
+		for _, key := range setKeys {
+			if _, retired := observations.WheelPillarRetirement(key); retired && !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
+}
+
+// wheelRetiredPillarError renders the refusal for a retired pillar key, or
+// returns nil when key is not retired: the one split message every add path
+// shares ([router.WheelRetiredPillarMessage]), closed with "nothing was saved".
+// prefix, when non-empty, leads the message in cobra's invalid-argument
+// dialect.
+func wheelRetiredPillarError(prefix, key string) error {
+	split, retired := observations.WheelPillarRetirement(key)
+	if !retired {
+		return nil
+	}
+	return fmt.Errorf("%s%s; nothing was saved", prefix, router.WheelRetiredPillarMessage(split))
+}
+
+// wheelRequestFromFlags builds the add request from the flag form. A retired
+// pillar's hidden flag is refused first, with the split message — before the
+// required-flag check, so `--relationships` beside the old seven reads as the
+// split, not as romance and friends missing. All nine rating flags are
+// required — a missing one is a usage error naming every missing pillar, worded
+// in cobra's own required-flag dialect — and each must be a plain whole number
+// 1–10. --note and --suggested pairs name a pillar
 // each; a pillar named twice in one flag is refused rather than silently
 // overwritten. Each of these refusals is typed as a usage error, so it exits 2
 // with the command's --help hint.
 func wheelRequestFromFlags(cmd *cobra.Command) (router.AddWheelRequest, error) {
 	flags := cmd.Flags()
+	for _, key := range wheelRetiredPillarKeys() {
+		if flags.Changed(key) {
+			return router.AddWheelRequest{}, newUsageError(cmd, wheelRetiredPillarError("", key))
+		}
+	}
 	var missing []string
 	for _, key := range observations.WheelPillarKeys() {
 		if !flags.Changed(key) {
@@ -254,9 +304,10 @@ func wheelRequestFromFlags(cmd *cobra.Command) (router.AddWheelRequest, error) {
 type wheelPairSetter func(p *observations.PillarScore, value string) error
 
 // applyWheelPairs applies a repeatable <pillar>=<value> flag's pairs onto
-// pillars. A pair without `=`, an unknown pillar, a pillar named twice, or a
-// value its setter refuses is refused in cobra's invalid-argument dialect; the
-// caller types the refusal as a usage error.
+// pillars. A pair naming a retired pillar is refused with the split message; a
+// pair without `=`, an unknown pillar, a pillar named twice, or a value its
+// setter refuses is refused in cobra's invalid-argument dialect. The caller
+// types every refusal as a usage error.
 func applyWheelPairs(
 	flag string, pairs []string, pillars map[string]observations.PillarScore, set wheelPairSetter,
 ) error {
@@ -264,6 +315,11 @@ func applyWheelPairs(
 	for _, pair := range pairs {
 		key, value, ok := strings.Cut(pair, "=")
 		key = strings.TrimSpace(key)
+		if err := wheelRetiredPillarError(
+			fmt.Sprintf("invalid argument %q for %q flag: ", pair, "--"+flag), key,
+		); err != nil {
+			return err
+		}
 		if !ok || !observations.IsWheelPillar(key) {
 			return fmt.Errorf(
 				"invalid argument %q for %q flag: want <pillar>=<value>, where <pillar> is one of %s; nothing was saved",
@@ -328,8 +384,10 @@ type wheelInputPillar struct {
 // is strict: an unknown key, trailing data, or a score or suggestion that is not
 // a plain whole number 1–10 is a clean error and nothing is written. A pillar
 // whose score is absent (or null) is left out of the request, so the router
-// refuses it as missing — never filled in; an unknown pillar key is passed
-// through for the router to refuse by name.
+// refuses it as missing — never filled in; an unknown or retired pillar key is
+// passed through for the router to refuse by name (a retired one with the split
+// message). A top-level pillar_set key is an unknown key: the binary always
+// records the current set.
 func parseWheelInput(data []byte) (router.AddWheelRequest, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -401,7 +459,7 @@ func isJSONAbsent(raw json.RawMessage) bool {
 
 // wheelAddView is the `wheel add --json` payload (wheel.md §7.4): the
 // snapshot's receipt, the month's stable id, the month, whether the month
-// already had a wheel, and the eight stored self-ratings — never a suggestion.
+// already had a wheel, and the nine stored self-ratings — never a suggestion.
 type wheelAddView struct {
 	ReceiptID string         `json:"receipt_id"`
 	EntryID   string         `json:"entry_id"`

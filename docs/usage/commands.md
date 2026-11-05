@@ -1910,8 +1910,9 @@ lucid gratitude thank gratitude_a-river --person "Sam Rivera" --day @yesterday
 ### wheel
 
 ```
-lucid wheel add --health <1-10> --relationships <1-10> --career <1-10> --finances <1-10>
-                --growth <1-10> --fun <1-10> --environment <1-10> --contribution <1-10>
+lucid wheel add --health <1-10> --romance <1-10> --friends <1-10> --career <1-10>
+                --finances <1-10> --growth <1-10> --fun <1-10> --environment <1-10>
+                --contribution <1-10>
                 [--note <pillar>=<text>]... [--suggested <pillar>=<1-10>]...
                 [--vision-reviewed] [--vision-reflection <text> | --vision-reflection-file <path>]
                 [--month <YYYY-MM>] [--json]
@@ -1920,10 +1921,11 @@ lucid wheel show [--month <YYYY-MM>] [--json]
 lucid wheel list [--json]
 ```
 
-Keep a monthly **Wheel of Life** — your own 1–10 rating of eight life pillars
-(health, relationships, career/work, finances, personal growth,
-fun/recreation, environment, contribution), read back as a month-over-month
-trend. An append-only **registry** kind under `~/.lucid/registries/wheel/`, one
+Keep a monthly **Wheel of Life** — your own 1–10 rating of nine life pillars
+(health, romance/partner, friends & family, career/work, finances, personal
+growth, fun/recreation, environment, contribution), read back as a
+month-over-month trend. The nine are **pillar set 2**; months recorded before it read in their
+own set, exactly as stored. An append-only **registry** kind under `~/.lucid/registries/wheel/`, one
 file per calendar month keyed `wheel_YYYY-MM`. An inventory of balance, never a
 scorecard: no balance score, average, streak, or target. Deterministic and
 agent-free — no model in any path, so every subcommand completes with no
@@ -1932,17 +1934,22 @@ the 1–10 scale, the snapshot schema, the `suggested` calibration field, the
 vision reflection, and the trend view): [`../wheel.md`](../wheel.md).
 
 - **`add`** records one month's whole wheel as one `snapshot` and prints the
-  write's receipt id (`wheel_YYYY_MM_<seq>`), then echoes the eight stored
-  ratings. **All eight rating flags are required**, each an integer **1–10** —
+  write's receipt id (`wheel_YYYY_MM_<seq>`), then echoes the nine stored
+  ratings. **All nine rating flags are required**, each an integer **1–10** —
   the wheel's own scale, not the 1–5 capacity or 1–7 Bristol scale. A missing,
   out-of-range, or non-integer rating is a clean error and nothing is written;
   a rating is never defaulted, inferred, or filled in.
+  - The retired `relationships` pillar was split into `romance` and `friends`
+    in pillar set 2: naming it as a flag, a `--note`/`--suggested` pillar, or an
+    `--input` key is refused with
+    `relationships was split into romance and friends in pillar set 2; rate both`
+    and nothing is written, while older months still show it as recorded.
   - `--note <pillar>=<text>` (repeatable) stores a pillar's optional one-line
     "why" verbatim.
   - `--suggested <pillar>=<1-10>` (repeatable) stores a pillar's optional
     **calibration** value — a companion's read of the month's evidence — in a
     field kept separate from your rating. It is accepted only alongside all
-    eight ratings, is never the score, never shown in human output, and never
+    nine ratings, is never the score, never shown in human output, and never
     folded into the trend.
   - `--vision-reviewed` records the monthly vision re-read;
     `--vision-reflection <text>` / `--vision-reflection-file <path>` (`-` for
@@ -1954,7 +1961,8 @@ vision reflection, and the trend view): [`../wheel.md`](../wheel.md).
     document instead (`{month?, pillars: {<key>: {score, note?, suggested?}},
     vision_reviewed?, vision_reflection?}`) — the structured path a companion
     uses to keep notes off the command line. It excludes every other `add` flag
-    but `--json`.
+    but `--json` (so the document carries its own `month`); a `pillar_set` key
+    is refused as unknown, because new wheels always record the current set.
 
   **Same month again = amend by append.** A second `add` for a month appends
   another snapshot, which wins on read (latest-wins); the earlier snapshot and
@@ -1967,7 +1975,11 @@ vision reflection, and the trend view): [`../wheel.md`](../wheel.md).
   Human output is `key: value` lines and bullets only — **never a markdown
   table** — so it relays cleanly into chat. The first recorded month shows
   `no prior month` instead of a delta; with nothing recorded, `show` prints
-  `no prior month — no wheel recorded yet` and exits `0`.
+  `no prior month — no wheel recorded yet` and exits `0`. Each month is shown
+  in its own pillar set: across a set change, a `pillars changed since
+  <YYYY-MM>: …` line follows the header, a pillar the prior month lacks reads
+  `(new)` instead of a delta, and its sparkline covers only the months that
+  rated it.
 - **`list`** prints one line per recorded month, most recent first (latest
   receipt, snapshot count when amended, whether the vision was reviewed); with
   nothing recorded it prints `no prior month — no wheel recorded yet`.
@@ -1975,26 +1987,31 @@ vision reflection, and the trend view): [`../wheel.md`](../wheel.md).
 **`--json` shapes** (snake_case; stdout carries JSON only):
 
 - **`add`**: `{receipt_id, entry_id, month, amended, scores}` — `scores` is the
-  eight stored ratings as a `pillar key → integer` map; `amended` is `true` when
+  nine stored ratings as a `pillar key → integer` map; `amended` is `true` when
   the month already had a wheel.
-- **`show`**: `{month, prior_month, receipt_id, months, pillars: [{pillar,
-  label, score, delta, trend, sparkline, note}], lowest: [{pillar, score}],
-  biggest_drop: [{pillar, delta}], vision_reviewed, vision_reflection,
-  calibration: {suggested: {<key>: <int>}}}` — `delta` is `null` and
-  `prior_month` `""` with no prior month; arrays are never null;
+- **`show`**: `{month, prior_month, receipt_id, pillar_set, pillars_changed,
+  months, pillars: [{pillar, label, score, delta, trend, sparkline, note}],
+  lowest: [{pillar, score}], biggest_drop: [{pillar, delta}], vision_reviewed,
+  vision_reflection, calibration: {suggested: {<key>: <int>}}}` — `delta` is
+  `null` and `prior_month` `""` with no prior month; arrays are never null;
   `calibration.suggested` is the only place stored `suggested` values appear,
-  and nothing else in the payload is derived from them.
+  and nothing else in the payload is derived from them. `trend` is
+  null-aligned to `months` (`null` where a month lacks the pillar, so
+  consumers must accept `null`), `delta` is `null` for a pillar new since the
+  prior month, `pillar_set` is the shown month's pillar set, and
+  `pillars_changed` is `{since, from, to}` (pillar keys) when the set changed
+  versus the prior month, else `null`.
 - **`list`**: `{months: [{month, entry_id, receipt_id, snapshots, recorded_at,
   vision_reviewed}]}` — most recent first; `[]` when empty.
 
 ```sh
-lucid wheel add --health 6 --relationships 7 --career 5 --finances 4 \
+lucid wheel add --health 6 --romance 4 --friends 7 --career 5 --finances 4 \
   --growth 7 --fun 4 --environment 6 --contribution 5 \
   --note health="moving most days" --vision-reviewed
 lucid wheel add --input wheel-2026-09.json --json
 lucid wheel add --input - < wheel-2026-09.json
-lucid wheel add --month 2026-08 --health 5 --relationships 7 --career 6 --finances 6 \
-  --growth 7 --fun 4 --environment 6 --contribution 5
+lucid wheel add --month 2026-08 --health 5 --romance 6 --friends 7 --career 6 \
+  --finances 6 --growth 7 --fun 4 --environment 6 --contribution 5
 lucid wheel show
 lucid wheel show --month 2026-08 --json
 lucid wheel list
