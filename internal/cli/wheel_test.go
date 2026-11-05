@@ -33,6 +33,9 @@ func wheelAddArgs(extra ...string) []string {
 	return append(append([]string{"wheel", "add"}, wheelRatingArgs()...), extra...)
 }
 
+// wheelScorePtr returns a pointer to a rating — one null-aligned trend entry.
+func wheelScorePtr(n int) *int { return &n }
+
 // readWheelMonth reads a month's entry straight from the isolated Ledger.
 func readWheelMonth(t *testing.T, home, month string) (observations.WheelEntry, bool) {
 	t.Helper()
@@ -633,7 +636,7 @@ func TestWheelRoundTrip_AddListShow_CLI(t *testing.T) {
 		require.NotNil(t, p.Delta, p.Pillar)
 		assert.Equal(t, w.delta, *p.Delta, "%s delta vs 2026-08", p.Pillar)
 	}
-	assert.Equal(t, []int{6, 6, 8}, show.Pillars[0].Trend)
+	assert.Equal(t, []*int{wheelScorePtr(6), wheelScorePtr(6), wheelScorePtr(8)}, show.Pillars[0].Trend)
 	assert.Equal(t, []router.WheelPillarScore{{Pillar: "finances", Score: 3}}, show.Lowest)
 
 	var aug router.WheelShowView
@@ -664,4 +667,209 @@ func TestWheelListCLI_ReadError(t *testing.T) {
 	assert.Empty(t, out)
 	assert.Contains(t, stderr, "could not read the wheel")
 	assert.Equal(t, ExitErr, exitCodeForError(err))
+}
+
+// writeRawWheelFile writes one month file straight into the isolated Ledger,
+// bypassing the add path, so the fixture keeps its pillar set whatever set new
+// writes record in: set 1 with no pillar_set under schema 1 (exactly as every
+// month before pillar set 2 was stored), any other set stamped under schema 2.
+// Ratings follow the set's canonical order — invented test data.
+func writeRawWheelFile(
+	t *testing.T, home, month string, set int, scores []int, edit func(map[string]observations.PillarScore),
+) {
+	t.Helper()
+	keys, ok := observations.WheelPillarKeysOf(set)
+	require.True(t, ok, "pillar set %d", set)
+	require.Len(t, scores, len(keys))
+	pillars := make(map[string]observations.PillarScore, len(keys))
+	for i, key := range keys {
+		pillars[key] = observations.PillarScore{Score: scores[i]}
+	}
+	if edit != nil {
+		edit(pillars)
+	}
+	schema, stamped := 1, 0
+	if set != 1 {
+		schema, stamped = 2, set
+	}
+	at := wheelClock().Format(time.RFC3339)
+	entry := observations.WheelEntry{
+		Key: observations.WheelEntryKey(month), Kind: observations.RegistryWheel, Schema: schema, Month: month,
+		History: []observations.WheelSnapshot{{
+			ID: observations.WheelReceiptID(month, 1), At: at, Type: observations.WheelEventSnapshot,
+			PillarSet: stamped, Pillars: pillars,
+		}},
+		CreatedAt: at, UpdatedAt: at,
+	}
+	b, err := json.Marshal(entry)
+	require.NoError(t, err)
+	dir := filepath.Join(home, "registries", "wheel")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "wheel_"+month+".json"), b, 0o600))
+}
+
+// seedWheelPillarSetBoundary writes a set-1 August (with a note and a
+// suggestion on the retired relationships pillar) and a set-2 September — the
+// first month after the split — with a friends note and a health suggestion.
+func seedWheelPillarSetBoundary(t *testing.T, home string) {
+	t.Helper()
+	writeRawWheelFile(t, home, "2026-08", 1, []int{5, 7, 6, 6, 6, 4, 6, 5}, func(p map[string]observations.PillarScore) {
+		suggested := 4
+		p[observations.PillarRelationships] = observations.PillarScore{
+			Score: 7, Note: "synthetic blended spoke note", Suggested: &suggested,
+		}
+	})
+	writeRawWheelFile(t, home, "2026-09", 2, []int{6, 2, 7, 5, 3, 7, 4, 6, 5}, func(p map[string]observations.PillarScore) {
+		suggested := 7
+		p[observations.PillarHealth] = observations.PillarScore{Score: 6, Suggested: &suggested}
+		p[observations.PillarFriends] = observations.PillarScore{Score: 7, Note: "synthetic dinner note"}
+	})
+}
+
+// TestWheelShowCLI_PillarSetBoundary_Human: `wheel show` on a set-2 month
+// against a set-1 prior prints the change line right after the header, `(new)`
+// on the two new pillars, real deltas on the seven unchanged ones, and no
+// retired relationships line or note — Discord-safe, with no suggestion
+// (wheel.md §7.2 "Across a pillar-set change").
+func TestWheelShowCLI_PillarSetBoundary_Human(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, wheelClock())
+	seedWheelPillarSetBoundary(t, home)
+
+	out, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "show")
+	require.NoError(t, err, stderr)
+	assert.Empty(t, stderr)
+	assert.Equal(t, strings.Join([]string{
+		"wheel: 2026-09 (vs 2026-08)",
+		"pillars changed since 2026-08: relationships → romance/partner + friends & family",
+		"health: 6 (+1) ▄▅",
+		"romance/partner: 2 (new) ▂",
+		"friends & family: 7 (new) ▆",
+		"career/work: 5 (-1) ▅▄",
+		"finances: 3 (-3) ▅▃",
+		"personal growth: 7 (+1) ▅▆",
+		"fun/recreation: 4 (0) ▃▃",
+		"environment: 6 (0) ▅▅",
+		"contribution: 5 (0) ▄▄",
+		"lowest: romance/partner (2)",
+		"biggest drop: finances (-3)",
+		"notes:",
+		"- friends & family: synthetic dinner note",
+		"vision reviewed: no",
+	}, "\n")+"\n", out)
+
+	assert.Equal(t, 2, strings.Count(out, "(new)"), "exactly the two new pillars read (new)")
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		assert.NotContains(t, line, "|", "never a markdown table: %q", line)
+		assert.False(t, strings.HasPrefix(line, "relationships:"), "no retired pillar line: %q", line)
+		if strings.HasPrefix(line, "romance/partner:") || strings.HasPrefix(line, "friends & family:") {
+			assert.NotContains(t, line, "(0)", "a new pillar never reads a zero delta: %q", line)
+			assert.NotContains(t, line, "(+", "a new pillar never reads a computed delta: %q", line)
+			assert.NotContains(t, line, "(-", "a new pillar never reads a computed delta: %q", line)
+		}
+	}
+	assert.NotContains(t, out, "blended", "the retired pillar's note is not carried")
+	assert.NotContains(t, strings.ToLower(out), "suggest", "a suggestion never reaches human output")
+}
+
+// TestWheelShowCLI_PillarSetBoundary_JSON: `wheel show --json` across the
+// boundary carries the shown month's pillar_set and the pillars_changed block,
+// a null-aligned trend with a null delta on each new pillar, only the shown
+// month's stored suggestions in calibration, and every array present
+// (wheel.md §7.2).
+func TestWheelShowCLI_PillarSetBoundary_JSON(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, wheelClock())
+	seedWheelPillarSetBoundary(t, home)
+	out := runWheel(t, "wheel", "show", "--json")
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &raw), out)
+	for _, key := range []string{"months", "pillars", "lowest", "biggest_drop"} {
+		assert.IsType(t, []any{}, raw[key], "%s is present and an array, never null", key)
+	}
+	assert.Equal(t, map[string]any{
+		"since": "2026-08", "from": []any{"relationships"}, "to": []any{"romance", "friends"},
+	}, raw["pillars_changed"])
+
+	var view struct {
+		PillarSet      int `json:"pillar_set"`
+		PillarsChanged *struct {
+			Since string   `json:"since"`
+			From  []string `json:"from"`
+			To    []string `json:"to"`
+		} `json:"pillars_changed"`
+		Months  []string `json:"months"`
+		Pillars []struct {
+			Pillar    string `json:"pillar"`
+			Label     string `json:"label"`
+			Score     int    `json:"score"`
+			Delta     *int   `json:"delta"`
+			Trend     []*int `json:"trend"`
+			Sparkline string `json:"sparkline"`
+		} `json:"pillars"`
+		BiggestDrop []router.WheelPillarDelta `json:"biggest_drop"`
+		Calibration struct {
+			Suggested map[string]int `json:"suggested"`
+		} `json:"calibration"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &view), out)
+	assert.Equal(t, 2, view.PillarSet)
+	require.NotNil(t, view.PillarsChanged)
+	assert.Equal(t, "2026-08", view.PillarsChanged.Since)
+	assert.Equal(t, []string{"2026-08", "2026-09"}, view.Months)
+	require.Len(t, view.Pillars, 9)
+
+	romance := view.Pillars[1]
+	assert.Equal(t, "romance", romance.Pillar)
+	assert.Equal(t, "romance/partner", romance.Label)
+	assert.Nil(t, romance.Delta, "a new pillar's delta is null")
+	require.Len(t, romance.Trend, 2)
+	assert.Nil(t, romance.Trend[0], "null where the month lacks the pillar")
+	require.NotNil(t, romance.Trend[1])
+	assert.Equal(t, 2, *romance.Trend[1])
+	assert.Equal(t, "▂", romance.Sparkline, "one block: only the month that rated it")
+	assert.Equal(t, "friends", view.Pillars[2].Pillar)
+	assert.Nil(t, view.Pillars[2].Delta)
+
+	for _, p := range view.Pillars {
+		assert.Len(t, p.Trend, len(view.Months), "%s trend is aligned to months", p.Pillar)
+		assert.NotEqual(t, "relationships", p.Pillar, "the retired pillar is not shown")
+	}
+	assert.Equal(t, []router.WheelPillarDelta{{Pillar: "finances", Delta: -3}}, view.BiggestDrop)
+	assert.Equal(t, map[string]int{"health": 7}, view.Calibration.Suggested,
+		"only the shown month's stored suggestions — never the retired pillar's")
+	rawRomance, ok := raw["pillars"].([]any)[1].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{nil, float64(2)}, rawRomance["trend"], "the trend's gap is a literal JSON null")
+	assert.Contains(t, rawRomance, "delta")
+	assert.Nil(t, rawRomance["delta"])
+}
+
+// TestWheelShowCLI_Schema1Golden_AdditiveKeys: over the schema-1 golden Ledger
+// (no pillar_set anywhere), `wheel show --json` carries the two additive keys
+// as pillar_set 1 and pillars_changed null — for the latest month and for
+// --month on the first one — and the reads rewrite no stored byte.
+func TestWheelShowCLI_Schema1Golden_AdditiveKeys(t *testing.T) {
+	home := isolatedHome(t)
+	withClock(t, schema1GoldenNow())
+	paths := seedSchema1GoldenLedger(t, home)
+
+	for _, args := range [][]string{
+		{"wheel", "show", "--json"},
+		{"wheel", "show", "--month", "2026-07", "--json"},
+	} {
+		var view map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(runWheel(t, args...)), &view))
+		assert.JSONEq(t, "1", string(view["pillar_set"]), "%v: a month with no pillar_set reads as set 1", args)
+		changed, present := view["pillars_changed"]
+		assert.True(t, present, "%v: pillars_changed is always present", args)
+		assert.JSONEq(t, "null", string(changed), "%v: the set did not change", args)
+	}
+
+	for i, want := range []string{schema1GoldenJuly, schema1GoldenAugust} {
+		got, err := os.ReadFile(paths[i])
+		require.NoError(t, err)
+		assert.Equal(t, want, string(got), "a read never rewrites a stored schema-1 file")
+	}
 }

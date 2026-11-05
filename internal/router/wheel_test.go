@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
@@ -44,6 +45,15 @@ func syntheticWheelRatings() map[string]observations.PillarScore {
 }
 
 func wheelIntPtr(n int) *int { return &n }
+
+// wheelTrendOf builds an expected null-aligned trend: one rating per month.
+func wheelTrendOf(scores ...int) []*int {
+	out := make([]*int, len(scores))
+	for i, n := range scores {
+		out[i] = wheelIntPtr(n)
+	}
+	return out
+}
 
 // readWheelFile returns the month's entry straight from the store.
 func readWheelFile(t *testing.T, r *Router, month string) (observations.WheelEntry, bool) {
@@ -417,7 +427,7 @@ func TestWheelShowDelta_VsPriorMonth(t *testing.T) {
 	health := pillarTrend(t, v, observations.PillarHealth)
 	require.NotNil(t, health.Delta)
 	assert.Equal(t, 1, *health.Delta)
-	assert.Equal(t, []int{4, 5, 5, 6}, health.Trend)
+	assert.Equal(t, wheelTrendOf(4, 5, 5, 6), health.Trend)
 	assert.Equal(t, "synthetic walk note", health.Note)
 	assert.Equal(t, []WheelPillarScore{{Pillar: "finances", Score: 4}, {Pillar: "fun", Score: 4}}, v.Lowest)
 	assert.Equal(t, []WheelPillarDelta{{Pillar: "finances", Delta: -2}}, v.BiggestDrop)
@@ -497,12 +507,13 @@ func TestWheelShowEmptyHistory(t *testing.T) {
 
 	b, err := json.Marshal(res.View)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{
+	assert.JSONEq(t, fmt.Sprintf(`{
 		"month": "", "prior_month": "", "receipt_id": "",
+		"pillar_set": %d, "pillars_changed": null,
 		"months": [], "pillars": [], "lowest": [], "biggest_drop": [],
 		"vision_reviewed": false, "vision_reflection": "",
 		"calibration": {"suggested": {}}
-	}`, string(b))
+	}`, observations.CurrentWheelPillarSet), string(b))
 }
 
 // TestWheelShow_MonthSelection: --month tolerates a leading `@`; a malformed
@@ -540,7 +551,7 @@ func TestWheelShowSparkline_FixedScaleSixMonths(t *testing.T) {
 	v := showWheel(t, r, "").View
 	assert.Equal(t, []string{"2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"}, v.Months)
 	health := pillarTrend(t, v, observations.PillarHealth)
-	assert.Equal(t, []int{3, 4, 5, 6, 7, 8}, health.Trend)
+	assert.Equal(t, wheelTrendOf(3, 4, 5, 6, 7, 8), health.Trend)
 	assert.Equal(t, "▃▃▄▅▆▆", health.Sparkline)
 	assert.Equal(t, "▇▇▇▇▇▇", pillarTrend(t, v, observations.PillarFun).Sparkline,
 		"a flat pillar stays flat at its own band — no auto-scaling")
@@ -726,4 +737,308 @@ func TestWheelListNoModel(t *testing.T) {
 	all, err := r.store.ReadWheelAll()
 	require.NoError(t, err)
 	assert.Len(t, all, 2)
+}
+
+// wheelSetRatings builds every pillar of pillar set set from ratings in that
+// set's canonical order — invented test data, independent of the set new
+// writes record in.
+func wheelSetRatings(t *testing.T, set int, scores ...int) map[string]observations.PillarScore {
+	t.Helper()
+	keys, ok := observations.WheelPillarKeysOf(set)
+	require.True(t, ok, "pillar set %d", set)
+	require.Len(t, scores, len(keys), "one rating per pillar of set %d", set)
+	out := make(map[string]observations.PillarScore, len(keys))
+	for i, key := range keys {
+		out[key] = observations.PillarScore{Score: scores[i]}
+	}
+	return out
+}
+
+// writeRawWheelMonth writes one month file straight to disk, bypassing the add
+// path, so the fixture keeps its pillar set whatever set new writes record in.
+// Set 1 is written with no pillar_set at all under schema 1 — exactly as every
+// month before pillar set 2 was stored; any other set is stamped under schema 2.
+func writeRawWheelMonth(
+	t *testing.T, r *Router, month string, set int, pillars map[string]observations.PillarScore,
+) {
+	t.Helper()
+	schema, stamped := 1, 0
+	if set != 1 {
+		schema, stamped = 2, set
+	}
+	at := wheelDay().Format(time.RFC3339)
+	entry := observations.WheelEntry{
+		Key:    observations.WheelEntryKey(month),
+		Kind:   observations.RegistryWheel,
+		Schema: schema,
+		Month:  month,
+		History: []observations.WheelSnapshot{{
+			ID:        observations.WheelReceiptID(month, 1),
+			At:        at,
+			Type:      observations.WheelEventSnapshot,
+			PillarSet: stamped,
+			Pillars:   pillars,
+		}},
+		CreatedAt: at,
+		UpdatedAt: at,
+	}
+	b, err := json.Marshal(entry)
+	require.NoError(t, err)
+	if set == 1 {
+		require.NotContains(t, string(b), "pillar_set", "a set-1 fixture carries no pillar_set")
+	}
+	require.NoError(t, r.store.ScaffoldWheel())
+	path := filepath.Join(r.store.Home(), "registries", "wheel", "wheel_"+month+".json")
+	require.NoError(t, os.WriteFile(path, b, 0o600))
+}
+
+// withNote returns pillars with key's note (and, when given, its suggestion)
+// set.
+func withNote(pillars map[string]observations.PillarScore, key, note string, suggested *int) map[string]observations.PillarScore {
+	p := pillars[key]
+	p.Note = note
+	p.Suggested = suggested
+	pillars[key] = p
+	return pillars
+}
+
+// TestWheelShow_PillarSetBoundary: a set-2 month shown against a set-1 prior
+// month never errors and never shows a number that was not recorded — the
+// seven unchanged pillars carry real deltas, the two new ones read `(new)` with
+// a nil delta and a trend over the months that rated them, biggest drop leaves
+// them out, lowest covers all nine, the header line names the change, and the
+// retired pillar is not shown (wheel.md §7.2 "Across a pillar-set change").
+func TestWheelShow_PillarSetBoundary(t *testing.T) {
+	r := bootedWheel(t)
+	aug := wheelSetRatings(t, 1, 5, 7, 6, 6, 6, 4, 6, 5)
+	aug = withNote(aug, observations.PillarRelationships, "synthetic blended spoke note", wheelIntPtr(4))
+	writeRawWheelMonth(t, r, "2026-08", 1, aug)
+	// A low romance rating: compared against the retired relationships 7 it
+	// would be the biggest drop (-5), so its absence from biggest drop is proof.
+	sep := wheelSetRatings(t, 2, 6, 2, 7, 5, 3, 7, 4, 6, 5)
+	sep = withNote(sep, observations.PillarFriends, "synthetic dinner note", nil)
+	sep = withNote(sep, observations.PillarHealth, "", wheelIntPtr(7))
+	writeRawWheelMonth(t, r, "2026-09", 2, sep)
+
+	res, err := r.ShowWheel(ShowWheelRequest{})
+	require.NoError(t, err, "a mixed window never errors")
+	assert.Equal(t, []string{
+		"wheel: 2026-09 (vs 2026-08)",
+		"pillars changed since 2026-08: relationships → romance/partner + friends & family",
+		"health: 6 (+1) ▄▅",
+		"romance/partner: 2 (new) ▂",
+		"friends & family: 7 (new) ▆",
+		"career/work: 5 (-1) ▅▄",
+		"finances: 3 (-3) ▅▃",
+		"personal growth: 7 (+1) ▅▆",
+		"fun/recreation: 4 (0) ▃▃",
+		"environment: 6 (0) ▅▅",
+		"contribution: 5 (0) ▄▄",
+		"lowest: romance/partner (2)",
+		"biggest drop: finances (-3)",
+		"notes:",
+		"- friends & family: synthetic dinner note",
+		"vision reviewed: no",
+	}, res.Lines)
+	assertDiscordSafe(t, res.Lines)
+	for _, line := range res.Lines {
+		assert.False(t, strings.HasPrefix(line, "relationships:"), "no retired pillar line: %q", line)
+		assert.NotContains(t, line, "blended", "a retired pillar's note is never carried: %q", line)
+	}
+
+	v := res.View
+	assert.Equal(t, "2026-09", v.Month)
+	assert.Equal(t, "2026-08", v.PriorMonth)
+	assert.Equal(t, 2, v.PillarSet)
+	assert.Equal(t, &WheelPillarsChanged{
+		Since: "2026-08", From: []string{"relationships"}, To: []string{"romance", "friends"},
+	}, v.PillarsChanged)
+	assert.Equal(t, []string{"2026-08", "2026-09"}, v.Months)
+	require.Len(t, v.Pillars, 9)
+	keys := make([]string, len(v.Pillars))
+	for i, p := range v.Pillars {
+		keys[i] = p.Pillar
+	}
+	assert.Equal(t, []string{
+		"health", "romance", "friends", "career", "finances", "growth", "fun", "environment", "contribution",
+	}, keys, "the shown month's set decides the lines, in its canonical order")
+
+	for _, key := range []string{observations.PillarRomance, observations.PillarFriends} {
+		p := pillarTrend(t, v, key)
+		assert.Nil(t, p.Delta, "%s is new since the prior month — no delta", key)
+		require.Len(t, p.Trend, 2, "the trend stays aligned to months")
+		assert.Nil(t, p.Trend[0], "%s was not rated in the set-1 month", key)
+		require.NotNil(t, p.Trend[1])
+		assert.Equal(t, p.Score, *p.Trend[1])
+		assert.Len(t, []rune(p.Sparkline), 1, "%s sparkline covers only the month that rated it", key)
+	}
+	deltas := 0
+	for _, p := range v.Pillars {
+		if p.Delta != nil {
+			deltas++
+			require.Len(t, p.Trend, 2)
+			assert.NotNil(t, p.Trend[0], "%s was rated in both months", p.Pillar)
+		}
+	}
+	assert.Equal(t, 7, deltas, "the seven unchanged pillars carry real deltas")
+	assert.Equal(t, 1, *pillarTrend(t, v, observations.PillarHealth).Delta)
+	assert.Equal(t, -3, *pillarTrend(t, v, observations.PillarFinances).Delta)
+	assert.Equal(t, []WheelPillarDelta{{Pillar: "finances", Delta: -3}}, v.BiggestDrop)
+	assert.Equal(t, []WheelPillarScore{{Pillar: "romance", Score: 2}}, v.Lowest)
+	assert.Equal(t, map[string]int{"health": 7}, v.Calibration.Suggested,
+		"calibration is the shown month's own — the retired pillar's suggestion is not carried")
+
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	assert.Contains(t, string(b),
+		`"pillar_set":2,"pillars_changed":{"since":"2026-08","from":["relationships"],"to":["romance","friends"]}`)
+	assert.Contains(t, string(b), `"pillar":"romance","label":"romance/partner","score":2,"delta":null,"trend":[null,2]`)
+	assert.NotContains(t, string(b), `"pillar":"relationships"`)
+}
+
+// TestWheelShow_PillarSetWindow: in a set-1 → set-2 → set-2 window the newest
+// month's deltas are against the middle set-2 month — real deltas on the new
+// pillars too — each new pillar's trend is null for the set-1 month and its
+// sparkline skips it, the seven unchanged pillars span all three months, and
+// no change line is printed (the set did not change since the prior month).
+func TestWheelShow_PillarSetWindow(t *testing.T) {
+	r := bootedWheel(t)
+	writeRawWheelMonth(t, r, "2026-07", 1, wheelSetRatings(t, 1, 4, 6, 5, 5, 6, 3, 7, 4))
+	writeRawWheelMonth(t, r, "2026-08", 2, wheelSetRatings(t, 2, 5, 3, 6, 5, 6, 6, 4, 7, 4))
+	writeRawWheelMonth(t, r, "2026-09", 2, wheelSetRatings(t, 2, 6, 6, 7, 6, 5, 7, 4, 6, 5))
+
+	res := showWheel(t, r, "")
+	assert.Equal(t, []string{
+		"wheel: 2026-09 (vs 2026-08)",
+		"health: 6 (+1) ▃▄▅",
+		"romance/partner: 6 (+3) ▃▅",
+		"friends & family: 7 (+1) ▅▆",
+		"career/work: 6 (+1) ▄▄▅",
+		"finances: 5 (-1) ▄▅▄",
+		"personal growth: 7 (+1) ▅▅▆",
+		"fun/recreation: 4 (0) ▃▃▃",
+		"environment: 6 (-1) ▆▆▅",
+		"contribution: 5 (+1) ▃▃▄",
+		"lowest: fun/recreation (4)",
+		"biggest drop: finances (-1), environment (-1)",
+		"vision reviewed: no",
+	}, res.Lines)
+	assertDiscordSafe(t, res.Lines)
+
+	v := res.View
+	assert.Nil(t, v.PillarsChanged, "the set did not change since the prior month")
+	assert.Equal(t, 2, v.PillarSet)
+	assert.Equal(t, []string{"2026-07", "2026-08", "2026-09"}, v.Months)
+	romance := pillarTrend(t, v, observations.PillarRomance)
+	require.NotNil(t, romance.Delta)
+	assert.Equal(t, 3, *romance.Delta, "the delta is against the middle set-2 month")
+	assert.Equal(t, []*int{nil, wheelIntPtr(3), wheelIntPtr(6)}, romance.Trend)
+	assert.Len(t, []rune(romance.Sparkline), 2, "the sparkline skips the set-1 month")
+	assert.Equal(t, []*int{nil, wheelIntPtr(6), wheelIntPtr(7)}, pillarTrend(t, v, observations.PillarFriends).Trend)
+	for _, p := range v.Pillars {
+		if p.Pillar == observations.PillarRomance || p.Pillar == observations.PillarFriends {
+			continue
+		}
+		assert.Len(t, []rune(p.Sparkline), 3, "%s spans all three months", p.Pillar)
+		for i, n := range p.Trend {
+			assert.NotNil(t, n, "%s was rated in %s", p.Pillar, v.Months[i])
+		}
+	}
+
+	// The first set-2 month, shown on its own, is the boundary month.
+	aug := showWheel(t, r, "2026-08")
+	assert.Equal(t, []string{
+		"wheel: 2026-08 (vs 2026-07)",
+		"pillars changed since 2026-07: relationships → romance/partner + friends & family",
+	}, aug.Lines[:2])
+	assert.Equal(t, "romance/partner: 3 (new) ▃", aug.Lines[3])
+	assert.Equal(t, "friends & family: 6 (new) ▅", aug.Lines[4])
+}
+
+// TestWheelShow_RefusesUnknownPillarSet: a month recorded in a pillar set this
+// build does not know (a newer build's) is refused cleanly — naming the month
+// and the receipt — rather than read in the wrong set; a month whose own window
+// does not reach it is still shown.
+func TestWheelShow_RefusesUnknownPillarSet(t *testing.T) {
+	r := bootedWheel(t)
+	writeRawWheelMonth(t, r, "2026-08", 1, wheelSetRatings(t, 1, 5, 7, 6, 6, 6, 4, 6, 5))
+	writeRawWheelMonth(t, r, "2026-09", 3, wheelSetRatings(t, 2, 6, 3, 7, 5, 3, 7, 4, 6, 5))
+
+	_, err := r.ShowWheel(ShowWheelRequest{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not show the 2026-09 wheel")
+	assert.Contains(t, err.Error(), "wheel_2026_09_001 was recorded in pillar set 3")
+	assert.Contains(t, err.Error(), "recorded by a newer build")
+	assert.Contains(t, err.Error(), "nothing is shown rather than a made-up number")
+
+	writeRawWheelMonth(t, r, "2026-07", 3, wheelSetRatings(t, 2, 6, 3, 7, 5, 3, 7, 4, 6, 5))
+	_, err = r.ShowWheel(ShowWheelRequest{Month: "2026-08"})
+	require.ErrorContains(t, err, "could not show the 2026-07 wheel", "an unknown set anywhere in the window is refused")
+
+	writeRawWheelMonth(t, r, "2026-07", 1, wheelSetRatings(t, 1, 4, 6, 5, 5, 6, 3, 7, 4))
+	prior := showWheel(t, r, "2026-08")
+	assert.Equal(t, "wheel: 2026-08 (vs 2026-07)", prior.Lines[0], "a window that never reaches the unknown set reads")
+}
+
+// TestWheelShow_Set1MonthAsStored: --month on a set-1 month, in a Ledger whose
+// later months are set 2, renders exactly its eight pillars as stored —
+// relationships included — with deltas against its own set-1 prior month, the
+// sparkline ending there, and no change line (wheel.md §7.2).
+func TestWheelShow_Set1MonthAsStored(t *testing.T) {
+	r := bootedWheel(t)
+	writeRawWheelMonth(t, r, "2026-06", 1, wheelSetRatings(t, 1, 5, 6, 7, 4, 5, 6, 7, 3))
+	jul := wheelSetRatings(t, 1, 6, 8, 6, 4, 6, 5, 7, 4)
+	jul = withNote(jul, observations.PillarRelationships, "synthetic blended spoke note", wheelIntPtr(9))
+	writeRawWheelMonth(t, r, "2026-07", 1, jul)
+	writeRawWheelMonth(t, r, "2026-08", 2, wheelSetRatings(t, 2, 6, 3, 7, 6, 4, 6, 5, 7, 4))
+	writeRawWheelMonth(t, r, "2026-09", 2, wheelSetRatings(t, 2, 7, 4, 7, 6, 5, 6, 5, 7, 5))
+
+	res := showWheel(t, r, "2026-07")
+	assert.Equal(t, []string{
+		"wheel: 2026-07 (vs 2026-06)",
+		"health: 6 (+1) ▄▅",
+		"relationships: 8 (+2) ▅▆",
+		"career/work: 6 (-1) ▆▅",
+		"finances: 4 (0) ▃▃",
+		"personal growth: 6 (+1) ▄▅",
+		"fun/recreation: 5 (-1) ▅▄",
+		"environment: 7 (0) ▆▆",
+		"contribution: 4 (+1) ▃▃",
+		"lowest: finances (4), contribution (4)",
+		"biggest drop: career/work (-1), fun/recreation (-1)",
+		"notes:",
+		"- relationships: synthetic blended spoke note",
+		"vision reviewed: no",
+	}, res.Lines)
+	assertDiscordSafe(t, res.Lines)
+
+	v := res.View
+	assert.Equal(t, 1, v.PillarSet)
+	assert.Nil(t, v.PillarsChanged)
+	assert.Equal(t, []string{"2026-06", "2026-07"}, v.Months, "the window ends at the shown month")
+	require.Len(t, v.Pillars, 8)
+	rel := pillarTrend(t, v, observations.PillarRelationships)
+	require.NotNil(t, rel.Delta)
+	assert.Equal(t, 2, *rel.Delta)
+	assert.Equal(t, wheelTrendOf(6, 8), rel.Trend)
+	assert.Equal(t, map[string]int{"relationships": 9}, v.Calibration.Suggested, "a set-1 month's own calibration")
+}
+
+// TestWheelShow_PillarSetReversed: a set-1 month stored after a set-2 month
+// (a set-2 backfill of an earlier month) is shown in its own set: the change
+// line names the reverse change and relationships reads `(new)` — nothing is
+// compared across the split.
+func TestWheelShow_PillarSetReversed(t *testing.T) {
+	r := bootedWheel(t)
+	writeRawWheelMonth(t, r, "2026-08", 2, wheelSetRatings(t, 2, 5, 3, 6, 6, 6, 6, 4, 6, 5))
+	writeRawWheelMonth(t, r, "2026-09", 1, wheelSetRatings(t, 1, 6, 7, 5, 6, 7, 4, 6, 5))
+
+	res := showWheel(t, r, "")
+	assert.Equal(t, "pillars changed since 2026-08: romance/partner + friends & family → relationships", res.Lines[1])
+	assert.Equal(t, "relationships: 7 (new) ▆", res.Lines[3])
+	assert.Equal(t, 1, res.View.PillarSet)
+	assert.Nil(t, pillarTrend(t, res.View, observations.PillarRelationships).Delta)
+	assert.Equal(t, &WheelPillarsChanged{
+		Since: "2026-08", From: []string{"romance", "friends"}, To: []string{"relationships"},
+	}, res.View.PillarsChanged)
 }

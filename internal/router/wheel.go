@@ -272,32 +272,51 @@ type WheelShowResult struct {
 
 // WheelShowView is the `wheel show --json` payload (wheel.md §7.2). Every array
 // is present and never null. Month is "" when no wheel is recorded; PriorMonth
-// is "" when the shown month is the first one recorded. Calibration is the only
-// place a stored `suggested` value appears — nothing else here is derived from
-// one (wheel.md §5).
+// is "" when the shown month is the first one recorded. PillarSet is the shown
+// month's own pillar set (the current set when no wheel is recorded), and it
+// decides Pillars. PillarsChanged names how that set differs from the prior
+// stored month's — nil when the set did not change or there is no prior month.
+// Calibration is the only place a stored `suggested` value appears — nothing
+// else here is derived from one (wheel.md §5).
 type WheelShowView struct {
-	Month            string             `json:"month"`
-	PriorMonth       string             `json:"prior_month"`
-	ReceiptID        string             `json:"receipt_id"`
-	Months           []string           `json:"months"`
-	Pillars          []WheelPillarTrend `json:"pillars"`
-	Lowest           []WheelPillarScore `json:"lowest"`
-	BiggestDrop      []WheelPillarDelta `json:"biggest_drop"`
-	VisionReviewed   bool               `json:"vision_reviewed"`
-	VisionReflection string             `json:"vision_reflection"`
-	Calibration      WheelCalibration   `json:"calibration"`
+	Month            string               `json:"month"`
+	PriorMonth       string               `json:"prior_month"`
+	ReceiptID        string               `json:"receipt_id"`
+	PillarSet        int                  `json:"pillar_set"`
+	PillarsChanged   *WheelPillarsChanged `json:"pillars_changed"`
+	Months           []string             `json:"months"`
+	Pillars          []WheelPillarTrend   `json:"pillars"`
+	Lowest           []WheelPillarScore   `json:"lowest"`
+	BiggestDrop      []WheelPillarDelta   `json:"biggest_drop"`
+	VisionReviewed   bool                 `json:"vision_reviewed"`
+	VisionReflection string               `json:"vision_reflection"`
+	Calibration      WheelCalibration     `json:"calibration"`
+}
+
+// WheelPillarsChanged is the `pillars_changed` block of `wheel show --json`
+// (wheel.md §7.2 "Across a pillar-set change"): Since is the prior stored
+// month, From the pillar keys its set had that the shown month's set lacks, and
+// To the keys the shown month's set adds — each in its own set's canonical
+// order, both derived from the pillar-set table and never null.
+type WheelPillarsChanged struct {
+	Since string   `json:"since"`
+	From  []string `json:"from"`
+	To    []string `json:"to"`
 }
 
 // WheelPillarTrend is one pillar in `wheel show` (wheel.md §7.2): your stored
 // rating verbatim, its signed delta against the prior stored month (nil when
-// there is none — never a fabricated 0), and its ratings over the trend window,
-// where Trend[i] is the rating in the view's Months[i].
+// there is none, or when the prior month does not carry the pillar — never a
+// fabricated 0), and its ratings over the trend window. Trend is null-aligned
+// to the view's Months: Trend[i] is the rating in Months[i], or nil when that
+// month's pillar set does not carry the pillar. Sparkline is drawn from the
+// non-nil ratings only.
 type WheelPillarTrend struct {
 	Pillar    string `json:"pillar"`
 	Label     string `json:"label"`
 	Score     int    `json:"score"`
 	Delta     *int   `json:"delta"`
-	Trend     []int  `json:"trend"`
+	Trend     []*int `json:"trend"`
 	Sparkline string `json:"sparkline"`
 	Note      string `json:"note"`
 }
@@ -358,8 +377,11 @@ type wheelMonth struct {
 // model. Every number it shows is a stored self-rating printed as stored: the
 // delta, sparkline, and callouts are computed from `score` alone, and a stored
 // `suggested` value appears only in the view's calibration block, never in the
-// human lines. With no wheel recorded it returns the empty view and the
-// no-history line; a malformed month, or one with no wheel, is a clean error.
+// human lines. Each month in the trend window is validated and read in its own
+// pillar set, so a window that spans a pillar-set change never errors and never
+// shows a number that was not recorded. With no wheel recorded it returns the
+// empty view and the no-history line; a malformed month, one with no wheel, or
+// a window month in a pillar set this build does not know is a clean error.
 func (r *Router) ShowWheel(req ShowWheelRequest) (WheelShowResult, error) {
 	months, err := r.readWheelMonths()
 	if err != nil {
@@ -441,10 +463,20 @@ func pickWheelMonth(months []wheelMonth, arg string) (int, error) {
 }
 
 // checkWheelRatings refuses to show a month whose latest snapshot lacks a valid
-// 1–10 rating for any pillar — a hand-edited file, say — rather than print a
-// number that was never recorded.
+// 1–10 rating for any pillar of the snapshot's OWN pillar set — a hand-edited
+// file, say — rather than print a number that was never recorded (wheel.md
+// §7.2). A snapshot recorded in a pillar set this build does not know (a newer
+// build's) is refused the same way, rather than read in the wrong set.
 func checkWheelRatings(m wheelMonth) error {
-	for _, p := range observations.WheelPillars() {
+	set := m.snap.EffectivePillarSet()
+	pillars, known := observations.WheelPillarsOf(set)
+	if !known {
+		return fmt.Errorf(
+			"could not show the %s wheel: %s was recorded in pillar set %d, which this build does not know — it was recorded by a newer build, so upgrade to read it; nothing is shown rather than a made-up number",
+			m.entry.Month, m.snap.ID, set,
+		)
+	}
+	for _, p := range pillars {
 		ps, ok := m.snap.Pillars[p.Key]
 		if !ok || !observations.ValidWheelScore(ps.Score) {
 			return fmt.Errorf(
@@ -456,10 +488,12 @@ func checkWheelRatings(m wheelMonth) error {
 	return nil
 }
 
-// emptyWheelShowView is the --json view with no wheel recorded: month "", every
-// array [] and the calibration map {} — never null.
+// emptyWheelShowView is the --json view with no wheel recorded: month "", the
+// current pillar set, no pillar-set change, every array [] and the calibration
+// map {} — never null.
 func emptyWheelShowView() WheelShowView {
 	return WheelShowView{
+		PillarSet:   observations.CurrentWheelPillarSet,
 		Months:      []string{},
 		Pillars:     []WheelPillarTrend{},
 		Lowest:      []WheelPillarScore{},
@@ -469,15 +503,21 @@ func emptyWheelShowView() WheelShowView {
 }
 
 // wheelShowViewOf builds the view for the last month in window, which holds up
-// to six stored months oldest first; the month before the shown one, when
-// present, is the prior month the deltas are against. Ratings, deltas,
-// sparklines, and callouts read `score` only; `suggested` is copied into the
-// calibration block and nowhere else.
+// to six stored months oldest first, each already validated in its own pillar
+// set (checkWheelRatings); the month before the shown one, when present, is the
+// prior month the deltas are against. The shown month's pillar set decides the
+// pillar lines, in that set's canonical order. A month carries a pillar only
+// when the pillar is in that month's own set, so a trend entry is nil, and a
+// delta absent, for a month that never rated the pillar — never a zero read
+// from a missing key (wheel.md §7.2 "Across a pillar-set change"). Ratings,
+// deltas, sparklines, and callouts read `score` only; `suggested` is copied
+// into the calibration block and nowhere else.
 func wheelShowViewOf(window []wheelMonth) WheelShowView {
 	cur := window[len(window)-1]
 	view := emptyWheelShowView()
 	view.Month = cur.entry.Month
 	view.ReceiptID = cur.snap.ID
+	view.PillarSet = cur.snap.EffectivePillarSet()
 	view.VisionReviewed = cur.snap.VisionReviewed
 	view.VisionReflection = cur.snap.VisionReflection
 	for _, m := range window {
@@ -487,25 +527,33 @@ func wheelShowViewOf(window []wheelMonth) WheelShowView {
 	if len(window) > 1 {
 		prior = &window[len(window)-2]
 		view.PriorMonth = prior.entry.Month
+		view.PillarsChanged = wheelPillarsChangedOf(*prior, view.PillarSet)
 	}
 
-	for _, p := range observations.WheelPillars() {
+	pillars, _ := observations.WheelPillarsOf(view.PillarSet)
+	for _, p := range pillars {
 		ps := cur.snap.Pillars[p.Key]
-		trend := make([]int, len(window))
+		trend := make([]*int, len(window))
+		carried := make([]int, 0, len(window))
 		for i, m := range window {
-			trend[i] = m.snap.Pillars[p.Key].Score
+			if score, ok := wheelScoreIn(m, p.Key); ok {
+				trend[i] = &score
+				carried = append(carried, score)
+			}
 		}
 		pt := WheelPillarTrend{
 			Pillar:    p.Key,
 			Label:     p.Label,
 			Score:     ps.Score,
 			Trend:     trend,
-			Sparkline: wheelSparkline(trend),
+			Sparkline: wheelSparkline(carried),
 			Note:      ps.Note,
 		}
 		if prior != nil {
-			d := ps.Score - prior.snap.Pillars[p.Key].Score
-			pt.Delta = &d
+			if before, ok := wheelScoreIn(*prior, p.Key); ok {
+				d := ps.Score - before
+				pt.Delta = &d
+			}
 		}
 		view.Pillars = append(view.Pillars, pt)
 		if ps.Suggested != nil {
@@ -515,6 +563,37 @@ func wheelShowViewOf(window []wheelMonth) WheelShowView {
 	view.Lowest = wheelLowest(view.Pillars)
 	view.BiggestDrop = wheelBiggestDrop(view.Pillars)
 	return view
+}
+
+// wheelScoreIn returns month m's stored rating for a pillar key, or ok=false
+// when the pillar is not in m's own pillar set — a set-1 month carries no
+// romance rating, a set-2 month no relationships rating. A stray key a
+// snapshot holds outside its own set is never read.
+func wheelScoreIn(m wheelMonth, key string) (int, bool) {
+	if !observations.IsWheelPillarIn(m.snap.EffectivePillarSet(), key) {
+		return 0, false
+	}
+	ps, ok := m.snap.Pillars[key]
+	return ps.Score, ok
+}
+
+// wheelPillarsChangedOf returns how the shown month's pillar set differs from
+// the prior stored month's (wheel.md §7.2), derived from the pillar-set table:
+// nil when the two months share a set or the sets differ in no key.
+func wheelPillarsChangedOf(prior wheelMonth, shownSet int) *WheelPillarsChanged {
+	priorSet := prior.snap.EffectivePillarSet()
+	if priorSet == shownSet {
+		return nil
+	}
+	retired, added := observations.WheelPillarSetChange(priorSet, shownSet)
+	if len(retired) == 0 && len(added) == 0 {
+		return nil
+	}
+	return &WheelPillarsChanged{
+		Since: prior.entry.Month,
+		From:  append([]string{}, retired...),
+		To:    append([]string{}, added...),
+	}
 }
 
 // wheelLowest names every pillar tied at the lowest rating, in canonical order.
@@ -571,11 +650,14 @@ func wheelSparkline(trend []int) string {
 }
 
 // wheelShowLines renders the human `wheel show` (wheel.md §7.2): a header
-// naming the comparison month, one `label: N (±d) <sparkline>` line per pillar
-// (no delta at all when there is no prior month), the lowest and biggest-drop
-// callouts, any notes as `- label: note` bullets, and the vision fields. Only
-// `key: value` lines and `- ` bullets — never a markdown table, never an
-// average or total, never a suggestion.
+// naming the comparison month, then — when the pillar set changed since that
+// month — a `pillars changed since` line naming the retired and new pillars,
+// one `label: N (±d) <sparkline>` line per pillar of the shown month's set (no
+// delta at all when there is no prior month, and `(new)` for a pillar the prior
+// month does not carry), the lowest and biggest-drop callouts, any notes as
+// `- label: note` bullets, and the vision fields. Only `key: value` lines and
+// `- ` bullets — never a markdown table, never an average or total, never a
+// suggestion.
 func wheelShowLines(view WheelShowView) []string {
 	hasPrior := view.PriorMonth != ""
 	lines := make([]string, 0, len(view.Pillars)+8)
@@ -584,10 +666,16 @@ func wheelShowLines(view WheelShowView) []string {
 	} else {
 		lines = append(lines, fmt.Sprintf("wheel: %s (%s)", view.Month, wheelNoPrior))
 	}
+	if view.PillarsChanged != nil {
+		lines = append(lines, wheelPillarsChangedLine(*view.PillarsChanged))
+	}
 	for _, p := range view.Pillars {
-		if p.Delta != nil {
+		switch {
+		case p.Delta != nil:
 			lines = append(lines, fmt.Sprintf("%s: %d (%s) %s", p.Label, p.Score, signedWheelDelta(*p.Delta), p.Sparkline))
-		} else {
+		case hasPrior:
+			lines = append(lines, fmt.Sprintf("%s: %d (%s) %s", p.Label, p.Score, wheelNewPillar, p.Sparkline))
+		default:
 			lines = append(lines, fmt.Sprintf("%s: %d %s", p.Label, p.Score, p.Sparkline))
 		}
 	}
@@ -632,6 +720,33 @@ func wheelShowLines(view WheelShowView) []string {
 		lines = append(lines, "vision reflection: "+view.VisionReflection)
 	}
 	return lines
+}
+
+// wheelNewPillar is what a pillar line carries in place of a delta when the
+// prior stored month does not carry the pillar (wheel.md §7.2) — never (+0),
+// never (0), never a computed number.
+const wheelNewPillar = "new"
+
+// wheelPillarsChangedLine renders the pillar-set change line that follows the
+// `wheel:` header (wheel.md §7.2): `pillars changed since <YYYY-MM>: <retired
+// labels> → <new labels>`, each side's labels joined by " + ", resolved from
+// the pillar-set table — never hand-written.
+func wheelPillarsChangedLine(c WheelPillarsChanged) string {
+	return fmt.Sprintf("pillars changed since %s: %s → %s",
+		c.Since, wheelLabelList(c.From, " + "), wheelLabelList(c.To, " + "))
+}
+
+// wheelLabelList renders pillar keys as their human labels joined by sep, or
+// `none` when there are none.
+func wheelLabelList(keys []string, sep string) string {
+	if len(keys) == 0 {
+		return "none"
+	}
+	labels := make([]string, len(keys))
+	for i, key := range keys {
+		labels[i], _ = observations.WheelPillarLabel(key)
+	}
+	return strings.Join(labels, sep)
 }
 
 // signedWheelDelta renders a delta with an ASCII sign: +1, -2, and a bare 0.
