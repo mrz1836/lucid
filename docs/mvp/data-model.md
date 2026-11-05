@@ -137,8 +137,10 @@ entries read unchanged ([`gratitude.md`](../gratitude.md) §2). The monthly
 `wheel` — that diverges from both: its key is the calendar month itself
 (`wheel_YYYY-MM`, deterministic and unsalted, because a month is not sensitive
 and must stay enumerable for the trend), it has no `aka[]` or merge, and it
-carries an append-only history of whole-wheel `snapshot` events (eight
-integer 1–10 self-ratings, optional per-pillar notes and a separate
+carries an append-only history of whole-wheel `snapshot` events (integer
+1–10 self-ratings for every pillar of the snapshot's pillar set — nine in
+pillar set 2, see [`wheel.md`](../wheel.md) §2 — optional per-pillar notes
+and a separate
 `suggested` calibration value, `vision_reviewed`, and `vision_reflection`).
 The month's wheel is the **latest** snapshot, folded at read time, so a
 same-month re-entry is an amend by append — nothing is mutated, and every
