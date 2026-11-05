@@ -24,12 +24,15 @@ import (
 
 // WheelSchema is the wheel entry schema version (wheel.md §4 Versioning). New
 // needs go in a new optional field or a new event type under a bumped schema;
-// readers tolerate an unknown field and a higher version.
-const WheelSchema = 1
+// readers tolerate an unknown field and a higher version. Schema 2 added the
+// per-snapshot `pillar_set` (pillar set 2); this build reads schema 1 and 2,
+// and an append raises a schema-1 month to 2 — a schema-1 file that is only
+// read is never rewritten.
+const WheelSchema = 2
 
-// WheelEventSnapshot is the one event type in schema 1 (wheel.md §4): a whole
-// wheel recorded by one `wheel add`. Every write appends exactly one; no event
-// is ever rewritten.
+// WheelEventSnapshot is the one event type in schema 1 and 2 (wheel.md §4): a
+// whole wheel recorded by one `wheel add`. Every write appends exactly one; no
+// event is ever rewritten.
 const WheelEventSnapshot = "snapshot"
 
 // The wheel's own rating scale (wheel.md §3): an integer 1–10 per pillar. It is
@@ -65,9 +68,11 @@ const (
 )
 
 // CurrentWheelPillarSet is the pillar set every new snapshot is rated in
-// (wheel.md §2, §4). A stored snapshot keeps the set it was recorded in forever
-// ([WheelSnapshot.EffectivePillarSet]); it is never migrated to a newer one.
-const CurrentWheelPillarSet = 1
+// (wheel.md §2, §4): pillar set 2, the nine pillars. The storage adapter stamps
+// it on every append, so no caller chooses it. A stored snapshot keeps the set
+// it was recorded in forever ([WheelSnapshot.EffectivePillarSet]); it is never
+// migrated to a newer one.
+const CurrentWheelPillarSet = 2
 
 // WheelPillar is one pillar of a pillar set (wheel.md §2): the short Key the
 // flags and JSON carry, and the Label human output prints.

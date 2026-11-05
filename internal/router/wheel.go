@@ -2,6 +2,8 @@ package router
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -10,8 +12,9 @@ import (
 
 // wheel.go is the user-facing Wheel of Life path (wheel.md §7): the monthly
 // balance review. `add` records one month's whole wheel — your own 1–10 rating
-// for all eight pillars, optional notes, optional `suggested` calibration
-// values, and the vision-review fields — as one append-only snapshot and returns
+// for every pillar of the current pillar set (nine since pillar set 2), optional
+// notes, optional `suggested` calibration values, and the vision-review fields —
+// as one append-only snapshot and returns
 // its receipt id; `show` folds the latest snapshot per month into the
 // month-over-month trend, and `list` names the recorded months. Every step is deterministic and agent-free (architecture P9):
 // no model is reached from any wheel path, so the structured `add` completes
@@ -40,7 +43,8 @@ type AddWheelRequest struct {
 // id (wheel_YYYY-MM). Amended is true when the month already had a wheel before
 // this write (the new snapshot wins on read; Replaced names the snapshot it
 // supersedes, and Snapshots counts every snapshot the month now keeps). Scores is
-// the eight stored self-ratings — never a suggestion (wheel.md §5).
+// every stored self-rating of the snapshot's pillar set (nine in pillar set 2) —
+// never a suggestion (wheel.md §5).
 type WheelWriteResult struct {
 	Entry     observations.WheelEntry
 	Snapshot  observations.WheelSnapshot
@@ -56,12 +60,15 @@ type WheelWriteResult struct {
 
 // AddWheel records one month's wheel (wheel.md §7.1): it resolves the month,
 // validates the whole wheel before anything is written, appends one snapshot
-// through the storage adapter, and returns the snapshot's receipt id. The eight
-// self-ratings are required and authoritative — an unknown pillar, a missing or
-// off-scale rating, an off-scale suggestion, a malformed month, or a month after
-// the current logical month is a clean error and nothing is saved. A month that
-// already has a wheel is amended by append: the new snapshot wins the fold, and
-// the earlier snapshot keeps its receipt on disk (wheel.md §4).
+// through the storage adapter, and returns the snapshot's receipt id. Every
+// self-rating of the current pillar set is required and authoritative — a
+// retired pillar (refused with the message naming its split), an unknown
+// pillar, a missing or off-scale rating, an off-scale suggestion, a malformed
+// month, or a month after the current logical month is a clean error and
+// nothing is saved. A new wheel is always recorded in the current pillar set,
+// whatever month it covers. A month that already has a wheel — in any pillar
+// set — is amended by append: the new snapshot wins the fold, and the earlier
+// snapshot keeps its receipt on disk (wheel.md §4).
 func (r *Router) AddWheel(req AddWheelRequest) (WheelWriteResult, error) {
 	now := whenOr(req.Now)
 	month, err := resolveWheelMonth(req.Month, now)
@@ -79,6 +86,7 @@ func (r *Router) AddWheel(req AddWheelRequest) (WheelWriteResult, error) {
 	}
 	snap := observations.WheelSnapshot{
 		Type:             observations.WheelEventSnapshot,
+		PillarSet:        observations.CurrentWheelPillarSet,
 		Pillars:          pillars,
 		VisionReviewed:   req.VisionReviewed || reflection != "",
 		VisionReflection: reflection,
@@ -132,13 +140,21 @@ func resolveWheelMonth(arg string, now time.Time) (string, error) {
 	return month, nil
 }
 
-// wheelPillarsOf validates a request's pillars and returns the snapshot's copy
-// (wheel.md §3, §5). An unknown pillar key, any of the eight missing, a rating
-// off the 1–10 scale, or a suggestion off it is a clean error naming the pillar
-// and the range. A blank note is dropped rather than stored; a non-blank note is
-// kept verbatim. The returned map is a fresh copy, so the caller's map is never
+// wheelPillarsOf validates a request's pillars against the current pillar set
+// and returns the snapshot's copy (wheel.md §3, §5). A retired pillar key is
+// refused first, with the message naming its split ([WheelRetiredPillarMessage])
+// — never as an unknown pillar, and never repurposed for a new spoke. Then an
+// unknown pillar key, any of the current set's pillars missing, a rating off the
+// 1–10 scale, or a suggestion off it is a clean error naming the pillar and the
+// range. A blank note is dropped rather than stored; a non-blank note is kept
+// verbatim. The returned map is a fresh copy, so the caller's map is never
 // shared with the Ledger write.
 func wheelPillarsOf(in map[string]observations.PillarScore) (map[string]observations.PillarScore, error) {
+	for _, key := range slices.Sorted(maps.Keys(in)) {
+		if split, retired := observations.WheelPillarRetirement(key); retired {
+			return nil, fmt.Errorf("wheel: %s; nothing was saved", WheelRetiredPillarMessage(split))
+		}
+	}
 	if unknown := observations.UnknownWheelPillars(in); len(unknown) > 0 {
 		return nil, fmt.Errorf(
 			"wheel: unknown pillar %s (want one of %s); nothing was saved",
@@ -199,9 +215,10 @@ func priorWheelSnapshot(entry observations.WheelEntry) (observations.WheelSnapsh
 
 // wheelAddAck builds the ack emitted only after the write lands (wheel.md
 // §7.1): the month and the receipt — plus, on an amend, that the new snapshot
-// replaces the earlier one when read and that every snapshot is kept — then the
-// eight stored ratings verbatim, one `label: N` line each in canonical order.
-// It never prints a suggestion, and computes no score, average, or total.
+// replaces the earlier one when read and that every snapshot is kept — then
+// every stored rating of the appended snapshot's own pillar set verbatim (nine
+// in pillar set 2), one `label: N` line each in that set's canonical order. It
+// never prints a suggestion, and computes no score, average, or total.
 func wheelAddAck(res WheelWriteResult) []string {
 	head := fmt.Sprintf("Recorded the %s wheel as %s.", res.Month, res.Receipt)
 	if res.Amended {
@@ -212,16 +229,31 @@ func wheelAddAck(res WheelWriteResult) []string {
 		head = fmt.Sprintf("Recorded the %s wheel as %s (replaces %s when read; %s).",
 			res.Month, res.Receipt, res.Replaced, kept)
 	}
-	lines := make([]string, 0, len(observations.WheelPillars())+1)
+	pillars, _ := observations.WheelPillarsOf(res.Snapshot.EffectivePillarSet())
+	lines := make([]string, 0, len(pillars)+1)
 	lines = append(lines, head)
-	for _, p := range observations.WheelPillars() {
+	for _, p := range pillars {
 		lines = append(lines, fmt.Sprintf("%s: %d", p.Label, res.Scores[p.Key]))
 	}
 	return lines
 }
 
+// WheelRetiredPillarMessage renders the refusal for a write that names a
+// retired pillar (wheel.md §2, §7.1), built from the pillar-set table's change
+// entry — e.g. `relationships was split into romance and friends in pillar set
+// 2; rate both`. Every add path (flags, pairs, --input) refuses a retired key
+// with this one wording, so it is never reported as an unknown pillar.
+func WheelRetiredPillarMessage(split observations.WheelPillarSplit) string {
+	rate := "both"
+	if len(split.Into) != 2 {
+		rate = fmt.Sprintf("all %d", len(split.Into))
+	}
+	return fmt.Sprintf("%s was split into %s in pillar set %d; rate %s",
+		split.Retired, strings.Join(split.Into, " and "), split.Set, rate)
+}
+
 // wheelLabels renders pillar keys as their human labels, comma-joined, in the
-// order given. Every key passed is one of the eight.
+// order given. Every key passed is a known pillar key.
 func wheelLabels(keys []string) string {
 	labels := make([]string, len(keys))
 	for i, key := range keys {

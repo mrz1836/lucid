@@ -20,10 +20,11 @@ import (
 // 2026-09.
 func wheelClock() time.Time { return time.Date(2026, 9, 6, 17, 12, 40, 0, time.UTC) }
 
-// wheelRatingArgs returns the eight rating flags with synthetic values.
+// wheelRatingArgs returns the nine rating flags of the current pillar set with
+// synthetic values.
 func wheelRatingArgs() []string {
 	return []string{
-		"--health", "6", "--relationships", "7", "--career", "5", "--finances", "4",
+		"--health", "6", "--romance", "6", "--friends", "7", "--career", "5", "--finances", "4",
 		"--growth", "7", "--fun", "4", "--environment", "6", "--contribution", "5",
 	}
 }
@@ -57,7 +58,8 @@ const syntheticWheelDoc = `{
   "month": "2026-08",
   "pillars": {
     "health":        { "score": 6, "note": "synthetic walk note", "suggested": 5 },
-    "relationships": { "score": 7 },
+    "romance":       { "score": 6 },
+    "friends":       { "score": 7 },
     "career":        { "score": 5, "suggested": 6 },
     "finances":      { "score": 4, "note": "synthetic repair note" },
     "growth":        { "score": 7 },
@@ -70,7 +72,7 @@ const syntheticWheelDoc = `{
 }`
 
 // TestWheelAddCLI_HumanAck: `wheel add` records the month and prints the ack —
-// the month, the receipt, and the eight stored ratings, one `label: N` line
+// the month, the receipt, and the nine stored ratings, one `label: N` line
 // each, never a suggestion (wheel.md §7.1).
 func TestWheelAddCLI_HumanAck(t *testing.T) {
 	home := isolatedHome(t)
@@ -83,7 +85,7 @@ func TestWheelAddCLI_HumanAck(t *testing.T) {
 	assert.Empty(t, stderr)
 	assert.Equal(t, strings.Join([]string{
 		"Recorded the 2026-09 wheel as wheel_2026_09_001.",
-		"health: 6", "relationships: 7", "career/work: 5", "finances: 4",
+		"health: 6", "romance/partner: 6", "friends & family: 7", "career/work: 5", "finances: 4",
 		"personal growth: 7", "fun/recreation: 4", "environment: 6", "contribution: 5",
 	}, "\n")+"\n", out)
 
@@ -108,7 +110,7 @@ func TestWheelSameMonthLatestWins_CLI(t *testing.T) {
 	require.NoError(t, err)
 
 	args := []string{
-		"wheel", "add", "--health", "8", "--relationships", "7", "--career", "5", "--finances", "4",
+		"wheel", "add", "--health", "8", "--romance", "6", "--friends", "7", "--career", "5", "--finances", "4",
 		"--growth", "7", "--fun", "4", "--environment", "6", "--contribution", "5", "--suggested", "career=1",
 	}
 	out, _, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
@@ -131,7 +133,7 @@ func TestWheelSameMonthLatestWins_CLI(t *testing.T) {
 	assert.Equal(t, "2026-09", view.Month)
 	assert.True(t, view.Amended)
 	assert.Equal(t, map[string]int{
-		"health": 8, "relationships": 7, "career": 5, "finances": 4,
+		"health": 8, "romance": 6, "friends": 7, "career": 5, "finances": 4,
 		"growth": 7, "fun": 4, "environment": 6, "contribution": 5,
 	}, view.Scores, "scores are the self-ratings; career's suggestion of 1 never appears")
 
@@ -140,20 +142,40 @@ func TestWheelSameMonthLatestWins_CLI(t *testing.T) {
 	assert.Len(t, e.History, 3, "every add kept its receipt")
 }
 
-// TestWheelSelfRatingRequired_CLI: every rating flag is required — a missing
-// one is a usage error (exit 2) naming each missing pillar, and nothing is
-// written (wheel.md §3).
+// TestWheelSelfRatingRequired_CLI: every rating flag of the current pillar set
+// is required — a missing one, romance and friends included, is a usage error
+// (exit 2) naming each missing pillar, and nothing is written (wheel.md §3).
 func TestWheelSelfRatingRequired_CLI(t *testing.T) {
 	home := isolatedHome(t)
 	withClock(t, wheelClock())
 
-	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "add", "--health", "6", "--relationships", "7")
+	_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, "wheel", "add", "--health", "6", "--romance", "7")
 	require.Error(t, err)
 	assert.Equal(t, ExitUsage, exitCodeForError(err))
 	assert.Contains(t, stderr,
-		`required flag(s) "career", "finances", "growth", "fun", "environment", "contribution" not set`)
+		`required flag(s) "friends", "career", "finances", "growth", "fun", "environment", "contribution" not set`)
 	assert.Contains(t, stderr, "nothing was saved")
 	assertUsageErrorOnce(t, stderr, "lucid wheel add")
+
+	// Each new spoke is required on its own: the other eight never stand in.
+	for flag, want := range map[string]string{
+		"--romance": `required flag(s) "romance" not set`,
+		"--friends": `required flag(s) "friends" not set`,
+	} {
+		args := []string{"wheel", "add"}
+		ratings := wheelRatingArgs()
+		for i := 0; i < len(ratings); i += 2 {
+			if ratings[i] != flag {
+				args = append(args, ratings[i], ratings[i+1])
+			}
+		}
+		_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, args...)
+		require.Errorf(t, err, "without %s", flag)
+		assert.Equalf(t, ExitUsage, exitCodeForError(err), "without %s", flag)
+		assert.Containsf(t, stderr, want, "without %s", flag)
+		assert.Containsf(t, stderr, "nothing was saved", "without %s", flag)
+		assertUsageErrorOnce(t, stderr, "lucid wheel add")
+	}
 
 	_, stderr, err = runRoot(t, BuildInfo{Version: "dev"}, "wheel", "add")
 	require.Error(t, err)
@@ -170,7 +192,7 @@ func TestWheelScaleRejects_CLI(t *testing.T) {
 
 	for _, bad := range []string{"2.5", "11", "0", "six", "-1", "6.0", ""} {
 		args := []string{
-			"wheel", "add", "--health", "6", "--relationships", "7", "--career", "5", "--finances", "4",
+			"wheel", "add", "--health", "6", "--romance", "6", "--friends", "7", "--career", "5", "--finances", "4",
 			"--growth", "7", "--fun", bad, "--environment", "6", "--contribution", "5",
 		}
 		_, stderr, err := runRoot(t, BuildInfo{Version: "dev"}, args...)
@@ -391,7 +413,7 @@ func runWheel(t *testing.T, args ...string) string {
 func seedWheelMonths(t *testing.T) {
 	t.Helper()
 	runWheel(t, "wheel", "add", "--month", "2026-08",
-		"--health", "5", "--relationships", "7", "--career", "6", "--finances", "6",
+		"--health", "5", "--romance", "7", "--friends", "7", "--career", "6", "--finances", "6",
 		"--growth", "7", "--fun", "4", "--environment", "6", "--contribution", "5")
 	runWheel(t, wheelAddArgs(
 		"--note", "health=synthetic walk note", "--suggested", "health=2", "--suggested", "fun=9",
@@ -414,7 +436,8 @@ func TestWheelShowCLI_Human(t *testing.T) {
 	assert.Equal(t, strings.Join([]string{
 		"wheel: 2026-09 (vs 2026-08)",
 		"health: 6 (+1) ▄▅",
-		"relationships: 7 (0) ▆▆",
+		"romance/partner: 6 (-1) ▆▅",
+		"friends & family: 7 (0) ▆▆",
 		"career/work: 5 (-1) ▅▄",
 		"finances: 4 (-2) ▅▃",
 		"personal growth: 7 (0) ▆▆",
@@ -465,13 +488,14 @@ func TestWheelShowCLI_JSON(t *testing.T) {
 	assert.Equal(t, "2026-08", view.PriorMonth)
 	assert.Equal(t, "wheel_2026_09_001", view.ReceiptID)
 	assert.Equal(t, []string{"2026-08", "2026-09"}, view.Months)
-	require.Len(t, view.Pillars, 8)
+	require.Len(t, view.Pillars, 9)
 	assert.Equal(t, "health", view.Pillars[0].Pillar)
 	assert.Equal(t, 6, view.Pillars[0].Score, "the score is the self-rating, not the suggestion")
 	require.NotNil(t, view.Pillars[0].Delta)
 	assert.Equal(t, 1, *view.Pillars[0].Delta)
 	assert.Equal(t, []int{5, 6}, view.Pillars[0].Trend)
-	assert.Equal(t, 4, view.Pillars[5].Score, "fun keeps its own 4 beside a suggestion of 9")
+	assert.Equal(t, "fun", view.Pillars[6].Pillar)
+	assert.Equal(t, 4, view.Pillars[6].Score, "fun keeps its own 4 beside a suggestion of 9")
 	assert.Len(t, view.BiggestDrop, 1)
 	assert.Equal(t, map[string]int{"health": 2, "fun": 9}, view.Calibration.Suggested)
 }
@@ -601,7 +625,7 @@ func TestWheelRoundTrip_AddListShow_CLI(t *testing.T) {
 		Scores    map[string]int `json:"scores"`
 	}
 	amend := []string{
-		"wheel", "add", "--json", "--health", "8", "--relationships", "7", "--career", "5", "--finances", "3",
+		"wheel", "add", "--json", "--health", "8", "--romance", "7", "--friends", "7", "--career", "5", "--finances", "3",
 		"--growth", "7", "--fun", "5", "--environment", "6", "--contribution", "5",
 	}
 	require.NoError(t, json.Unmarshal([]byte(runWheel(t, amend...)), &ack))
@@ -626,10 +650,12 @@ func TestWheelRoundTrip_AddListShow_CLI(t *testing.T) {
 	assert.Equal(t, "wheel_2026_09_002", show.ReceiptID)
 	assert.Equal(t, []string{"2026-07", "2026-08", "2026-09"}, show.Months)
 	want := map[string]struct{ score, delta int }{
-		"health": {8, 2}, "relationships": {7, 0}, "career": {5, 0}, "finances": {3, -1},
+		"health": {8, 2}, "romance": {7, 1}, "friends": {7, 0}, "career": {5, 0}, "finances": {3, -1},
 		"growth": {7, 0}, "fun": {5, 1}, "environment": {6, 0}, "contribution": {5, 0},
 	}
-	require.Len(t, show.Pillars, 8)
+	require.Len(t, show.Pillars, 9)
+	assert.Equal(t, 2, show.PillarSet)
+	assert.Nil(t, show.PillarsChanged, "every month here is recorded in pillar set 2")
 	for _, p := range show.Pillars {
 		w := want[p.Pillar]
 		assert.Equal(t, w.score, p.Score, "%s renders the latest stored rating", p.Pillar)

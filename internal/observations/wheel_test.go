@@ -11,9 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fullWheel returns a synthetic snapshot pillar map with all eight pillars
-// rated — every value is invented test data.
-func fullWheel() map[string]PillarScore {
+// fullWheelSet1 returns a synthetic pillar-set-1 snapshot pillar map with all
+// eight set-1 pillars rated — the shape every snapshot before pillar set 2 was
+// stored in; every value is invented test data.
+func fullWheelSet1() map[string]PillarScore {
 	return map[string]PillarScore{
 		PillarHealth:        {Score: 6},
 		PillarRelationships: {Score: 7},
@@ -28,21 +29,33 @@ func fullWheel() map[string]PillarScore {
 
 func intPtr(n int) *int { return &n }
 
-// TestWheelPillars_CanonicalOrder: the eight pillars come back in the documented
-// canonical order with their labels (wheel.md §2), as a fresh slice each call.
+// TestWheelPillars_CanonicalOrder: the current pillar set is pillar set 2, and
+// its nine pillars come back in the documented canonical order with their labels
+// — romance and friends in relationships' old slot (wheel.md §2) — as a fresh
+// slice each call; the retired relationships key is not a current pillar.
 func TestWheelPillars_CanonicalOrder(t *testing.T) {
+	assert.Equal(t, 2, CurrentWheelPillarSet, "new wheels are rated in pillar set 2")
+	assert.Equal(t, 2, WheelSchema)
 	assert.Equal(t, []string{
-		"health", "relationships", "career", "finances", "growth", "fun", "environment", "contribution",
+		"health", "romance", "friends", "career", "finances", "growth", "fun", "environment", "contribution",
 	}, WheelPillarKeys())
 
-	labels := make([]string, 0, 8)
+	labels := make([]string, 0, 9)
 	for _, p := range WheelPillars() {
 		labels = append(labels, p.Label)
 	}
 	assert.Equal(t, []string{
-		"health", "relationships", "career/work", "finances", "personal growth", "fun/recreation",
-		"environment", "contribution",
+		"health", "romance/partner", "friends & family", "career/work", "finances", "personal growth",
+		"fun/recreation", "environment", "contribution",
 	}, labels)
+	assert.False(t, IsWheelPillar(PillarRelationships), "relationships is retired, never repurposed")
+	into, retired := RetiredWheelPillar(PillarRelationships)
+	require.True(t, retired, "relationships is retired in the current set")
+	assert.Equal(t, []string{PillarRomance, PillarFriends}, into)
+	for _, key := range []string{PillarRomance, PillarFriends, PillarHealth, "wealth"} {
+		_, retired = RetiredWheelPillar(key)
+		assert.Falsef(t, retired, "%q is not retired", key)
+	}
 
 	first := WheelPillars()
 	first[0].Label = "mutated"
@@ -77,60 +90,66 @@ func TestWheelScaleRejectsOutOfRangeAndNonInteger(t *testing.T) {
 	assert.False(t, ValidWheelScore(11))
 }
 
-// TestWheelSelfRatingRequired_SnapshotValidate: a snapshot must rate all eight
-// pillars on the 1–10 scale — a missing pillar is refused, never defaulted; an
-// unknown pillar, an off-scale rating, and an off-scale suggestion are refused
-// too (wheel.md §3, §5).
+// TestWheelSelfRatingRequired_SnapshotValidate: a new (current-set) snapshot
+// must rate all nine pillars on the 1–10 scale — a missing pillar is refused,
+// never defaulted; an unknown pillar, an off-scale rating, and an off-scale
+// suggestion are refused too (wheel.md §3, §5).
 func TestWheelSelfRatingRequired_SnapshotValidate(t *testing.T) {
-	ok := WheelSnapshot{Type: WheelEventSnapshot, Pillars: fullWheel()}
-	require.NoError(t, ok.Validate())
+	current := func(p map[string]PillarScore) WheelSnapshot {
+		return WheelSnapshot{Type: WheelEventSnapshot, PillarSet: CurrentWheelPillarSet, Pillars: p}
+	}
+	require.NoError(t, current(fullWheelSet2()).Validate())
 
-	missing := fullWheel()
+	missing := fullWheelSet2()
 	delete(missing, PillarCareer)
 	delete(missing, PillarFun)
-	err := WheelSnapshot{Pillars: missing}.Validate()
+	err := current(missing).Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing rating(s) for career, fun")
 	assert.Equal(t, []string{PillarCareer, PillarFun}, MissingWheelPillars(missing), "canonical order")
-	assert.Empty(t, MissingWheelPillars(fullWheel()))
+	assert.Empty(t, MissingWheelPillars(fullWheelSet2()))
+	assert.Equal(t, []string{PillarRomance, PillarFriends}, MissingWheelPillars(fullWheelSet1()),
+		"the eight set-1 pillars miss both new spokes of the current set")
 
-	unknown := fullWheel()
+	unknown := fullWheelSet2()
 	unknown["wealth"] = PillarScore{Score: 5}
-	err = WheelSnapshot{Pillars: unknown}.Validate()
+	err = current(unknown).Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown pillar(s) wealth")
 	assert.Equal(t, []string{"wealth"}, UnknownWheelPillars(unknown))
+	assert.Equal(t, []string{PillarRelationships}, UnknownWheelPillars(fullWheelSet1()),
+		"the retired key is not a pillar of the current set")
 
 	for _, bad := range []int{0, 11, -3} {
-		off := fullWheel()
+		off := fullWheelSet2()
 		off[PillarHealth] = PillarScore{Score: bad}
-		err = WheelSnapshot{Pillars: off}.Validate()
+		err = current(off).Validate()
 		require.Errorf(t, err, "score %d", bad)
 		assert.Contains(t, err.Error(), "rating for health")
 	}
 
-	offSuggested := fullWheel()
+	offSuggested := fullWheelSet2()
 	offSuggested[PillarHealth] = PillarScore{Score: 6, Suggested: intPtr(0)}
-	err = WheelSnapshot{Pillars: offSuggested}.Validate()
+	err = current(offSuggested).Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "suggestion for health")
 
-	withSuggested := fullWheel()
+	withSuggested := fullWheelSet2()
 	withSuggested[PillarHealth] = PillarScore{Score: 6, Suggested: intPtr(3)}
-	assert.NoError(t, WheelSnapshot{Pillars: withSuggested}.Validate(), "a valid suggestion is optional and accepted")
+	assert.NoError(t, current(withSuggested).Validate(), "a valid suggestion is optional and accepted")
 }
 
 // TestWheelSuggestedIsSeparateFromScore: a suggestion is stored in its own
 // field — WheelScores carries the self-ratings only — and a snapshot without one
 // marshals no suggested key at all (wheel.md §4, §5).
 func TestWheelSuggestedIsSeparateFromScore(t *testing.T) {
-	pillars := fullWheel()
+	pillars := fullWheelSet2()
 	pillars[PillarHealth] = PillarScore{Score: 6, Note: "synthetic note", Suggested: intPtr(2)}
-	snap := WheelSnapshot{Type: WheelEventSnapshot, Pillars: pillars}
+	snap := WheelSnapshot{Type: WheelEventSnapshot, PillarSet: CurrentWheelPillarSet, Pillars: pillars}
 
 	scores := snap.WheelScores()
 	assert.Equal(t, 6, scores[PillarHealth], "the score is the self-rating, never the suggestion")
-	assert.Len(t, scores, 8)
+	assert.Len(t, scores, 9)
 
 	b, err := json.Marshal(snap.Pillars[PillarHealth])
 	require.NoError(t, err)
@@ -150,8 +169,8 @@ func TestWheelFold_LatestWins(t *testing.T) {
 	assert.False(t, ok, "no snapshot yet")
 	assert.Equal(t, 0, e.SnapshotCount())
 
-	first := fullWheel()
-	second := fullWheel()
+	first := fullWheelSet2()
+	second := fullWheelSet2()
 	second[PillarHealth] = PillarScore{Score: 8}
 	e.History = append(e.History,
 		WheelSnapshot{ID: "wheel_2026_09_001", Type: WheelEventSnapshot, Pillars: first},
@@ -371,7 +390,7 @@ func TestWheelPillarSets_Table(t *testing.T) {
 	}
 
 	// Set 2's change entry: relationships → romance + friends, relative to the
-	// set that is current. At set 1 nothing is retired yet.
+	// set that is current. At set 1 nothing is retired.
 	split, ok := wheelPillarRetirementAt(2, PillarRelationships)
 	require.True(t, ok)
 	assert.Equal(t, WheelPillarSplit{Set: 2, Retired: PillarRelationships, Into: []string{PillarRomance, PillarFriends}}, split)
@@ -425,7 +444,7 @@ func TestWheelSnapshot_EffectivePillarSet(t *testing.T) {
 	), &set2))
 	assert.Equal(t, 2, set2.EffectivePillarSet())
 
-	b, err := json.Marshal(WheelSnapshot{ID: "wheel_2026_08_001", Type: WheelEventSnapshot, Pillars: fullWheel()})
+	b, err := json.Marshal(WheelSnapshot{ID: "wheel_2026_08_001", Type: WheelEventSnapshot, Pillars: fullWheelSet1()})
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), "pillar_set", "an unset pillar set is omitted, so a set-1 write reads as before")
 
@@ -446,12 +465,12 @@ func TestWheelSnapshot_EffectivePillarSet(t *testing.T) {
 // refused by name, the range check covers the set's own pillars, and a set
 // this build does not know is refused (wheel.md §3, §4).
 func TestWheelSnapshot_ValidateOwnSet(t *testing.T) {
-	require.NoError(t, WheelSnapshot{Pillars: fullWheel()}.Validate(), "an absent set validates on the eight")
-	require.NoError(t, WheelSnapshot{PillarSet: 1, Pillars: fullWheel()}.Validate(), "set 1 validates on the eight")
+	require.NoError(t, WheelSnapshot{Pillars: fullWheelSet1()}.Validate(), "an absent set validates on the eight")
+	require.NoError(t, WheelSnapshot{PillarSet: 1, Pillars: fullWheelSet1()}.Validate(), "set 1 validates on the eight")
 	require.NoError(t, WheelSnapshot{PillarSet: 2, Pillars: fullWheelSet2()}.Validate(), "set 2 validates on the nine")
 
 	// The eight are not a valid set-2 wheel, and the nine are not a valid set-1 wheel.
-	err := WheelSnapshot{PillarSet: 2, Pillars: fullWheel()}.Validate()
+	err := WheelSnapshot{PillarSet: 2, Pillars: fullWheelSet1()}.Validate()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown pillar(s) relationships")
 	err = WheelSnapshot{Pillars: fullWheelSet2()}.Validate()
@@ -465,7 +484,7 @@ func TestWheelSnapshot_ValidateOwnSet(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown pillar(s) relationships")
 	assert.Equal(t, []string{PillarRelationships}, UnknownWheelPillarsIn(2, withRetired))
-	assert.Empty(t, UnknownWheelPillarsIn(1, fullWheel()))
+	assert.Empty(t, UnknownWheelPillarsIn(1, fullWheelSet1()))
 
 	// A missing set-2 pillar is refused by name, in canonical order.
 	noFriends := fullWheelSet2()

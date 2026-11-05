@@ -123,9 +123,17 @@ func wheelMonthOfFile(de fs.DirEntry) (string, bool) {
 //
 // It is append-only (wheel.md §4): a second call for the same month does not
 // refuse and mutates nothing — it appends another snapshot to the same file,
-// which then wins the fold, and every earlier snapshot keeps its receipt. The
-// snapshot is validated before anything is written (all eight pillars rated
-// 1–10, any suggestion 1–10), so an invalid wheel never reaches disk.
+// which then wins the fold, and every earlier snapshot keeps its receipt.
+//
+// It is the single writer of the pillar set (wheel.md §4): snap.PillarSet is
+// stamped with [observations.CurrentWheelPillarSet] whatever the caller passed,
+// so no path can append a snapshot in an older set. The snapshot is then
+// validated in that set before anything is written (every pillar of the current
+// set rated 1–10, any suggestion 1–10), so an invalid wheel never reaches disk.
+// The entry's schema is raised to [observations.WheelSchema] when the month
+// was recorded under an older one — every earlier snapshot stays byte-for-byte
+// as stored — and a month written by a newer build is refused rather than
+// written back unfaithfully.
 func (a *Adapter) AppendWheelSnapshot(
 	month string, snap observations.WheelSnapshot, now time.Time,
 ) (observations.WheelEntry, observations.WheelSnapshot, error) {
@@ -134,6 +142,7 @@ func (a *Adapter) AppendWheelSnapshot(
 			"storage: invalid wheel month %q (want YYYY-MM)", month,
 		)
 	}
+	snap.PillarSet = observations.CurrentWheelPillarSet
 	if err := snap.Validate(); err != nil {
 		return observations.WheelEntry{}, observations.WheelSnapshot{}, err
 	}
@@ -149,6 +158,9 @@ func (a *Adapter) AppendWheelSnapshot(
 	if !found {
 		entry = observations.NewWheelEntry(month, nowStr)
 	}
+	// An older month is raised to the schema its newest snapshot needs; a newer
+	// one keeps its own schema so entry.Validate refuses it below.
+	entry.Schema = max(entry.Schema, observations.WheelSchema)
 
 	snap.ID = observations.WheelReceiptID(month, observations.NextWheelSeq(entry.History))
 	snap.At = nowStr
