@@ -103,6 +103,12 @@ func (r *Router) liveReconcilePeople() ([]reconcilePerson, error) {
 		return nil, fmt.Errorf("reconcile: read off-limits: %w", err)
 	}
 	deny := toSet(offLimits)
+	// Mention counts are references on read: entry_refs with every pin and
+	// move-ref folded in (data-model.md §"Attribution on read").
+	fold, err := r.store.MentionFold()
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: fold mentions: %w", err)
+	}
 
 	out := make([]reconcilePerson, 0, len(keys))
 	for _, key := range keys {
@@ -118,7 +124,7 @@ func (r *Router) liveReconcilePeople() ([]reconcilePerson, error) {
 			display:   rec.DisplayName,
 			forms:     normalizedForms(rec),
 			nickForms: nicknameForms(rec),
-			refs:      len(rec.EntryRefs),
+			refs:      len(fold.EntryRefs(rec)),
 			firstSeen: rec.FirstSeenAt.Format(personDateLayout),
 		})
 	}

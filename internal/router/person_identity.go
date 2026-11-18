@@ -273,6 +273,108 @@ func (r *Router) PersonRelease(req PersonReleaseRequest) (PersonIdentityResult, 
 	return res, nil
 }
 
+// PersonMoveRefRequest is one `lucid person move-ref` intent: move RawID's
+// mention from From onto To, or — with From empty — pin RawID's one held
+// mention to To. Now is the event instant (zero falls back to the wall clock).
+type PersonMoveRefRequest struct {
+	RawID string
+	From  string
+	To    string
+	Now   time.Time
+}
+
+// PersonMoveRef executes `lucid person move-ref <raw_id> [--from <subject>]
+// --to <subject>`: repair one misfiled mention with an append-only correction.
+// With --from it appends a move_ref event, so every read shows that entry's
+// mention under --to only; without it, it pins the entry's one held mention
+// (§P-11) to --to. The raw entry, its processed artifact, and both people
+// records are never rewritten, and a structuring re-run does not undo it. Both
+// subjects are record-targeted; --to must already be a person — a correction
+// never creates one, so an unknown --to carries the `person create` pointer
+// (§P-4). Every other refusal is §P-12, decided before anything is written: an
+// unknown raw id, --from equal to --to, no mention under --from, or — without
+// --from — no held mention or more than one. The undo is the reverse move-ref.
+func (r *Router) PersonMoveRef(req PersonMoveRefRequest) (PersonIdentityResult, error) {
+	rawID := strings.TrimSpace(req.RawID)
+	exists, err := r.store.RawExists(rawID)
+	if err != nil {
+		return PersonIdentityResult{}, fmt.Errorf("person: move-ref: %w", err)
+	}
+	if !exists {
+		return PersonIdentityResult{}, moveRefUnknownRaw(rawID)
+	}
+	to, err := r.resolvePersonRecord(req.To, false)
+	if err != nil {
+		if errors.Is(err, ErrPersonUnknownSubject) {
+			return PersonIdentityResult{}, rejectPerson(ErrPersonUnknownSubject,
+				"no one matches %q — add them first with lucid person create <name>; nothing was saved.",
+				strings.TrimSpace(req.To))
+		}
+		return PersonIdentityResult{}, err
+	}
+	var from storage.PersonRecord
+	if strings.TrimSpace(req.From) != "" {
+		if from, err = r.resolvePersonRecord(req.From, false); err != nil {
+			return PersonIdentityResult{}, err
+		}
+	}
+
+	w, err := r.store.MoveRef(rawID, from.PersonKey, to.PersonKey, whenOr(req.Now))
+	if err != nil {
+		return PersonIdentityResult{}, moveRefRefusal(err, rawID, from, to)
+	}
+	res := PersonIdentityResult{
+		Record: to, Receipt: w.Receipt, RawID: rawID, From: from.PersonKey, To: to.PersonKey,
+		Pinned: w.Pinned, StillHeld: w.StillHeld,
+	}
+	if from.PersonKey == "" {
+		res.Ack = fmt.Sprintf("Pinned the held %q in %s to %s (%s).",
+			w.Pinned[0].Form, rawID, personRefOf(to), w.Receipt)
+		return res, nil
+	}
+	res.Ack = fmt.Sprintf("Moved the mention in %s from %s to %s (%s).",
+		rawID, personRefOf(from), personRefOf(to), w.Receipt)
+	return res, nil
+}
+
+// moveRefRefusal maps a storage move-ref refusal to its fixed §P-12 copy.
+// Anything that is not a refusal travels on wrapped.
+func moveRefRefusal(err error, rawID string, from, to storage.PersonRecord) error {
+	var several *storage.MoveRefHeldError
+	switch {
+	case errors.Is(err, storage.ErrMoveRefUnknownRaw):
+		return moveRefUnknownRaw(rawID)
+	case errors.Is(err, storage.ErrMoveRefSamePerson):
+		return rejectPerson(ErrPersonMoveRefRejected,
+			"--from and --to are the same person (%q); nothing was saved.", to.DisplayName)
+	case errors.Is(err, storage.ErrMoveRefNoMention):
+		return rejectPerson(ErrPersonMoveRefRejected,
+			"%s has no mention under %s to move; nothing was saved.", rawID, personRefOf(from))
+	case errors.Is(err, storage.ErrMoveRefNoHeld):
+		return rejectPerson(ErrPersonMoveRefRejected,
+			"%s has no held mention — name the person it is filed under with --from; nothing was saved.", rawID)
+	case errors.As(err, &several):
+		forms := make([]string, len(several.Forms))
+		for i, f := range several.Forms {
+			forms[i] = fmt.Sprintf("%q", f)
+		}
+		return rejectPerson(ErrPersonMoveRefRejected,
+			"%s has more than one held mention (%s) — settle them with lucid person claim or lucid person dormant; nothing was saved.",
+			rawID, strings.Join(forms, ", "))
+	}
+	return fmt.Errorf("person: move-ref: %w", err)
+}
+
+// moveRefUnknownRaw is the §P-12 refusal for a raw id no captured entry has.
+func moveRefUnknownRaw(rawID string) error {
+	return rejectPerson(ErrPersonMoveRefRejected, "there is no entry %s — check the raw id; nothing was saved.", rawID)
+}
+
+// personRefOf renders one record as `"Name" (key)`.
+func personRefOf(rec storage.PersonRecord) string {
+	return joinPersonRefs([]PersonRef{{PersonKey: rec.PersonKey, DisplayName: rec.DisplayName}})
+}
+
 // identityForm trims a claim or release form and refuses one with no letter or
 // digit, or one that spans lines (§P-9).
 func identityForm(raw string) (string, error) {
