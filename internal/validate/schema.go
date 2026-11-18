@@ -21,6 +21,7 @@ var schemaKinds = []schemaKind{
 	{"people", LedgerSource.ListPeopleKeys, LedgerSource.ReadPersonErr},
 	{"links", LedgerSource.ListLinkEventIDs, LedgerSource.ReadLinkEventErr},
 	{"secrets", LedgerSource.ListSecretRefIDs, LedgerSource.ReadSecretRefErr},
+	{"identity", LedgerSource.ListIdentityEventIDs, LedgerSource.ReadIdentityEventErr},
 }
 
 // CheckLedgerSchema validates every on-disk Ledger record through its

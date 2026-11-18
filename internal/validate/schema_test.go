@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -50,6 +51,15 @@ type fakeLedger struct {
 	anchorsErr    error
 	events        engine.AnchorEventLog
 	eventsErr     error
+	// identity is the identity log's events, read only when identityPresent —
+	// the zero value is a Ledger without the log — and identityErr forces a
+	// read failure. identityIDs and badIdentity drive the schema sweep's
+	// identity-line listing.
+	identity        []identity.Event
+	identityPresent bool
+	identityErr     error
+	identityIDs     []string
+	badIdentity     map[string]bool
 }
 
 func (f *fakeLedger) Home() string { return f.home }
@@ -99,6 +109,19 @@ func (f *fakeLedger) ReadAnchorsErr() (engine.AnchorLog, error) {
 
 func (f *fakeLedger) ReadAnchorEventsErr() (engine.AnchorEventLog, error) {
 	return f.events, f.eventsErr
+}
+
+func (f *fakeLedger) ListIdentityEventIDs() ([]string, error) { return f.identityIDs, nil }
+func (f *fakeLedger) ReadIdentityEventErr(id string) error    { return errIf(f.badIdentity, id) }
+
+func (f *fakeLedger) IdentityEvents() ([]identity.Event, error) {
+	switch {
+	case f.identityErr != nil:
+		return nil, f.identityErr
+	case !f.identityPresent:
+		return nil, fmt.Errorf("storage: read identity log: %w", fs.ErrNotExist)
+	}
+	return f.identity, nil
 }
 
 // errIf returns a parse error when id is in the bad set.

@@ -14,6 +14,9 @@
 //     (data-model.md); a corrupt record is reported, never rewritten.
 //   - people-redirects: the people tree's redirect tombstones form a
 //     single-hop, acyclic graph.
+//   - people-identity: the identity log agrees with the people tree — no claim
+//     on a missing person or a tombstone, no second claim on a claimed form, no
+//     dormant status on a tombstone. It runs only when the log exists.
 //   - anchors: anchors.json and the anchor event store hold well-formed
 //     records whose joins are whole — every event targets a recorded anchor,
 //     every void target is legal, and no two-file write is half-written
@@ -23,7 +26,8 @@
 //
 // The grep-style checks (public-boundary, diagnostic, sanctuary, links) run
 // over a repo root; the Ledger checks (schema, people-redirects, anchors) run
-// over a Ledger home through the storage adapter. Either half may be absent — `lucid validate` runs whatever
+// over a Ledger home through the storage adapter (people-identity only when the
+// identity log exists). Either half may be absent — `lucid validate` runs whatever
 // is present and says what it skipped.
 package validate
 
@@ -32,6 +36,7 @@ import (
 	"slices"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // Severity ranks a finding. An error fails the sweep (a real gate breach); a
@@ -53,6 +58,7 @@ const (
 	CheckSchema          = "schema"
 	CheckLinks           = "links"
 	CheckPeopleRedirects = "people-redirects"
+	CheckPeopleIdentity  = "people-identity"
 	CheckAnchors         = "anchors"
 )
 
@@ -142,6 +148,17 @@ type LedgerSource interface {
 	// material.
 	ListSecretRefIDs() ([]string, error)
 	ReadSecretRefErr(id string) error
+	// ListIdentityEventIDs enumerates the identity-log event locators in
+	// append order (the parsed id, or a positional line-<n> for a malformed
+	// line), and ReadIdentityEventErr re-parses the one line a locator names
+	// and returns only its error, so the schema sweep reports a malformed
+	// identity line. A missing log yields no locators.
+	ListIdentityEventIDs() ([]string, error)
+	ReadIdentityEventErr(id string) error
+	// IdentityEvents returns the identity log's well-formed events in append
+	// order; a missing log is an error wrapping fs.ErrNotExist (the
+	// people-identity check then does not run). It backs [CheckPeopleIdentity].
+	IdentityEvents() ([]identity.Event, error)
 	// PersonRedirect returns the redirect_to of a person record — the empty
 	// string for a canonical record or one that cannot be read (the schema
 	// check reports an unreadable record; the redirect check does not
@@ -194,26 +211,46 @@ func Run(opts Options) (Report, error) {
 	}
 
 	if opts.Ledger != nil {
-		found, err := CheckLedgerSchema(opts.Ledger)
-		if err != nil {
+		if err := runLedgerChecks(&rep, opts.Ledger); err != nil {
 			return Report{}, err
 		}
-		rep.Ran = append(rep.Ran, CheckSchema)
-		rep.Findings = append(rep.Findings, found...)
-
-		redirects, err := CheckPeopleRedirectGraph(opts.Ledger)
-		if err != nil {
-			return Report{}, err
-		}
-		rep.Ran = append(rep.Ran, CheckPeopleRedirects)
-		rep.Findings = append(rep.Findings, redirects...)
-
-		rep.Ran = append(rep.Ran, CheckAnchors)
-		rep.Findings = append(rep.Findings, CheckAnchorFiles(opts.Ledger)...)
 	}
 
 	sortFindings(rep.Findings)
 	return rep, nil
+}
+
+// runLedgerChecks runs the Ledger half of the sweep — schema, people-redirects,
+// people-identity (only when the identity log exists, so a Ledger that never
+// wrote an identity fact validates exactly as it always has), and anchors —
+// appending each check that ran and its findings to rep.
+func runLedgerChecks(rep *Report, src LedgerSource) error {
+	found, err := CheckLedgerSchema(src)
+	if err != nil {
+		return err
+	}
+	rep.Ran = append(rep.Ran, CheckSchema)
+	rep.Findings = append(rep.Findings, found...)
+
+	redirects, err := CheckPeopleRedirectGraph(src)
+	if err != nil {
+		return err
+	}
+	rep.Ran = append(rep.Ran, CheckPeopleRedirects)
+	rep.Findings = append(rep.Findings, redirects...)
+
+	identityFindings, ran, err := CheckPeopleIdentityLog(src)
+	if err != nil {
+		return err
+	}
+	if ran {
+		rep.Ran = append(rep.Ran, CheckPeopleIdentity)
+		rep.Findings = append(rep.Findings, identityFindings...)
+	}
+
+	rep.Ran = append(rep.Ran, CheckAnchors)
+	rep.Findings = append(rep.Findings, CheckAnchorFiles(src)...)
+	return nil
 }
 
 // sortFindings orders findings deterministically (check, path, line, rule) so

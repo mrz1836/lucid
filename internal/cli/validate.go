@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/router"
 	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/mrz1836/lucid/internal/validate"
@@ -214,6 +215,16 @@ func (l ledgerAdapter) ListSecretRefIDs() ([]string, error) { return l.a.ListSec
 
 // ReadSecretRefErr returns only the parse/validation error of one secret-reference event.
 func (l ledgerAdapter) ReadSecretRefErr(id string) error { return l.a.ReadSecretRefErr(id) }
+
+// ListIdentityEventIDs enumerates the identity-log event locators.
+func (l ledgerAdapter) ListIdentityEventIDs() ([]string, error) { return l.a.ListIdentityEventIDs() }
+
+// ReadIdentityEventErr returns only the parse/validation error of one identity-log line.
+func (l ledgerAdapter) ReadIdentityEventErr(id string) error { return l.a.ReadIdentityEventErr(id) }
+
+// IdentityEvents returns the identity log's events; a missing log is an error
+// wrapping fs.ErrNotExist, so the people-identity check does not run.
+func (l ledgerAdapter) IdentityEvents() ([]identity.Event, error) { return l.a.ReadIdentityLog() }
 
 // PersonRedirect returns the redirect_to of one person record, backing the
 // redirect-graph check. An unreadable record resolves to the empty string

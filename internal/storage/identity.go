@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -162,6 +163,18 @@ func (a *Adapter) ReadIdentityEvents() ([]identity.Event, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// ReadIdentityLog reads every well-formed identity event like
+// [Adapter.ReadIdentityEvents], except that a missing log is an error wrapping
+// fs.ErrNotExist rather than the empty stream — so lucid validate can tell a
+// Ledger that never wrote an identity fact (and runs no identity check) from
+// one whose log is present. It never creates the log.
+func (a *Adapter) ReadIdentityLog() ([]identity.Event, error) {
+	if _, err := os.Stat(a.identityPath()); err != nil {
+		return nil, fmt.Errorf("storage: read identity log: %w", err)
+	}
+	return a.ReadIdentityEvents()
 }
 
 // IdentityState folds the identity log into the current identity facts,
