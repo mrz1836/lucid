@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/provider"
 	"github.com/mrz1836/lucid/internal/storage"
 )
@@ -402,4 +404,161 @@ func TestEntryOccurredAt(t *testing.T) {
 	assert.Equal(t, fb, entryOccurredAt(map[string]any{}, fb))
 	assert.Equal(t, fb, entryOccurredAt(map[string]any{"occurred_at": "not-a-date"}, fb))
 	assert.Equal(t, fb, entryOccurredAt(map[string]any{"occurred_at": 42}, fb))
+}
+
+// peopleExtraction is a well-formed extraction reply mentioning the given
+// display names (synthetic people only).
+func peopleExtraction(names ...string) string {
+	people := make([]string, 0, len(names))
+	for _, n := range names {
+		people = append(people, fmt.Sprintf(`{"display_name": %q}`, n))
+	}
+	return `{"emotions": [], "themes": [{"name": "catching-up", "rationale": "saw a friend"}], "people": [` +
+		strings.Join(people, ", ") + `], "notes": null}`
+}
+
+// structureWith runs one Structuring pass over rawID with a scripted reply.
+func structureWith(t *testing.T, r *Router, rawID, reply string, now time.Time, force bool) {
+	t.Helper()
+	p := &provider.Fake{Script: []provider.Exchange{extractEx(reply)}}
+	res, err := r.StructurePass(context.Background(), StructurePassRequest{RawID: rawID, Force: force, Now: now, Provider: p})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Wrote)
+}
+
+// identityKinds reads the identity log and counts events by kind.
+func identityKinds(t *testing.T, a *storage.Adapter) map[string]int {
+	t.Helper()
+	events, err := a.ReadIdentityEvents()
+	require.NoError(t, err)
+	out := map[string]int{}
+	for _, e := range events {
+		out[e.Kind]++
+	}
+	return out
+}
+
+// seedStorePerson records one mention straight through the People routine.
+func seedStorePerson(t *testing.T, a *storage.Adapter, display, rawID string, aka ...string) string {
+	t.Helper()
+	res, err := a.UpdatePerson(storage.PersonMention{DisplayName: display, Aka: aka, RawEntryID: rawID, At: fixedNow().Add(-48 * time.Hour)})
+	require.NoError(t, err)
+	require.False(t, res.Held)
+	return res.PersonKey
+}
+
+// TestStructure_WritesHeldPeople: a mention two active people hold exactly
+// (the C3 aka collision) is written to the processed artifact's
+// held_people[] — not people[] — with its reason and key-sorted candidates,
+// once per normalized form, and the identity log gets exactly one hold event.
+// The structure summary is unchanged: res.People stays empty.
+func TestStructure_WritesHeldPeople(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	alex := seedStorePerson(t, a, "Alex", "raw_2026_05_01_09_00", "A.")
+	andy := seedStorePerson(t, a, "Andy", "raw_2026_05_02_09_00", "A.")
+	want := []string{alex, andy}
+	if andy < alex {
+		want = []string{andy, alex}
+	}
+	id, _ := writeRawAt(t, a, home, "Coffee with A. and Jordan Lee.", fixedNow())
+
+	p := &provider.Fake{Script: []provider.Exchange{extractEx(peopleExtraction("A.", "a", "Jordan Lee"))}}
+	res, err := r.Structure(context.Background(), structReq(id, p))
+	require.NoError(t, err)
+	assert.True(t, res.Wrote)
+	require.Len(t, res.People, 1)
+	assert.Equal(t, "Jordan Lee", res.People[0].DisplayName)
+	require.Len(t, res.HeldPeople, 1, "held mentions dedupe by normalized form")
+	assert.Equal(t, storage.HeldPerson{DisplayName: "A.", Reason: "exact", Candidates: want}, res.HeldPeople[0])
+
+	m := readProcessedMap(t, home, id)
+	held, ok := m["held_people"].([]any)
+	require.True(t, ok, "the artifact carries held_people[]")
+	require.Len(t, held, 1)
+	entry := held[0].(map[string]any)
+	assert.Equal(t, "A.", entry["display_name"])
+	assert.Equal(t, "exact", entry["reason"])
+	assert.Equal(t, []any{want[0], want[1]}, entry["candidates"])
+	assert.Len(t, m["people"], 1)
+	assert.Equal(t, map[string]int{"hold": 1}, identityKinds(t, a))
+
+	for _, key := range want {
+		rec, _, rerr := a.ReadPerson(key)
+		require.NoError(t, rerr)
+		assert.NotContains(t, rec.EntryRefs, id, "a held mention is counted for no one")
+	}
+}
+
+// TestUpdatePerson_StickyOnForceRerun: a `structure --force` re-run keeps each
+// already-recorded resolution. A mention recorded for "Sam" stays on "Sam"
+// after a later claim sends bare "Sam" to "Sam Rivera"; a held mention stays
+// held after a later claim on its form, with no second hold event; and every
+// file but produced_at is byte-identical across the re-run.
+func TestUpdatePerson_StickyOnForceRerun(t *testing.T) {
+	r, a, home := newBootedRouter(t)
+	sam := seedStorePerson(t, a, "Sam", "raw_2026_05_01_09_00")
+	rivera := seedStorePerson(t, a, "Sam Rivera", "raw_2026_05_02_09_00")
+	seedStorePerson(t, a, "Alex", "raw_2026_05_03_09_00", "A.")
+	andy := seedStorePerson(t, a, "Andy", "raw_2026_05_04_09_00", "A.")
+
+	samRaw, _ := writeRawAt(t, a, home, "Lunch with Sam.", fixedNow())
+	heldRaw, _ := writeRawAt(t, a, home, "Ran into A.", fixedNow().Add(time.Hour))
+	structureWith(t, r, samRaw, peopleExtraction("Sam"), fixedNow(), false)
+	structureWith(t, r, heldRaw, peopleExtraction("A."), fixedNow(), false)
+	firstSam := readProcessedMap(t, home, samRaw)
+	firstHeld := readProcessedMap(t, home, heldRaw)
+	require.Equal(t, sam, firstSam["people"].([]any)[0].(map[string]any)["person_key"])
+	require.Len(t, firstHeld["held_people"], 1)
+	require.Equal(t, 1, identityKinds(t, a)["hold"])
+
+	// Later claims would send each form elsewhere for a NEW mention…
+	at := fixedNow().Add(3 * time.Hour).Format(time.RFC3339)
+	for _, c := range []struct{ form, key string }{{"Sam", rivera}, {"A.", andy}} {
+		_, err := a.AppendIdentityEvent(identity.NewClaim(at, identity.SourceCLI, c.form, c.key, false, nil))
+		require.NoError(t, err)
+	}
+	peopleBefore := snapshotDir(t, filepath.Join(home, "people"))
+	logBefore, err := os.ReadFile(filepath.Join(home, "identity", "identity.jsonl"))
+	require.NoError(t, err)
+
+	// …but a --force re-run keeps the recorded resolutions.
+	later := fixedNow().Add(4 * time.Hour)
+	structureWith(t, r, samRaw, peopleExtraction("Sam"), later, true)
+	structureWith(t, r, heldRaw, peopleExtraction("A."), later, true)
+
+	secondSam := readProcessedMap(t, home, samRaw)
+	secondHeld := readProcessedMap(t, home, heldRaw)
+	for _, pair := range [][2]map[string]any{{firstSam, secondSam}, {firstHeld, secondHeld}} {
+		assert.NotEqual(t, pair[0]["produced_at"], pair[1]["produced_at"])
+		delete(pair[0], "produced_at")
+		delete(pair[1], "produced_at")
+		assert.Equal(t, pair[0], pair[1], "a re-run differs only in produced_at")
+	}
+	assert.Equal(t, peopleBefore, snapshotDir(t, filepath.Join(home, "people")), "no people record moves")
+	logAfter, err := os.ReadFile(filepath.Join(home, "identity", "identity.jsonl"))
+	require.NoError(t, err)
+	assert.Equal(t, logBefore, logAfter, "no second hold event")
+
+	// The claim still decides a brand-new mention.
+	freshRaw, _ := writeRawAt(t, a, home, "Called Sam.", fixedNow().Add(5*time.Hour))
+	structureWith(t, r, freshRaw, peopleExtraction("Sam"), later, false)
+	fresh := readProcessedMap(t, home, freshRaw)
+	assert.Equal(t, rivera, fresh["people"].([]any)[0].(map[string]any)["person_key"])
+}
+
+// snapshotDir reads every file directly under dir into a name→bytes map.
+func snapshotDir(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	out := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		b, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		require.NoError(t, rerr)
+		out[e.Name()] = string(b)
+	}
+	return out
 }

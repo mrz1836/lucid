@@ -30,9 +30,13 @@ type StructureResult struct {
 	RawID       string
 	ProcessedID string
 	People      []storage.ProcessedPerson
-	Wrote       bool
-	Degraded    bool
-	Ack         string
+	// HeldPeople are the mentions the People routine held instead of
+	// assigning (error-states.md §P-11). The structure summary does not change
+	// for them; `person reconcile` lists them.
+	HeldPeople []storage.HeldPerson
+	Wrote      bool
+	Degraded   bool
+	Ack        string
 }
 
 // Structure runs the deterministic compose for one raw entry
@@ -66,7 +70,7 @@ func (r *Router) Structure(ctx context.Context, req StructureRequest) (Structure
 		AgentVersion: r.cfg.AgentVersions.Structuring,
 	}, req.Provider)
 
-	people, ok := r.resolvePeople(ext.People, req.RawID, occurredAt)
+	people, held, ok := r.resolvePeople(ext.People, req.RawID, occurredAt, now)
 	if !ok {
 		// update_person failed for a mention (e.g. wordlist missing) — abort
 		// the write and degrade; the raw entry is captured, replay later (§S-5).
@@ -81,6 +85,7 @@ func (r *Router) Structure(ctx context.Context, req StructureRequest) (Structure
 		Emotions:     toStorageItems(ext.Emotions),
 		Themes:       toStorageItems(ext.Themes),
 		People:       people,
+		HeldPeople:   held,
 		Notes:        optionalNotes(ext.Notes),
 	}
 	if err := r.store.WriteProcessed(art); err != nil {
@@ -93,6 +98,7 @@ func (r *Router) Structure(ctx context.Context, req StructureRequest) (Structure
 		RawID:       req.RawID,
 		ProcessedID: req.RawID,
 		People:      people,
+		HeldPeople:  held,
 		Wrote:       true,
 		Degraded:    ext.Degraded,
 	}, nil
@@ -101,21 +107,39 @@ func (r *Router) Structure(ctx context.Context, req StructureRequest) (Structure
 // resolvePeople runs the storage People routine for each extracted mention,
 // back-filling the resolved person_key and the authoritative first_mention
 // onto a processed people[] entry. It deduplicates by resolved key so a name
-// mentioned twice in one entry yields one people[] entry. It reports ok=false
+// mentioned twice in one entry yields one people[] entry. A mention the
+// routine held instead of assigning (error-states.md §P-11) becomes a
+// held_people[] entry, deduplicated by normalized form. It reports ok=false
 // on the first update_person failure so the caller degrades without writing
 // (error-states.md §S-5).
-func (r *Router) resolvePeople(mentions []structuring.Person, rawID string, at time.Time) ([]storage.ProcessedPerson, bool) {
+func (r *Router) resolvePeople(mentions []structuring.Person, rawID string, at, now time.Time) ([]storage.ProcessedPerson, []storage.HeldPerson, bool) {
 	people := make([]storage.ProcessedPerson, 0, len(mentions))
+	var held []storage.HeldPerson
 	seen := map[string]bool{}
+	seenHeld := map[string]bool{}
 	for _, m := range mentions {
 		res, err := r.store.UpdatePerson(storage.PersonMention{
 			DisplayName: m.DisplayName,
 			Aka:         m.Aka,
 			RawEntryID:  rawID,
 			At:          at,
+			RecordedAt:  now,
 		})
 		if err != nil {
-			return nil, false
+			return nil, nil, false
+		}
+		if res.Held {
+			form := storage.NormalizeName(m.DisplayName)
+			if seenHeld[form] {
+				continue
+			}
+			seenHeld[form] = true
+			held = append(held, storage.HeldPerson{
+				DisplayName: m.DisplayName,
+				Reason:      res.HoldReason,
+				Candidates:  res.Candidates,
+			})
+			continue
 		}
 		if seen[res.PersonKey] {
 			continue
@@ -127,7 +151,7 @@ func (r *Router) resolvePeople(mentions []structuring.Person, rawID string, at t
 			FirstMention: res.FirstMention,
 		})
 	}
-	return people, true
+	return people, held, true
 }
 
 // toStorageItems maps agent emotion/theme items to their storage shape.
