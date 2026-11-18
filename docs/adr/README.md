@@ -26,3 +26,4 @@ new one; records are append-only, like everything else here
 | [0013](0013-anchor-kinds.md) | Anchor kinds: milestone, quit, limit, habit — each kind its own honest number, kinds and events in a separate append-only store | Proposed |
 | [0014](0014-contact-check-ins.md) | Contact check-ins: per-person cadences in a separate append-only store, a native Monday who's-due post, and the Sunday wrap as a read view | Accepted |
 | [0015](0015-witness-week-notes.md) | Witness week notes: one operator-approved file, rendered verbatim and handed to the model as labeled grounding | Accepted |
+| [0016](0016-person-status-and-name-claims.md) | Person status and name claims: an append-only identity log consulted before slug resolution, folded on read | Accepted |
