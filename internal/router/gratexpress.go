@@ -65,8 +65,8 @@ type gratitudePerson struct {
 // ThankGratitude records that you told a person you were grateful (gratitude.md
 // §8). It validates everything before anything is written — the id must name a
 // live entry (an unknown id or a merge tombstone is a clean error, like
-// `--into`), the person subject must resolve to exactly one live person
-// ([Router.resolvePersonRecord]: no match or several is a clean error naming
+// `--into`), the person subject must resolve to who it means now
+// ([Router.resolveGratitudePerson]: no match or several is a clean error naming
 // the remedy or the candidate keys), and `--day` runs the shared strict tier —
 // then links the canonical person key onto the entry and appends one
 // tally-neutral `expressed` event, returning its receipt. An off-limits person
@@ -131,18 +131,19 @@ func (r *Router) ThankGratitude(req ThankGratitudeRequest) (GratitudeThankResult
 }
 
 // resolveGratitudePerson resolves a `--person` subject for `add --person` or
-// `thank` exactly as the person write verbs resolve one
-// ([Router.resolvePersonRecord]): an exact person_key wins (a redirect followed
-// to its canonical record), otherwise the name is matched against live
-// display_name / aka[]; no match or several is a clean [PersonRejectedError]
-// ending "nothing was saved". It also reports whether the person is off-limits,
-// which an add uses to withhold the tier-3 judge — reading the registry fails
-// closed, as an error before anything is written.
+// `thank` to who it means now ([Router.resolvePersonNow]): an exact person_key
+// wins (a redirect followed to its canonical record), then the form's active
+// claimant, then the one active display_name / aka[] holder — a dormant person
+// never beats an active one; no match or several is a clean
+// [PersonRejectedError] ending "nothing was saved". It also reports whether the
+// person is off-limits, which an add uses to withhold the tier-3 judge —
+// reading the registry fails closed, as an error before anything is written.
 func (r *Router) resolveGratitudePerson(raw string) (gratitudePerson, error) {
-	rec, err := r.resolvePersonRecord(raw, false)
+	subj, err := r.resolvePersonNow(raw)
 	if err != nil {
 		return gratitudePerson{}, err
 	}
+	rec := subj.Record
 	off, err := r.store.ReadOffLimitsPersonKeys()
 	if err != nil {
 		return gratitudePerson{}, fmt.Errorf("could not read the off-limits registry; nothing was saved: %w", err)

@@ -8,7 +8,7 @@ import (
 
 // BirthdaysInWeek returns the birthdays that fall in the ISO Monday–Sunday
 // week containing day, a YYYY-MM-DD logical day (ADR-0014 §7). Everyone with a
-// readable dob who is not off-limits counts, cadence or not. A Feb 29 birthday
+// readable dob who is neither off-limits nor dormant counts, cadence or not. A Feb 29 birthday
 // is observed on Feb 28 in a non-leap year, and a week that spans New Year
 // checks both years. Rows are ordered by date, then case-folded name, then key;
 // the result is never nil. An unreadable day yields no rows.
@@ -18,12 +18,14 @@ func BirthdaysInWeek(people map[string]PersonInfo, day string) []BirthdayRow {
 		return []BirthdayRow{}
 	}
 	start, end := weekBounds(d)
-	return birthdaysBetween(people, start, end)
+	return birthdaysBetween(people, start, end, false)
 }
 
 // birthdaysBetween collects the birthdays observed from monday through sunday
-// (civil dates at noon UTC, at most one year boundary apart).
-func birthdaysBetween(people map[string]PersonInfo, monday, sunday time.Time) []BirthdayRow {
+// (civil dates at noon UTC, at most one year boundary apart). An off-limits
+// person never counts; a dormant one counts only with all, their row marked
+// Dormant.
+func birthdaysBetween(people map[string]PersonInfo, monday, sunday time.Time, all bool) []BirthdayRow {
 	from, to := monday.Format(dateLayout), sunday.Format(dateLayout)
 	years := []int{monday.Year()}
 	if sunday.Year() != monday.Year() {
@@ -31,7 +33,7 @@ func birthdaysBetween(people map[string]PersonInfo, monday, sunday time.Time) []
 	}
 	rows := []BirthdayRow{}
 	for key, info := range people {
-		if info.OffLimits {
+		if info.OffLimits || (info.Dormant && !all) {
 			continue
 		}
 		dob, ok := civilDate(strings.TrimSpace(info.Dob))
@@ -44,7 +46,7 @@ func birthdaysBetween(people map[string]PersonInfo, monday, sunday time.Time) []
 			if date < from || date > to || observed.Before(dob) {
 				continue
 			}
-			rows = append(rows, BirthdayRow{PersonKey: key, DisplayName: displayName(key, info), Date: date})
+			rows = append(rows, BirthdayRow{PersonKey: key, DisplayName: displayName(key, info), Date: date, Dormant: info.Dormant})
 			break
 		}
 	}

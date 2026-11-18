@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -86,12 +87,25 @@ type LinkRequest struct {
 // LinkApplied reports what one subject in a turn resolved to: the parsed kind
 // and key, the id of the event appended for it, and whether it was a no-op. A
 // no-op carries no EventID — re-linking a live pair or unlinking a pair that is
-// not live appends nothing (D4).
+// not live appends nothing (D4). Dormant marks a person subject whose person is
+// dormant, so the ack can label them; it never changes what is linked.
 type LinkApplied struct {
 	Kind    string
 	Key     string
 	EventID string
 	NoOp    bool
+	Dormant bool
+}
+
+// ackRef renders the applied subject as its <kind>:<key> token for an ack,
+// followed by " (dormant)" for a dormant person — `person:person_s-oak
+// (dormant)`. Every other token renders exactly as before.
+func (a LinkApplied) ackRef() string {
+	ref := a.Kind + ":" + a.Key
+	if a.Dormant {
+		ref += " (dormant)"
+	}
+	return ref
 }
 
 // LinkResult reports what a turn did: the resolved media id, one LinkApplied per
@@ -134,6 +148,12 @@ func (r *Router) Link(req LinkRequest) (LinkResult, error) {
 	if err != nil {
 		return LinkResult{}, err
 	}
+	// Which person subjects are dormant, read before anything is appended so a
+	// failed read leaves the ledger untouched. It only labels the ack.
+	dormant, err := r.dormantPersonSubjects(refs)
+	if err != nil {
+		return LinkResult{}, err
+	}
 
 	// Fold the media's current links once, so the per-pair no-op decision reads
 	// the same liveness view for every subject in the turn.
@@ -148,6 +168,7 @@ func (r *Router) Link(req LinkRequest) (LinkResult, error) {
 		if aerr != nil {
 			return LinkResult{}, aerr
 		}
+		a.Dormant = dormant[ref]
 		applied = append(applied, a)
 	}
 
@@ -247,6 +268,35 @@ func (r *Router) resolveSubjects(subjects []string) ([]subjectRef, error) {
 	return refs, nil
 }
 
+// dormantPersonSubjects reports which of the turn's person subjects name a
+// dormant person — their key, followed through a merge redirect, has a folded
+// dormant status (data-model.md §"Identity log"). Link stays key-only; this
+// only feeds the ack's " (dormant)" label. A turn with no person subject reads
+// nothing, and a Ledger with no identity log marks no one.
+func (r *Router) dormantPersonSubjects(refs []subjectRef) (map[subjectRef]bool, error) {
+	if !slices.ContainsFunc(refs, func(s subjectRef) bool { return s.kind == "person" }) {
+		return nil, nil //nolint:nilnil // no person subject: nothing to label
+	}
+	st, err := r.store.IdentityState()
+	if err != nil {
+		return nil, fmt.Errorf("could not read the identity log; nothing was linked: %w", err)
+	}
+	out := map[subjectRef]bool{}
+	for _, ref := range refs {
+		if ref.kind != "person" {
+			continue
+		}
+		canon, rerr := r.store.ResolvePersonRedirect(ref.key)
+		if rerr != nil {
+			return nil, fmt.Errorf("could not resolve %s; nothing was linked: %w", ref.ref(), rerr)
+		}
+		if st.IsDormant(canon) {
+			out[ref] = true
+		}
+	}
+	return out, nil
+}
+
 // liveSubjects folds one media's current links into a set of the (kind, key)
 // subjects that are live, so a link/unlink turn can decide each subject's no-op
 // in a single read (SC-8's fold, consumed through the seam rather than raw
@@ -269,7 +319,7 @@ func (r *Router) liveSubjects(mediaID string) (map[subjectRef]bool, error) {
 func linkAck(op storage.LinkOp, mediaID string, applied []LinkApplied) string {
 	var changed, noop []string
 	for _, a := range applied {
-		ref := a.Kind + ":" + a.Key
+		ref := a.ackRef()
 		if a.NoOp {
 			noop = append(noop, ref)
 		} else {

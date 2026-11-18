@@ -33,12 +33,14 @@ type PersonMatch struct {
 }
 
 // PersonSubject is who a name means now ([Router.resolvePersonNow]): the
-// resolved record and whether they are dormant, the dormant people who also
-// hold the queried form, and — when the name is ambiguous — the candidates,
-// active first, then dormant.
+// resolved record, whether they are dormant (with their folded status event,
+// for the "Dormant since" line), the dormant people who also hold the queried
+// form, and — when the name is ambiguous — the candidates, active first, then
+// dormant.
 type PersonSubject struct {
 	Record      storage.PersonRecord
 	Dormant     bool
+	Status      identity.StatusFact
 	DormantAlso []PersonMatch
 	Candidates  []PersonMatch
 }
@@ -72,7 +74,11 @@ func (r *Router) resolvePersonNow(raw string) (PersonSubject, error) {
 		if rerr != nil {
 			return PersonSubject{}, rerr
 		}
-		return PersonSubject{Record: rec, Dormant: res.Dormant, DormantAlso: also}, nil
+		subj := PersonSubject{Record: rec, Dormant: res.Dormant, DormantAlso: also}
+		if res.Dormant {
+			subj.Status, _ = st.StatusEvent(rec.PersonKey)
+		}
+		return subj, nil
 	case storage.NameAmbiguous:
 		cands, rerr := r.personMatches(st, res.Candidates)
 		if rerr != nil {
