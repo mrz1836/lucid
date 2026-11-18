@@ -290,6 +290,15 @@ func (r *Router) matchPeople(query string) ([]storage.PersonRecord, error) {
 	return matches, nil
 }
 
+// holdsFormExactly reports whether the record holds the form exactly — as its
+// display_name or an aka, case-insensitively — the same exact-holder rule
+// lookup and capture discovery use. It lets reconcile's whole-Ledger scan (a
+// declared reader) test first-name overlaps without growing a matcher of its
+// own.
+func holdsFormExactly(rec storage.PersonRecord, form string) bool {
+	return recordMatchesName(rec, strings.TrimSpace(form))
+}
+
 // recordMatchesName reports whether the queried name equals the record's
 // display_name or any of its aka variants, case-insensitively.
 func recordMatchesName(rec storage.PersonRecord, query string) bool {
