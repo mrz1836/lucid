@@ -1,7 +1,6 @@
 package router
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -53,8 +52,8 @@ type PersonRequest struct {
 // mentioning them, and its dominance share (agent-contracts.md §"How contracts
 // compose"; scope.md §4). It never calls a model and never writes. Resolution is
 // key-first: an exact person_key wins (a tombstone key resolves forward to its
-// canonical), mirroring resolvePersonSubject so the read and write paths accept
-// the same identifiers; otherwise the query is matched against display_name /
+// canonical), mirroring the curation verbs' record targeting so the read and
+// write paths accept the same identifiers; otherwise the query is matched against display_name /
 // aka[]. No match returns the empty state (§P-1); several name matches list the
 // candidates (§P-2); a match named in the off-limits registry renders the raw
 // record only, behind the standing header, with nothing derived (§P-3). The
@@ -63,8 +62,8 @@ func (r *Router) Person(req PersonRequest) (PersonResult, error) {
 	query := strings.TrimSpace(req.Name)
 
 	// Key-first: an exact person_key wins (a tombstone resolves forward to its
-	// canonical), mirroring resolvePersonSubject so read and write accept the same
-	// identifiers. A non-key query falls through to display_name/aka matching.
+	// canonical), mirroring the curation verbs' record targeting so read and
+	// write accept the same identifiers. A non-key query falls through to display_name/aka matching.
 	if rec, ok, err := r.exactKeySubject(query); err != nil {
 		return PersonResult{}, err
 	} else if ok {
@@ -84,44 +83,6 @@ func (r *Router) Person(req PersonRequest) (PersonResult, error) {
 	default:
 		return r.renderCandidates(query, matches), nil
 	}
-}
-
-// matchPeople returns every canonical people record whose display_name or an
-// aka variant equals the query (case-insensitive), sorted by person_key so the
-// candidate order — and any output built from it — is deterministic.
-//
-// Redirect tombstones are skipped: a merge unions the source's forms into the
-// canonical's aka[], so a merged-away form still matches the canonical and
-// yields exactly one match rather than a spurious §P-2. Resolution never scans
-// a tombstone (data-model.md §"Merge & redirect").
-func (r *Router) matchPeople(query string) ([]storage.PersonRecord, error) {
-	keys, err := r.store.ListPeopleKeys()
-	if err != nil {
-		return nil, fmt.Errorf("person: list people: %w", err)
-	}
-	var matches []storage.PersonRecord
-	for _, key := range keys {
-		rec, found, err := r.store.ReadPerson(key)
-		if err != nil {
-			return nil, fmt.Errorf("person: read %q: %w", key, err)
-		}
-		if found && !rec.IsTombstone() && recordMatchesName(rec, query) {
-			matches = append(matches, rec)
-		}
-	}
-	slices.SortStableFunc(matches, func(a, b storage.PersonRecord) int { return cmp.Compare(a.PersonKey, b.PersonKey) })
-	return matches, nil
-}
-
-// recordMatchesName reports whether the queried name equals the record's
-// display_name or any of its aka variants, case-insensitively.
-func recordMatchesName(rec storage.PersonRecord, query string) bool {
-	if strings.EqualFold(strings.TrimSpace(rec.DisplayName), query) {
-		return true
-	}
-	return slices.ContainsFunc(rec.Aka, func(aka string) bool {
-		return strings.EqualFold(strings.TrimSpace(aka), query)
-	})
 }
 
 // renderCandidates builds the P-2 disambiguation result: the candidates listed

@@ -351,7 +351,7 @@ func contactResult(stored contact.Event, rec storage.PersonRecord, after contact
 // resolver's copy naming the candidate keys (Ct-2). Either way the refusal is
 // a [ContactRejectedError] that still matches the person sentinels.
 func (r *Router) contactSubject(raw string) (storage.PersonRecord, error) {
-	rec, err := r.resolvePersonSubject(raw)
+	rec, err := r.resolvePersonRecord(raw, false)
 	if err == nil {
 		return rec, nil
 	}
