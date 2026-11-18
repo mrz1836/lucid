@@ -13,6 +13,8 @@ import (
 const (
 	personReasonFileFlag = "reason-file"
 	personForceFlag      = "force"
+	personFromFlag       = "from"
+	personToFlag         = "to"
 )
 
 // reasonWithRestoreError is the usage refusal for --reason-file alongside
@@ -208,4 +210,47 @@ no-op ack. Quote a multi-word subject or form.`,
 			return emitPersonIdentityWrite(cmd, res)
 		},
 	}
+}
+
+// newPersonMoveRefCmd builds the `move-ref` child: repair one misfiled mention
+// with an append-only correction, never by hand-editing people/ or processed/.
+func newPersonMoveRefCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "move-ref <raw_id>",
+		Short: "Move one misfiled mention to the person it really was",
+		Long: `move-ref repairs one misfiled mention: lucid person move-ref <raw_id> --from
+<subject> --to <subject> appends one correction to the identity log, and every
+read then shows that entry's mention under --to only — the person view's count,
+entry list and insights, the dominance line, the reflect gate panel, the
+Reflection slice and reconcile. The raw entry, its processed artifact and both
+people records are never rewritten, and a lucid structure --force re-run does not
+undo the correction. --to must already be a person (lucid person create first).
+The undo is the reverse move-ref.
+
+Leave out --from to settle a held mention — one capture could not assign to a
+single person: the entry's one held mention is pinned to --to. The move is
+refused, before anything is written, for an unknown raw id, an entry with no
+mention under --from, --from equal to --to, or — without --from — an entry with
+no held mention or more than one. Each subject is a person_key or a name.`,
+		Args: cobra.ExactArgs(1),
+		Example: `  lucid person move-ref raw_2026_11_18_21_40 --from Sam --to "Sam Rivera"
+  lucid person move-ref raw_2026_11_18_09_00 --to person_s-river --json`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := bootedRouter(cmd)
+			if err != nil {
+				return err
+			}
+			from, _ := cmd.Flags().GetString(personFromFlag)
+			to, _ := cmd.Flags().GetString(personToFlag)
+			res, err := r.PersonMoveRef(router.PersonMoveRefRequest{RawID: args[0], From: from, To: to, Now: clockNow()})
+			if err != nil {
+				return personRejection(cmd, err)
+			}
+			return emitPersonIdentityWrite(cmd, res)
+		},
+	}
+	cmd.Flags().String(personFromFlag, "", "The person the mention is filed under now (leave out to settle the entry's one held mention)")
+	cmd.Flags().String(personToFlag, "", "The person the mention really was (must already exist)")
+	_ = cmd.MarkFlagRequired(personToFlag)
+	return cmd
 }

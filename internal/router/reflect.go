@@ -404,11 +404,17 @@ func (r *Router) dominanceLine() (string, error) {
 	}
 	deny := toSet(offLimits)
 
-	// Canonicalize each mention's person_key before counting: a merged person's
+	// Attribute each mention on read before counting: a merged person's
 	// mentions are spread across their pre-merge slugs in the historical
 	// artifacts, and only folding onto the canonical key aggregates them (and
-	// renders the canonical display name).
-	canon, canonNames, err := r.personRedirectIndex()
+	// renders the canonical display name); a pin or move-ref then moves a
+	// mention onto the person it was settled or corrected to
+	// (data-model.md §"Attribution on read").
+	fold, err := r.store.MentionFold()
+	if err != nil {
+		return "", fmt.Errorf("reflect: fold mentions for dominance: %w", err)
+	}
+	_, canonNames, err := r.personRedirectIndex()
 	if err != nil {
 		return "", fmt.Errorf("reflect: index people for dominance: %w", err)
 	}
@@ -421,14 +427,16 @@ func (r *Router) dominanceLine() (string, error) {
 			return "", fmt.Errorf("reflect: read processed %q for dominance: %w", id, err)
 		}
 		seen := map[string]bool{}
-		for _, p := range art.People {
-			key := canonicalKey(canon, p.PersonKey)
-			if deny[key] || deny[p.PersonKey] || seen[key] {
+		for _, m := range fold.Mentions(art) {
+			key := m.PersonKey
+			// Off-limits is checked on the stored, canonical, and folded key, so
+			// a corrected mention never names an off-limits person (fail closed).
+			if deny[key] || deny[m.StoredKey] || deny[fold.Canon(m.StoredKey)] || seen[key] {
 				continue
 			}
 			seen[key] = true
 			counts[key]++
-			names[key] = p.DisplayName
+			names[key] = m.DisplayName
 		}
 	}
 

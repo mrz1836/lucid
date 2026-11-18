@@ -114,14 +114,20 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 	if err != nil {
 		return PersonResult{}, err
 	}
+	// The person's references on read: their entry_refs with every pin and
+	// move-ref folded in (data-model.md §"Attribution on read").
+	refs, err := r.store.FoldedEntryRefs(rec)
+	if err != nil {
+		return PersonResult{}, fmt.Errorf("person: fold entry refs for %q: %w", rec.PersonKey, err)
+	}
 	if toSet(offLimits)[rec.PersonKey] {
 		return PersonResult{
 			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey, Contact: checkIns,
-			Text: renderOffLimits(rec, checkIns),
+			Text: renderOffLimits(rec, refs, checkIns),
 		}, nil
 	}
 
-	insightIDs, err := r.insightsCiting(rec)
+	insightIDs, err := r.insightsCiting(refs)
 	if err != nil {
 		return PersonResult{}, err
 	}
@@ -132,7 +138,7 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + "\n")
-	b.WriteString(mentionSummary(rec) + "\n")
+	b.WriteString(mentionSummary(rec, refs) + "\n")
 	writeCheckInLine(&b, checkIns)
 	if len(insightIDs) > 0 {
 		b.WriteString("Referenced by accepted insights: " + strings.Join(insightIDs, ", ") + "\n")
@@ -188,25 +194,26 @@ func (r *Router) personLinkedMediaLine(rec storage.PersonRecord) (string, error)
 
 // renderOffLimits builds the §P-3 raw-record-only view: the standing header,
 // the mention summary, the check-in line when there are contact events (the
-// user's own record), and the raw entry ids — mentions and dates, nothing
-// derived (no insights, no dominance).
-func renderOffLimits(rec storage.PersonRecord, checkIns *PersonContact) string {
+// user's own record), and the raw entry ids (refs, the folded references) —
+// mentions and dates, nothing derived (no insights, no dominance).
+func renderOffLimits(rec storage.PersonRecord, refs []string, checkIns *PersonContact) string {
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + " is off-limits to inference — what follows is your raw record only: " +
 		"mentions and dates, nothing derived.\n")
-	b.WriteString(mentionSummary(rec) + "\n")
+	b.WriteString(mentionSummary(rec, refs) + "\n")
 	writeCheckInLine(&b, checkIns)
-	if len(rec.EntryRefs) > 0 {
-		b.WriteString("Entries: " + strings.Join(rec.EntryRefs, ", ") + "\n")
+	if len(refs) > 0 {
+		b.WriteString("Entries: " + strings.Join(refs, ", ") + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
 // mentionSummary renders the deterministic mention-count-over-time line: how
-// many entries mention the person and the first/last seen dates.
-func mentionSummary(rec storage.PersonRecord) string {
+// many entries mention the person (refs, their folded references) and the
+// record's own first/last seen dates, which the fold never re-derives.
+func mentionSummary(rec storage.PersonRecord, refs []string) string {
 	return fmt.Sprintf("Mentioned in %d entr%s (first seen %s, last seen %s).",
-		len(rec.EntryRefs), plural(len(rec.EntryRefs)),
+		len(refs), plural(len(refs)),
 		rec.FirstSeenAt.Format(personDateLayout), rec.LastSeenAt.Format(personDateLayout))
 }
 
@@ -220,10 +227,11 @@ func plural(n int) string {
 }
 
 // insightsCiting returns the ids of every accepted insight whose provenance
-// cites a raw entry that mentions this person — the deterministic join scope.md
-// §4 specifies. Ids are sorted so the output is byte-stable.
-func (r *Router) insightsCiting(rec storage.PersonRecord) ([]string, error) {
-	refs := toSet(rec.EntryRefs)
+// cites a raw entry that mentions this person — one of entryRefs, their folded
+// references — the deterministic join scope.md §4 specifies. Ids are sorted so
+// the output is byte-stable.
+func (r *Router) insightsCiting(entryRefs []string) ([]string, error) {
+	refs := toSet(entryRefs)
 	ids, err := r.store.ListInsightIDs()
 	if err != nil {
 		return nil, fmt.Errorf("person: list insights: %w", err)
@@ -250,11 +258,11 @@ func (r *Router) insightsCiting(rec storage.PersonRecord) ([]string, error) {
 
 // personRedirectIndex reads the people tree once and returns, for every person
 // key, the canonical key it resolves to (canon), plus the current display name
-// of each canonical record (names). It is the join bridge for the two counting
-// paths — /person dominance and the /reflect gate panel — because historical
-// processed/*.json artifacts keep the pre-merge person_key, so a count that
-// keys on the artifact's key would split a merged person across their old and
-// new slugs. Canonicalizing first folds those counts back onto the one record.
+// of each canonical record (names). The /reflect gate panel renders a counted
+// person by their canonical display name from it; the counts themselves come
+// from the storage mention fold, which canonicalizes the historical
+// processed/*.json keys (an artifact keeps the pre-merge person_key) and folds
+// in every pin and move-ref.
 func (r *Router) personRedirectIndex() (canon, names map[string]string, err error) {
 	keys, err := r.store.ListPeopleKeys()
 	if err != nil {
@@ -280,20 +288,13 @@ func (r *Router) personRedirectIndex() (canon, names map[string]string, err erro
 	return canon, names, nil
 }
 
-// canonicalKey maps a person_key through the redirect index, returning the key
-// unchanged when it names a canonical record (or one absent from the index).
-func canonicalKey(canon map[string]string, key string) string {
-	if c, ok := canon[key]; ok {
-		return c
-	}
-	return key
-}
-
 // personDominanceLine returns the one dominance line for this person, or "" when
 // their share of processed entries does not exceed person_dominance_threshold.
-// Share is the fraction of processed artifacts that mention them (deterministic,
-// router-side). The line is hypothesis-framed and appears only in /person and
-// /reflect gate — never on /status or a daily surface (S-22).
+// Share is the fraction of processed artifacts that mention them on read —
+// each artifact's mentions canonicalized through redirects (historical
+// artifacts keep the pre-merge key) with every pin and move-ref folded in
+// (deterministic, router-side). The line is hypothesis-framed and appears only
+// in /person and /reflect gate — never on /status or a daily surface (S-22).
 func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 	ids, err := r.store.ListProcessedIDs()
 	if err != nil {
@@ -303,9 +304,9 @@ func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 	if total == 0 {
 		return "", nil
 	}
-	canon, _, err := r.personRedirectIndex()
+	fold, err := r.store.MentionFold()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("person: fold mentions: %w", err)
 	}
 	mentions := 0
 	for _, id := range ids {
@@ -313,11 +314,8 @@ func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("person: read processed %q: %w", id, err)
 		}
-		for _, p := range art.People {
-			if canonicalKey(canon, p.PersonKey) == rec.PersonKey {
-				mentions++
-				break
-			}
+		if slices.Contains(fold.MentionKeys(art), rec.PersonKey) {
+			mentions++
 		}
 	}
 	share := float64(mentions) / float64(total)

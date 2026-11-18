@@ -287,7 +287,8 @@ func TestPersonDormantRestore_ReachesDormantAfterNameMovedOn(t *testing.T) {
 	require.ErrorIs(t, err, ErrPersonAmbiguousSubject)
 	assert.Equal(t, fmt.Sprintf(
 		`"Sam" matches more than one person — disambiguate with a person_key (%s / %s (dormant)); nothing was saved.`,
-		river, oldSam), err.Error())
+		river, oldSam,
+	), err.Error())
 
 	res, err := f.r.PersonDormant(PersonDormantRequest{Subject: "Sam", Restore: true, Now: f.now()})
 	require.NoError(t, err)

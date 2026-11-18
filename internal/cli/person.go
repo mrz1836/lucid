@@ -135,6 +135,7 @@ func newPersonCmd() *cobra.Command {
 	cmd.AddCommand(newPersonDormantCmd())
 	cmd.AddCommand(newPersonClaimCmd())
 	cmd.AddCommand(newPersonReleaseCmd())
+	cmd.AddCommand(newPersonMoveRefCmd())
 	cmd.AddCommand(newPersonReconcileCmd())
 	return cmd
 }
