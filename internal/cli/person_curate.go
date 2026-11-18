@@ -119,7 +119,7 @@ person_key or a name (quote a multi-word name).`,
 			if err != nil {
 				return err
 			}
-			res, err := r.PersonMerge(router.PersonMergeRequest{Source: args[0], Target: args[1]})
+			res, err := r.PersonMerge(router.PersonMergeRequest{Source: args[0], Target: args[1], Now: clockNow()})
 			if err != nil {
 				return personRejection(cmd, err)
 			}

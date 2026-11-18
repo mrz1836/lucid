@@ -66,7 +66,7 @@ type gratitudePerson struct {
 // §8). It validates everything before anything is written — the id must name a
 // live entry (an unknown id or a merge tombstone is a clean error, like
 // `--into`), the person subject must resolve to exactly one live person
-// ([Router.resolvePersonSubject]: no match or several is a clean error naming
+// ([Router.resolvePersonRecord]: no match or several is a clean error naming
 // the remedy or the candidate keys), and `--day` runs the shared strict tier —
 // then links the canonical person key onto the entry and appends one
 // tally-neutral `expressed` event, returning its receipt. An off-limits person
@@ -132,14 +132,14 @@ func (r *Router) ThankGratitude(req ThankGratitudeRequest) (GratitudeThankResult
 
 // resolveGratitudePerson resolves a `--person` subject for `add --person` or
 // `thank` exactly as the person write verbs resolve one
-// ([Router.resolvePersonSubject]): an exact person_key wins (a redirect followed
+// ([Router.resolvePersonRecord]): an exact person_key wins (a redirect followed
 // to its canonical record), otherwise the name is matched against live
 // display_name / aka[]; no match or several is a clean [PersonRejectedError]
 // ending "nothing was saved". It also reports whether the person is off-limits,
 // which an add uses to withhold the tier-3 judge — reading the registry fails
 // closed, as an error before anything is written.
 func (r *Router) resolveGratitudePerson(raw string) (gratitudePerson, error) {
-	rec, err := r.resolvePersonSubject(raw)
+	rec, err := r.resolvePersonRecord(raw, false)
 	if err != nil {
 		return gratitudePerson{}, err
 	}

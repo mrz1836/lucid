@@ -61,12 +61,39 @@ func (a *Adapter) AppendIdentityEvents(events []identity.Event) ([]identity.Even
 		return nil, nil
 	}
 	path := a.identityPath()
-	next, err := a.identitySlots(path)
+	out, err := a.stampIdentityEvents(events)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	for i, e := range out {
+		line, merr := e.MarshalLine()
+		if merr != nil {
+			return nil, merr
+		}
+		if i > 0 {
+			buf.WriteByte('\n')
+		}
+		buf.Write(line)
+	}
+	if err := appendLineFsync(path, buf.Bytes()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// stampIdentityEvents fills each event's schema and assigns the id
+// [Adapter.AppendIdentityEvents] would give it — the local date of its `at`
+// plus the first unused per-day slot in the log — and validates it, writing
+// nothing. A curation write uses it to fold its own events in memory before
+// appending them, so the pins it records are decided against the state the
+// write produces, and the whole batch lands as one append.
+func (a *Adapter) stampIdentityEvents(events []identity.Event) ([]identity.Event, error) {
+	next, err := a.identitySlots(a.identityPath())
 	if err != nil {
 		return nil, err
 	}
 	out := make([]identity.Event, len(events))
-	var buf bytes.Buffer
 	for i, e := range events {
 		at, perr := time.Parse(time.RFC3339, e.At)
 		if perr != nil {
@@ -79,18 +106,7 @@ func (a *Adapter) AppendIdentityEvents(events []identity.Event) ([]identity.Even
 		if verr := e.Validate(); verr != nil {
 			return nil, verr
 		}
-		line, merr := e.MarshalLine()
-		if merr != nil {
-			return nil, merr
-		}
-		if i > 0 {
-			buf.WriteByte('\n')
-		}
-		buf.Write(line)
 		out[i] = e
-	}
-	if err := appendLineFsync(path, buf.Bytes()); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
