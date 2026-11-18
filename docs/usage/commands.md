@@ -267,8 +267,10 @@ media, so the attachment is discoverable by the day view and the Mirror.
 
 Provenance over magic: the ack lands only *after* the write, naming the stored
 path, the sha256, the logical day, the linked raw id, and any subjects linked.
-`--json` emits `{stored_path, sha256, day, raw_id, caption, linked}`. Scaffolds
-the media store (and, when `--to` is given, the link ledger) on first use.
+`--json` emits `{stored_path, sha256, day, raw_id, caption, linked}`. A linked
+dormant person is marked in the ack exactly as [`link`](#link) marks them
+(`person:person_s-oak (dormant)`). Scaffolds the media store (and, when `--to`
+is given, the link ledger) on first use.
 
 ```sh
 lucid attach ~/Pictures/IMG_4823.jpg --caption "handwritten session notes, page 1"
@@ -304,7 +306,10 @@ Deterministic, agent-free, no model in the path.
 prints "already linked", exits `0`, and appends nothing — the verb exists so
 associations can grow over years, so "already there" is an acknowledgement, not a
 failure. `--json` emits `{media_id, applied: [{kind, key, event_id, no_op}]}`;
-the prose ack names each subject linked.
+the prose ack names each subject linked. A `person` subject takes only an exact
+`person_key`; a dormant person ([`person dormant`](#person-dormant)) is still
+linkable, and the ack marks them by following their `person:<key>` with
+` (dormant)` — `person:person_s-oak (dormant)`. Every other ack is unchanged.
 
 ```sh
 lucid link 2026-07-10-handwritten-notes.jpg --to person:person_a-river
@@ -1426,7 +1431,7 @@ lucid contact resume <subject...> [--json]
 lucid contact retire <subject...> [--json]
 lucid contact snooze <subject...> [--json]
 lucid contact void <id> [--json]
-lucid contact due [--wrap] [--json]
+lucid contact due [--wrap] [--all] [--json]
 ```
 
 Keep in touch with the people who matter to you, inside a time frame you choose:
@@ -1476,8 +1481,8 @@ The user guide is [`contact.md`](contact.md); the design record is
   person, and both records stay in the history. An unknown id, an
   already-voided event, a void, or a cadence event is refused — a cadence is
   corrected with `every`, `pause`, `resume` or `retire`, never voided.
-- **`due`** is the read view and **`due --wrap`** the Sunday wrap, both below.
-  A read appends nothing.
+- **`due`** is the read view and **`due --wrap`** the Sunday wrap, both below;
+  **`--all`** brings dormant people back into either. A read appends nothing.
 
 State is a fold, never a mutation: every write appends one event and nothing is
 rewritten. Events follow `person merge` redirects at read time, so a cadence, a
@@ -1543,8 +1548,8 @@ Under `--json` every write emits one shared receipt shape, extending the global
 
 **The due view.** `lucid contact due` groups people against the ISO
 Monday–Sunday week of the current logical day (the 04:00 rollover applies).
-Only people with an **active** cadence, not snoozed this week and not
-off-limits are grouped:
+Only people with an **active** cadence, not snoozed this week, not off-limits
+and not dormant are grouped (`--all` includes dormant people):
 
 | Group | `--json` key | The window closes… |
 |-------|--------------|--------------------|
@@ -1565,8 +1570,8 @@ it reads `No check-in cadences yet — set one with lucid contact every <name> 4
 with nobody in the three groups it reads `Nobody's due this week.`, and
 birthdays are still listed.
 
-**Birthdays.** Anyone with a `dob` who is not off-limits — cadence or not,
-snoozed or paused — shows in the birthdays block when their birthday falls this
+**Birthdays.** Anyone with a `dob` who is not off-limits or dormant — cadence
+or not, snoozed or paused — shows in the birthdays block when their birthday falls this
 Monday–Sunday. A Feb 29 `dob` is observed on Feb 28 in non-leap years, and a
 week that crosses New Year works. Birthdays show in the due view and the Monday
 post, never in the wrap.
@@ -1604,6 +1609,15 @@ post, never in the wrap.
 
 Arrays are never `null`; an empty group is `[]`.
 
+**`--all` — dormant people too.** A [dormant](#person-dormant) person is left out
+of the groups and the birthdays block by default. `due --all` (and `due --wrap
+--all`) puts them back where their cadence and birthday place them, each line
+ending ` (dormant)` — `- Sam (every 4 weeks), last caught up Oct 8 (dormant)`,
+`- Sam — Wed Nov 4 (dormant)` — and under `--json` each of their rows carries
+`"dormant": true`, a key left out for everyone else. Without `--all` the view is
+byte-identical to a Ledger with no dormant people. The Monday post has no such
+flag: it always leaves dormant people out.
+
 **The Sunday wrap.** `due --wrap` is the due view with only the two lists, "Due
 this week" and "Still open from before". It leaves out "Coming up next week" and
 birthdays (under `--json`, `wrap` is `true` and the `coming_up` and `birthdays`
@@ -1625,15 +1639,18 @@ anyone but you. Setup and the exact template:
 
 **Off-limits people** can still be written about — a contact, a cadence and a
 snooze for them are your own record — but they never appear in the due view, the
-birthdays block, the Monday post or the wrap. The witness report never reads
-contact data.
+birthdays block, the Monday post or the wrap. **Dormant people** can be written
+about too, and leave the same lists unless `--all` is passed (the Monday post
+never shows them). The witness report never reads contact data.
 
-**Resolving a subject.** Every contact verb resolves its subject exactly as the
-person write verbs do ([Resolving a subject](#resolving-a-subject)): an exact
-`person_key` wins, then a `display_name`/`aka[]` match, with redirect tombstones
-followed forward. No match is refused with the `lucid person create` pointer
-(§P-4), more than one is refused naming the candidate keys (§P-5), and the verb
-never guesses. A multi-word subject joins into one name.
+**Resolving a subject.** Every contact verb resolves its subject to **who it
+means now** ([Resolving a subject](#resolving-a-subject)): an exact `person_key`
+wins (redirect tombstones followed forward), then the form's active claimant,
+then the one active person whose `display_name`/`aka[]` is the form — a dormant
+person never beats an active one. No match is refused with the
+`lucid person create` pointer (§P-4), more than one is refused naming the
+candidate keys (§P-5), and the verb never guesses. A multi-word subject joins
+into one name.
 
 The subcommand names shadow a person with the same literal name — reach such a person by their `person_key`.
 `every`, `pause`, `resume`, `retire`, `snooze`, `void` and `due` always run the
@@ -1660,6 +1677,7 @@ lucid contact retire Casey Park
 lucid contact due
 lucid contact due --json
 lucid contact due --wrap --json
+lucid contact due --all
 ```
 
 ### retro
@@ -1799,8 +1817,8 @@ match tiers, confidence bands, and outward expression):
   that entry). `--new` cannot be combined with `--into` or `--count`.
 - **`add <thing> --person <subject>`** also links the entry the occurrence lands
   on to a person (link-only: no "expressed" record, no extra tally effect). The
-  subject is resolved like every person write verb's
-  ([Resolving a subject](#resolving-a-subject)) and validated **before**
+  subject resolves to who the name means now
+  ([Resolving a subject](#resolving-a-subject)) and is validated **before**
   anything is written — no match or several matches writes nothing. It cannot
   be combined with the `--count` seed.
 - **`list`** folds each live entry's Count/First/Last and prints the tally
@@ -3037,7 +3055,11 @@ lucid person alias <subject> <form> [--json]
 lucid person rename <subject> <new-name...> [--json]
 lucid person set <subject> [--dob <YYYY-MM-DD>] [--relationship <text>] [--relationship-file <path>] [--note <text>] [--note-file <path>] [--json]
 lucid person off-limits <subject> [--restore] [--json]
-lucid person reconcile [--json]
+lucid person dormant <subject> [--reason-file <path>] [--restore] [--json]
+lucid person claim <subject> <form> [--force] [--json]
+lucid person release <subject> <form> [--json]
+lucid person move-ref <raw_id> [--from <subject>] --to <subject> [--json]
+lucid person reconcile [--all] [--json]
 ```
 
 `lucid person <name>` is a deterministic person join
@@ -3049,22 +3071,45 @@ across repeated runs on the same store (S-22). Names may contain spaces (trailin
 arguments are joined). An exact `person_key` is **also a valid lookup identifier** —
 resolved before `display_name`/`aka[]` (a tombstone key resolving forward to its
 canonical record), so `lucid person <person_key>` prints that person's view rather
-than the §P-1 empty state. This is the same subject resolution the write verbs use
-([§"Resolving a subject"](#resolving-a-subject)), so read and write accept the same
-identifiers. It **always exits `0`**: a no-match (§P-1), several matches
-(§P-2, candidates listed), a single match, and an off-limits person (§P-3, raw record
-only — mentions and dates, nothing derived) are all read outcomes carried in the
-result, never errors. `--json` emits `{query, matched, multiple_matches,
-candidates:[{person_key, display_name, first_seen_at}], off_limits, person_key,
-text}`. When the person has [`contact`](#contact) events, the view adds one
-check-in line — the cadence (or paused / retired) and the last contact, e.g.
-`Check-ins: every 4 weeks — last caught up 2026-09-28` — and an omitempty
-`contact` object under `--json`, in the off-limits raw view too, since it is
-your own record; a person with no contact events renders exactly as before. The
+than the §P-1 empty state. A name resolves to **who it means now**
+([§"Resolving a subject"](#resolving-a-subject)): the form's active claimant, else
+the one active person who holds it. It **always exits `0`**: a no-match (§P-1),
+several matches (§P-2, candidates listed), a single match, and an off-limits person
+(§P-3, raw record only — mentions and dates, nothing derived) are all read outcomes
+carried in the result, never errors. `--json` emits `{query, matched,
+multiple_matches, candidates:[{person_key, display_name, first_seen_at}],
+off_limits, person_key, text}`. When the person has [`contact`](#contact) events,
+the view adds one check-in line — the cadence (or paused / retired) and the last
+contact, e.g. `Check-ins: every 4 weeks — last caught up 2026-09-28` — and an
+omitempty `contact` object under `--json`, in the off-limits raw view too, since it
+is your own record; a person with no contact events renders exactly as before. The
 object is `{state, cadence, cadence_days, last_contact}`: `state` is `active`,
 `paused`, `retired` or `none` (contact logged, no cadence); `cadence` and
 `cadence_days` are the most recent window, left out when none was ever set; and
 `last_contact` is the last non-voided contact day, or `null`.
+
+**Dormant people** ([`person dormant`](#person-dormant)) never beat an active
+person for a name. In a §P-2 candidate list they rank last and are labeled —
+`Sam (first seen 2023-03-04, dormant)`. A dormant person's own view adds one line
+after its first line:
+
+```text
+Dormant since 2026-11-17 — an old contact from one passing mention
+```
+
+or `Dormant since 2026-11-17.` when no reason was recorded. A view that resolves
+to an **active** person names any dormant person who shares the queried form, also
+right after its first line:
+
+```text
+"Sam" also names a dormant person: "Sam" (person_s-oak).
+```
+
+With more than one: `"Sam" also names dormant people: "Sam" (person_s-oak); "Sam"
+(person_s-oak-2).` Under `--json` the view adds `dormant: true` for a dormant
+person, `dormant_also: [{person_key, display_name}]` for that line, and
+`dormant: true` on a dormant candidate — each left out otherwise, so a Ledger with
+no dormant people renders exactly as before.
 
 ```sh
 lucid person "Sam Rivera"
@@ -3077,19 +3122,45 @@ People records are **capture-first**: they appear as you mention people, and a
 disconnected records. The write verbs below are the **curate** surface that
 reconciles them, modeled as **append-and-redirect** (§"Merge & redirect"):
 nothing is ever deleted, and `lucid person <any form>` ends up resolving to one
-canonical record with correct aggregate counts. Every write verb is
-deterministic and model-free, decides its rejection from the store before any
-write, and prints an inventory-only ack (no evaluative language). All accept
-`--json`, which emits a projected view of the record, never the raw storage
-struct.
+canonical record with correct aggregate counts. Four of them — `dormant`,
+`claim`, `release` and `move-ref` — settle **who a name means** instead: who
+matters now, which person a bare name goes to, and where one misfiled mention
+belongs. They append to the separate identity log
+([`../mvp/data-model.md`](../mvp/data-model.md) §"Identity log") and never touch a
+people record. Every write verb is deterministic and model-free, decides its
+rejection from the store before any write, and prints an inventory-only ack (no
+evaluative language). All accept `--json`, which emits a projected view of the
+record, never the raw storage struct.
 
 #### Resolving a subject
 
-Every write verb takes a **subject** — a `person_key` or a name. An exact key
-wins; otherwise the name is matched against `display_name`/`aka[]` exactly as
-`lucid person <name>` does, with redirect tombstones skipped. No live match is
-rejected (§P-4); more than one live match is rejected and the candidate keys are
-named (§P-5) — the verb never guesses which person you meant.
+A verb takes its subject — a `person_key` or a name — in one of two ways
+([`../mvp/data-model.md`](../mvp/data-model.md) §"Resolving a bare name"):
+
+- **Who it means now** — `lucid person <name>`, the [`contact`](#contact) verbs,
+  [`gratitude`](#gratitude) `--person` and `thank`, and the `--people` refs of
+  `obs memory`. An exact key wins (a tombstone key resolves forward); then the
+  form's active claimant ([`person claim`](#person-claim)); then the one
+  **active** person whose `display_name` or `aka[]` is the form. When only
+  dormant people hold the form, a one-word name goes to the one active person
+  with that first name, and otherwise to the dormant holder, labeled. Two or more
+  active holders are ambiguous: the read lists them (§P-2), and a write is
+  refused naming the candidate keys (§P-5). These never create a person.
+- **Record targeting** — every curation write: `merge`, `alias`, `rename`, `set`,
+  `off-limits`, `dormant` (and its `--restore`), `claim`, `release` and
+  `move-ref`. A write names a *record*, so an exact key wins, then an exact
+  `display_name`/`aka[]` match across active **and dormant** records, with
+  redirect tombstones skipped. No match is refused (§P-4). More than one match —
+  or a match that **disagrees** with who the name means now, say an old "Sam"
+  record while a bare "Sam" has been claimed for "Sam Rivera" — is refused, and
+  the error names the candidate keys, active first and each dormant one marked
+  ` (dormant)` (§P-5). The verb never guesses which person you meant.
+  `person dormant <subject> --restore` considers **only** dormant records, so
+  `lucid person dormant Sam --restore` reaches the old "Sam" even after a bare
+  "Sam" means someone else.
+
+[`link`](#link) and [`attach`](#attach) `--to person:` take only an exact
+`person_key`.
 
 #### `person create`
 
@@ -3118,7 +3189,13 @@ Creating a name whose derived key already names a live record (or resolves
 forward through a redirect tombstone) is an **idempotent no-op**: it exits `0`
 with an "already recorded" ack, forks no second record, and never rewrites the
 existing record's fields — so re-running an import is safe. (To enrich an
-existing person, use `person set`.)
+existing person, use `person set`.) The one exception is a **dormant** holder:
+when every record that holds the name is dormant ([`person dormant`](#person-dormant)),
+`create` mints a fresh active record under the next free collision suffix
+(`person_s-oak-2`) instead of returning the dormant one, and never routes to a
+person who only shares the first name. Restoring the old record later leaves the
+name with two active holders — ambiguous until a [`claim`](#person-claim) or a
+`dormant` settles it.
 
 `create` accepts the same **user-authored durable-field** flags as
 [`person set`](#person-set) — `--dob` (a civil `YYYY-MM-DD`), `--relationship`,
@@ -3148,6 +3225,14 @@ tombstone that already pointed at the source is flattened onto the target, so
 the chain stays a single hop. Merging a person into themselves is rejected
 (§P-6).
 
+Merge also keeps the identity log valid. The target keeps its status; a dormant
+source is made active again, so no status sits on a tombstone; and each form the
+source claims moves to the target — or is released when another active person
+holds that form exactly. The ack then adds `Claims moved: "Sammy".` and/or
+`Claims released: "Sam" (another active person holds it).` (several forms are
+joined with `, `). A merge of two people with no status and no claims acks
+exactly as before.
+
 #### `person alias`
 
 Record another written form on a person without waiting for it to be captured.
@@ -3155,7 +3240,8 @@ The form is added to the subject's `aka[]`, and a redirect tombstone is planted
 at the form's derived slug **when that slug is free or already this person's**,
 so a future bare mention of the form resolves here. If the form already resolves
 to a *different* live record, the verb refuses (§P-7) rather than hijack the
-other person's slug — merge them instead if they are the same. Idempotent: an
+other person's slug — merge them instead if they are the same, or
+[`claim`](#person-claim) the form if they are different people. Idempotent: an
 alias already recorded is a no-op ack.
 
 #### `person rename`
@@ -3194,52 +3280,319 @@ for the P-3 redaction registry, which previously had no verb. While off-limits,
 `lucid person <name>` renders the raw record only (mentions and dates, nothing
 derived) and the person is redacted from every agent slice. Nothing is deleted.
 Idempotent: marking someone already off-limits, or restoring someone who is not,
-is a no-op ack, not an error.
+is a no-op ack, not an error. Off-limits and [`dormant`](#person-dormant) are
+independent flags.
+
+#### `person dormant`
+
+Mark a person **dormant** — not who you mean now — without deleting anything;
+`--restore` makes them active again. It is the fix for a name that belongs to
+someone who no longer matters: once an old "Sam" is dormant, a new bare "Sam" no
+longer folds into them ([Resolving a subject](#resolving-a-subject)) and goes to
+the one active Sam instead. The write appends one `status` event to the identity
+log and changes nothing else: every mention, `entry_refs` id, contact event,
+user-authored field and off-limits mark is kept, and `--restore` returns the
+person exactly as they were. Dormant and [`off-limits`](#person-off-limits) are
+independent — a person can be both, and each toggles on its own.
+
+While dormant, a person:
+
+- never wins a bare name against an active person, and ranks last, labeled
+  `dormant`, in every candidate list;
+- is left out of `contact due` (its rows and birthdays), the Monday who's-due
+  post, and `person reconcile` merge suggestions — `contact due --all` and
+  `person reconcile --all` include them, labeled;
+- is still reached by `person_key`, by an exact name no active person holds, and
+  by every record-targeting verb; agent slices, insights and the dominance line
+  are unchanged.
+
+`--reason-file <path>` (`-` reads stdin) records why, as one line shown on the
+person view (`Dormant since 2026-11-17 — <reason>`). More than one line is
+refused (§P-9), an empty file is the shared file-flag usage error, and
+`--reason-file` does not combine with `--restore` (a usage error, exit `2`).
+
+```text
+"Sam" is now dormant — the record and its history are kept (identity_2026_11_17_a).
+"Sam" is active again (identity_2026_11_17_d).
+```
+
+If the person claims any forms ([`person claim`](#person-claim)), a second line
+says what happened to the claims: `Their claim on "Sam" is inert while they are
+dormant.` on `dormant`, and `Their claim on "Sam" is active again.` on `--restore`
+(with more than one: `Their claims on "Sam", "Sammy" are inert while they are
+dormant.` / `… are active again.`). A dormant or restore write also settles held
+mentions — see [The identity receipt](#the-identity-receipt). Repeating either
+form is a no-op ack with no receipt: `"Sam" is already dormant — nothing to
+change.` / `"Sam" is already active — nothing to change.`
+
+```sh
+lucid person dormant Sam --reason-file reason.txt
+lucid person dormant person_s-oak --restore
+```
+
+#### `person claim`
+
+Say **who a bare name means**. `lucid person claim <subject> <form>` makes every
+mention of `<form>` resolved **from now on** go to `<subject>` —
+`lucid person claim "Sam Rivera" Sam` means a bare "Sam" is Sam Rivera. Quote a
+multi-word subject or form. The claim lives in the identity log and never
+touches `aka[]`, a people record, or any past mention: entries already filed stay
+where they are (move one with [`move-ref`](#person-move-ref)). A form has at
+most one claimant.
+
+A claim is refused (§P-10) when a **different active** person holds the form —
+its slug holder, an exact `display_name`/`aka[]` holder, or its current
+claimant. The refusal names them and the remedy: make them dormant, or pass
+`--force`. A dormant holder, a dormant claimant, and someone who only shares the
+first name never block a claim. `--force` claims the form anyway: a displaced
+claimant is released first, everyone overridden stays active and reachable by
+`person_key` or full name, and the receipt names them. A dormant claimant's
+claim is **inert** — it stays recorded and takes effect again on `--restore` —
+and claiming a form whose claimant is dormant releases that claim first.
+
+```text
+A bare "Sam" now means "Sam Rivera" — earlier mentions stay where they are (identity_2026_11_17_b).
+```
+
+A forced claim adds `Overrode "Sam" (person_s-oak); still active and reached by
+person_key.` (several people are joined with ` / `), and replacing a dormant
+claimant adds `Released the dormant claimant "Sam" (person_s-oak).` Claiming a
+form the person already claims is a no-op ack with no receipt: `"Sam Rivera"
+already claims "Sam" — nothing to change.`
+
+```sh
+lucid person claim "Sam Rivera" Sam
+lucid person claim person_s-river Sam --force --json
+```
+
+#### `person release`
+
+End a claim. `lucid person release <subject> <form>` stops `<form>` meaning
+`<subject>` by claim, for mentions resolved from now on; nothing already filed
+moves.
+
+```text
+Released "Sam" from "Sam Rivera" — a bare "Sam" no longer means them by claim (identity_2026_11_17_c).
+```
+
+Releasing a form the person does not claim is a no-op ack with no receipt:
+`"Sam Rivera" does not claim "Sam" — nothing to release.`
+
+#### `person move-ref`
+
+Repair **one** misfiled mention without hand-editing anything.
+`lucid person move-ref <raw_id> --from <subject> --to <subject>` appends one
+`move_ref` correction to the identity log, and every read then shows that
+entry's mention under `--to` only: the `/person` count, entry list and insight
+join, the dominance line, the `/reflect gate` panel, the Reflection slice, and
+reconcile. The raw entry, its processed artifact and both people records are
+never rewritten, and a `lucid structure --force` re-run does not undo the
+correction. `--to` must already be a person — otherwise the move is refused with
+the `person create` pointer (§P-4). The undo is the reverse move-ref.
+
+Leave out `--from` to settle a **held** mention (§P-11) — a mention capture
+could not assign to one person: `lucid person move-ref <raw_id> --to <subject>`
+pins that raw entry's one held mention to `--to`. The move is refused (§P-12),
+before anything is written, for an unknown raw id, a raw entry with no mention
+under `--from`, `--from` equal to `--to`, or — without `--from` — a raw entry
+with no held mention or more than one.
+
+```text
+Moved the mention in raw_2026_11_18_21_40 from "Sam" (person_s-oak) to "Sam Rivera" (person_s-river) (identity_2026_11_19_a).
+Pinned the held "Sam" in raw_2026_11_18_09_00 to "Sam Rivera" (person_s-river) (identity_2026_11_19_b).
+```
+
+```sh
+lucid person move-ref raw_2026_11_18_21_40 --from Sam --to "Sam Rivera"
+lucid person move-ref raw_2026_11_18_09_00 --to person_s-river --json
+```
+
+#### The identity receipt
+
+`dormant`, `--restore`, `claim`, `release` and `move-ref` are curation writes on
+the same strict tier as `merge` and `rename`. Every successful write returns an
+`identity_YYYY_MM_DD_<slot>` receipt — the id of the event it appended — in its
+ack and under `--json`; a no-op ack carries none.
+
+**Held mentions get settled.** A `claim`, `release`, `dormant` or `--restore`
+write re-resolves the held mentions (§P-11) of every form it affects, by
+capture's rules, and pins each one that now resolves to exactly one person. It
+never creates a person, so a held mention that would need a new record stays
+held. The ack lists what it pinned and how many held mentions of those forms are
+still held:
+
+```text
+Pinned 1 held mention:
+- raw_2026_11_18_09_00 "Sam" → "Sam Rivera" (person_s-river)
+1 mention is still held — see lucid person reconcile.
+```
+
+The plural forms are `Pinned 2 held mentions:` and `2 mentions are still held —
+see lucid person reconcile.`; each part is left out when its count is zero. A
+pinned mention moves again only through `move-ref`.
+
+`--json` emits one shape for all five writes, in this field order:
+
+| Field | Meaning |
+|-------|---------|
+| `receipt_id` | The appended event's id; left out on a no-op. |
+| `person_key` / `display_name` | The subject: the person made dormant or restored, the claimant, or the `move-ref` target. |
+| `status` | `dormant` or `active` — on `dormant` / `--restore` only. |
+| `form` | The claimed or released form — on `claim` / `release` only. |
+| `displaced` | `[{person_key, display_name}]` — the people a `--force` claim overrode; only on a forced claim. |
+| `raw_id` / `from` / `to` | On `move-ref` only; `from` is left out when `--from` was. |
+| `pinned` | `[{raw_id, form, person_key}]` — the held mentions this write settled; always an array. |
+| `still_held` | How many held mentions of the affected forms are still held; always a number. |
+| `ack` | The prose ack, verbatim. |
+
+```json
+{
+  "receipt_id": "identity_2026_11_17_b",
+  "person_key": "person_s-river",
+  "display_name": "Sam Rivera",
+  "form": "Sam",
+  "pinned": [{"raw_id": "raw_2026_11_18_09_00", "form": "Sam", "person_key": "person_s-river"}],
+  "still_held": 0,
+  "ack": "A bare \"Sam\" now means \"Sam Rivera\" — earlier mentions stay where they are (identity_2026_11_17_b).\nPinned 1 held mention:\n- raw_2026_11_18_09_00 \"Sam\" → \"Sam Rivera\" (person_s-river)"
+}
+```
 
 #### Errors
 
 Each write verb prints a fixed reason, exits `1`, and writes nothing:
 
-- **A subject no live record holds** (§P-4) — the error names the remedy.
-- **A subject matching more than one live record** (§P-5) — the error names the
-  candidate keys so the retry is exact; the verb never guesses.
+- **A subject no live record holds** (§P-4) — the error names the remedy. A
+  `move-ref --to` names the `person create` pointer.
+- **A subject matching more than one live record, or disagreeing with who the
+  name means now** (§P-5) — the error names the candidate keys, dormant ones
+  marked ` (dormant)`, so the retry is exact; the verb never guesses.
 - **`merge` of a person into themselves** (§P-6).
 - **`alias` onto a form that already belongs to another person** (§P-7).
 - **`rename` onto a name that already identifies another person** (§P-8).
-- **Blank input, or a `set`/`create --dob` that is not `YYYY-MM-DD`** (§P-9).
+- **Blank input, a `set`/`create --dob` that is not `YYYY-MM-DD`, or a dormant
+  reason of more than one line** (§P-9).
+- **`claim` of a form a different active person holds, without `--force`**
+  (§P-10) — the error names them and the remedy.
+- **`move-ref` that cannot apply** (§P-12) — an unknown raw id, no mention under
+  `--from`, `--from` equal to `--to`, or, without `--from`, no held mention or
+  more than one.
 
-`create` mints identity rather than resolving a subject, so it never raises
-§P-4/§P-5 (nor §P-6/§P-7/§P-8): creating an already-recorded name exits `0` as
-an idempotent "already recorded" ack, not an error (§P-9 is the only rejection
-it can raise).
+`--reason-file` together with `--restore` is a usage error (exit `2`). `create`
+mints identity rather than resolving a subject, so it never raises §P-4/§P-5
+(nor §P-6/§P-7/§P-8): creating an already-recorded name exits `0` as an
+idempotent "already recorded" ack, not an error (§P-9 is the only rejection it
+can raise).
 
 #### `person reconcile`
 
 List likely-duplicate people and a suggested merge for each — the detector that
-catches the split `merge`/`alias` fix by hand. It is a pure **read**: no model,
-no writes, byte-stable across runs (S-22), and off-limits people are excluded.
-Two deterministic signals surface a pair: a **shared written form** (a normalized
-`display_name`/`aka[]` in common) or **name proximity** (a bounded edit distance
-of ≤2 between forms of length ≥4, or a short diminutive prefix like `sam`⊂
-`sammy`). Co-occurrence in the same entry is deliberately *not* a signal — people
-seen together are usually different people. Each unordered pair is listed once,
-with a suggested merge direction (the record with fewer mentions folds into the
-one with more; ties break by later first-seen, then key) and the exact
-`lucid person merge` command to run. It changes nothing — you decide. `--json`
-emits `{candidates: [{source_key, source_display_name, target_key,
-target_display_name, reason, suggested_merge}]}` (an empty array, never null,
-when the store is clean).
+catches the split `merge`/`alias` fix by hand — followed by the identity loose
+ends, each with its one-command fix. It is a pure **read**: no model, no writes,
+byte-stable across runs (S-22), and off-limits people are excluded from every
+line. A pair is suggested only on a corroborating signal: a **shared written
+form** (a normalized `display_name`/`aka[]` in common), a **nickname-map link**
+between first names (`Mike` ~ `Michael Torres`), or a **diminutive** — a strict
+prefix of three or more letters (`sam` ⊂ `sammy`). Co-occurrence in the same
+entry is deliberately *not* a signal — people seen together are usually different
+people. Each unordered pair is listed once, with a suggested merge direction (the
+record with fewer mentions folds into the one with more; ties break by later
+first-seen, then key) and the exact `lucid person merge` command to run. Dormant
+people are left out of merge suggestions unless you pass `--all`, which includes
+them, each marked `, dormant` inside its parentheses. It changes nothing — you
+decide.
+
+Three more kinds of finding follow the pairs, each only when there is something
+to list:
+
+- **First-name overlaps.** A one-word form exactly one active person holds,
+  while another active person has that form as their first name — a bare "Sam"
+  goes to the old "Sam" while "Sam Rivera" is also a Sam. If they are one person,
+  merge them; if not, claim the name for the one you mean, or make the other
+  dormant. When the two are already a merge suggestion the overlap attaches to
+  it; otherwise it is listed under `First-name overlaps`. It drops once the form
+  is claimed or either person is dormant. A form no one holds exactly is never
+  listed, and a shared first name never holds a mention back — this is advice,
+  not a hold.
+- **Held mentions** (§P-11) — each mention capture could not assign, with its
+  raw id, the people it could mean, and the fixes, where `<key>` is the
+  candidate you mean.
+- **Dormant look-alikes** — an active person who shares an exact written form
+  with a dormant one, often the same person mentioned again after the old record
+  went dormant. The fix restores the dormant record and merges the new one into
+  it. Under `--all`, when the two are already a merge suggestion, the restore
+  step attaches to it instead.
+
+A synthetic Ledger with an old "Sam", "Sam Rivera", "Jo" and "Jo Lee", a
+"Riley" mention that both "Riley" and "Riley Moss" (who has "Riley" in `aka[]`)
+hold, and a new "Casey" alongside a dormant "Casey":
+
+```text
+Found 2 likely-duplicate pairs — review each; nothing has changed:
+- "Riley Moss" (person_r-moss) and "Riley" (person_r-dune) — share the written form "riley".
+    → lucid person merge person_r-dune person_r-moss
+- "Sam Rivera" (person_s-river) and "Sam" (person_s-oak) — similar names ("samrivera" ~ "sam").
+    → lucid person merge person_s-oak person_s-river
+  Or keep them apart: a bare "Sam" goes to "Sam" (person_s-oak, first seen 2023-03-04), and "Sam Rivera" (person_s-river) also has the first name "Sam".
+    → lucid person claim person_s-river "Sam"
+    → lucid person dormant person_s-oak
+Held mentions — counted for no one until you settle each:
+- raw_2026_11_18_09_00: "Riley" could mean "Riley" (person_r-dune) / "Riley Moss" (person_r-moss).
+    → lucid person claim <key> "Riley"
+    → lucid person dormant <key>
+    → lucid person move-ref raw_2026_11_18_09_00 --to <key>
+First-name overlaps — a bare name goes to one person while another shares that first name:
+- A bare "Jo" goes to "Jo" (person_j-fern, first seen 2025-06-01), and "Jo Lee" (person_j-lark) also has the first name "Jo".
+    → lucid person claim person_j-lark "Jo"
+    → lucid person dormant person_j-fern
+Dormant look-alikes — an active person shares a written form with a dormant one:
+- "Casey" (person_c-reed) shares the written form "casey" with the dormant "Casey" (person_c-wave). If they are the same person:
+    → lucid person dormant person_c-wave --restore
+    → lucid person merge person_c-reed person_c-wave
+```
+
+With no pairs the first line is `No likely-duplicate people found.`, and the
+sections that follow are unchanged. The sections are never separated by blank
+lines, and a Ledger with nothing beyond pairs prints exactly what it always has.
+Under `--all` a dormant look-alike that is also a pair attaches to it as:
+
+```text
+- "Casey" (person_c-wave, dormant) and "Casey" (person_c-reed) — share the written form "casey".
+    → lucid person merge person_c-reed person_c-wave
+  "Casey" (person_c-wave) is dormant — restore them before merging:
+    → lucid person dormant person_c-wave --restore
+```
+
+Ordering is fixed: pairs by their two keys, held mentions by raw id then form,
+overlaps by form then the two keys, and dormant look-alikes by the active key then
+the dormant key.
+
+`--json` emits `{candidates: [{source_key, source_display_name, target_key,
+target_display_name, reason, suggested_merge}]}` — an empty array, never null,
+when the store is clean — plus these keys, each left out when it would be empty:
+
+| Key | Shape |
+|-----|-------|
+| `candidates[].source_dormant` / `target_dormant` | `true` for a dormant person in a pair (only under `--all`). |
+| `candidates[].overlap` | The overlap attached to that pair: `{form, holder_key, holder_display_name, holder_first_seen_at, sharer_key, sharer_display_name, suggested_claim, suggested_dormant}`. |
+| `candidates[].dormant_share` | The dormant look-alike attached to that pair (under `--all`): `{form, active_key, active_display_name, dormant_key, dormant_display_name, suggested_restore, suggested_merge}`. |
+| `held` | `[{raw_id, form, reason, candidates: [{person_key, display_name, dormant}]}]` — `reason` is `exact` or `first_name`, and `dormant` is left out unless true. |
+| `overlaps` | The standalone overlaps, each shaped like `candidates[].overlap`. |
+| `dormant_shares` | The standalone dormant look-alikes, each shaped like `candidates[].dormant_share`. |
+
+A pair carries at most one `overlap`; a second overlap between the same two
+people (by form order) is listed under `overlaps`.
 
 ```sh
 lucid person reconcile
-lucid person reconcile --json
+lucid person reconcile --all --json
 ```
 
 #### A subcommand shadows a literal name
 
-`create`, `merge`, `alias`, `rename`, `set`, `off-limits`, and `reconcile` are
-subcommands, so `lucid person merge …` always runs the merge verb — a person you
-literally mentioned as "merge" cannot be looked up by `lucid person merge`. This mirrors
+`create`, `merge`, `alias`, `rename`, `set`, `off-limits`, `dormant`, `claim`,
+`release`, `move-ref`, and `reconcile` are subcommands, so `lucid person merge …`
+always runs the merge verb — a person you literally mentioned as "merge" cannot be
+looked up by `lucid person merge`; reach them by their `person_key`. This mirrors
 every other verb group in the CLI and is the accepted trade for a clean curate
 surface; the names collide only with a handful of English words no one records a
 person under.
@@ -3251,6 +3604,9 @@ lucid person rename person_s-river "Sam Rivera"    # key stable, old form kept i
 lucid person set person_s-river --relationship colleague --dob 1990-04-12
 lucid person off-limits person_s-river             # then --restore
 lucid person Sammy                                 # resolves to the one canonical record
+lucid person dormant person_s-oak                  # an old "Sam" no longer wins a bare "Sam"
+lucid person claim "Sam Rivera" Sam                # a bare "Sam" means Sam Rivera from now on
+lucid person move-ref raw_2026_11_18_21_40 --from person_s-oak --to person_s-river
 ```
 
 ### self
@@ -4039,7 +4395,13 @@ distilling is a reader's judgment, not the binary's.
 **Skip by default, `--force` to redo.** An entry that already has a processed
 artifact is skipped with no model call. `--force` re-structures it — the pass is
 idempotent, so a re-run overwrites the artifact differing only in its
-produced-at stamp, and leaves the raw entry untouched. Skipping is what makes an
+produced-at stamp, and leaves the raw entry untouched. Each person mention keeps
+the resolution it already has: a mention filed under a person stays with them, a
+held mention (§P-11) stays held until a pin settles it (it is then filed under
+the pinned person), and a `move-ref` is never undone — so a claim or a dormant
+written since never moves an earlier mention
+([`../mvp/data-model.md`](../mvp/data-model.md) §"Status, claims and
+move-ref"). Skipping is what makes an
 interrupted window run resumable: re-run the same command and it pays only for
 what it has not already done, so a repeat run over a settled window is free.
 

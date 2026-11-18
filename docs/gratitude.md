@@ -755,11 +755,13 @@ for both the person link and the record of having expressed it:
 
 * `<id>` is a live entry's stable id (a tombstone or unknown id is a clean
   error that writes nothing, like `--into`).
-* `--person <subject>` (required, one per call) is resolved exactly as the
-  person write verbs resolve a subject
+* `--person <subject>` (required, one per call) resolves to who the name
+  means now, the way `lucid person <name>` does
   ([`usage/commands.md`](usage/commands.md#resolving-a-subject)): an exact
-  `person_key` wins, otherwise the name is matched against live people
-  `display_name`/`aka[]`, redirect tombstones followed to the canonical record.
+  `person_key` wins, then the form's active claimant, otherwise the name is
+  matched against live people `display_name`/`aka[]` — a dormant person never
+  beating an active one — with redirect tombstones followed to the canonical
+  record.
   No match, or more than one, is a clean error naming the remedy or the
   candidate keys — **validated before anything is written**; the verb never
   guesses.

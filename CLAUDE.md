@@ -143,6 +143,11 @@ One static `lucid` binary; source under `internal/` only, no `pkg/`.
   report's weekly-job shape over `flynode.Fire`, a fixed template rendered by
   `internal/contact`, its own disposable job DB (`LUCID_CONTACT_WEEKLY_DB`), and
   no model call anywhere in the package.
+- `internal/identity` — the pure identity core behind the person curation verbs
+  `person dormant | claim | release | move-ref`: the identity-log event schema,
+  the `identity_…` receipt ids, and the fold (status, claims, holds, pins,
+  move-refs) that every name resolution reads. No IO, no model;
+  `internal/storage` owns `identity/identity.jsonl` and the shared resolver.
 - [`internal/storage`](internal/storage) — the **only** reader/writer of
   `~/.lucid/` (`LUCID_HOME` override); frontmatter + one file per record
   family; `fetch_enrichment.go` = the single audited network op.

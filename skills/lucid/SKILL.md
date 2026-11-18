@@ -8,7 +8,7 @@ description: >
   user-owned, append-only Ledger under ~/.lucid/. This skill is a translator,
   not a brain: it shells out to the same `lucid` commands any surface uses and
   composes no messages of its own.
-min_lucid_version: "0.45.0"
+min_lucid_version: "0.46.0"
 ---
 
 # Lucid
@@ -71,7 +71,7 @@ its output. Acknowledge *after* the binary persists, never before.
 | a missed day on a `habit` anchor ("skipped the walk, I'm traveling") | anchor event capture | `lucid anchor miss <label> [--day <date>] [--note-file <path>]` — **capture tier** |
 | `/contact <name>` / being in touch with someone ("talked to Sam yesterday") | contact capture | `lucid contact <name> [--via <call\|text\|video\|in-person>] [--note-file <path>] [--day <date>]` — **capture tier**: run immediately, lead with the `contact_…` receipt; either direction counts, and it never creates a person |
 | `/contact snooze <name>` ("skip Alex Kim this week") | skip this week's check-in | `lucid contact snooze <name>` — **capture tier**; covers the current Monday–Sunday week only and leaves the cadence untouched |
-| `/contact due [--wrap]` ("who do I need to catch up with") | who's-due read view | `lucid contact due [--wrap]` — read-only, runs immediately; relay the lists as printed (`--wrap` is the Sunday view: "Due this week" and "Still open from before" only) |
+| `/contact due [--wrap] [--all]` ("who do I need to catch up with") | who's-due read view | `lucid contact due [--wrap] [--all]` — read-only, runs immediately; relay the lists as printed (`--wrap` is the Sunday view: "Due this week" and "Still open from before" only; `--all` adds dormant people back, each marked `(dormant)`) |
 | `/reflect week` | Sunday weekly recall deep-dive | `lucid reflect week` — read-only weekly deep-dive, never writes |
 | `/excavate` | select the next memory cluster to excavate | `lucid excavate` — read-only, never writes |
 | `/companion [morning\|night]` | compose one companion message on demand | `lucid companion fire --mode <morning\|night>` — dry-run by default; scheduled sends stay scheduler-owned |
@@ -113,7 +113,12 @@ conversational verbs; the rest are reached by their documented CLI forms:
 | `lucid obs void` | Retract a mistaken **measurement** reading by its `obs_…` receipt — `<obs-id>`; append-only, both records kept. The reading drops out of `lucid export measurements` and the packet's "Measurements in range", and `lucid day` shows both. Then re-log the right value with `lucid obs measurement <metric> <value> <unit> --day @YYYY-MM-DD`. It takes no `--day` and no reason text, and a void can't be voided. `workout` and `memory` observations use their own `amend`; other kinds aren't voidable yet. It makes a reading stop counting, so it runs only on an explicit correction: **echo-and-confirm**. |
 | `lucid structure` | Structure a raw entry you did not just capture, or a window of them. |
 | `lucid self` | Read and record durable facts about yourself. |
-| `lucid person create` | Deliberately record a known person with **no** model call — the deterministic import/backfill primitive (people otherwise appear only as `lucid structure` extracts a mention). Idempotent on an already-recorded name (an "already recorded" no-op, never a fork); accepts the `person set` durable-field flags (`--dob`/`--relationship`/`--note`, plus `-file` siblings) to create-and-enrich in one call. Reached by its CLI form, not chat-mapped — `/person <name>` above stays a read. |
+| `lucid person create` | Deliberately record a known person with **no** model call — the deterministic import/backfill primitive (people otherwise appear only as `lucid structure` extracts a mention). Idempotent on an already-recorded name (an "already recorded" no-op, never a fork) — except when every record holding that name is dormant: then it mints a new record under the next free collision suffix rather than returning the dormant one. Accepts the `person set` durable-field flags (`--dob`/`--relationship`/`--note`, plus `-file` siblings) to create-and-enrich in one call. Reached by its CLI form, not chat-mapped — `/person <name>` above stays a read. |
+| `lucid person dormant` | Mark a person dormant — not who the person means now — so a bare name stops going to them: `<subject> [--reason-file <path>]`; `--restore` makes them active again. Nothing is deleted (history, contacts and fields are kept), they leave `contact due` and reconcile suggestions (`--all` brings them back), and it returns an `identity_…` receipt plus any held mentions it settled. It changes who a name means: **echo-and-confirm**. |
+| `lucid person claim` | Say who a bare name means from now on — `<subject> <form>`, e.g. `lucid person claim "Sam Rivera" Sam`. Never rewrites past mentions or `aka[]`. A form another **active** person holds is refused (§P-10) with the remedy — relay it; pass `--force` only when the person explicitly says to override. Returns an `identity_…` receipt. **Echo-and-confirm**. |
+| `lucid person release` | End a claim — `<subject> <form>`; earlier mentions stay where they are. **Echo-and-confirm**. |
+| `lucid person reconcile` | Read-only: list likely-duplicate people with the exact merge to run, plus held mentions, first-name overlaps and dormant look-alikes, each with its one-command fix; `--all` adds dormant people to the merge suggestions. Runs immediately; relay as printed, and treat each suggested fix as a write to echo and confirm. |
+| `lucid person move-ref` | Move one misfiled mention to the right person — `<raw_id> --from <subject> --to <subject>`, or `<raw_id> --to <subject>` to settle a held mention that `lucid person reconcile` lists. An append-only correction folded on read; the undo is the reverse move. **Echo-and-confirm**. |
 | `lucid backup` | Write the must-keep Ledger trees to a single `.tar.gz` archive; a data-safety operation rather than a conversation. |
 | `lucid restore` | Rebuild a Ledger from a backup archive; destructive-adjacent and deliberately CLI-only. |
 | `lucid secret` | Maintain a names-only catalog of hush secret handles (`add`/`list`/`note`/`remove`) — a handle and an optional note, never a value; `note` amends a live handle's note in place (or removes it with `--clear`), keeping its creation time, and the catalog has no reveal, fetch, or storage path. An operational/config verb reached by its CLI form. |
@@ -237,6 +242,21 @@ differently:
   (`lucid obs measurement <metric> <value> <unit> --day @YYYY-MM-DD`). Only
   measurement readings can be voided; a workout or a memory is corrected with
   its own `amend`.
+* **Who a name means — echoed and confirmed.** `lucid person dormant`,
+  `claim`, `release` and `move-ref` decide which person a name or a mention
+  belongs to, so the skill assembles the command, shows it back, and waits for a
+  one-word confirmation. The mappings, with synthetic names:
+  * "I don't care about Sam anymore" → `lucid person dormant Sam`
+  * "when I say Sam I mean Sam Rivera" → `lucid person claim "Sam Rivera" Sam`
+  * "Sam is back" / "I'm in touch with old Sam again" → `lucid person dormant Sam --restore`
+  * "that mention was really Sam Rivera" → `lucid person move-ref <raw_id> --from Sam --to "Sam Rivera"`
+
+  Never dormant or claim on a guess: the person must have said who they mean.
+  When the binary refuses with §P-5 candidates (more than one person, or a name
+  that now means someone else), relay the candidates and ask which one; re-run
+  with the `person_key` they choose. A §P-10 refusal is relayed with its remedy,
+  and `--force` is added only when the person explicitly says to override.
+  The receipt leads the reply, followed by any held mentions it pinned.
 * **State-writing verbs are echoed and confirmed.** For `closeout`,
   `closeout backfill`, `mode`, and `closeout skip`, the skill **assembles the
   compact command, shows it back, and waits for a one-word confirmation** before
@@ -249,8 +269,9 @@ differently:
 **Ask, don't guess.** When a required piece — a chain-link state, a capacity, an
 observation field (including a measurement's value, or its unit when the unit
 isn't universal for the metric), a limit use's intent (planned or slip), which
-anchor a lapse belongs to, or which person a contact names when the binary
-lists several candidates — is missing or ambiguous, the skill asks **one**
+anchor a lapse belongs to, which person a contact names when the binary
+lists several candidates, or which person a dormant, claim or move-ref names —
+is missing or ambiguous, the skill asks **one**
 concise question and waits. It never fabricates a link state, a capacity, an
 intent, a unit, or any value the user did not give. It never reclassifies, confirms or graduates an
 anchor on its own: `metrics` only surfaces eligibility and over-allowance.

@@ -1474,8 +1474,8 @@ user-driven through `lucid person merge`.
 
 `person reconcile` also lists **held mentions**, **first-name overlaps**, and
 **dormant look-alikes**, each with its one-command fix (§"Status, claims and
-move-ref"; the exact lines are in [`../usage/commands.md`](../usage/commands.md)
-§`person reconcile`). Dormant people join merge suggestions only under `--all`.
+move-ref"; the exact lines are in the command reference under `person
+reconcile`). Dormant people join merge suggestions only under `--all`.
 
 ### Identity log — `~/.lucid/identity/`
 
