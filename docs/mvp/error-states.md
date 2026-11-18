@@ -105,44 +105,80 @@ The cross-cutting principles below bind all three tables.
 
 | # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
 |---|---------|-----------------|----------------------|------------------|----------|
-| P-1 | `/person <name-or-key>` matches no live `people/` record — the query is **neither an exact `person_key`** (a tombstone key resolves forward to its canonical record) **nor** a `display_name`/`aka[]` form. Key resolution is tried first, then name/aka — the same subject resolution the write verbs use, so read and write accept the same identifiers. | Return the empty state; never guess. | "No one by that name yet — people appear here as you mention them." | None (read-only). | User checks spelling, supplies the `person_key`, or mentions the person in an entry. |
-| P-2 | `<name>` matches more than one person record | List the candidates by display name and first-seen date; render nothing else. | "That matches more than one person — which did you mean: <list>?" | None. | User re-runs with a disambiguated name. |
+| P-1 | `/person <name-or-key>` matches no live `people/` record — the query is **neither an exact `person_key`** (a tombstone key resolves forward to its canonical record) **nor** a `display_name`/`aka[]` form, **nor** a form an active person claims. Key resolution is tried first, then the claim, then name/aka ([`data-model.md`](data-model.md) §"Resolving a bare name"), so read and write accept the same identifiers. | Return the empty state; never guess. | "No one by that name yet — people appear here as you mention them." | None (read-only). | User checks spelling, supplies the `person_key`, or mentions the person in an entry. |
+| P-2 | `<name>` means more than one person — with no active claim on the form, two or more **active** people hold it exactly (as `display_name` or an `aka` form), or only **dormant** people hold it and two or more active people have it as their first name | List the candidates by display name and first-seen date — active people first, then dormant people, ranked last and labeled `dormant`; render nothing else. An **active** exact holder alongside dormant ones is not §P-2: the view renders the active person and names the dormant ones on one line. | "That matches more than one person — which did you mean: <list>?" — each candidate reads `Sam (first seen 2026-11-17)`, and a dormant one `Sam (first seen 2023-03-04, dormant)`. | None. | User re-runs with a disambiguated name or a `person_key`; or settles the name for good with `lucid person claim` or `lucid person dormant`. |
 | P-3 | The matched person is named in the off-limits registry | Render the view with a standing header note; inference-derived material is absent by construction (the person was redacted from every agent slice, so no insight or proposal references them). | "<name> is off-limits to inference — what follows is your raw record only: mentions and dates, nothing derived." | None. | (none — this is designed behavior, not a failure) |
+
+### People — held mentions (capture, deterministic, agent-free)
+
+Capture assigns each mention through the shared resolver
+([`data-model.md`](data-model.md) §"Resolving a bare name"). When it cannot name
+exactly one person, it **holds** the mention instead of assigning it first-come.
+This is a state, not a failure: capture never fails on it, and one command
+settles it.
+
+| # | Trigger | System behavior | User-visible message | Disk side effect | Recovery |
+|---|---------|-----------------|----------------------|------------------|----------|
+| P-11 | With no active claim on the form, capture (`update_person`, during `lucid structure` or a check-in) cannot assign a mention to one person: **(a)** two or more active people hold the form exactly — as `display_name` or an `aka` form, including a form two records share through `aka[]`; **(b)** only dormant people hold it and two or more active people have it as their first name; or **(c)** the only active holder is found only through `aka[]` while the form's slug path holds only dormant people. A shared first name alone never holds a mention. | The mention is **held, not assigned**: it is counted for no one — no `entry_refs` id, no mention count, no agent slice — until a pin settles it. `lucid person reconcile` lists it with its fixes. A lookup of the form shows §P-2 in (a) and (b); in (c) it resolves to the sole active `aka` holder, as `/person` always has — the `aka` discovery read can hold a mention but never assign one. | None at capture (the `structure` summary is unchanged). `lucid person reconcile` lists it under `Held mentions` — e.g. `- raw_2026_11_18_09_00: "Sam" could mean "Sam" (person_s-oak) / "Sam Rivera" (person_s-river).` | The processed artifact gets a `held_people[]` entry and `identity/identity.jsonl` one `hold` event, once per `(raw_id, form)`; a `structure --force` re-run keeps it held with no second event. Nothing under `people/` is written. | `lucid person claim <key> "<form>"` or `lucid person dormant <key>` — either pins every held mention of the form that then resolves to exactly one person, and lists them in its receipt — or `lucid person move-ref <raw_id> --to <key>` for this one mention. |
 
 ### Person (write verbs) — the curation verbs (deterministic, agent-free)
 
-The `/person` rows above cover a *read*. These cover the six **curation
-writes** — `person create | merge | alias | rename | set | off-limits`
-(scope.md §4; [`data-model.md`](data-model.md) §"Merge & redirect" and
-§"Deliberate creation") — which deliberately mint a person (no model call),
-repair a nickname/full-name split, record another written form, fix a display
-name, add the user-authored `dob`/`relationship`/`notes`, or toggle P-3
-redaction. All are on the **strict tier**: the rejection is decided from the
-store *before* any write, the copy is fixed and model-free, the exit is
-non-zero, every row ends with the nothing-was-saved clause, and no record is
-deleted (a merge leaves a redirect tombstone). Subjects are resolved the way
-`/person` matches: an exact `person_key` wins, else a unique
-`display_name`/`aka[]` match — more than one live match is refused, never
-guessed. Tombstones are skipped in matching, so a merged-away form resolves to
-its one canonical record. `create` is the exception: it does not *resolve* an
-existing subject, it **derives** a key and mints identity (see the note after
-the table), so P-4/P-5 do not apply to it.
+The `/person` rows above cover a *read*. These cover the ten **curation
+writes** — `person create | merge | alias | rename | set | off-limits |
+dormant | claim | release | move-ref` (scope.md §4; [`data-model.md`](data-model.md)
+§"Merge & redirect", §"Deliberate creation", and §"Identity log") — which
+deliberately mint a person (no model call), repair a nickname/full-name split,
+record another written form, fix a display name, add the user-authored
+`dob`/`relationship`/`notes`, toggle P-3 redaction, mark who matters now
+(`dormant`, `--restore`), say who a bare name means (`claim`, `release`), or
+move one misfiled mention (`move-ref`). The last four append to
+`identity/identity.jsonl` and never write `people/`. All are on the **strict
+tier**: the rejection is decided from the store *before* any write, the copy is
+fixed and model-free, the exit is non-zero, every row ends with the
+nothing-was-saved clause, and no record is deleted (a merge leaves a redirect
+tombstone). Subjects are resolved by **record targeting**
+([`data-model.md`](data-model.md) §"Resolving a bare name"): an exact
+`person_key` wins, else an exact `display_name`/`aka[]` match across active and
+dormant records — and when that match disagrees with who the name means now, or
+more than one record matches, the verb is refused and never guesses.
+`person dormant --restore` considers only dormant records. Tombstones are
+skipped in matching, so a merged-away form resolves to its one canonical record.
+`create` is the exception: it does not *resolve* an existing subject, it
+**derives** a key and mints identity (see the note after the table), so P-4/P-5
+do not apply to it.
 
 | # | Trigger | System behavior | User-visible message | Disk side effect |
 |---|---------|-----------------|----------------------|------------------|
 | P-4 | A subject (name or key) names **no live record** | Reject before any write; never guess. The remedy travels with the error. | `no one matches "andy" — check the name or run lucid person <name>; nothing was saved.` | None |
-| P-5 | A subject matches **more than one** live record | Reject — never guess which. Names the candidate keys so the retry is exact. | `"sam" matches more than one person — disambiguate with a person_key (person_s-… / person_s-…); nothing was saved.` | None |
+| P-5 | A subject matches **more than one** live record — or its exact match **disagrees** with who the name means now (a claim, or a dormant holder whose bare name now routes to someone else) | Reject — never guess which. Names the candidate keys so the retry is exact: active people first, then dormant ones, each dormant key followed by ` (dormant)`. With no dormant candidate the copy is byte-identical to before. | `"sam" matches more than one person — disambiguate with a person_key (person_s-… / person_s-…); nothing was saved.` / `"Sam" matches more than one person — disambiguate with a person_key (person_s-river / person_s-oak (dormant)); nothing was saved.` | None |
 | P-6 | `person merge` whose source and target resolve to the **same** canonical record | Reject — there is nothing to merge (the store's `MergePersons` is a no-op for this too, so a retry is harmless). | `"alex" is already that person; nothing was saved.` | None |
 | P-7 | `person alias` whose new form already resolves to a **different** live record | Reject — an alias never hijacks another person's slug (merge them instead if they are the same). | `the form "ali" already belongs to another person — use lucid person merge if they are the same; nothing was saved.` | None |
 | P-8 | `person rename` onto a name that already **uniquely identifies a different** live record | Reject — a rename never creates a duplicate identity; steer to merge. Two people who *coincidentally* share a name from capture stay as they are (the intentional §P-2 state); only the explicit rename that would add a collision is refused. | `"alex" already identifies another person — use lucid person merge if they are the same; nothing was saved.` | None |
-| P-9 | Blank or malformed input — an empty subject/value, or a `person set`/`person create --dob` that is not a civil `YYYY-MM-DD` | Reject before any write. | `a person name is required; nothing was saved.` / `could not read the date of birth "04/12/1990" (want YYYY-MM-DD); nothing was saved.` | None |
+| P-9 | Blank or malformed input — an empty subject/value, a `person set`/`person create --dob` that is not a civil `YYYY-MM-DD`, a blank `claim`/`release` form, or a `person dormant --reason-file` of more than one line | Reject before any write. | `a person name is required; nothing was saved.` / `could not read the date of birth "04/12/1990" (want YYYY-MM-DD); nothing was saved.` / `a name form is required; nothing was saved.` / `a dormant reason is one line; nothing was saved.` | None |
+| P-10 | `person claim` on a form a **different active** person holds — its slug-path holder, an exact `display_name`/`aka` holder, or its current claimant — without `--force` | Reject before any write; name every active holder and the remedy. A dormant holder, a dormant claimant, and a person who only shares the first name never trigger it. With `--force` the claim is written: a displaced claimant is released first, and the receipt names everyone it overrode — they stay active and reachable by `person_key`. | `the form "Sam" is held by "Sam" (person_s-oak), who is active — mark them dormant with lucid person dormant person_s-oak, or re-run with --force; nothing was saved.` / `the form "Sam" is held by other active people — "Sam" (person_s-oak) / "Sam" (person_s-oak-2); mark each dormant with lucid person dormant <key>, or re-run with --force; nothing was saved.` | None |
+| P-12 | `person move-ref` that cannot apply: an unknown raw id; a raw entry with no mention under `--from` (after the read fold); `--from` and `--to` the same person; or, without `--from`, a raw entry with no pending held mention or more than one | Reject before any write; never guess which mention was meant. | `there is no entry raw_2026_11_18_09_00 — check the raw id; nothing was saved.` / `raw_2026_11_18_09_00 has no mention under "Sam" (person_s-oak) to move; nothing was saved.` / `--from and --to are the same person ("Sam Rivera"); nothing was saved.` / `raw_2026_11_18_09_00 has no held mention — name the person it is filed under with --from; nothing was saved.` / `raw_2026_11_18_09_00 has more than one held mention ("Jo", "Sam") — settle them with lucid person claim or lucid person dormant; nothing was saved.` | None |
 
-`person create`, `person off-limits`, and `person set` cannot raise P-6/P-7/P-8
-(they do not merge, alias, or rename). Every verb **except `create`** can raise
-P-4 and P-5 (they resolve an existing subject); every verb can raise P-9.
+`person create`, `person off-limits`, `person set`, and the four identity
+verbs cannot raise P-6/P-7/P-8 (they do not merge, alias, or rename). Every verb
+**except `create`** can raise P-4 and P-5 (they resolve an existing subject);
+every verb can raise P-9. So `dormant`, `claim`, `release`, and `move-ref` raise
+P-4, P-5, and P-9; `claim` also raises **P-10**, and `move-ref` also raises
+**P-12**. A `move-ref --to` that names no live record is P-4 with the `person
+create` pointer — `no one matches "Sam Rivera" — add them first with lucid
+person create <name>; nothing was saved.` — because a correction never creates a
+person. `--reason-file` together with `--restore` is a usage error (exit `2`):
+`--reason-file only applies when marking someone dormant, not with --restore; nothing was saved.`
 `off-limits` is idempotent (adding a person already off-limits, or `--restore`
 on one who is not, is a no-op ack, not a rejection), matching how the registry
 already behaves.
+
+The identity verbs are idempotent the same way. Each repeat is a no-op ack —
+exit `0`, no event appended, no receipt:
+
+- `person dormant` on someone already dormant: `"Sam" is already dormant — nothing to change.`
+- `person dormant --restore` on someone already active: `"Sam" is already active — nothing to change.`
+- `person claim` of a form the person already claims: `"Sam Rivera" already claims "Sam" — nothing to change.`
+- `person release` of a form the person does not claim: `"Sam Rivera" does not claim "Sam" — nothing to release.`
 
 `person create` mints identity rather than resolving a subject: it derives the
 key with the *same* unsalted-hash function the People routine uses and writes a
@@ -157,10 +193,12 @@ flags are ignored (enriching an existing person stays `person set`'s job). It
 can still raise **P-9** — a blank name, or a `--dob` that is not a civil
 `YYYY-MM-DD` — rejected before any write like the rest of the tier.
 
-`person reconcile` is a **read**, not a write, so none of P-4..P-9 applies: it
+`person reconcile` is a **read**, not a write, so none of P-4..P-12 applies: it
 takes no subject, never fails on the state of the data, and — like `/person` —
 exits `0` whether it finds candidates or not (an honest empty list is a
-legitimate outcome, not an error). It is deterministic, no-LLM, off-limits-safe,
+legitimate outcome, not an error). With or without `--all`, and with or without
+held mentions (§P-11), first-name overlaps, or dormant look-alikes to list, it
+appends nothing. It is deterministic, no-LLM, off-limits-safe,
 and byte-stable across runs (S-22); only a genuine read/boot fault surfaces as a
 non-zero exit.
 
@@ -396,8 +434,10 @@ These cover the `lucid contact` verbs
 one or to more than one person, a window or `--via` the grammar does not take, a
 note that is not one line, a backdated day that cannot be used, a cadence change
 that does not fit the person's current state, and a `void` aimed at the wrong
-event. Subjects resolve exactly as the person write verbs do, so Ct-1 and Ct-2
-reuse the §P-4 / §P-5 behavior; Ct-1 adds the `person create` pointer because
+event. Subjects resolve the who-it-means-now way `lucid person <name>` does
+([`data-model.md`](data-model.md) §"Resolving a bare name": an active claimant
+or the one active holder wins, and a dormant person never beats an active one),
+so Ct-1 and Ct-2 reuse the §P-4 / §P-5 behavior; Ct-1 adds the `person create` pointer because
 logging contact never creates a person. Only the bare capture form takes
 `--day`, so Ct-6 applies to it alone. Every row is on the **strict tier**: the
 rejection is decided from the input and the folded `contacts/` store *before*
