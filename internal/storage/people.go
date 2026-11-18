@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/data"
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // peopleDirName is the flat Mirror subtree of low-signal person references
@@ -40,8 +42,13 @@ type PersonMention struct {
 	// folded into the record's aka[] and gets a resolving redirect tombstone
 	// when its slug is free or already this person's; a form owned by a
 	// different live person is left for `person reconcile` — capture never fails
-	// on it (data-model.md §"Merge & redirect").
+	// on it (data-model.md §"Merge & redirect"). It is folded only on the
+	// ordinary slug-holder fold and on a mint — never on a claim, first-name,
+	// or pinned route, and never on a held mention.
 	Aka []string
+	// RecordedAt is when capture runs — the `at` of any identity-log event the
+	// mention records (a hold, or a first-name pin). Zero means the wall clock.
+	RecordedAt time.Time
 }
 
 // PersonResult reports what [Adapter.UpdatePerson] resolved for a mention:
@@ -58,6 +65,14 @@ type PersonResult struct {
 	// and stable across reruns (idempotent), so a repeated Structuring pass
 	// never flips it (acceptance-criteria.md test cases 4.1–4.3).
 	FirstMention bool
+	// Held is true when the mention was held, not assigned (error-states.md
+	// §P-11): PersonKey is empty, nothing under people/ was written, and the
+	// router records a held_people[] entry instead of a people[] one.
+	Held bool
+	// HoldReason is why a held mention was held: exact or first_name.
+	HoldReason string
+	// Candidates are the person_keys a held mention could mean, sorted by key.
+	Candidates []string
 }
 
 // PersonRecord is a decoded people/<key>.json record (data-model.md
@@ -170,15 +185,20 @@ func (a *Adapter) ListPeopleKeys() ([]string, error) {
 
 // UpdatePerson is the deterministic People routine (agent-contracts.md
 // §"People (extractive)"; treated as part of the storage adapter for the
-// MVP). It resolves the mention to a stable slug via the wordlist and the
-// -2/-3 collision rule, then creates or merges the people/<key>.json record
-// and returns the resolved key plus the authoritative first_mention.
+// MVP). It resolves the mention through the shared resolver's capture mode
+// ([Adapter.ResolvePersonName]; data-model.md §"Resolving a bare name"), then
+// creates or merges the people/<key>.json record and returns the resolved key
+// plus the authoritative first_mention — or, when no single person can be
+// named, holds the mention (§P-11) and writes nothing under people/.
 //
 // It is idempotent: re-running it for the same (person, raw entry) neither
 // duplicates an entry_ref nor flips first_mention, so a repeated Structuring
-// pass leaves the record unchanged (acceptance-criteria.md test case 4.3).
-// A missing/empty wordlist or an empty display name is an error the router
-// degrades on without writing a processed artifact (error-states.md §S-5).
+// pass leaves the record unchanged (acceptance-criteria.md test case 4.3). A
+// mention already recorded in the raw entry's processed artifact keeps its
+// resolution (stickiness), a held one stays held with no second hold event,
+// and a pin for the (raw entry, form) outranks both. A missing/empty wordlist
+// or an empty display name is an error the router degrades on without writing
+// a processed artifact (error-states.md §S-5).
 func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	if strings.TrimSpace(m.DisplayName) == "" {
 		return PersonResult{}, errors.New("storage: update_person: empty display_name")
@@ -187,6 +207,57 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 		return PersonResult{}, errors.New("storage: update_person: empty raw_entry_id")
 	}
 
+	ix, err := a.loadPeopleIndex()
+	if err != nil {
+		return PersonResult{}, err
+	}
+	st, err := a.identityStateWith(ix)
+	if err != nil {
+		return PersonResult{}, err
+	}
+	priorKey, priorHeld, err := a.priorMention(m.RawEntryID, m.DisplayName, st)
+	if err != nil {
+		return PersonResult{}, err
+	}
+	res, err := a.resolveName(ix, st, m.DisplayName, ResolveOptions{
+		Mode:      ResolveCapture,
+		RawID:     m.RawEntryID,
+		PriorKey:  priorKey,
+		PriorHeld: priorHeld,
+	})
+	if err != nil {
+		return PersonResult{}, fmt.Errorf("storage: update_person: resolve key: %w", err)
+	}
+
+	switch {
+	case res.Outcome == NameAmbiguous:
+		return a.holdMention(m, res, st)
+	case res.Outcome == NameMint && res.Step == StepMintNext:
+		// Every slug-path holder is dormant: a fresh active record under the
+		// next free collision suffix (ADR-0016).
+		return a.foldMention(res.MintKey, PersonRecord{}, false, m)
+	case res.Outcome == NameMint:
+		return a.mintMention(m, st)
+	case res.SlugHolder:
+		// The ordinary fold, exactly as before: the form joins aka[].
+		existing, found, rerr := a.ReadPerson(res.PersonKey)
+		if rerr != nil {
+			return PersonResult{}, rerr
+		}
+		return a.foldMention(res.PersonKey, existing, found, m)
+	default:
+		// A claim, first-name, pinned, or previously recorded route: the
+		// mention is counted for the person, but the form never joins aka[].
+		return a.refMention(res, m)
+	}
+}
+
+// mintMention is the existing mint branch, run unchanged when the form has no
+// slug-path holder at all: derive the key with the collision-suffix rule,
+// follow a redirect, and — when that would mint a new record — run the
+// alias-aware nickname discovery pass, with dormant people excluded from its
+// candidates.
+func (a *Adapter) mintMention(m PersonMention, st identity.State) (PersonResult, error) {
 	key, err := ResolvePersonKey(m.DisplayName, data.Wordlist(), a.personKeyOwner)
 	if err != nil {
 		return PersonResult{}, fmt.Errorf("storage: update_person: resolve key: %w", err)
@@ -215,11 +286,17 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	// mechanism, so resolution still runs only through the tombstone graph — the
 	// "aka is never scanned" collision-oracle invariant stays intact (Q2=B). Zero or
 	// >=2 candidates deliberately mint a new record and defer to `person reconcile`.
-	key, existing, found, err = a.resolveMintCandidate(key, existing, found, m.DisplayName)
+	key, existing, found, err = a.resolveMintCandidate(key, existing, found, m.DisplayName, st)
 	if err != nil {
 		return PersonResult{}, err
 	}
+	return a.foldMention(key, existing, found, m)
+}
 
+// foldMention is the ordinary fold: merge the mention into the record at key
+// (or mint it there), fold any explicit akas, write it, and plant a resolving
+// tombstone for each explicit alias.
+func (a *Adapter) foldMention(key string, existing PersonRecord, found bool, m PersonMention) (PersonResult, error) {
 	rec := mergePerson(existing, found, key, m)
 	// Fold any explicit akas ("X, aka Y" phrasing) into the record before the
 	// write, so the merged-away form matches this person immediately.
@@ -230,7 +307,7 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 	}
 	slices.Sort(rec.Aka)
 
-	if err = a.writePerson(rec); err != nil {
+	if err := a.writePerson(rec); err != nil {
 		return PersonResult{}, err
 	}
 
@@ -247,12 +324,141 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 			return PersonResult{}, perr
 		}
 	}
+	return PersonResult{PersonKey: key, FirstMention: isFirstMention(rec, m.RawEntryID)}, nil
+}
 
-	// first_mention is order-independent: this entry introduces the person
-	// exactly when it is the earliest ref on the merged record. entry_refs is
-	// kept sorted, so the earliest is the first element.
-	firstMention := len(rec.EntryRefs) > 0 && rec.EntryRefs[0] == m.RawEntryID
-	return PersonResult{PersonKey: key, FirstMention: firstMention}, nil
+// refMention counts the mention for the person a claim, a first-name route, a
+// pin, or the raw entry's prior resolution named: the entry_refs id is
+// appended and the seen window widens, but aka[] and display_name are left
+// alone — no tombstone is planted, so the form keeps resolving through the
+// identity log, never through the people tree. A first-name route also records
+// its pin (cause first_name), once per (raw entry, form).
+func (a *Adapter) refMention(res NameResolution, m PersonMention) (PersonResult, error) {
+	existing, found, err := a.ReadPerson(res.PersonKey)
+	if err != nil {
+		return PersonResult{}, err
+	}
+	if !found || existing.IsTombstone() {
+		return PersonResult{}, fmt.Errorf("storage: update_person: no canonical record at %q", res.PersonKey)
+	}
+	rec := mergePersonRef(existing, m)
+	if err = a.writePerson(rec); err != nil {
+		return PersonResult{}, err
+	}
+	if res.Step == StepFirstName {
+		pin := identity.NewPin(recordedAt(m), identity.SourceStructure, m.RawEntryID, m.DisplayName, res.PersonKey, identity.CauseFirstName)
+		if _, err = a.AppendIdentityEvent(pin); err != nil {
+			return PersonResult{}, err
+		}
+	}
+	return PersonResult{PersonKey: res.PersonKey, FirstMention: isFirstMention(rec, m.RawEntryID)}, nil
+}
+
+// holdMention holds a mention capture could not assign to one person
+// (error-states.md §P-11): nothing under people/ is written, and one hold event
+// is appended per (raw entry, form) — none when the raw's prior artifact
+// already held it, or a pending hold already names it. The router records the
+// returned held_people[] entry.
+func (a *Adapter) holdMention(m PersonMention, res NameResolution, st identity.State) (PersonResult, error) {
+	cands := slices.Clone(res.Candidates)
+	slices.Sort(cands)
+	cands = slices.Compact(cands)
+	if res.Step != StepPrior && !hasPendingHold(st, m.RawEntryID, m.DisplayName) {
+		hold := identity.NewHold(recordedAt(m), identity.SourceStructure, m.RawEntryID, m.DisplayName, res.HoldReason, cands)
+		if _, err := a.AppendIdentityEvent(hold); err != nil {
+			return PersonResult{}, err
+		}
+	}
+	return PersonResult{Held: true, HoldReason: res.HoldReason, Candidates: cands}, nil
+}
+
+// priorMention finds what the raw entry's prior processed artifact already
+// recorded for the form (matched by normalized form): a person_key from
+// people[], or a held_people[] entry. When the artifact is missing — a first
+// pass, or one that degraded after holding the mention — a pending hold in the
+// identity log for the (raw entry, form) stands in for it, so a replay never
+// appends a second hold. A damaged prior artifact is what the re-run replaces,
+// so it reads as no prior.
+func (a *Adapter) priorMention(rawID, form string, st identity.State) (string, *HeldPerson, error) {
+	norm := NormalizeName(form)
+	art, found, err := a.readPriorProcessed(rawID)
+	if err != nil {
+		return "", nil, err
+	}
+	if found {
+		for _, p := range art.People {
+			if NormalizeName(p.DisplayName) == norm && p.PersonKey != "" {
+				return p.PersonKey, nil, nil
+			}
+		}
+		for _, h := range art.HeldPeople {
+			if NormalizeName(h.DisplayName) == norm {
+				held := h
+				return "", &held, nil
+			}
+		}
+	}
+	for _, h := range st.PendingHolds() {
+		if h.RawID == rawID && NormalizeName(h.Form) == norm {
+			return "", &HeldPerson{DisplayName: h.Form, Reason: h.Reason, Candidates: h.Candidates}, nil
+		}
+	}
+	return "", nil, nil
+}
+
+// readPriorProcessed reads the raw entry's processed artifact for stickiness.
+// A missing artifact is found=false; a damaged one is also found=false (the
+// re-run overwrites it). Only an unexpected read error surfaces.
+func (a *Adapter) readPriorProcessed(rawID string) (ProcessedArtifact, bool, error) {
+	path, err := safeRecordPath(a.processedDir(), rawID, processedExt, "processed id")
+	if err != nil {
+		return ProcessedArtifact{}, false, nil //nolint:nilerr // an id that cannot name an artifact has no prior
+	}
+	b, err := os.ReadFile(path) //nolint:gosec // adapter-internal path derived from the resolved Ledger home
+	if errors.Is(err, fs.ErrNotExist) {
+		return ProcessedArtifact{}, false, nil
+	}
+	if err != nil {
+		return ProcessedArtifact{}, false, fmt.Errorf("storage: read processed %q: %w", rawID, err)
+	}
+	var j processedJSON
+	if err = json.Unmarshal(b, &j); err != nil {
+		return ProcessedArtifact{}, false, nil //nolint:nilerr // a damaged prior artifact is replaced by the re-run, never blocks it
+	}
+	art, err := j.decode()
+	if err != nil {
+		return ProcessedArtifact{}, false, nil //nolint:nilerr // a damaged prior artifact is replaced by the re-run, never blocks it
+	}
+	return art, true, nil
+}
+
+// hasPendingHold reports whether a pending hold already names the raw entry's
+// mention of the form.
+func hasPendingHold(st identity.State, rawID, form string) bool {
+	norm := NormalizeName(form)
+	for _, h := range st.PendingHolds() {
+		if h.RawID == rawID && NormalizeName(h.Form) == norm {
+			return true
+		}
+	}
+	return false
+}
+
+// recordedAt is the `at` of an identity event a capture records: when capture
+// ran, RFC3339 with its own offset.
+func recordedAt(m PersonMention) string {
+	at := m.RecordedAt
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return at.Format(time.RFC3339)
+}
+
+// isFirstMention reports whether rawID is the earliest ref on the record:
+// first_mention is order-independent, and entry_refs is kept sorted, so the
+// earliest is the first element.
+func isFirstMention(rec PersonRecord, rawID string) bool {
+	return len(rec.EntryRefs) > 0 && rec.EntryRefs[0] == rawID
 }
 
 // resolveMintCandidate applies alias-aware routing when a mention would otherwise
@@ -261,11 +467,11 @@ func (a *Adapter) UpdatePerson(m PersonMention) (PersonResult, error) {
 // when that folds the mention into a single known person, it returns that
 // canonical key and the freshly-read record (found=true); when it does not route,
 // it returns the inputs unchanged so UpdatePerson mints as before.
-func (a *Adapter) resolveMintCandidate(key string, existing PersonRecord, found bool, displayName string) (string, PersonRecord, bool, error) {
+func (a *Adapter) resolveMintCandidate(key string, existing PersonRecord, found bool, displayName string, st identity.State) (string, PersonRecord, bool, error) {
 	if found {
 		return key, existing, found, nil
 	}
-	routed, err := a.routeAliasMention(displayName)
+	routed, err := a.routeAliasMention(displayName, st)
 	if err != nil {
 		return "", PersonRecord{}, false, err
 	}
@@ -294,7 +500,9 @@ func (a *Adapter) resolveMintCandidate(key string, existing PersonRecord, found 
 // UpdatePerson mints a fresh record and `person reconcile` can suggest the merge,
 // rather than risk fusing two distinct people at capture. It is pure and
 // deterministic (no model calls) — every step is a sorted scan over the store.
-func (a *Adapter) routeAliasMention(displayName string) (string, error) {
+// A dormant person is never a candidate (ADR-0016): dormant means "not who I
+// mean now", so a nickname never routes to them.
+func (a *Adapter) routeAliasMention(displayName string, st identity.State) (string, error) {
 	// The mention's lookup form is the normalized first whitespace-delimited
 	// component; direct cluster neighbors only (no transitive expansion) keep the
 	// link conservative. A form with no curated cluster never routes.
@@ -325,8 +533,8 @@ func (a *Adapter) routeAliasMention(displayName string) (string, error) {
 		if rerr != nil {
 			return "", rerr
 		}
-		if !found || rec.IsTombstone() {
-			continue // only live canonical records are alias candidates
+		if !found || rec.IsTombstone() || st.IsDormant(key) {
+			continue // only live, active canonical records are alias candidates
 		}
 		if !aliasFormsMatch(rec, relatedSet) {
 			continue
@@ -446,6 +654,25 @@ func mergePerson(existing PersonRecord, found bool, key string, m PersonMention)
 	}
 	rec.EntryRefs = addUnique(rec.EntryRefs, m.RawEntryID)
 	slices.Sort(rec.EntryRefs)
+	return rec
+}
+
+// mergePersonRef counts a mention for an existing record without touching its
+// identity: the entry_refs id is appended (deduplicated and re-sorted) and the
+// seen window widens, but display_name and aka[] stay exactly as they were. It
+// is the fold a claim, a first-name route, a pin, or a previously recorded
+// resolution uses, so the form never joins aka[] and no tombstone is planted.
+// The receiver is never mutated in place.
+func mergePersonRef(existing PersonRecord, m PersonMention) PersonRecord {
+	rec := existing
+	rec.EntryRefs = addUnique(slices.Clone(rec.EntryRefs), m.RawEntryID)
+	slices.Sort(rec.EntryRefs)
+	if !m.At.IsZero() && (rec.FirstSeenAt.IsZero() || m.At.Before(rec.FirstSeenAt)) {
+		rec.FirstSeenAt = m.At
+	}
+	if m.At.After(rec.LastSeenAt) {
+		rec.LastSeenAt = m.At
+	}
 	return rec
 }
 
