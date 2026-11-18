@@ -1,0 +1,2 @@
+# Test fixture false positive: the fixed golden key_salt in people_golden_test.go.
+f98bb0200913aad5f3de86e7248876194d07f5fb:internal/cli/people_golden_test.go:generic-api-key:103

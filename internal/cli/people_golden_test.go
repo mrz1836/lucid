@@ -100,7 +100,7 @@ func goldenEnv(t *testing.T) string {
 
 // goldenKeySalt replaces the random per-Ledger key_salt the scaffold generates,
 // so the salted registry keys (a gratitude id) are the same on every run.
-const goldenKeySalt = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+const goldenKeySalt = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff" // gitleaks:allow (fixed test fixture, not a secret)
 
 // goldenSeedObservations pins observations/config.json: the fixed key_salt, and
 // the enable-gated memory kind switched on (there is no verb that enables a
