@@ -119,7 +119,7 @@ person_key or a name (quote a multi-word name).`,
 			if err != nil {
 				return err
 			}
-			res, err := r.PersonMerge(router.PersonMergeRequest{Source: args[0], Target: args[1]})
+			res, err := r.PersonMerge(router.PersonMergeRequest{Source: args[0], Target: args[1], Now: clockNow()})
 			if err != nil {
 				return personRejection(cmd, err)
 			}
@@ -351,61 +351,184 @@ not a civil date is rejected.`,
 }
 
 // reconcileCandidateView is one row of the reconcile --json output: the pair,
-// why they were flagged, and the exact merge to run.
+// why they were flagged, and the exact merge to run, plus — each left out when
+// empty — the dormant marks (only under --all) and the overlap or dormant
+// look-alike attached to the pair.
 type reconcileCandidateView struct {
-	SourceKey      string `json:"source_key"`
-	SourceName     string `json:"source_display_name"`
-	TargetKey      string `json:"target_key"`
-	TargetName     string `json:"target_display_name"`
-	Reason         string `json:"reason"`
-	SuggestedMerge string `json:"suggested_merge"`
+	SourceKey      string                     `json:"source_key"`
+	SourceName     string                     `json:"source_display_name"`
+	TargetKey      string                     `json:"target_key"`
+	TargetName     string                     `json:"target_display_name"`
+	Reason         string                     `json:"reason"`
+	SuggestedMerge string                     `json:"suggested_merge"`
+	SourceDormant  bool                       `json:"source_dormant,omitempty"`
+	TargetDormant  bool                       `json:"target_dormant,omitempty"`
+	Overlap        *reconcileOverlapView      `json:"overlap,omitempty"`
+	DormantShare   *reconcileDormantShareView `json:"dormant_share,omitempty"`
+}
+
+// reconcileOverlapView is one first-name overlap: who a bare form goes to now,
+// who else has it as a first name, and the two one-command fixes.
+type reconcileOverlapView struct {
+	Form              string `json:"form"`
+	HolderKey         string `json:"holder_key"`
+	HolderName        string `json:"holder_display_name"`
+	HolderFirstSeenAt string `json:"holder_first_seen_at"`
+	SharerKey         string `json:"sharer_key"`
+	SharerName        string `json:"sharer_display_name"`
+	SuggestedClaim    string `json:"suggested_claim"`
+	SuggestedDormant  string `json:"suggested_dormant"`
+}
+
+// reconcileDormantShareView is one dormant look-alike: the shared form, the two
+// people, and the restore-then-merge fix.
+type reconcileDormantShareView struct {
+	Form             string `json:"form"`
+	ActiveKey        string `json:"active_key"`
+	ActiveName       string `json:"active_display_name"`
+	DormantKey       string `json:"dormant_key"`
+	DormantName      string `json:"dormant_display_name"`
+	SuggestedRestore string `json:"suggested_restore"`
+	SuggestedMerge   string `json:"suggested_merge"`
+}
+
+// reconcileHeldView is one pending held mention (§P-11) and the people it could
+// mean, active first.
+type reconcileHeldView struct {
+	RawID      string                       `json:"raw_id"`
+	Form       string                       `json:"form"`
+	Reason     string                       `json:"reason"`
+	Candidates []reconcileHeldCandidateView `json:"candidates"`
+}
+
+// reconcileHeldCandidateView is one person a held mention could mean; dormant
+// is left out unless true.
+type reconcileHeldCandidateView struct {
+	PersonKey   string `json:"person_key"`
+	DisplayName string `json:"display_name"`
+	Dormant     bool   `json:"dormant,omitempty"`
 }
 
 // personReconcileView is the machine-readable projection of a reconcile scan.
-// Candidates is always a (possibly empty) array, never null.
+// Candidates is always a (possibly empty) array, never null; held, overlaps,
+// and dormant_shares are left out when there is nothing to list, so a Ledger
+// with nothing beyond pairs emits exactly what it always has.
 type personReconcileView struct {
-	Candidates []reconcileCandidateView `json:"candidates"`
+	Candidates    []reconcileCandidateView    `json:"candidates"`
+	Held          []reconcileHeldView         `json:"held,omitempty"`
+	Overlaps      []reconcileOverlapView      `json:"overlaps,omitempty"`
+	DormantShares []reconcileDormantShareView `json:"dormant_shares,omitempty"`
 }
 
 // projectReconcile builds the --json view from a router result.
 func projectReconcile(res router.PersonReconcileResult) personReconcileView {
 	cands := make([]reconcileCandidateView, 0, len(res.Candidates))
 	for _, c := range res.Candidates {
-		cands = append(cands, reconcileCandidateView{
+		v := reconcileCandidateView{
 			SourceKey:      c.SourceKey,
 			SourceName:     c.SourceName,
 			TargetKey:      c.TargetKey,
 			TargetName:     c.TargetName,
 			Reason:         c.Reason,
-			SuggestedMerge: fmt.Sprintf("lucid person merge %s %s", c.SourceKey, c.TargetKey),
-		})
+			SuggestedMerge: c.SuggestedMerge(),
+			SourceDormant:  c.SourceDormant,
+			TargetDormant:  c.TargetDormant,
+		}
+		if c.Overlap != nil {
+			o := projectOverlap(*c.Overlap)
+			v.Overlap = &o
+		}
+		if c.DormantShare != nil {
+			d := projectDormantShare(*c.DormantShare)
+			v.DormantShare = &d
+		}
+		cands = append(cands, v)
 	}
-	return personReconcileView{Candidates: cands}
+	view := personReconcileView{Candidates: cands}
+	for _, h := range res.Held {
+		hv := reconcileHeldView{
+			RawID: h.RawID, Form: h.Form, Reason: h.Reason,
+			Candidates: make([]reconcileHeldCandidateView, 0, len(h.Candidates)),
+		}
+		for _, c := range h.Candidates {
+			hv.Candidates = append(hv.Candidates, reconcileHeldCandidateView{
+				PersonKey: c.PersonKey, DisplayName: c.DisplayName, Dormant: c.Dormant,
+			})
+		}
+		view.Held = append(view.Held, hv)
+	}
+	for _, o := range res.Overlaps {
+		view.Overlaps = append(view.Overlaps, projectOverlap(o))
+	}
+	for _, d := range res.DormantShares {
+		view.DormantShares = append(view.DormantShares, projectDormantShare(d))
+	}
+	return view
 }
 
+// projectOverlap projects one first-name overlap.
+func projectOverlap(o router.ReconcileOverlap) reconcileOverlapView {
+	return reconcileOverlapView{
+		Form:              o.Form,
+		HolderKey:         o.HolderKey,
+		HolderName:        o.HolderName,
+		HolderFirstSeenAt: o.HolderFirstSeen,
+		SharerKey:         o.SharerKey,
+		SharerName:        o.SharerName,
+		SuggestedClaim:    o.SuggestedClaim(),
+		SuggestedDormant:  o.SuggestedDormant(),
+	}
+}
+
+// projectDormantShare projects one dormant look-alike.
+func projectDormantShare(d router.ReconcileDormantShare) reconcileDormantShareView {
+	return reconcileDormantShareView{
+		Form:             d.Form,
+		ActiveKey:        d.ActiveKey,
+		ActiveName:       d.ActiveName,
+		DormantKey:       d.DormantKey,
+		DormantName:      d.DormantName,
+		SuggestedRestore: d.SuggestedRestore(),
+		SuggestedMerge:   d.SuggestedMerge(),
+	}
+}
+
+// personReconcileAllFlag brings dormant people back into reconcile's merge
+// suggestions.
+const personReconcileAllFlag = "all"
+
 // newPersonReconcileCmd builds the `reconcile` child: a read-only detector that
-// lists likely-duplicate people and a suggested merge for each. It changes
-// nothing and always exits 0 (an empty result is honest, not an error).
+// lists likely-duplicate people and a suggested merge for each, then the
+// identity loose ends with their fixes. It changes nothing and always exits 0
+// (an empty result is honest, not an error).
 func newPersonReconcileCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "reconcile",
 		Short: "List likely-duplicate people and a suggested merge for each (read-only)",
 		Long: `reconcile scans the people records for likely duplicates — a nickname and a
 full name split into two records, a transcription variant — and lists each pair
 with a suggested merge direction and the exact command to run. It is a pure read:
-no model, no writes, byte-stable across runs, and off-limits people are excluded.
-Two signals flag a pair: a shared written form (a normalized display_name/aka in
-common) or name proximity (a bounded edit distance, or a short diminutive prefix
-like sam ⊂ sammy). It changes nothing — you decide whether to merge.`,
+no model, no writes, byte-stable across runs, and off-limits people are excluded
+from every line. A pair needs a corroborating signal: a shared written form (a
+normalized display_name/aka in common), a nickname-map link between first names,
+or a diminutive prefix of three or more letters (sam ⊂ sammy).
+
+After the pairs it lists, each only when there is something to list: held
+mentions capture could not assign, first-name overlaps (a bare name goes to one
+person while another active person has it as their first name), and dormant
+look-alikes (an active person who shares a written form with a dormant one),
+each with its one-command fix. Dormant people join the merge suggestions only
+with --all. It changes nothing — you decide.`,
 		Args: cobra.NoArgs,
 		Example: `  lucid person reconcile
-  lucid person reconcile --json`,
+  lucid person reconcile --all --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := bootedRouter(cmd)
 			if err != nil {
 				return err
 			}
-			res, err := r.PersonReconcile()
+			all, _ := cmd.Flags().GetBool(personReconcileAllFlag)
+			res, err := r.PersonReconcile(router.PersonReconcileRequest{All: all})
 			if err != nil {
 				return err
 			}
@@ -416,6 +539,8 @@ like sam ⊂ sammy). It changes nothing — you decide whether to merge.`,
 			return nil
 		},
 	}
+	cmd.Flags().Bool(personReconcileAllFlag, false, "Include dormant people in the merge suggestions, each marked dormant")
+	return cmd
 }
 
 // newPersonOffLimitsCmd builds the `off-limits` child: toggle P-3 redaction. It

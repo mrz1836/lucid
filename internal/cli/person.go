@@ -16,11 +16,13 @@ import (
 const personCandidateDateLayout = "2006-01-02"
 
 // personCandidateView is one row of the §P-2 disambiguation list under --json:
-// the record key, its display name, and its first-seen date.
+// the record key, its display name, its first-seen date, and dormant: true for
+// a dormant candidate (left out for everyone else).
 type personCandidateView struct {
 	PersonKey   string `json:"person_key"`
 	DisplayName string `json:"display_name"`
 	FirstSeenAt string `json:"first_seen_at"`
+	Dormant     bool   `json:"dormant,omitempty"`
 }
 
 // personContactView is the person view's check-in summary under --json
@@ -41,16 +43,21 @@ type personContactView struct {
 // matched (§P-0), multiple_matches (§P-2), off_limits (§P-3), or neither (§P-1
 // no-match) — rather than parsing the prose; the router package stays untouched.
 // contact is present only when the person has contact events, so a person with
-// none projects exactly as before.
+// none projects exactly as before. dormant (a dormant person's view) and
+// dormant_also (the dormant people who also hold the queried form) are likewise
+// left out unless set, so a Ledger with no dormant people projects exactly as
+// before.
 type personView struct {
-	Query           string                `json:"query"`
-	Matched         bool                  `json:"matched"`
-	MultipleMatches bool                  `json:"multiple_matches"`
-	Candidates      []personCandidateView `json:"candidates"`
-	OffLimits       bool                  `json:"off_limits"`
-	PersonKey       string                `json:"person_key"`
-	Contact         *personContactView    `json:"contact,omitempty"`
-	Text            string                `json:"text"`
+	Query           string                  `json:"query"`
+	Matched         bool                    `json:"matched"`
+	MultipleMatches bool                    `json:"multiple_matches"`
+	Candidates      []personCandidateView   `json:"candidates"`
+	OffLimits       bool                    `json:"off_limits"`
+	PersonKey       string                  `json:"person_key"`
+	Dormant         bool                    `json:"dormant,omitempty"`
+	DormantAlso     []personIdentityRefView `json:"dormant_also,omitempty"`
+	Contact         *personContactView      `json:"contact,omitempty"`
+	Text            string                  `json:"text"`
 }
 
 // personViewFrom projects a router result into the CLI --json view, always
@@ -63,7 +70,12 @@ func personViewFrom(res router.PersonResult) personView {
 			PersonKey:   c.PersonKey,
 			DisplayName: c.DisplayName,
 			FirstSeenAt: c.FirstSeenAt.Format(personCandidateDateLayout),
+			Dormant:     c.Dormant,
 		})
+	}
+	also := make([]personIdentityRefView, 0, len(res.DormantAlso))
+	for _, d := range res.DormantAlso {
+		also = append(also, personIdentityRefView{PersonKey: d.PersonKey, DisplayName: d.DisplayName})
 	}
 	return personView{
 		Query:           res.Query,
@@ -72,6 +84,8 @@ func personViewFrom(res router.PersonResult) personView {
 		Candidates:      cands,
 		OffLimits:       res.OffLimits,
 		PersonKey:       res.PersonKey,
+		Dormant:         res.Dormant,
+		DormantAlso:     also,
 		Contact:         personContactViewFrom(res.Contact),
 		Text:            res.Text,
 	}
@@ -132,6 +146,10 @@ func newPersonCmd() *cobra.Command {
 	cmd.AddCommand(newPersonRenameCmd())
 	cmd.AddCommand(newPersonSetCmd())
 	cmd.AddCommand(newPersonOffLimitsCmd())
+	cmd.AddCommand(newPersonDormantCmd())
+	cmd.AddCommand(newPersonClaimCmd())
+	cmd.AddCommand(newPersonReleaseCmd())
+	cmd.AddCommand(newPersonMoveRefCmd())
 	cmd.AddCommand(newPersonReconcileCmd())
 	return cmd
 }

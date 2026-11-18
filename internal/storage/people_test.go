@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/data"
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // personAt is a fixed synthetic instant for the People-routine tests.
@@ -691,4 +693,158 @@ func TestPersonRecord_RoundTrips(t *testing.T) {
 	assert.JSONEq(t, `["Sam"]`, string(m["aka"]))
 	assert.Equal(t, "null", string(m["notes"]))
 	assert.Equal(t, "Sam", rec.DisplayName)
+}
+
+// TestUpdatePerson_FirstNameRoutePinsWithoutAka: when a bare "Sam"'s only
+// exact holder is dormant and exactly one active person has the first name
+// "Sam", the mention is counted for that person — the entry_refs id appended
+// and the seen window widened — with one first_name pin recorded per (raw
+// entry, form). The target's display_name and aka[] stay untouched, no
+// tombstone is planted, the dormant record is unchanged, and a re-run is
+// idempotent (the pin, not the slug path, decides it).
+func TestUpdatePerson_FirstNameRoutePinsWithoutAka(t *testing.T) {
+	f := newResolveFixture(t)
+	sam := f.mention("Sam")
+	rivera := f.mention("Sam Rivera")
+	f.dormant("Sam")
+	riveraBefore, _, err := f.a.ReadPerson(rivera)
+	require.NoError(t, err)
+	before := f.peopleBytes()
+
+	raw := "raw_2026_11_20_10_00"
+	m := PersonMention{DisplayName: "Sam", RawEntryID: raw, At: personAt(28), RecordedAt: personAt(28)}
+	res, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.Equal(t, rivera, res.PersonKey)
+	assert.False(t, res.Held)
+	assert.False(t, res.FirstMention, "the person already had an earlier entry")
+
+	after, _, err := f.a.ReadPerson(rivera)
+	require.NoError(t, err)
+	assert.Equal(t, riveraBefore.DisplayName, after.DisplayName)
+	assert.Equal(t, riveraBefore.Aka, after.Aka, "the form never joins aka[]")
+	assert.Equal(t, append(slices.Clone(riveraBefore.EntryRefs), raw), after.EntryRefs)
+	assert.Equal(t, personAt(28), after.LastSeenAt, "the seen window widens")
+
+	got := f.peopleBytes()
+	assert.Len(t, got, len(before), "no tombstone and no new record")
+	assert.Equal(t, before[sam+personExt], got[sam+personExt], "the dormant holder is unchanged")
+
+	pins := f.eventsOfKind(identity.KindPin)
+	require.Len(t, pins, 1)
+	assert.Equal(t, raw, pins[0].RawID)
+	assert.Equal(t, "Sam", pins[0].Form)
+	assert.Equal(t, rivera, pins[0].PersonKey)
+	assert.Equal(t, identity.CauseFirstName, pins[0].Cause)
+	assert.Equal(t, identity.SourceStructure, pins[0].Source)
+	assert.Equal(t, personAt(28).Format(time.RFC3339), pins[0].At)
+
+	// Re-running the same mention lands on the same person and adds nothing.
+	stable := f.peopleBytes()
+	logBefore := identityLogBytes(t, f.a)
+	again, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.Equal(t, rivera, again.PersonKey)
+	assert.Equal(t, stable, f.peopleBytes())
+	assert.Equal(t, logBefore, identityLogBytes(t, f.a), "one pin per (raw entry, form)")
+}
+
+// TestUpdatePerson_HeldMentionRecordsHold: a mention two active people hold
+// exactly is held, not assigned (§P-11): no people/ write, no entry_refs id for
+// anyone, one hold event; Structure's processed held_people[] entry round-trips;
+// and a re-run against that artifact stays held with no second hold event. A
+// replay after a degraded pass (hold recorded, artifact never written) also
+// appends nothing.
+func TestUpdatePerson_HeldMentionRecordsHold(t *testing.T) {
+	f := newResolveFixture(t)
+	alex := f.mention("Alex", "A.")
+	andy := f.mention("Andy", "A.")
+	want := []string{alex, andy}
+	slices.Sort(want)
+	before := f.peopleBytes()
+
+	raw := "raw_2026_11_21_10_00"
+	m := PersonMention{DisplayName: "A.", RawEntryID: raw, At: personAt(28), RecordedAt: personAt(28)}
+	res, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.True(t, res.Held)
+	assert.Empty(t, res.PersonKey)
+	assert.Equal(t, identity.HoldExact, res.HoldReason)
+	assert.Equal(t, want, res.Candidates)
+	assert.Equal(t, before, f.peopleBytes(), "a held mention writes nothing under people/")
+
+	holds := f.eventsOfKind(identity.KindHold)
+	require.Len(t, holds, 1)
+	assert.Equal(t, raw, holds[0].RawID)
+	assert.Equal(t, "A.", holds[0].Form)
+	assert.Equal(t, identity.HoldExact, holds[0].Reason)
+	assert.Equal(t, want, holds[0].Candidates)
+	assert.Equal(t, identity.SourceStructure, holds[0].Source)
+
+	// Holds are per raw entry: the same form in another entry gets its own.
+	other, err := f.a.UpdatePerson(PersonMention{DisplayName: "A.", RawEntryID: "raw_2026_11_21_11_00", At: personAt(28), RecordedAt: personAt(28)})
+	require.NoError(t, err)
+	assert.True(t, other.Held)
+	require.Len(t, f.eventsOfKind(identity.KindHold), 2)
+
+	// A replay before any artifact exists (a degraded pass) appends nothing.
+	logBefore := identityLogBytes(t, f.a)
+	replay, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.True(t, replay.Held)
+	assert.Equal(t, logBefore, identityLogBytes(t, f.a))
+
+	// The processed entry the router writes for it round-trips.
+	art := ProcessedArtifact{
+		ID: raw, EntryID: raw, ProducedAt: personAt(28), AgentVersion: "structuring-2026.05.0",
+		HeldPeople: []HeldPerson{{DisplayName: "A.", Reason: res.HoldReason, Candidates: res.Candidates}},
+	}
+	require.NoError(t, f.a.WriteProcessed(art))
+	back, err := f.a.ReadProcessed(raw)
+	require.NoError(t, err)
+	assert.Equal(t, art.HeldPeople, back.HeldPeople)
+	assert.Empty(t, back.People)
+
+	// A re-run against the artifact keeps it held, with no second hold event —
+	// even after the form gains a claimant.
+	f.claim("A.", andy)
+	logBefore = identityLogBytes(t, f.a)
+	rerun, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.True(t, rerun.Held)
+	assert.Equal(t, want, rerun.Candidates)
+	assert.Equal(t, logBefore, identityLogBytes(t, f.a))
+	assert.Equal(t, before, f.peopleBytes())
+}
+
+// TestUpdatePerson_StickyPriorArtifact covers stickiness at the storage seam: a
+// re-run keeps the person the prior processed artifact recorded even after a
+// claim would now send the form elsewhere, and a damaged prior artifact reads
+// as no prior (the re-run replaces it).
+func TestUpdatePerson_StickyPriorArtifact(t *testing.T) {
+	f := newResolveFixture(t)
+	sam := f.mention("Sam")
+	rivera := f.mention("Sam Rivera")
+	raw := "raw_2026_11_22_10_00"
+	m := PersonMention{DisplayName: "Sam", RawEntryID: raw, At: personAt(28)}
+	res, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	require.Equal(t, sam, res.PersonKey)
+	require.NoError(t, f.a.WriteProcessed(ProcessedArtifact{
+		ID: raw, EntryID: raw, ProducedAt: personAt(28), AgentVersion: "structuring-2026.05.0",
+		People: []ProcessedPerson{{DisplayName: "Sam", PersonKey: sam}},
+	}))
+
+	f.claim("Sam", rivera)
+	before := f.peopleBytes()
+	again, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.Equal(t, sam, again.PersonKey, "a recorded mention keeps its person")
+	assert.Equal(t, before, f.peopleBytes())
+
+	// A damaged artifact is no prior: the claim now decides.
+	require.NoError(t, os.WriteFile(filepath.Join(f.a.processedDir(), raw+".json"), []byte("{torn"), filePerm))
+	fresh, err := f.a.UpdatePerson(m)
+	require.NoError(t, err)
+	assert.Equal(t, rivera, fresh.PersonKey)
 }

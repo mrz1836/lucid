@@ -42,6 +42,8 @@ These rules trace directly to
 │   └── i_2026_05_05_a.md
 ├── people/                 # lightweight person references (.json)
 │   └── person_a-river.json
+├── identity/               # append-only person identity log — status, claims, holds, pins, move-refs (ADR-0016)
+│   └── identity.jsonl
 ├── sessions/               # thread/session metadata (.json) + channel memory
 │   ├── session_2026_05_05_19_42.json
 │   └── channel_lucid.md
@@ -336,6 +338,7 @@ disk: `/day 2026-03-04` lists both readings, and `/day 2026-03-05` the void.
 | Wheel receipt id | `wheel_YYYY_MM_<seq>` — one per appended `snapshot`, assigned single-writer as max-seq+1 over that month's history (zero-padded to three digits, wider values legal); returned by every `wheel add`, distinct from the stable entry id. A second `add` for the same month mints the next receipt and wins on read (latest-wins). See [`wheel.md`](../wheel.md). | `wheel_2026_09_001` |
 | Retro item id | `R-NNN` — the parked-item id, minted **globally monotonic** as the max `R-NNN` across all `park` lines plus one (zero-padded to three digits, wider values legal; `park` auto-mints, `import` supplies explicit ids). A `resolve` / `defer` references it without advancing the counter. Shown by `list`, targeted by `show` / `resolve` / `defer`. See [`retro.md`](../retro.md). | `R-012` |
 | Retro receipt id | `retro_event_YYYY_MM_DD_<seq>` — one per appended retro event (`park` / `resolve` / `defer`), assigned single-writer per logical-day as max-seq+1; returned by every write, distinct from the stable `R-NNN` item id. See [`retro.md`](../retro.md). | `retro_event_2026_08_23_001` |
+| Identity event id | `identity_YYYY_MM_DD_<slot>` — one per appended identity-log event (`status` / `claim` / `release` / `hold` / `pin` / `move_ref`), dated by the local date the event is recorded and minted single-writer as the first unused per-day slot (`a`, `b`, … `z`, `aa` — the anchor-event `SlotLabel` grammar) in the file, never the line count; a damaged line whose id can still be read keeps its slot, so an id is never reissued. Returned by every `lucid person dormant` / `claim` / `release` / `move-ref` write. See §"Identity log" and [ADR-0016](../adr/0016-person-status-and-name-claims.md). | `identity_2026_11_17_a` |
 | Contact event id | `contact_YYYY_MM_DD_<slot>` — one per appended contact event (`cadence` / `contact` / `snooze` / `void`), dated by the event's logical day (a backdated contact takes its own day) and minted single-writer as the first unused per-day slot (`a`, `b`, … `z`, `aa` — the anchor-event `SlotLabel` grammar) in that day's shard, never the line count. A correction appends a `void` whose `refs.voids` names the target; cadence events are never voided. Returned by every `lucid contact` write. See [ADR-0014](../adr/0014-contact-check-ins.md). | `contact_2026_10_29_a` |
 
 People keys deliberately do not encode real names; the storage adapter
@@ -383,8 +386,17 @@ key        = "person_" + word1[0] + "-" + word2
   changing it is a breaking schema change.
 * If the resulting `key` already exists in `~/.lucid/people/` for a
   **different** normalized name, the writer appends `-2`, `-3`, ...
-  until unique (`person_a-river`, `person_a-river-2`, ...). This is
-  the only reason a slug ever drifts from the deterministic output.
+  until unique (`person_a-river`, `person_a-river-2`, ...).
+* **One extension (ADR-0016).** When a new person is minted under a
+  name whose every existing holder is **dormant** (§"Identity log"), a
+  slot whose canonical record has the **same** normalized name but is
+  dormant also counts as taken, so the new record takes the next free
+  collision suffix (`person_a-river-2`, then `-3`, ...). This happens
+  only on the two mint paths — a captured mention whose only exact
+  holders are dormant (§"Resolving a bare name"), and `person create`.
+  `DerivePersonKey` and every existing key are unchanged. These two
+  rules are the only reasons a slug ever drifts from the deterministic
+  output.
 * `aka[]` on the people record carries every display variant ever
   seen so a future search can resolve "M." back to `person_a-river`.
 
@@ -1044,6 +1056,29 @@ each write must record the agent version that produced it.
 }
 ```
 
+An artifact with a **held mention** — a name the People routine could not
+assign to one person (§"Resolving a bare name") — carries it in a sibling
+`held_people[]` array right after `people[]`. The array is omitted when empty,
+so every artifact without a held mention is byte-identical to before:
+
+```json
+{
+  "id": "raw_2026_11_18_09_00",
+  "entry_id": "raw_2026_11_18_09_00",
+  "produced_at": "2026-11-18T09:00:12-05:00",
+  "agent_version": "structuring-2026.05.0",
+  "emotions": [],
+  "themes": [{"name": "catching-up", "rationale": "'had lunch with Sam'"}],
+  "people": [],
+  "held_people": [
+    {"display_name": "Sam", "reason": "exact", "candidates": ["person_s-oak", "person_s-river"]}
+  ],
+  "notes": null,
+  "rejected_proposals": [],
+  "unanswered_proposals": []
+}
+```
+
 ### Field semantics
 
 | Field | Required | Meaning |
@@ -1053,7 +1088,8 @@ each write must record the agent version that produced it.
 | `agent_version` | yes | Stamps the prompt/version that produced this artifact. |
 | `emotions[]` | yes | Short list, each with a one-line rationale. May be empty. |
 | `themes[]` | yes | Short list of recurring or newly noticed themes. May be empty. |
-| `people[]` | yes | Each entry pairs a `display_name` (as written) with a stable `person_key` (see below) and a `first_mention` flag. The on-disk artifact never has `person_key: null`; the Structuring agent emits `null` and the router runs `storage.update_person` (the deterministic People routine) before `write_processed`, which back-fills the slug per [`agent-contracts.md`](agent-contracts.md) §"How contracts compose". |
+| `people[]` | yes | Each entry pairs a `display_name` (as written) with a stable `person_key` (see below) and a `first_mention` flag. The on-disk artifact never has `person_key: null`; the Structuring agent emits `null` and the router runs `storage.update_person` (the deterministic People routine) before `write_processed`, which back-fills the slug per [`agent-contracts.md`](agent-contracts.md) §"How contracts compose". Held mentions are never in `people[]`: a mention the routine could not assign goes to `held_people[]` instead. |
+| `held_people[]` | no | Mentions **held, not assigned** (error-states.md §P-11). Each entry is `{display_name, reason, candidates}`: the name as written; `reason` is `exact` (more than one active person holds the form exactly, or the only active holder is reachable only through `aka[]` while the slug path holds only dormant people) or `first_name` (only dormant people hold the form, and two or more active people have it as their first name); `candidates` is the person_keys it could mean, sorted by key. Omitted when empty. A held mention is **never counted for anyone** — no `entry_refs`, no mention count, no agent slice — until a `pin` settles it (§"Identity log"). Each held entry is matched by one `hold` event in the identity log. It counts as structure, so an artifact whose only finding is a held mention is valid. |
 | `notes` | no | Optional free-text the agent wants to preserve. Not surfaced to the user. |
 | `rejected_proposals[]` | yes | Appended to when Reflection's proposal is rejected. See "Insight provenance" below. |
 | `unanswered_proposals[]` | yes | Appended to when Reflection's proposal goes unanswered. Each entry is `{shape_tag, proposed_at}` — an exact parallel to `rejected_proposals[]`, kept as a separate array because silence is not rejection (see [`agent-contracts.md`](agent-contracts.md) §2). |
@@ -1185,7 +1221,11 @@ longer the *only* writer: the curation verbs — `person create`, `person
 merge`, `person alias`, `person rename`, `person set`, and `person
 off-limits` — also write here. All of them are deterministic and model-free;
 none infers anything (see the user-authored carve-out below and §"Deliberate
-creation").
+creation"). The four identity verbs — `person dormant`, `person claim`,
+`person release`, and `person move-ref` — **never** write here: who matters
+now, who a bare name means, and where a single mention belongs live in the
+separate append-only identity log (§"Identity log"), so a people record keeps
+its exact shape and bytes.
 
 ### Schema
 
@@ -1249,9 +1289,9 @@ other field frozen:
 |-------|----------|---------|
 | `person_key` | yes | Stable, low-signal slug. The filename matches. |
 | `display_name` | yes | Whatever the user actually wrote (or the latest version). On a tombstone it is frozen and still serves as the collision-oracle witness for its slug. |
-| `aka[]` | yes | Other forms the same person has been written as, including every form absorbed by a merge or alias. Used for `/person` name matching and human readability — **never** for resolution, which goes through tombstones. |
+| `aka[]` | yes | Other forms the same person has been written as, including every form absorbed by a merge or alias. Used for `/person` name matching and human readability — **never** for resolution, which goes through tombstones. Capture may also read it as a *discovery* pass that can only **hold** a mention, never assign one (§"Resolving a bare name"). |
 | `first_seen_at` / `last_seen_at` | yes | Lifecycle window. |
-| `entry_refs[]` | yes | Raw entry ids in which this person was mentioned. |
+| `entry_refs[]` | yes | Raw entry ids in which this person was mentioned, as capture recorded them. Reads that attribute a raw entry to a person fold in the identity log's pins and move-refs (§"Identity log"); the stored list itself is never rewritten by them. |
 | `redirect_to` | no | Present only on a **redirect tombstone**: the `person_key` of the canonical record this key resolves to. Omitted on a canonical record. Single-hop by invariant — a tombstone never points at another tombstone. |
 | `dob` | no | User-authored civil date of birth (`YYYY-MM-DD`), set with `person set --dob`. Never inferred. Omitted when unset. |
 | `relationship` | no | User-authored relationship label ("colleague", "sister"), set with `person set --relationship`. Never inferred. Omitted when unset. |
@@ -1315,7 +1355,12 @@ duplicate:
   a live record (or resolves forward through a tombstone) is an idempotent no-op
   ack ("already recorded"), never a second record and never a rewrite of the
   existing record's fields — enriching an existing person stays `person set`'s
-  job.
+  job. **The one exception is a dormant holder (ADR-0016):** when every record
+  on the name's slug path is dormant, `create` mints a fresh active record under
+  the next free collision suffix (§"`person_key` derivation"). It never returns
+  the dormant record and never routes to a person who only shares the first
+  name. Restoring the old holder later leaves the form with two active holders —
+  ambiguous until a claim or a dormant settles it (§"Resolving a bare name").
 - **Record shape.** A deliberately-created, never-mentioned person is a
   well-formed canonical record with `entry_refs: []`, `first_seen_at =
   last_seen_at =` the creation date, and `aka: [display_name]`. There is no
@@ -1400,7 +1445,10 @@ The pass is deterministic and local-first — a pure function of the map and the
 existing records, with **no LLM** — so a re-run of the same mention sequence
 yields byte-identical records (the second pass sees the planted tombstone and
 takes the ordinary resolve path). An alias/aka conflict never fails capture; it
-falls back to minting.
+falls back to minting. **Dormant records are never candidates** (§"Identity
+log"): the pass routes only to an active person, and a name whose slug path
+holds only dormant people takes the dormant-holder branch of §"Resolving a bare
+name" instead of this pass.
 
 #### Reconcile precision — a corroborating signal is always required
 
@@ -1423,6 +1471,283 @@ near-zero false positives on unrelated short names, while real duplicates
 `person reconcile` stays a **read-only suggestion surface**: it changes nothing
 and is byte-stable across runs. Nothing is auto-merged — merges remain
 user-driven through `lucid person merge`.
+
+`person reconcile` also lists **held mentions**, **first-name overlaps**, and
+**dormant look-alikes**, each with its one-command fix (§"Status, claims and
+move-ref"; the exact lines are in the command reference under `person
+reconcile`). Dormant people join merge suggestions only under `--all`.
+
+### Identity log — `~/.lucid/identity/`
+
+**Format:** newline-delimited JSON (JSONL), one event per line, in a single file,
+`identity/identity.jsonl`:
+
+```
+~/.lucid/identity/
+└── identity.jsonl
+```
+
+**Mutability:** **Append-only.** Every curation write and every capture-time
+hold or first-name pin is a new line; no line is ever rewritten or removed, and
+a correction is another event. The people records say *who exists*; the identity
+log says **who matters now** (a person's status), **who a bare name means**
+(name claims), and **where a single mention belongs** when capture could not
+decide or decided wrong (holds, pins, and move-refs). It is read only through
+`internal/storage` and folded on read; nothing in it ever rewrites `people/` or
+`processed/`. The design record is
+[ADR-0016](../adr/0016-person-status-and-name-claims.md).
+
+**A Ledger without the file reads as everyone active**, with no claims, holds,
+pins, or move-refs, so every surface renders exactly as it did before the log
+existed. Reads never create the file; only the first write that needs it does
+(a `person dormant`, `claim`, `release`, or `move-ref`, or a capture that holds a
+mention or routes it by first name).
+
+#### Schema
+
+One event per kind, with synthetic keys (`person_s-oak` is an old "Sam",
+`person_s-river` is "Sam Rivera"):
+
+```json
+{"schema":"identity.v1","id":"identity_2026_11_17_a","kind":"status","at":"2026-11-17T09:14:07-05:00","source":"cli","person_key":"person_s-oak","status":"dormant","reason":"an old contact from one passing mention"}
+{"schema":"identity.v1","id":"identity_2026_11_17_b","kind":"claim","at":"2026-11-17T09:15:30-05:00","source":"cli","form":"Sam","person_key":"person_s-river"}
+{"schema":"identity.v1","id":"identity_2026_11_17_c","kind":"release","at":"2026-11-17T09:20:02-05:00","source":"cli","form":"Sam","person_key":"person_s-river"}
+{"schema":"identity.v1","id":"identity_2026_11_18_a","kind":"hold","at":"2026-11-18T09:00:12-05:00","source":"structure","raw_id":"raw_2026_11_18_09_00","form":"Sam","reason":"exact","candidates":["person_s-oak","person_s-river"]}
+{"schema":"identity.v1","id":"identity_2026_11_18_b","kind":"pin","at":"2026-11-18T10:02:45-05:00","source":"cli","raw_id":"raw_2026_11_18_09_00","form":"Sam","person_key":"person_s-river","cause":"claim"}
+{"schema":"identity.v1","id":"identity_2026_11_19_a","kind":"move_ref","at":"2026-11-19T08:30:00-05:00","source":"cli","raw_id":"raw_2026_11_18_21_40","from":"person_s-oak","to":"person_s-river"}
+```
+
+The table lists the fields in their fixed JSON order; every field after `source`
+is present only on the kinds named, and an optional field is left out when unset.
+
+| Field | Kinds | Meaning |
+|-------|-------|---------|
+| `schema` | all | Record schema tag, `identity.v1`. |
+| `id` | all | `identity_YYYY_MM_DD_<slot>` — the local date the event is recorded plus the first unused per-day slot in the file (`a`, `b`, … `z`, `aa`, the anchor-event `SlotLabel` grammar), never the line count. A damaged line whose id can still be read keeps its slot: the id is salvaged, never reissued. The id is the write's **receipt**. |
+| `kind` | all | `status`, `claim`, `release`, `hold`, `pin`, or `move_ref`. |
+| `at` | all | When the event was recorded — RFC3339 with the host's local offset. |
+| `source` | all | `cli` (a curation verb), `structure` (capture: a hold or a first-name pin), or `merge` (`person merge` keeping the log valid). |
+| `raw_id` | `hold`, `pin`, `move_ref` | The raw entry the mention is in. |
+| `form` | `claim`, `release`, `hold`, `pin` | The name as written — as typed for a claim, as the mention was written for a hold or pin. Forms compare by their **normalized** form (lowercase, punctuation and whitespace stripped — the `person_key` normalization), so "Sam" and "sam." are one form. |
+| `person_key` | `status`, `claim`, `release`, `pin` | `status`: the record whose status changes. `claim` / `release`: the claimant. `pin`: the person the mention is pinned to. |
+| `status` | `status` | `active` or `dormant`. |
+| `reason` | `status` (optional), `hold` | On `status`: the one-line `--reason-file` text, shown on the person view. On `hold`: `exact` or `first_name` (the `held_people[]` reason, §"Processed artifacts"). |
+| `cause` | `pin` | What settled the mention: `first_name` (capture routed it by first name), `claim`, `release`, `dormant`, `restore` (a curation write re-resolved a held mention), or `move_ref` (a `move-ref` without `--from`). |
+| `force` | `claim` (optional) | `true` when `--force` overrode an active holder. |
+| `displaced` | `claim` (optional) | The person_keys a forced claim overrode, sorted. |
+| `from` / `to` | `move_ref` | The person the mention moves off, and the person it moves onto. |
+| `candidates` | `hold` | The person_keys the held mention could mean, sorted by key. Surfaces that show them list active people first, then dormant people labeled. |
+
+#### The fold — current identity facts are a read
+
+Events fold in `(at, id)` order:
+
+- **Status** is keyed on the **exact** `person_key` it was written for. The
+  latest `status` event wins, and no event means **active**. Status is never
+  read through a redirect; `person merge` clears a dormant source instead (see
+  §"Status, claims and move-ref").
+- **Claims** canonicalize through redirects: a claim on a key that was later
+  merged away belongs to the canonical record. A normalized form has **at most
+  one claimant**: a `claim` makes its person the claimant, and that person's
+  `release` ends it. A `claim` on a form another person still claims is a
+  **duplicate** and is **inert** — it never takes effect, even after the
+  standing claim is released — and `lucid validate` reports it. The CLI never
+  writes one: `claim` first appends a `release` for any standing claimant it
+  replaces.
+- **A dormant claimant is inert.** The claim stays recorded, resolution skips it
+  while its claimant is dormant, and it takes effect again on `--restore`.
+- **Holds** are pending until settled: a `hold` for `(raw_id, form)` stays
+  pending until a later `pin` for the same raw entry and normalized form. The
+  first `pin` for a `(raw_id, form)` settles it; a later one is ignored.
+- **Pins and move-refs** canonicalize their person_keys through redirects.
+  Move-refs apply in order per raw entry: each moves the raw's mention from
+  `from` onto `to`, and a reverse move-ref undoes one.
+
+**Attribution on read.** Capture keeps writing `entry_refs` exactly as it always
+has; corrections live only in the log and are **folded on read**. A raw entry's
+mentions on read are the canonical keys of its processed `people[]`, plus each
+pinned `held_people[]` entry's person, with the raw's move-refs applied in
+order, deduplicated. A person's references on read are their stored
+`entry_refs`, re-derived from that fold for every raw entry a pin or move-ref
+touches. Every read that attributes a raw entry to a person uses this one fold,
+through `internal/storage`: the `/person` mention count, entry list, insight join
+and dominance line, the `/reflect gate` dominance panel, the agent-bound
+Reflection slice, and reconcile's mention counts. The seen window
+(`first_seen_at` / `last_seen_at`) is the record's own and is not re-derived. The
+agent-bound slice checks off-limits against both the stored and the folded key
+and redacts a mention when either is off-limits — it fails closed.
+
+**Backup.** Like `people/`, the identity log sits outside the ADR-0002 backup set
+(`deploy.BackupManifest`, [`local-runtime.md`](local-runtime.md)
+§Rebuildability), unchanged here. Losing it returns everyone to active with no
+claims, holds, pins, or move-refs; the people records and processed artifacts
+stay valid on their own.
+
+#### Status, claims and move-ref
+
+All four identity verbs are curation writes on the strict tier, like `merge`
+and `rename` ([`error-states.md`](error-states.md) §"Person (write verbs)"):
+every rejection is decided before any write, every write returns its
+`identity_…` receipt, and every no-op is an ack with no receipt.
+
+**Dormant — who matters now.** `lucid person dormant <subject>` appends a
+`status: dormant` event (with the optional one-line `--reason-file` text);
+`--restore` appends `status: active`. Nothing in `people/`, `contacts/`, or
+`processed/` changes, so a dormant person keeps every mention, `entry_refs` id,
+contact event, and user-authored field, and `--restore` returns them exactly as
+they were. Dormant is **orthogonal to off-limits**: a person can be both, and
+each flag toggles on its own. Dormant changes three things:
+
+- **Resolution.** A dormant person never wins a bare name against an active one
+  (§"Resolving a bare name"). An explicit subject that matches only a dormant
+  person still resolves, labeled dormant.
+- **Lookups and candidate lists.** Dormant people rank last and carry a
+  `dormant` label. Their `lucid person` view adds `Dormant since YYYY-MM-DD.`
+  (or `Dormant since YYYY-MM-DD — <reason>`) after its first line, and a view of
+  an active person names any dormant person who shares the queried form.
+- **Default listings.** `contact due` (its rows and birthdays), the Monday
+  who's-due post, and `person reconcile` merge suggestions leave dormant people
+  out. `contact due --all` and `person reconcile --all` bring them back,
+  labeled; the Monday post has no flag.
+
+Dormant does **not** change agent slices, insights, the dominance line,
+off-limits, the link ledger, or any record's bytes.
+
+**Claims — who a bare name means.** `lucid person claim <subject> <form>` makes
+a bare `<form>` resolve to that person for every mention resolved **after** the
+claim is written; `lucid person release <subject> <form>` ends it. A claim never
+touches `aka[]` and never rewrites a past mention or an existing `entry_refs`
+id. It conflicts only with a **different active** person who holds the form —
+the slug-path holder, an exact `display_name`/`aka` holder, or the current
+claimant — and that conflict is refused (§P-10) unless `--force` is passed. A
+forced claim releases any displaced claimant first, and its receipt names
+everyone it overrode; they stay active and reachable by key or full name. A
+dormant holder, a dormant claimant, and a person who only shares the first name
+never block a claim. When someone else claims a form whose claimant is dormant,
+the dormant claimant's claim is released first and the receipt says so.
+
+**Held mentions and pins.** Capture **holds** a mention it cannot assign to one
+person (§"Resolving a bare name"): the processed artifact gets a
+`held_people[]` entry and the log gets one `hold` event, once per
+`(raw_id, form)`, and the mention counts for no one. A `claim`, `release`,
+`dormant`, or `restore` write then re-resolves the pending held mentions of each
+affected form under **capture rules that never mint**, and pins each one that
+now resolves to exactly one existing person (a `pin` whose `cause` is the verb).
+A held mention that would mint stays held, and so does the aka-only case below
+even where a lookup would resolve it. The receipt lists every pinned `raw_id`
+with its person, plus how many held mentions of those forms are still held. The
+affected forms are the claimed or released form for `claim` / `release`, and for
+`dormant` / `restore` the person's normalized display and `aka` forms, their
+first name, and the forms of pending holds that list them as a candidate. A
+curation write never mints a person, and a pinned mention moves again only
+through `move-ref`.
+
+**move-ref — one misfiled mention.** `lucid person move-ref <raw_id> --from
+<subject> --to <subject>` appends one `move_ref` event that moves that raw
+entry's mention off `--from` and onto `--to` on read. It never changes `aka[]`
+or any form. `--to` must already be a canonical person (`person create` first).
+Leaving out `--from` pins the raw's one pending held mention to `--to` (a `pin`
+with `cause: move_ref`). The undo is a reverse move-ref.
+
+**Merge keeps the log valid.** `person merge` leaves the target's status as it
+is. A dormant source gets a clearing `status: active` event with `source:
+merge`, so no status sits on a tombstone. Each claim of the source re-points to
+the target (a `release` plus a `claim`, both `source: merge`), or — when another
+active person holds the form exactly — is released and reported. Pins and
+move-refs canonicalize through the new redirect on read. A merge with no
+identity facts acks exactly as before.
+
+**Stickiness — a recorded resolution stays put.** On a `lucid structure
+<raw_id> --force` re-run, each mention is matched by normalized form to the
+raw's prior processed artifact: a prior `people[]` entry keeps its person
+(canonicalized through redirects), a prior `held_people[]` entry stays held
+with no second `hold` event, and a `pin` for that `(raw_id, form)` outranks
+both. A later claim or status write therefore never moves an already-recorded
+mention; only a `move-ref` or a `pin` does.
+
+#### Resolving a bare name
+
+One deterministic, model-free resolver in `internal/storage` answers "who does
+this name mean?" for every surface, in two modes that share every decision step.
+The terms:
+
+- **Exact holders** of a form: the live canonical records whose `display_name`
+  or an `aka` equals it case-insensitively — the `/person` matching rule. This
+  is a **discovery** read.
+- **The slug path** of a form: its derived slug, that slug's redirect, and each
+  `-2`, `-3`, … slot whose **own** record normalizes to the form (the same-name
+  suffix chain of §"`person_key` derivation"), walked until the first free slot.
+  `aka[]` is never scanned on the slug-resolution path: each slot is read from
+  its own record, so the collision oracle — a slug's own record is its witness —
+  is untouched.
+- **First name**: the shared lookup form of a person's `display_name` — its
+  normalized first whitespace-delimited component (§"Shared lookup rule").
+- **Single-word form**: a form with exactly one whitespace-delimited field.
+
+**Lookup — who the name means now.** Used by `lucid person <name>`, the
+`contact` subject, gratitude `--person` / `thank`, and memory linking. It never
+mints.
+
+1. An exact `person_key` wins; a tombstone key resolves forward.
+2. The form's active claimant wins.
+3. If exactly one exact holder is active, they win. Two or more active exact
+   holders make the name **ambiguous** (§P-2: the active holders, then the
+   dormant ones, labeled).
+4. When every exact holder is dormant: for a single-word form, the one active
+   person with that first name wins, and two or more make it ambiguous. With no
+   such person, or for a multi-word form, a single dormant exact holder resolves,
+   labeled dormant, and two or more make it ambiguous.
+5. With no exact holder and no claimant there is no match (§P-1).
+
+**Capture — where a new mention goes.** Used by `update_person` during
+Structuring.
+
+1. A `pin` for this `(raw_id, form)` wins.
+2. Otherwise the raw's prior processed entry for the form wins (stickiness).
+3. Otherwise the form's active claimant wins: the mention's `entry_refs` id is
+   appended and the seen window widens, but the form never joins `aka[]`.
+4. Otherwise let S be the active people on the slug path and X the active exact
+   holders found **only** through discovery:
+   - S and X together hold two or more people → **hold** (`exact`). This
+     includes a form two records share through `aka[]`.
+   - S holds one person and X is empty → the ordinary fold, exactly as before
+     (the form joins `aka[]`).
+   - S is empty, X holds one person, and the slug path holds a dormant person →
+     **hold** (`exact`): the discovery read can only hold a mention, never
+     assign one. A lookup of the same name still resolves to that active
+     person.
+5. When every slug-path holder is dormant (and X is empty): a single-word form
+   with exactly one active first-name match routes there (the `entry_refs` id is
+   appended and a `pin` with `cause: first_name` is recorded; no tombstone is
+   planted and `aka[]` is untouched); two or more active first-name matches
+   **hold** it (`first_name`); with none, or for any multi-word form, a fresh
+   active record is minted under **the next free collision suffix** (§"`person_key`
+   derivation").
+6. With no slug-path holder at all — even when one active person holds the form
+   only through `aka[]` — the existing mint branch runs unchanged,
+   including the nickname-map discovery pass (§"Capture-time routing"), with
+   dormant records excluded from its candidates.
+
+`person create` follows capture's slug path without the claim and first-name
+steps: an active same-name holder is the idempotent "already recorded" no-op,
+and when every holder is dormant it mints under the next free collision suffix
+(§"Deliberate creation"). `DerivePersonKey` and every existing key are
+unchanged.
+
+**A shared first name alone never holds a mention.** With "Sam" and "Sam Rivera"
+both active and no claim, a bare "Sam" still goes to "Sam" in both modes;
+`person reconcile` points out the overlap and offers `claim` / `dormant`.
+
+**Record targeting — the curation verbs.** `dormant` / `--restore`, `claim` /
+`release`, `move-ref`, `merge`, `rename`, `alias`, `set`, and `off-limits` name
+a *record*, not a meaning. Each resolves its subject key-first, then by exact
+`display_name` / `aka` match across active and dormant records. When that match
+and the lookup above disagree, or two or more records match, the verb refuses
+with §P-5 and lists the candidates (active first, dormant labeled) — a write
+never guesses. `person dormant <subject> --restore` considers only dormant
+records, so it reaches an old "Sam" even after a bare "Sam" means someone else.
+A subject that is no one's exact form but is claimed resolves to its claimant.
+`link` / `attach --to person:` stay key-only.
 
 ## Sessions and channel memory — `~/.lucid/sessions/`
 

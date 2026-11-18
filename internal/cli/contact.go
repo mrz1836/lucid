@@ -13,7 +13,8 @@ import (
 
 // Contact verb flag names. --via carries the optional closed-set channel;
 // --note the optional one-line note (--note-file its shell-safe form); --wrap
-// switches `due` to the Sunday wrap. --day comes from the shared
+// switches `due` to the Sunday wrap, and --all brings dormant people back into
+// it. --day comes from the shared
 // registerDayFlag (the bare capture form only), --json from the persistent
 // root flag.
 const (
@@ -21,6 +22,7 @@ const (
 	flagContactNote     = "note"
 	flagContactNoteFile = "note-file"
 	flagContactWrap     = "wrap"
+	flagContactAll      = "all"
 )
 
 // errContactNotRecorded maps a deterministically refused contact write to a
@@ -324,11 +326,13 @@ change it with every, pause, resume or retire.`,
 	}
 }
 
-// newContactDueCmd wires `lucid contact due [--wrap] [--json]`: the due view
-// for the current logical day — due this week, still open from before, coming
-// up next week, and the week's birthdays — or under --wrap the Sunday wrap's
-// two lists alone. Computed fresh on every call; it appends nothing.
-// Human-first by default; the documented, byte-deterministic view under --json.
+// newContactDueCmd wires `lucid contact due [--wrap] [--all] [--json]`: the due
+// view for the current logical day — due this week, still open from before,
+// coming up next week, and the week's birthdays — or under --wrap the Sunday
+// wrap's two lists alone. Dormant people are left out unless --all, which puts
+// them back with each line marked (dormant). Computed fresh on every call; it
+// appends nothing. Human-first by default; the documented, byte-deterministic
+// view under --json.
 func newContactDueCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "due",
@@ -337,7 +341,9 @@ func newContactDueCmd() *cobra.Command {
 the ones still open from before, the ones coming up next week, and the week's
 birthdays. Each line shows the cadence and the last time you caught up, never a
 count of days. Paused, retired and snoozed people stay off the lists, and
-off-limits people appear nowhere in the view.
+off-limits people appear nowhere in the view. Dormant people are left out too
+unless --all is passed, which lists them where they fall, each line ending
+(dormant).
 
 --wrap is the Sunday wrap: only "Due this week" and "Still open from before",
 computed fresh. Anyone left open rolls into next Monday's list on their own.
@@ -345,6 +351,7 @@ Under --json the view is byte-deterministic for a given Ledger and day.`,
 		Args: cobra.NoArgs,
 		Example: `  lucid contact due
   lucid contact due --json
+  lucid contact due --all
   lucid contact due --wrap --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := bootedRouter(cmd)
@@ -352,7 +359,8 @@ Under --json the view is byte-deterministic for a given Ledger and day.`,
 				return err
 			}
 			wrap, _ := cmd.Flags().GetBool(flagContactWrap)
-			view, err := r.ContactDue(clockNow(), wrap)
+			all, _ := cmd.Flags().GetBool(flagContactAll)
+			view, err := r.ContactDueWith(clockNow(), wrap, all)
 			if err != nil {
 				return emitErr(cmd, err)
 			}
@@ -364,5 +372,6 @@ Under --json the view is byte-deterministic for a given Ledger and day.`,
 		},
 	}
 	cmd.Flags().Bool(flagContactWrap, false, "The Sunday wrap: only the due-this-week and still-open lists")
+	cmd.Flags().Bool(flagContactAll, false, "Include dormant people, each line marked (dormant)")
 	return cmd
 }

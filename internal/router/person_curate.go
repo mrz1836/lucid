@@ -58,87 +58,14 @@ func rejectPerson(cause error, format string, args ...any) error {
 	return &PersonRejectedError{Reason: fmt.Sprintf(format, args...), Cause: cause}
 }
 
-// resolvePersonSubject resolves a raw subject string to one live canonical
-// person record, the way `/person` matches: an exact person_key wins (a
-// tombstone key resolves forward to its canonical), otherwise the string is
-// matched against display_name / aka[] with tombstones skipped. No live match is
-// §P-4; more than one is §P-5 — the verb never guesses which person was meant.
-func (r *Router) resolvePersonSubject(raw string) (storage.PersonRecord, error) {
-	subject := strings.TrimSpace(raw)
-	if subject == "" {
-		return storage.PersonRecord{}, rejectPerson(ErrPersonRejected, "a person name or key is required; nothing was saved.")
-	}
-
-	if rec, ok, err := r.exactKeySubject(subject); err != nil {
-		return storage.PersonRecord{}, err
-	} else if ok {
-		return rec, nil
-	}
-
-	matches, err := r.matchPeople(subject)
-	if err != nil {
-		return storage.PersonRecord{}, err
-	}
-	switch len(matches) {
-	case 0:
-		return storage.PersonRecord{}, rejectPerson(ErrPersonUnknownSubject,
-			"no one matches %q — check the name or run `lucid person <name>`; nothing was saved.", subject)
-	case 1:
-		return matches[0], nil
-	default:
-		return storage.PersonRecord{}, rejectPerson(ErrPersonAmbiguousSubject,
-			"%q matches more than one person — disambiguate with a person_key (%s); nothing was saved.",
-			subject, candidateKeys(matches))
-	}
-}
-
-// exactKeySubject resolves a subject that is an exact person_key, following a
-// tombstone forward to its canonical record. It reports ok=false (never an
-// error) when the string is not a usable key — a bad slug, an absent record, or
-// a dangling tombstone — so the caller falls through to a name match.
-func (r *Router) exactKeySubject(subject string) (storage.PersonRecord, bool, error) {
-	rec, found, err := r.store.ReadPerson(subject)
-	if err != nil || !found {
-		// A subject that is not a usable key (a bad slug, an absent or unreadable
-		// record) simply is not an exact-key hit — fall through to the name match,
-		// which re-surfaces a genuine read error while scanning the tree.
-		return storage.PersonRecord{}, false, nil //nolint:nilerr // intentional: a non-key subject falls through to matchPeople
-	}
-	canonKey, err := r.store.ResolvePersonRedirect(subject)
-	if err != nil {
-		return storage.PersonRecord{}, false, err
-	}
-	if canonKey == subject {
-		if rec.IsTombstone() {
-			return storage.PersonRecord{}, false, nil
-		}
-		return rec, true, nil
-	}
-	canon, cfound, err := r.store.ReadPerson(canonKey)
-	if err != nil {
-		return storage.PersonRecord{}, false, err
-	}
-	if !cfound {
-		return storage.PersonRecord{}, false, nil
-	}
-	return canon, true, nil
-}
-
-// candidateKeys renders the sorted person_keys of the ambiguous matches for the
-// §P-5 disambiguation copy.
-func candidateKeys(matches []storage.PersonRecord) string {
-	keys := make([]string, 0, len(matches))
-	for _, m := range matches {
-		keys = append(keys, m.PersonKey)
-	}
-	return strings.Join(keys, " / ")
-}
-
 // PersonMergeRequest is one `lucid person merge` intent: fold Source into
-// Target. Both are raw subjects resolved in the router.
+// Target. Both are raw subjects resolved in the router. Now is the instant of
+// any identity event the merge appends to keep the identity log valid (zero
+// falls back to the wall clock).
 type PersonMergeRequest struct {
 	Source string
 	Target string
+	Now    time.Time
 }
 
 // PersonMergeResult reports the merged canonical record and the inventory-only
@@ -152,12 +79,19 @@ type PersonMergeResult struct {
 // duplicate person onto a canonical one (data-model.md §"Merge & redirect"). The
 // source becomes a redirect tombstone; nothing is deleted. Merging a person into
 // themselves is rejected (§P-6). Deterministic and model-free.
+//
+// It also keeps the identity log valid (data-model.md §"Status, claims and
+// move-ref"): the target keeps its status, a dormant source is made active
+// again, and each claim of the source moves to the target — or is released
+// when another active person holds the form exactly. The ack then names the
+// moved and released claims; a merge with no identity facts acks exactly as
+// before.
 func (r *Router) PersonMerge(req PersonMergeRequest) (PersonMergeResult, error) {
-	source, err := r.resolvePersonSubject(req.Source)
+	source, err := r.resolvePersonRecord(req.Source, false)
 	if err != nil {
 		return PersonMergeResult{}, err
 	}
-	target, err := r.resolvePersonSubject(req.Target)
+	target, err := r.resolvePersonRecord(req.Target, false)
 	if err != nil {
 		return PersonMergeResult{}, err
 	}
@@ -169,14 +103,36 @@ func (r *Router) PersonMerge(req PersonMergeRequest) (PersonMergeResult, error) 
 	if err != nil {
 		return PersonMergeResult{}, fmt.Errorf("person: merge: %w", err)
 	}
-	return PersonMergeResult{Record: merged, Ack: personMergeAck(source, merged)}, nil
+	moved, err := r.store.RepointIdentityOnMerge(source.PersonKey, merged.PersonKey, whenOr(req.Now))
+	if err != nil {
+		return PersonMergeResult{}, fmt.Errorf("person: merge: keep the identity log valid: %w", err)
+	}
+	return PersonMergeResult{Record: merged, Ack: personMergeAck(source, merged, moved)}, nil
 }
 
 // personMergeAck builds the inventory ack for a merge: what folded into what, and
-// the resulting mention count — no evaluative language (engine §0).
-func personMergeAck(source, merged storage.PersonRecord) string {
-	return fmt.Sprintf("Merged %q into %q — %d entr%s now resolve to one record.",
-		source.DisplayName, merged.DisplayName, len(merged.EntryRefs), plural(len(merged.EntryRefs)))
+// the resulting mention count — no evaluative language (engine §0) — then one
+// line each for the claims the merge moved to the target and the ones it
+// released, when there are any.
+func personMergeAck(source, merged storage.PersonRecord, moved storage.MergeIdentity) string {
+	lines := []string{fmt.Sprintf("Merged %q into %q — %d entr%s now resolve to one record.",
+		source.DisplayName, merged.DisplayName, len(merged.EntryRefs), plural(len(merged.EntryRefs)))}
+	if len(moved.Moved) > 0 {
+		lines = append(lines, fmt.Sprintf("Claims moved: %s.", quoteForms(moved.Moved)))
+	}
+	if len(moved.Released) > 0 {
+		lines = append(lines, fmt.Sprintf("Claims released: %s (another active person holds it).", quoteForms(moved.Released)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// quoteForms renders forms quoted and joined by ", ".
+func quoteForms(forms []string) string {
+	parts := make([]string, len(forms))
+	for i, f := range forms {
+		parts[i] = fmt.Sprintf("%q", f)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // PersonAliasRequest is one `lucid person alias` intent: record Form as another
@@ -201,7 +157,7 @@ func (r *Router) PersonAlias(req PersonAliasRequest) (PersonAliasResult, error) 
 	if form == "" {
 		return PersonAliasResult{}, rejectPerson(ErrPersonRejected, "a form to record is required; nothing was saved.")
 	}
-	subject, err := r.resolvePersonSubject(req.Subject)
+	subject, err := r.resolvePersonRecord(req.Subject, false)
 	if err != nil {
 		return PersonAliasResult{}, err
 	}
@@ -238,7 +194,7 @@ func (r *Router) PersonRename(req PersonRenameRequest) (PersonRenameResult, erro
 	if newName == "" {
 		return PersonRenameResult{}, rejectPerson(ErrPersonRejected, "a new name is required; nothing was saved.")
 	}
-	subject, err := r.resolvePersonSubject(req.Subject)
+	subject, err := r.resolvePersonRecord(req.Subject, false)
 	if err != nil {
 		return PersonRenameResult{}, err
 	}
@@ -283,7 +239,7 @@ func (r *Router) PersonSet(req PersonSetRequest) (PersonSetResult, error) {
 		return PersonSetResult{}, rejectPerson(ErrPersonRejected,
 			"could not read the date of birth %q (want YYYY-MM-DD); nothing was saved.", *req.Dob)
 	}
-	subject, err := r.resolvePersonSubject(req.Subject)
+	subject, err := r.resolvePersonRecord(req.Subject, false)
 	if err != nil {
 		return PersonSetResult{}, err
 	}
@@ -420,7 +376,7 @@ type PersonOffLimitsResult struct {
 // kept and only its inference visibility changes. Idempotent — marking someone
 // already off-limits (or restoring someone who is not) is a no-op ack.
 func (r *Router) PersonOffLimits(req PersonOffLimitsRequest) (PersonOffLimitsResult, error) {
-	subject, err := r.resolvePersonSubject(req.Subject)
+	subject, err := r.resolvePersonRecord(req.Subject, false)
 	if err != nil {
 		return PersonOffLimitsResult{}, err
 	}

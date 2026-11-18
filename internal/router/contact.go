@@ -275,15 +275,23 @@ func (r *Router) ContactVoid(req ContactVoidRequest) (ContactWriteResult, error)
 	return contactResult(stored, rec, after, today), nil
 }
 
-// ContactDue builds the due view for the logical day of now (ADR-0014 §6): the
-// three groups over the ISO Monday–Sunday week, plus the week's birthdays, or
-// under wrap the Sunday wrap's two lists alone (§9). It is computed fresh on
+// ContactDue is [Router.ContactDueWith] with dormant people left out — the
+// read the weekly node's Monday post shares, which never shows them.
+func (r *Router) ContactDue(now time.Time, wrap bool) (contact.DueView, error) {
+	return r.ContactDueWith(now, wrap, false)
+}
+
+// ContactDueWith builds the due view for the logical day of now (ADR-0014 §6):
+// the three groups over the ISO Monday–Sunday week, plus the week's birthdays,
+// or under wrap the Sunday wrap's two lists alone (§9). It is computed fresh on
 // every call — there is no stored snapshot — and it is the one read the CLI's
 // `contact due` and the weekly node share. Events fold through merge
 // redirects, only live canonical records are grouped, and off-limits people
-// appear nowhere in it. It never calls a model and appends nothing; the
-// idempotent contacts/ scaffold may run.
-func (r *Router) ContactDue(now time.Time, wrap bool) (contact.DueView, error) {
+// appear nowhere in it. Dormant people (the identity log) are left out of the
+// groups and the birthdays unless all, which brings them back with each row
+// marked dormant. It never calls a model and appends nothing; the idempotent
+// contacts/ scaffold may run.
+func (r *Router) ContactDueWith(now time.Time, wrap, all bool) (contact.DueView, error) {
 	if err := r.prepareContacts(); err != nil {
 		return contact.DueView{}, err
 	}
@@ -291,11 +299,32 @@ func (r *Router) ContactDue(now time.Time, wrap bool) (contact.DueView, error) {
 	if err != nil {
 		return contact.DueView{}, err
 	}
+	if err = r.markDormant(idx); err != nil {
+		return contact.DueView{}, err
+	}
 	events, err := r.readContactEvents(idx)
 	if err != nil {
 		return contact.DueView{}, err
 	}
-	return contact.Due(contact.Fold(events), idx.info, contact.LogicalDay(whenOr(now)), wrap), nil
+	return contact.DueWith(contact.Fold(events), idx.info, contact.LogicalDay(whenOr(now)),
+		contact.DueOptions{Wrap: wrap, All: all}), nil
+}
+
+// markDormant flags every live canonical person whose folded identity status
+// is dormant. A Ledger with no identity log reads as everyone active, so it
+// flags no one and reads nothing beyond the missing file.
+func (r *Router) markDormant(idx contactPeople) error {
+	st, err := r.store.IdentityState()
+	if err != nil {
+		return fmt.Errorf("could not read the identity log: %w", err)
+	}
+	for key, info := range idx.info {
+		if st.IsDormant(key) {
+			info.Dormant = true
+			idx.info[key] = info
+		}
+	}
+	return nil
 }
 
 // PersonContact is the check-in summary a person view carries (ADR-0014 §6):
@@ -344,16 +373,17 @@ func contactResult(stored contact.Event, rec storage.PersonRecord, after contact
 	}
 }
 
-// contactSubject resolves a contact verb's subject through the shared person
-// resolver (aliases, merge redirects, §P-4 / §P-5), so the verbs never grow
-// their own lookup. An unknown subject is re-worded to carry the remedy —
-// logging contact never creates a person (Ct-1); an ambiguous one keeps the
-// resolver's copy naming the candidate keys (Ct-2). Either way the refusal is
-// a [ContactRejectedError] that still matches the person sentinels.
+// contactSubject resolves a contact verb's subject to who it means now
+// ([Router.resolvePersonNow]: an exact key, the form's active claimant, the one
+// active exact holder — a dormant person never beats an active one), so the
+// verbs never grow their own lookup. An unknown subject is re-worded to carry
+// the remedy — logging contact never creates a person (Ct-1); an ambiguous one
+// keeps the resolver's copy naming the candidate keys (Ct-2). Either way the
+// refusal is a [ContactRejectedError] that still matches the person sentinels.
 func (r *Router) contactSubject(raw string) (storage.PersonRecord, error) {
-	rec, err := r.resolvePersonSubject(raw)
+	subj, err := r.resolvePersonNow(raw)
 	if err == nil {
-		return rec, nil
+		return subj.Record, nil
 	}
 	var refused *PersonRejectedError
 	if !errors.As(err, &refused) {

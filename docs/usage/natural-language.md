@@ -46,7 +46,9 @@ like a capture ([Anchors, by kind](#anchors-by-kind)). Contact check-ins split
 the same way: saying you were in touch, or skipping a week, runs at once, and a
 cadence change is echoed ([Contact check-ins](#contact-check-ins)). Measurement
 captures run at once like any `obs`, and voiding a reading is echoed
-([Measurements](#measurements)).
+([Measurements](#measurements)). Settling who a name means — making someone
+dormant, claiming a name, or moving a misfiled mention — is always echoed
+([People — who a name means](#people--who-a-name-means)).
 
 ### Reads — run immediately
 
@@ -215,6 +217,33 @@ no count of days, no question about why someone was not reached, never "overdue"
 A name that matches no one is refused with a pointer to `lucid person create`;
 a name that matches several people comes back with the candidates, and the
 harness asks which one.
+
+### People — who a name means
+
+Sam knows two people called Jordan: an old contact from one passing mention,
+recorded years ago as "Jordan", and "Jordan Lee", who matters now. Until Sam says
+otherwise, a bare "Jordan" goes to the old record. Four `lucid person` verbs
+settle that, and each one changes which person a name or a mention belongs to — so the harness **always echoes** the assembled
+command and waits for a *"yes"*:
+
+- *"I don't care about Jordan anymore."*
+  → `lucid person dormant Jordan` — the old record is kept, and a bare "Jordan"
+  goes to the one active Jordan from now on.
+- *"When I say Jordan I mean Jordan Lee."*
+  → `lucid person claim "Jordan Lee" Jordan`
+- *"The old Jordan is back in my life."*
+  → `lucid person dormant Jordan --restore`
+- *"That lunch entry was really Jordan Lee."*
+  → `lucid person move-ref <raw_id> --from Jordan --to "Jordan Lee"`, naming the
+  entry's raw id
+
+None of these runs on a guess. If the binary answers with candidates — two
+records hold the name, or the name now means someone else — the harness lists
+them and asks which person Sam means, then re-runs with that `person_key`. A
+claim that another active person blocks comes back with its remedy; the harness
+relays it and adds `--force` only when Sam says to override. Earlier entries
+never move on their own: only `move-ref` moves one, and `lucid person reconcile`
+lists any mention Lucid is holding until Sam decides.
 
 ### Measurements
 

@@ -26,6 +26,9 @@ const (
 	NobodyStillOpen = "Nobody's still open this week."
 	// NotLoggedYet stands in for the last contact when none is logged.
 	NotLoggedYet = "not logged yet"
+	// DormantLabel ends a dormant person's line, which only `contact due --all`
+	// shows.
+	DormantLabel = " (dormant)"
 )
 
 // Date layouts for people: "Sep 28", "Dec 30, 2025", "Wed Nov 4".
@@ -38,7 +41,8 @@ const (
 // RenderDueLine renders one person line (ADR-0014 §6), e.g.
 // "Sam Rivera (every 4 weeks), last caught up Sep 28" or
 // "Alex Kim (every 10 days), not logged yet". The year is added when the last
-// contact falls in a year other than today's. It never states lateness.
+// contact falls in a year other than today's. A dormant person's line ends
+// [DormantLabel]. It never states lateness.
 func RenderDueLine(row DueRow, today string) string {
 	human := row.Human
 	if human == "" {
@@ -48,12 +52,21 @@ func RenderDueLine(row DueRow, today string) string {
 	if row.LastContact != "" {
 		last = "last caught up " + shortDate(row.LastContact, today)
 	}
-	return row.DisplayName + " (" + human + "), " + last
+	return row.DisplayName + " (" + human + "), " + last + dormantSuffix(row.Dormant)
 }
 
-// RenderBirthdayLine renders a birthday for the read view: "Jordan Lee — Wed Nov 4".
+// RenderBirthdayLine renders a birthday for the read view: "Jordan Lee — Wed Nov 4",
+// ending [DormantLabel] for a dormant person.
 func RenderBirthdayLine(b BirthdayRow) string {
-	return b.DisplayName + " — " + birthdayDate(b.Date)
+	return b.DisplayName + " — " + birthdayDate(b.Date) + dormantSuffix(b.Dormant)
+}
+
+// dormantSuffix is [DormantLabel] for a dormant person's line, else "".
+func dormantSuffix(dormant bool) string {
+	if dormant {
+		return DormantLabel
+	}
+	return ""
 }
 
 // RenderDueText renders the human due view: the week heading, then the

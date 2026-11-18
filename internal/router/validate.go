@@ -322,6 +322,12 @@ func (r *Router) buildProposeInput(current storage.ProcessedArtifact, bootstrap 
 		return reflection.ProposeInput{}, fmt.Errorf("validate: read off-limits registry: %w", err)
 	}
 	deny := toSet(offLimits)
+	// The slice attributes each mention on read (pins and move-refs folded in);
+	// an unreadable fold fails the turn like an unreadable registry does.
+	fold, err := r.store.MentionFold()
+	if err != nil {
+		return reflection.ProposeInput{}, fmt.Errorf("validate: fold mentions: %w", err)
+	}
 
 	window, err := r.recentWindow(current.ID)
 	if err != nil {
@@ -334,11 +340,11 @@ func (r *Router) buildProposeInput(current storage.ProcessedArtifact, bootstrap 
 	for _, art := range window {
 		rejected = append(rejected, storage.RejectedShapeTags(art)...)
 		unanswered = append(unanswered, storage.UnansweredShapeTags(art)...)
-		views = append(views, toView(art, deny))
+		views = append(views, toView(art, deny, fold))
 	}
 
 	return reflection.ProposeInput{
-		Current:             toView(current, deny),
+		Current:             toView(current, deny, fold),
 		RecentWindow:        views,
 		RejectedShapeTags:   dedupe(rejected),
 		UnansweredShapeTags: dedupe(unanswered),
@@ -379,11 +385,16 @@ func (r *Router) recentWindow(currentID string) ([]storage.ProcessedArtifact, er
 	return out, nil
 }
 
-// toView renders a processed artifact as Reflection's slice view, dropping any
-// person whose key is in the off-limits set. The on-disk artifact is never
-// touched — the redaction is a copy-time transform on the agent-bound slice
-// only (agent-contracts.md cross-cutting; acceptance-criteria 5.12).
-func toView(art storage.ProcessedArtifact, offLimits map[string]bool) reflection.ProcessedView {
+// toView renders a processed artifact as Reflection's slice view. Its people
+// are the artifact's mentions as reads attribute them (fold: people[] plus each
+// pinned held mention, move-refs applied; a held mention no pin settles never
+// enters the slice), and a mention is dropped when its stored, canonical, or
+// folded key is in the off-limits set — a correction can move a mention off
+// or onto an off-limits person, so either side redacts it (fail closed). The
+// on-disk artifact is never touched — the redaction is a copy-time transform on
+// the agent-bound slice only (agent-contracts.md cross-cutting;
+// acceptance-criteria 5.12; data-model.md §"Attribution on read").
+func toView(art storage.ProcessedArtifact, offLimits map[string]bool, fold storage.MentionFold) reflection.ProcessedView {
 	view := reflection.ProcessedView{ID: art.ID, Notes: notesString(art.Notes)}
 	for _, e := range art.Emotions {
 		view.Emotions = append(view.Emotions, e.Name)
@@ -391,11 +402,11 @@ func toView(art storage.ProcessedArtifact, offLimits map[string]bool) reflection
 	for _, th := range art.Themes {
 		view.Themes = append(view.Themes, th.Name)
 	}
-	for _, p := range art.People {
-		if offLimits[p.PersonKey] {
+	for _, m := range fold.Mentions(art) {
+		if offLimits[m.StoredKey] || offLimits[fold.Canon(m.StoredKey)] || offLimits[m.PersonKey] {
 			continue // redacted from the agent-bound copy, fail closed
 		}
-		view.People = append(view.People, p.DisplayName)
+		view.People = append(view.People, m.DisplayName)
 	}
 	return view
 }

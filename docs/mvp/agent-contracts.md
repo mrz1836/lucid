@@ -261,6 +261,19 @@ mention immediately after Structuring returns and **before**
 `null` for `person_key`. See §"How contracts compose" below for the
 exact router order.
 
+A mention the People routine cannot assign to exactly one person is
+**held**, not assigned first-come ([`error-states.md`](error-states.md)
+§P-11): two or more active people hold its form exactly, only dormant
+people hold it and two or more active people have it as their first
+name, or its only active holder is reachable only through `aka[]` while
+the slug path holds only dormant people. A held mention goes into the
+artifact's `held_people[]` array — `{display_name, reason, candidates}`,
+never into `people[]` — and `update_person` appends one `hold` event to
+`identity/identity.jsonl`; it is counted for no one until a curation write
+pins it ([`data-model.md`](data-model.md) §"Identity log"). Structuring
+still never reads `people/`, and it never reads the identity log either:
+both are read only by `update_person`, inside the storage adapter.
+
 A `people[]` entry may additionally carry an optional `aka[]` — other
 written forms of the **same** person — but **only** when the entry states
 the alias explicitly ("Sam, aka Sammy", "Sam (nickname Sammy)").
@@ -331,8 +344,12 @@ silence is not rejection. Both arrays feed the suppression window in
     `display_name`, `person_key` (always `null` in Structuring's
     output; never `null` on disk after `storage.update_person` runs),
     and `first_mention`.
-  * Either at least one of (`emotions`, `themes`, `people`) is
-    non-empty, **or** `notes` is non-empty.
+  * On disk, an optional `held_people[]` (written by the router, never
+    by Structuring) holds `{display_name, reason, candidates}` entries:
+    a non-empty `display_name`, a `reason` of `exact` or `first_name`,
+    and `candidates` sorted by key.
+  * Either at least one of (`emotions`, `themes`, `people`,
+    `held_people`) is non-empty, **or** `notes` is non-empty.
   * No diagnostic terms in `notes` (regex check against the phrase
     blocklist in [`product-principles.md`](product-principles.md) §6).
 
@@ -946,9 +963,19 @@ before implementation begins.
 * **Inputs (now).** `{display_name, person_key | null,
   raw_entry_id, occurred_at}`. If `person_key` is null, a deterministic
   slug is derived (low-signal, see
-  [`data-model.md`](data-model.md) §"Naming conventions").
+  [`data-model.md`](data-model.md) §"Naming conventions"). Inside the
+  storage adapter, `update_person` also reads the identity log (status,
+  claims, pins — [`data-model.md`](data-model.md) §"Identity log") and
+  the raw's prior processed artifact, so a re-run keeps each recorded
+  resolution ([`data-model.md`](data-model.md) §"Resolving a bare
+  name"). Structuring still never reads
+  `people/`.
 * **Outputs (now).** Updated `~/.lucid/people/<key>.json` via the
-  storage adapter.
+  storage adapter — or, for a mention it cannot assign to one person, a
+  `held_people[]` entry on the payload plus one `hold` event in
+  `identity/identity.jsonl` ([`error-states.md`](error-states.md) §P-11). A mention routed by an active claim
+  or by first name appends its `entry_refs` id but never joins `aka[]`;
+  a first-name route also records a `pin`.
 * **Forbidden (now).** No relationship inference, no profile prompts,
   no LLM calls.
 * **User-driven curation (now).** The `person merge | alias | rename |
@@ -956,6 +983,9 @@ before implementation begins.
   reconcile the people records — collapse a nickname/full-name split,
   record another written form, fix a display name, add the
   user-authored `dob`/`relationship`/`notes`, or toggle P-3 redaction.
+  The `person dormant | claim | release | move-ref` verbs record who
+  matters now, who a bare name means, and where one misfiled mention
+  belongs, in the append-only identity log — never in `people/`.
   Every one is **deterministic, user-invoked, and model-free**, decided
   from the store before any write, and bound by the same forbidden list
   above: the durable fields are recorded *because the user typed them*,
@@ -1071,7 +1101,9 @@ that knows the order. Spelled out, the per-session sequence is:
   │                                            (people[].person_key are all null)
   ├── for each people[]:                       deterministic People routine;
   │     storage.update_person(...)             resolves or creates slug,
-  │                                            back-fills person_key on payload
+  │                                            back-fills person_key on payload —
+  │                                            or holds the mention: moves it to
+  │                                            held_people[] + one `hold` event
   ├── storage.write_processed(processed)     → processed_id
   │                                            (no person_key is null on disk)
   ├── Safety.evaluate(structuring_rendered)  → ack message (pass/rewrite/block)

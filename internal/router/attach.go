@@ -279,7 +279,8 @@ func attachBody(relPath, caption string) string {
 // attachAck builds the user-facing acknowledgement, emitted only after the
 // writes land (provenance over magic): it names the stored path, a short
 // sha256, the logical day, and the linked raw id — and, when the capture named
-// subjects with --to, what it was linked to.
+// subjects with --to, what it was linked to (a dormant person marked
+// " (dormant)", as link marks them).
 func attachAck(relPath, day, sha, rawID string, linked []LinkApplied) string {
 	ack := fmt.Sprintf("Attached %s for %s (sha256 %s) — logged as `%s`.",
 		relPath, day, shortSHA(sha), rawID)
@@ -288,7 +289,7 @@ func attachAck(relPath, day, sha, rawID string, linked []LinkApplied) string {
 	}
 	refs := make([]string, len(linked))
 	for i, a := range linked {
-		refs[i] = a.Kind + ":" + a.Key
+		refs[i] = a.ackRef()
 	}
 	return ack + " Linked to " + strings.Join(refs, ", ") + "."
 }

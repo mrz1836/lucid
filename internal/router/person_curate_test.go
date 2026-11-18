@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/mrz1836/lucid/internal/validate"
 )
@@ -247,7 +248,7 @@ func TestPersonCreate_ReconcileNoDuplicates(t *testing.T) {
 	_, err = a.UpdatePerson(newMention("Alex", "raw_2026_05_11_09_30", personSeedTime().Add(96*time.Hour)))
 	require.NoError(t, err)
 
-	rec, err := r.PersonReconcile()
+	rec, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, rec.Candidates, "one record — reconcile has nothing to flag")
 	assert.Equal(t, reconcileNoCandidates, rec.Text)
@@ -397,6 +398,18 @@ func (s personLedgerSource) ReadLinkEventErr(id string) error    { return s.a.Re
 func (s personLedgerSource) ListSecretRefIDs() ([]string, error) { return s.a.ListSecretRefIDs() }
 func (s personLedgerSource) ReadSecretRefErr(id string) error    { return s.a.ReadSecretRefErr(id) }
 func (s personLedgerSource) LoadConfigErr() error                { _, err := s.a.LoadConfig(); return err }
+
+func (s personLedgerSource) ListIdentityEventIDs() ([]string, error) {
+	return s.a.ListIdentityEventIDs()
+}
+
+func (s personLedgerSource) ReadIdentityEventErr(id string) error {
+	return s.a.ReadIdentityEventErr(id)
+}
+
+func (s personLedgerSource) IdentityEvents() ([]identity.Event, error) {
+	return s.a.ReadIdentityLog()
+}
 
 func (s personLedgerSource) ReadAnchorsErr() (engine.AnchorLog, error) {
 	return s.a.ReadAnchors()

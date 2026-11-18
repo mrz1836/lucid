@@ -1,12 +1,13 @@
 package router
 
 import (
-	"cmp"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -18,11 +19,13 @@ const (
 )
 
 // PersonCandidate is one row of the P-2 disambiguation list: the record's key,
-// its display name, and when it was first seen.
+// its display name, when it was first seen, and whether they are dormant
+// (ranked last and labeled).
 type PersonCandidate struct {
 	PersonKey   string
 	DisplayName string
 	FirstSeenAt time.Time
+	Dormant     bool
 }
 
 // PersonResult reports what /person resolved. Matched is false for the empty
@@ -31,7 +34,10 @@ type PersonCandidate struct {
 // check-in summary (ADR-0014 §6), nil when they have no contact events — it is
 // set in the off-limits view too, since it is the user's own record. Text is
 // the full rendered, byte-stable output the user sees — the same input always
-// renders the same bytes (S-22).
+// renders the same bytes (S-22). Dormant marks a matched person who is dormant
+// (their view carries the "Dormant since" line), and DormantAlso names the
+// dormant people who also hold the queried form when the name resolved to an
+// active person — both empty on a Ledger with no dormant people.
 type PersonResult struct {
 	Query           string
 	Matched         bool
@@ -39,6 +45,8 @@ type PersonResult struct {
 	Candidates      []PersonCandidate
 	OffLimits       bool
 	PersonKey       string
+	Dormant         bool
+	DormantAlso     []PersonRef
 	Contact         *PersonContact
 	Text            string
 }
@@ -51,87 +59,50 @@ type PersonRequest struct {
 // Person executes /person <name-or-key>: a deterministic, no-LLM join over the
 // people record, its mention counts, the accepted insights that cite entries
 // mentioning them, and its dominance share (agent-contracts.md §"How contracts
-// compose"; scope.md §4). It never calls a model and never writes. Resolution is
-// key-first: an exact person_key wins (a tombstone key resolves forward to its
-// canonical), mirroring resolvePersonSubject so the read and write paths accept
-// the same identifiers; otherwise the query is matched against display_name /
-// aka[]. No match returns the empty state (§P-1); several name matches list the
-// candidates (§P-2); a match named in the off-limits registry renders the raw
-// record only, behind the standing header, with nothing derived (§P-3). The
-// output is byte-stable across repeated runs on the same store (S-22).
+// compose"; scope.md §4). It never calls a model and never writes. The query
+// resolves to who it means now ([Router.resolvePersonNow]): an exact person_key
+// wins (a tombstone key resolves forward to its canonical), then the form's
+// active claimant, then the one active display_name / aka[] holder — a dormant
+// person never beats an active one — then, when every holder is dormant, the
+// first-name rule or the lone dormant holder, labeled. No match returns the
+// empty state (§P-1); an ambiguous name lists the candidates, active first and
+// dormant ones last and labeled (§P-2); a match named in the off-limits
+// registry renders the raw record only, behind the standing header, with
+// nothing derived (§P-3). The output is byte-stable across repeated runs on the
+// same store (S-22).
 func (r *Router) Person(req PersonRequest) (PersonResult, error) {
 	query := strings.TrimSpace(req.Name)
-
-	// Key-first: an exact person_key wins (a tombstone resolves forward to its
-	// canonical), mirroring resolvePersonSubject so read and write accept the same
-	// identifiers. A non-key query falls through to display_name/aka matching.
-	if rec, ok, err := r.exactKeySubject(query); err != nil {
-		return PersonResult{}, err
-	} else if ok {
-		return r.renderPerson(query, rec)
-	}
-
-	matches, err := r.matchPeople(query)
-	if err != nil {
-		return PersonResult{}, err
-	}
-
-	switch len(matches) {
-	case 0:
+	if query == "" {
 		return PersonResult{Query: query, Text: personNoMatch}, nil
-	case 1:
-		return r.renderPerson(query, matches[0])
-	default:
-		return r.renderCandidates(query, matches), nil
 	}
-}
-
-// matchPeople returns every canonical people record whose display_name or an
-// aka variant equals the query (case-insensitive), sorted by person_key so the
-// candidate order — and any output built from it — is deterministic.
-//
-// Redirect tombstones are skipped: a merge unions the source's forms into the
-// canonical's aka[], so a merged-away form still matches the canonical and
-// yields exactly one match rather than a spurious §P-2. Resolution never scans
-// a tombstone (data-model.md §"Merge & redirect").
-func (r *Router) matchPeople(query string) ([]storage.PersonRecord, error) {
-	keys, err := r.store.ListPeopleKeys()
-	if err != nil {
-		return nil, fmt.Errorf("person: list people: %w", err)
+	subj, err := r.resolvePersonNow(query)
+	switch {
+	case err == nil:
+		return r.renderPerson(query, subj)
+	case errors.Is(err, ErrPersonAmbiguousSubject):
+		return renderCandidates(query, subj.Candidates), nil
+	case errors.Is(err, ErrPersonUnknownSubject):
+		return PersonResult{Query: query, Text: personNoMatch}, nil
 	}
-	var matches []storage.PersonRecord
-	for _, key := range keys {
-		rec, found, err := r.store.ReadPerson(key)
-		if err != nil {
-			return nil, fmt.Errorf("person: read %q: %w", key, err)
-		}
-		if found && !rec.IsTombstone() && recordMatchesName(rec, query) {
-			matches = append(matches, rec)
-		}
-	}
-	slices.SortStableFunc(matches, func(a, b storage.PersonRecord) int { return cmp.Compare(a.PersonKey, b.PersonKey) })
-	return matches, nil
-}
-
-// recordMatchesName reports whether the queried name equals the record's
-// display_name or any of its aka variants, case-insensitively.
-func recordMatchesName(rec storage.PersonRecord, query string) bool {
-	if strings.EqualFold(strings.TrimSpace(rec.DisplayName), query) {
-		return true
-	}
-	return slices.ContainsFunc(rec.Aka, func(aka string) bool {
-		return strings.EqualFold(strings.TrimSpace(aka), query)
-	})
+	return PersonResult{}, err
 }
 
 // renderCandidates builds the P-2 disambiguation result: the candidates listed
-// by display name and first-seen date, nothing else rendered.
-func (r *Router) renderCandidates(query string, matches []storage.PersonRecord) PersonResult {
+// by display name and first-seen date — active people first, then dormant
+// ones, each labeled — nothing else rendered.
+func renderCandidates(query string, matches []PersonMatch) PersonResult {
 	cands := make([]PersonCandidate, 0, len(matches))
 	names := make([]string, 0, len(matches))
-	for _, rec := range matches {
-		cands = append(cands, PersonCandidate{PersonKey: rec.PersonKey, DisplayName: rec.DisplayName, FirstSeenAt: rec.FirstSeenAt})
-		names = append(names, fmt.Sprintf("%s (first seen %s)", rec.DisplayName, rec.FirstSeenAt.Format(personDateLayout)))
+	for _, m := range matches {
+		rec := m.Record
+		cands = append(cands, PersonCandidate{
+			PersonKey: rec.PersonKey, DisplayName: rec.DisplayName, FirstSeenAt: rec.FirstSeenAt, Dormant: m.Dormant,
+		})
+		label := ""
+		if m.Dormant {
+			label = ", dormant"
+		}
+		names = append(names, fmt.Sprintf("%s (first seen %s%s)", rec.DisplayName, rec.FirstSeenAt.Format(personDateLayout), label))
 	}
 	text := "That matches more than one person — which did you mean: " + strings.Join(names, "; ") + "?"
 	return PersonResult{Query: query, MultipleMatches: true, Candidates: cands, Text: text}
@@ -143,8 +114,20 @@ func (r *Router) renderCandidates(query string, matches []storage.PersonRecord) 
 // accepted insights citing entries that mention them, and a dominance line only
 // when their share of entries exceeds person_dominance_threshold. Both views
 // add the check-in line after the mention counts when the person has contact
-// events (ADR-0014 §6) — it is the user's own record, not an inference.
-func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonResult, error) {
+// events (ADR-0014 §6) — it is the user's own record, not an inference — and
+// the identity lines right after their first line: "Dormant since …" for a
+// dormant person, or the line naming the dormant people who also hold the
+// queried form. Neither line renders on a Ledger with no dormant people.
+func (r *Router) renderPerson(query string, subj PersonSubject) (PersonResult, error) {
+	rec := subj.Record
+	identityLines := personIdentityLines(query, subj)
+	also := make([]PersonRef, 0, len(subj.DormantAlso))
+	for _, m := range subj.DormantAlso {
+		also = append(also, PersonRef{PersonKey: m.Record.PersonKey, DisplayName: m.Record.DisplayName})
+	}
+	if len(also) == 0 {
+		also = nil
+	}
 	offLimits, err := r.store.ReadOffLimitsPersonKeys()
 	if err != nil {
 		return PersonResult{}, fmt.Errorf("person: read off-limits: %w", err)
@@ -153,14 +136,21 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 	if err != nil {
 		return PersonResult{}, err
 	}
+	// The person's references on read: their entry_refs with every pin and
+	// move-ref folded in (data-model.md §"Attribution on read").
+	refs, err := r.store.FoldedEntryRefs(rec)
+	if err != nil {
+		return PersonResult{}, fmt.Errorf("person: fold entry refs for %q: %w", rec.PersonKey, err)
+	}
 	if toSet(offLimits)[rec.PersonKey] {
 		return PersonResult{
-			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey, Contact: checkIns,
-			Text: renderOffLimits(rec, checkIns),
+			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey,
+			Dormant: subj.Dormant, DormantAlso: also, Contact: checkIns,
+			Text: renderOffLimits(rec, refs, checkIns, identityLines),
 		}, nil
 	}
 
-	insightIDs, err := r.insightsCiting(rec)
+	insightIDs, err := r.insightsCiting(refs)
 	if err != nil {
 		return PersonResult{}, err
 	}
@@ -171,7 +161,8 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + "\n")
-	b.WriteString(mentionSummary(rec) + "\n")
+	writeLines(&b, identityLines)
+	b.WriteString(mentionSummary(rec, refs) + "\n")
 	writeCheckInLine(&b, checkIns)
 	if len(insightIDs) > 0 {
 		b.WriteString("Referenced by accepted insights: " + strings.Join(insightIDs, ", ") + "\n")
@@ -189,9 +180,60 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 		b.WriteString(linked + "\n")
 	}
 	return PersonResult{
-		Query: query, Matched: true, PersonKey: rec.PersonKey, Contact: checkIns,
+		Query: query, Matched: true, PersonKey: rec.PersonKey,
+		Dormant: subj.Dormant, DormantAlso: also, Contact: checkIns,
 		Text: strings.TrimRight(b.String(), "\n"),
 	}, nil
+}
+
+// personIdentityLines returns the identity lines a person view adds right
+// after its first line (usage/commands.md §person): "Dormant since
+// YYYY-MM-DD." — or "Dormant since YYYY-MM-DD — <reason>" — for a dormant
+// person, and, when the query resolved to an active person, one line naming
+// every dormant person who also holds the queried form. Both are empty for
+// everyone on a Ledger with no dormant people, so such a view renders exactly
+// as before (S-22).
+func personIdentityLines(query string, subj PersonSubject) []string {
+	var lines []string
+	if subj.Dormant {
+		lines = append(lines, dormantSinceLine(subj.Status))
+	}
+	if len(subj.DormantAlso) > 0 {
+		lines = append(lines, dormantAlsoLine(query, subj.DormantAlso))
+	}
+	return lines
+}
+
+// dormantSinceLine renders a dormant person's status line from their folded
+// status event: the day it was recorded, and the one-line reason when one was
+// given.
+func dormantSinceLine(fact identity.StatusFact) string {
+	if reason := strings.TrimSpace(fact.Reason); reason != "" {
+		return "Dormant since " + fact.Date + " — " + reason
+	}
+	return "Dormant since " + fact.Date + "."
+}
+
+// dormantAlsoLine names the dormant people who also hold the queried form:
+// `"Sam" also names a dormant person: "Sam" (person_s-oak).`, or with several,
+// `… also names dormant people: "Sam" (person_s-oak); "Sam" (person_s-oak-2).`
+func dormantAlsoLine(query string, also []PersonMatch) string {
+	names := make([]string, 0, len(also))
+	for _, m := range also {
+		names = append(names, fmt.Sprintf("%q (%s)", m.Record.DisplayName, m.Record.PersonKey))
+	}
+	noun := "a dormant person"
+	if len(also) > 1 {
+		noun = "dormant people"
+	}
+	return fmt.Sprintf("%q also names %s: %s.", query, noun, strings.Join(names, "; "))
+}
+
+// writeLines writes each line followed by a newline.
+func writeLines(b *strings.Builder, lines []string) {
+	for _, l := range lines {
+		b.WriteString(l + "\n")
+	}
 }
 
 // writeCheckInLine adds the person's check-in line to a view, or nothing when
@@ -226,26 +268,29 @@ func (r *Router) personLinkedMediaLine(rec storage.PersonRecord) (string, error)
 }
 
 // renderOffLimits builds the §P-3 raw-record-only view: the standing header,
-// the mention summary, the check-in line when there are contact events (the
-// user's own record), and the raw entry ids — mentions and dates, nothing
-// derived (no insights, no dominance).
-func renderOffLimits(rec storage.PersonRecord, checkIns *PersonContact) string {
+// the identity lines (the user's own curation, not an inference), the mention
+// summary, the check-in line when there are contact events (the user's own
+// record), and the raw entry ids (refs, the folded references) — mentions and
+// dates, nothing derived (no insights, no dominance).
+func renderOffLimits(rec storage.PersonRecord, refs []string, checkIns *PersonContact, identityLines []string) string {
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + " is off-limits to inference — what follows is your raw record only: " +
 		"mentions and dates, nothing derived.\n")
-	b.WriteString(mentionSummary(rec) + "\n")
+	writeLines(&b, identityLines)
+	b.WriteString(mentionSummary(rec, refs) + "\n")
 	writeCheckInLine(&b, checkIns)
-	if len(rec.EntryRefs) > 0 {
-		b.WriteString("Entries: " + strings.Join(rec.EntryRefs, ", ") + "\n")
+	if len(refs) > 0 {
+		b.WriteString("Entries: " + strings.Join(refs, ", ") + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
 // mentionSummary renders the deterministic mention-count-over-time line: how
-// many entries mention the person and the first/last seen dates.
-func mentionSummary(rec storage.PersonRecord) string {
+// many entries mention the person (refs, their folded references) and the
+// record's own first/last seen dates, which the fold never re-derives.
+func mentionSummary(rec storage.PersonRecord, refs []string) string {
 	return fmt.Sprintf("Mentioned in %d entr%s (first seen %s, last seen %s).",
-		len(rec.EntryRefs), plural(len(rec.EntryRefs)),
+		len(refs), plural(len(refs)),
 		rec.FirstSeenAt.Format(personDateLayout), rec.LastSeenAt.Format(personDateLayout))
 }
 
@@ -259,10 +304,11 @@ func plural(n int) string {
 }
 
 // insightsCiting returns the ids of every accepted insight whose provenance
-// cites a raw entry that mentions this person — the deterministic join scope.md
-// §4 specifies. Ids are sorted so the output is byte-stable.
-func (r *Router) insightsCiting(rec storage.PersonRecord) ([]string, error) {
-	refs := toSet(rec.EntryRefs)
+// cites a raw entry that mentions this person — one of entryRefs, their folded
+// references — the deterministic join scope.md §4 specifies. Ids are sorted so
+// the output is byte-stable.
+func (r *Router) insightsCiting(entryRefs []string) ([]string, error) {
+	refs := toSet(entryRefs)
 	ids, err := r.store.ListInsightIDs()
 	if err != nil {
 		return nil, fmt.Errorf("person: list insights: %w", err)
@@ -289,11 +335,11 @@ func (r *Router) insightsCiting(rec storage.PersonRecord) ([]string, error) {
 
 // personRedirectIndex reads the people tree once and returns, for every person
 // key, the canonical key it resolves to (canon), plus the current display name
-// of each canonical record (names). It is the join bridge for the two counting
-// paths — /person dominance and the /reflect gate panel — because historical
-// processed/*.json artifacts keep the pre-merge person_key, so a count that
-// keys on the artifact's key would split a merged person across their old and
-// new slugs. Canonicalizing first folds those counts back onto the one record.
+// of each canonical record (names). The /reflect gate panel renders a counted
+// person by their canonical display name from it; the counts themselves come
+// from the storage mention fold, which canonicalizes the historical
+// processed/*.json keys (an artifact keeps the pre-merge person_key) and folds
+// in every pin and move-ref.
 func (r *Router) personRedirectIndex() (canon, names map[string]string, err error) {
 	keys, err := r.store.ListPeopleKeys()
 	if err != nil {
@@ -319,20 +365,13 @@ func (r *Router) personRedirectIndex() (canon, names map[string]string, err erro
 	return canon, names, nil
 }
 
-// canonicalKey maps a person_key through the redirect index, returning the key
-// unchanged when it names a canonical record (or one absent from the index).
-func canonicalKey(canon map[string]string, key string) string {
-	if c, ok := canon[key]; ok {
-		return c
-	}
-	return key
-}
-
 // personDominanceLine returns the one dominance line for this person, or "" when
 // their share of processed entries does not exceed person_dominance_threshold.
-// Share is the fraction of processed artifacts that mention them (deterministic,
-// router-side). The line is hypothesis-framed and appears only in /person and
-// /reflect gate — never on /status or a daily surface (S-22).
+// Share is the fraction of processed artifacts that mention them on read —
+// each artifact's mentions canonicalized through redirects (historical
+// artifacts keep the pre-merge key) with every pin and move-ref folded in
+// (deterministic, router-side). The line is hypothesis-framed and appears only
+// in /person and /reflect gate — never on /status or a daily surface (S-22).
 func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 	ids, err := r.store.ListProcessedIDs()
 	if err != nil {
@@ -342,9 +381,9 @@ func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 	if total == 0 {
 		return "", nil
 	}
-	canon, _, err := r.personRedirectIndex()
+	fold, err := r.store.MentionFold()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("person: fold mentions: %w", err)
 	}
 	mentions := 0
 	for _, id := range ids {
@@ -352,11 +391,8 @@ func (r *Router) personDominanceLine(rec storage.PersonRecord) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("person: read processed %q: %w", id, err)
 		}
-		for _, p := range art.People {
-			if canonicalKey(canon, p.PersonKey) == rec.PersonKey {
-				mentions++
-				break
-			}
+		if slices.Contains(fold.MentionKeys(art), rec.PersonKey) {
+			mentions++
 		}
 	}
 	share := float64(mentions) / float64(total)

@@ -147,6 +147,7 @@ Each is a new event with a receipt; nothing is rewritten.
 ```sh
 lucid contact due
 lucid contact due --json
+lucid contact due --all
 ```
 
 The due view groups everyone with an active cadence against **this week,
@@ -157,7 +158,9 @@ Monday to Sunday**, by the day their window closes:
 - **Coming up next week** — the window closes next Monday through next Sunday.
 
 Later windows are not shown. Paused, retired and snoozed people stay off the
-lists. Within each list people are ordered by the day their window closes, then
+lists, and so do dormant people unless you ask for them with
+`lucid contact due --all` (see [Merges, aliases and off-limits
+people](#merges-aliases-and-off-limits-people)). Within each list people are ordered by the day their window closes, then
 by name.
 
 A synthetic week — today is Wednesday, Nov 4, 2026:
@@ -243,7 +246,9 @@ last_contact}`. A person with no contact events looks exactly as before.
 
 Anyone with a date of birth (`lucid person set <name> --dob YYYY-MM-DD`) shows in
 a **Birthdays this week** block when their birthday falls this Monday–Sunday —
-whether or not they have a cadence, and even if they are snoozed or paused. A
+whether or not they have a cadence, and even if they are snoozed or paused. Off-limits
+and dormant people are left out (`lucid contact due --all` lists a dormant person's
+birthday, marked ` (dormant)`). A
 Feb 29 birthday is marked on Feb 28 in other years, and a week that spans New
 Year works as you would expect. Birthdays show in the due view and the Monday
 post, not in the Sunday wrap, and they have no separate switch: they ride the
@@ -333,16 +338,26 @@ is built from the same two lists.
 
 ## Merges, aliases and off-limits people
 
-- **Names resolve like every person verb**
+- **Names resolve to who they mean now**
   ([Resolving a subject](commands.md#resolving-a-subject)): an exact
-  `person_key` wins, then a display name or alias. A name that matches more than
-  one person is refused with the candidate keys, so you can retry with the key.
+  `person_key` wins, then a name you have claimed for someone
+  (`lucid person claim`), then the one active person with that display name or
+  alias — a dormant person never beats an active one. A name that matches more
+  than one active person is refused with the candidate keys, so you can retry
+  with the key.
 - **Merges carry history.** After `lucid person merge`, cadences, contacts and
   snoozes recorded under either record belong to the merged person. Merging
   duplicates before setting cadences keeps each list clean from the start.
 - **Off-limits people** (`lucid person off-limits`) can still be logged — it is
   your own record — but they never appear in the due view, the birthdays block,
   the Monday post or the wrap.
+- **Dormant people** (`lucid person dormant`) — people who are not who you mean
+  now — can still be logged, and keep their cadence and history, but they are
+  left out of the due view, the birthdays block, the Monday post and the wrap.
+  `lucid contact due --all` (and `due --wrap --all`) shows them anyway, each line
+  ending ` (dormant)`, with `"dormant": true` on their rows under `--json`. The
+  Monday post has no such flag. `lucid person dormant <name> --restore` brings
+  them back onto the lists where their cadence places them.
 - **The witness report never reads contact data.** Who you keep in touch with is
   never part of the friend-facing report.
 

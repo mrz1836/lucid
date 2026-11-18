@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/data"
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // TestMergePersons_UnionsAndTombstones proves a merge folds the source into the
@@ -269,10 +270,18 @@ func TestUpdatePerson_AkaNeverHijacks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, alex.Aka, "Bob", "the aka is recorded for matching")
 
-	// A bare "Bob" still resolves to the original Bob, not Alex — no hijack.
+	// A bare "Bob" never hijacks onto Alex. Two live people now hold the form
+	// exactly (Bob's display_name, Alex's aka), so capture holds the mention
+	// rather than assigning it first-come (error-states.md §P-11; ADR-0016) —
+	// it is counted for neither until a claim, a dormant, or a move-ref settles it.
+	before := snapshotPeople(t, a)
 	later, err := a.UpdatePerson(PersonMention{DisplayName: "Bob", RawEntryID: "raw_2026_05_09_20_10", At: personAt(9)})
 	require.NoError(t, err)
-	assert.Equal(t, keyBob, later.PersonKey)
+	assert.True(t, later.Held)
+	assert.Empty(t, later.PersonKey)
+	assert.Equal(t, identity.HoldExact, later.HoldReason)
+	assert.ElementsMatch(t, []string{keyAlex, keyBob}, later.Candidates)
+	assert.Equal(t, before, snapshotPeople(t, a), "a held mention writes nothing under people/")
 }
 
 // TestUpdatePerson_AkaEqualToDisplayIsNoop proves an aka that repeats the display
@@ -475,3 +484,81 @@ func readFileBytes(t *testing.T, a *Adapter, key string) []byte {
 
 // strptr returns a pointer to s, for building sparse PersonPatch values.
 func strptr(s string) *string { return &s }
+
+// TestCreatePerson_DormantOnlyHolderMintsNextSuffix: `person create` of a name
+// whose only slug-path holder is dormant mints a fresh active record under the
+// next free collision suffix (R4) — never returning the dormant record, never
+// routing to a person who only shares the first name — and the dormant record
+// is untouched. Creating it again is the idempotent no-op on the new record.
+func TestCreatePerson_DormantOnlyHolderMintsNextSuffix(t *testing.T) {
+	f := newResolveFixture(t)
+	old, created := f.create("Sam")
+	require.True(t, created)
+	f.keys["Sam"] = old.PersonKey
+	f.mention("Sam Rivera") // shares the first name; create never routes to it
+	f.dormant("Sam")
+	oldBefore := readFileBytes(t, f.a, old.PersonKey)
+
+	fresh, created := f.create("Sam")
+	require.True(t, created, "a dormant-only holder mints a new record")
+	assert.Equal(t, secondSlot(old.PersonKey), fresh.PersonKey)
+	assert.Equal(t, "Sam", fresh.DisplayName)
+	assert.Equal(t, []string{"Sam"}, fresh.Aka)
+	assert.Empty(t, fresh.EntryRefs)
+	assert.Equal(t, oldBefore, readFileBytes(t, f.a, old.PersonKey), "the dormant record is untouched")
+
+	again, created := f.create("Sam")
+	assert.False(t, created, "an active holder further down the chain is the no-op")
+	assert.Equal(t, fresh.PersonKey, again.PersonKey)
+
+	// A multi-word name follows the same rule.
+	f.dormant("Sam Rivera")
+	rivera := f.key("Sam Rivera")
+	minted, created := f.create("Sam Rivera")
+	require.True(t, created)
+	assert.Equal(t, secondSlot(rivera), minted.PersonKey)
+}
+
+// TestCreatePerson_RestoreMakesFormAmbiguous: after a dormant-only create has
+// minted a second "Sam", restoring the first leaves two active holders of the
+// form — capture holds a bare "Sam" and lookup shows both (§P-2) until a claim
+// or a dormant settles it. Create itself then returns the first active holder.
+func TestCreatePerson_RestoreMakesFormAmbiguous(t *testing.T) {
+	f := newResolveFixture(t)
+	old, _ := f.create("Sam")
+	f.keys["Sam"] = old.PersonKey
+	f.dormant("Sam")
+	fresh, created := f.create("Sam")
+	require.True(t, created)
+	f.setStatus(old.PersonKey, identity.StatusActive)
+
+	want := []string{old.PersonKey, fresh.PersonKey}
+	got := f.capture("Sam")
+	assert.Equal(t, NameAmbiguous, got.Outcome)
+	assert.Equal(t, identity.HoldExact, got.HoldReason)
+	assert.Equal(t, want, got.Candidates)
+	look := f.lookup("Sam")
+	assert.Equal(t, NameAmbiguous, look.Outcome)
+	assert.Equal(t, want, look.Candidates)
+
+	res, err := f.a.UpdatePerson(PersonMention{DisplayName: "Sam", RawEntryID: "raw_2026_11_23_10_00", At: personAt(28)})
+	require.NoError(t, err)
+	assert.True(t, res.Held)
+
+	rec, created := f.create("Sam")
+	assert.False(t, created)
+	assert.Equal(t, old.PersonKey, rec.PersonKey)
+}
+
+// TestCreatePerson_NoIdentityLogUnchanged: without an identity log, create
+// never consults status — a live holder is the no-op exactly as before.
+func TestCreatePerson_NoIdentityLogUnchanged(t *testing.T) {
+	f := newResolveFixture(t)
+	first, created := f.create("Sam")
+	require.True(t, created)
+	again, created := f.create("Sam")
+	assert.False(t, created)
+	assert.Equal(t, first.PersonKey, again.PersonKey)
+	_, err := os.Stat(f.a.identityPath())
+	assert.True(t, os.IsNotExist(err), "create never creates the identity log")
+}

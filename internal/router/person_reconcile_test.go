@@ -1,9 +1,12 @@
 package router
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/data"
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // TestPersonReconcile_TwoSignals seeds a nickname-map pair (Sam/Sammy, both in the
@@ -26,7 +30,7 @@ func TestPersonReconcile_TwoSignals(t *testing.T) {
 	writePersonFile(t, home, "person_a-alex", "Alex", []string{"A."}, day1)
 	writePersonFile(t, home, "person_a-andy", "Andy", []string{"A."}, day2)
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	require.Len(t, res.Candidates, 2)
 
@@ -42,7 +46,7 @@ func TestPersonReconcile_TwoSignals(t *testing.T) {
 	assert.Contains(t, samSammy.Reason, "linked nicknames")
 
 	// Byte-stable across repeated runs (S-22).
-	again, err := r.PersonReconcile()
+	again, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, res.Text, again.Text)
 }
@@ -55,7 +59,7 @@ func TestPersonReconcile_ExcludesOffLimits(t *testing.T) {
 	writePersonFile(t, home, "person_s-sammy", "Sammy", []string{"Sammy"}, personSeedTime())
 	require.NoError(t, a.WriteOffLimitsPersonKeys([]string{"person_s-sammy"}))
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, res.Candidates)
 	assert.Equal(t, reconcileNoCandidates, res.Text)
@@ -71,7 +75,7 @@ func TestPersonReconcile_CoOccurringNotPaired(t *testing.T) {
 	writePersonFile(t, home, "person_a-alex", "Alex", []string{"Alex"}, personSeedTime())
 	writePersonFile(t, home, "person_b-bob", "Bob", []string{"Bob"}, personSeedTime())
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, res.Candidates, "people seen together are usually different people")
 }
@@ -81,7 +85,7 @@ func TestPersonReconcile_CoOccurringNotPaired(t *testing.T) {
 func TestPersonReconcile_EmptyAndTombstones(t *testing.T) {
 	r, _, home := newBootedRouter(t)
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, res.Candidates)
 	assert.Equal(t, reconcileNoCandidates, res.Text)
@@ -91,7 +95,7 @@ func TestPersonReconcile_EmptyAndTombstones(t *testing.T) {
 	writePersonFile(t, home, "person_s-sam", "Sam", []string{"Sam"}, personSeedTime())
 	writeTombstone(t, home, "person_s-sammy", "Sammy", "person_s-sam", personSeedTime())
 
-	res, err = r.PersonReconcile()
+	res, err = r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, res.Candidates, "a tombstone is never a reconcile candidate")
 }
@@ -156,7 +160,7 @@ func TestReconcileShortNameNoFalsePositive(t *testing.T) {
 	writePersonFile(t, home, "person_q-quinn", "Quinn", []string{"Quinn"}, day)
 	writePersonFile(t, home, "person_z-zachary", "Zachary", []string{"Zachary"}, day)
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, res.Candidates, "edit-distance-close short names and co-occurrence are not signals")
 	assert.Equal(t, reconcileNoCandidates, res.Text)
@@ -178,7 +182,7 @@ func TestReconcileCatchesRealDuplicates(t *testing.T) {
 	writePersonFile(t, home, "person_s-steph", "Steph", []string{"Steph"}, day)
 	writePersonFile(t, home, "person_s-stephanie", "Stephanie", []string{"Stephanie"}, day)
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 
 	shared, ok := candidateFor(res.Candidates, "person_o-olivia", "person_o-liv")
@@ -207,7 +211,7 @@ func TestReconcileReadOnly(t *testing.T) {
 
 	before := snapshotTree(t, home)
 
-	res, err := r.PersonReconcile()
+	res, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.Candidates, "the fixture has a real duplicate to surface")
 
@@ -315,4 +319,360 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 	})
 	require.NoError(t, err)
 	return out
+}
+
+// The identity reconcile fixtures use synthetic people only: two people named
+// "Sam" ("Sam" and "Sam Rivera"), plus "Sammy", "Jo", "Jo Lark", "Jordan Lee",
+// "Alex", "Alex Kim", and "Alex Stone".
+
+// reconcileFixture is a booted router over hand-written people records, with
+// the identity verbs on a clock that ticks forward so events fold in the order
+// a test writes them.
+type reconcileFixture struct {
+	t    *testing.T
+	r    *Router
+	home string
+	tick int
+}
+
+// newReconcileFixture returns an empty booted Ledger.
+func newReconcileFixture(t *testing.T) *reconcileFixture {
+	t.Helper()
+	r, _, home := newBootedRouter(t)
+	return &reconcileFixture{t: t, r: r, home: home}
+}
+
+// person writes one canonical record first seen on the given day of May 2026.
+func (f *reconcileFixture) person(key, display string, day int, aka ...string) {
+	f.t.Helper()
+	writePersonFile(f.t, f.home, key, display, append([]string{display}, aka...),
+		time.Date(2026, time.May, day, 19, 42, 11, 0, time.UTC))
+}
+
+// now returns the next verb instant, one minute after the last.
+func (f *reconcileFixture) now() time.Time {
+	f.tick++
+	return time.Date(2026, time.November, 17, 9, 0, 0, 0, time.UTC).Add(time.Duration(f.tick) * time.Minute)
+}
+
+func (f *reconcileFixture) dormant(key string) {
+	f.t.Helper()
+	_, err := f.r.PersonDormant(PersonDormantRequest{Subject: key, Now: f.now()})
+	require.NoError(f.t, err)
+}
+
+func (f *reconcileFixture) restore(key string) {
+	f.t.Helper()
+	_, err := f.r.PersonDormant(PersonDormantRequest{Subject: key, Restore: true, Now: f.now()})
+	require.NoError(f.t, err)
+}
+
+func (f *reconcileFixture) claim(key, form string, force bool) {
+	f.t.Helper()
+	_, err := f.r.PersonClaim(PersonClaimRequest{Subject: key, Form: form, Force: force, Now: f.now()})
+	require.NoError(f.t, err)
+}
+
+// reconcile runs the scan and proves it byte-stable across a second run.
+func (f *reconcileFixture) reconcile(all bool) PersonReconcileResult {
+	f.t.Helper()
+	res, err := f.r.PersonReconcile(PersonReconcileRequest{All: all})
+	require.NoError(f.t, err)
+	again, err := f.r.PersonReconcile(PersonReconcileRequest{All: all})
+	require.NoError(f.t, err)
+	require.Equal(f.t, res.Text, again.Text, "reconcile is byte-stable (S-22)")
+	return res
+}
+
+// TestPersonReconcile_ListsHeldMentionsWithFix: every pending held mention
+// (§P-11) is listed under "Held mentions" with its raw id, the form, the people
+// it could mean — active first, a dormant one marked — and the three fixes.
+// Settling a mention drops it, an off-limits candidate is never named, and the
+// scan writes nothing.
+func TestPersonReconcile_ListsHeldMentionsWithFix(t *testing.T) {
+	f := newIDFixture(t)
+	oldSam, river, samRaw := heldSamPair(f)
+	alex := f.person("Alex")
+	kim := f.person("Alex Kim")
+	stone := f.person("Alex Stone")
+	f.dormant(alex)
+	alexRaw := f.hold("Alex")
+
+	samCands := []ReconcileHeldCandidate{{PersonKey: oldSam, DisplayName: "Sam"}, {PersonKey: river, DisplayName: "Sam Rivera"}}
+	slices.SortFunc(samCands, func(a, b ReconcileHeldCandidate) int { return strings.Compare(a.PersonKey, b.PersonKey) })
+	alexCands := make([]ReconcileHeldCandidate, 0, 3)
+	alexCands = append(alexCands,
+		ReconcileHeldCandidate{PersonKey: kim, DisplayName: "Alex Kim"},
+		ReconcileHeldCandidate{PersonKey: stone, DisplayName: "Alex Stone"})
+	slices.SortFunc(alexCands, func(a, b ReconcileHeldCandidate) int { return strings.Compare(a.PersonKey, b.PersonKey) })
+	alexCands = append(alexCands, ReconcileHeldCandidate{PersonKey: alex, DisplayName: "Alex", Dormant: true})
+
+	before := snapshotTree(t, f.home)
+	res, err := f.r.PersonReconcile(PersonReconcileRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, before, snapshotTree(t, f.home), "reconcile is read-only")
+	assert.Equal(t, []ReconcileHeld{
+		{RawID: samRaw, Form: "Sam", Reason: identity.HoldExact, Candidates: samCands},
+		{RawID: alexRaw, Form: "Alex", Reason: identity.HoldFirstName, Candidates: alexCands},
+	}, res.Held)
+
+	wantBlock := func(raw, form string, cands []ReconcileHeldCandidate) string {
+		names := make([]string, 0, len(cands))
+		for _, c := range cands {
+			label := c.PersonKey
+			if c.Dormant {
+				label += ", dormant"
+			}
+			names = append(names, fmt.Sprintf("%q (%s)", c.DisplayName, label))
+		}
+		return fmt.Sprintf("- %s: %q could mean %s.\n", raw, form, strings.Join(names, " / ")) +
+			fmt.Sprintf("    → lucid person claim <key> %q\n", form) +
+			"    → lucid person dormant <key>\n" +
+			fmt.Sprintf("    → lucid person move-ref %s --to <key>", raw)
+	}
+	assert.Contains(t, res.Text, "\n"+reconcileHeldHeader+"\n"+
+		wantBlock(samRaw, "Sam", samCands)+"\n"+wantBlock(alexRaw, "Alex", alexCands),
+		"held mentions follow the pairs in (raw id, form) order")
+	assert.True(t, strings.HasSuffix(res.Text, "--to <key>"), "the text ends on the last fix, no trailing newline")
+
+	// Settling the Sam mention with a claim drops it from the list.
+	f.claim("Sam Rivera", "Sam", true)
+	res, err = f.r.PersonReconcile(PersonReconcileRequest{})
+	require.NoError(t, err)
+	require.Len(t, res.Held, 1)
+	assert.Equal(t, alexRaw, res.Held[0].RawID)
+	assert.NotContains(t, res.Text, samRaw)
+
+	// An off-limits candidate is never named; the mention is still listed.
+	require.NoError(t, f.a.WriteOffLimitsPersonKeys([]string{stone}))
+	res, err = f.r.PersonReconcile(PersonReconcileRequest{})
+	require.NoError(t, err)
+	require.Len(t, res.Held, 1)
+	assert.NotContains(t, res.Text, "Alex Stone")
+	assert.Len(t, res.Held[0].Candidates, 2)
+
+	// With every candidate off-limits the mention is not listed at all.
+	require.NoError(t, f.a.WriteOffLimitsPersonKeys([]string{stone, kim, alex}))
+	res, err = f.r.PersonReconcile(PersonReconcileRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Held)
+	assert.NotContains(t, res.Text, reconcileHeldHeader)
+}
+
+// TestPersonReconcile_FirstNameOverlapAttachesToMergePair: "Sam" and "Sam
+// Rivera" are already a diminutive merge pair, so their first-name overlap
+// attaches to that pair — one entry offers merge (same person) or claim /
+// dormant (different people) — rather than repeating it in its own section. A
+// second overlap between the same two people is listed on its own.
+func TestPersonReconcile_FirstNameOverlapAttachesToMergePair(t *testing.T) {
+	f := newReconcileFixture(t)
+	f.person("person_s-oak", "Sam", 5)
+	f.person("person_s-river", "Sam Rivera", 6)
+
+	res := f.reconcile(false)
+	require.Len(t, res.Candidates, 1)
+	c := res.Candidates[0]
+	assert.Equal(t, "person_s-oak", c.TargetKey)
+	assert.Equal(t, "person_s-river", c.SourceKey)
+	require.NotNil(t, c.Overlap)
+	assert.Equal(t, ReconcileOverlap{
+		Form: "Sam", HolderKey: "person_s-oak", HolderName: "Sam", HolderFirstSeen: "2026-05-05",
+		SharerKey: "person_s-river", SharerName: "Sam Rivera",
+	}, *c.Overlap)
+	assert.Equal(t, `lucid person claim person_s-river "Sam"`, c.Overlap.SuggestedClaim())
+	assert.Equal(t, "lucid person dormant person_s-oak", c.Overlap.SuggestedDormant())
+	assert.Empty(t, res.Overlaps, "an attached overlap is not repeated")
+	assert.Equal(t, `Found 1 likely-duplicate pair — review each; nothing has changed:
+- "Sam" (person_s-oak) and "Sam Rivera" (person_s-river) — similar names ("sam" ~ "samrivera").
+    → lucid person merge person_s-river person_s-oak
+  Or keep them apart: a bare "Sam" goes to "Sam" (person_s-oak, first seen 2026-05-05), and "Sam Rivera" (person_s-river) also has the first name "Sam".
+    → lucid person claim person_s-river "Sam"
+    → lucid person dormant person_s-oak`, res.Text)
+
+	// Two overlaps between one pair: "Jordan Lee" holds "Jo" (aka) while "Jo
+	// Lark" has the first name Jo, and "Jo Lark" holds "Jordan" while "Jordan
+	// Lee" has the first name Jordan. The first by form ("Jo") attaches; the
+	// second is listed under First-name overlaps.
+	g := newReconcileFixture(t)
+	g.person("person_j-lee", "Jordan Lee", 5, "Jo")
+	g.person("person_j-lark", "Jo Lark", 6, "Jordan")
+	res = g.reconcile(false)
+	require.Len(t, res.Candidates, 1)
+	require.NotNil(t, res.Candidates[0].Overlap)
+	assert.Equal(t, "Jo", res.Candidates[0].Overlap.Form)
+	assert.Equal(t, "person_j-lee", res.Candidates[0].Overlap.HolderKey)
+	require.Len(t, res.Overlaps, 1)
+	assert.Equal(t, ReconcileOverlap{
+		Form: "Jordan", HolderKey: "person_j-lark", HolderName: "Jo Lark", HolderFirstSeen: "2026-05-06",
+		SharerKey: "person_j-lee", SharerName: "Jordan Lee",
+	}, res.Overlaps[0])
+	assert.Contains(t, res.Text, "\n"+reconcileOverlapHeader+"\n"+
+		`- A bare "Jordan" goes to "Jo Lark" (person_j-lark, first seen 2026-05-06), and "Jordan Lee" (person_j-lee) also has the first name "Jordan".`)
+}
+
+// TestPersonReconcile_OverlapStandaloneSection: "Jo" and "Jo Lark" share a
+// first name but a two-letter prefix is no diminutive, so there is no merge
+// pair and the overlap is listed under its own "First-name overlaps" header,
+// right after the honest empty pairs line. An off-limits holder is never named.
+func TestPersonReconcile_OverlapStandaloneSection(t *testing.T) {
+	f := newReconcileFixture(t)
+	f.person("person_j-fern", "Jo", 5)
+	f.person("person_j-lark", "Jo Lark", 6)
+
+	res := f.reconcile(false)
+	assert.Empty(t, res.Candidates)
+	assert.Equal(t, []ReconcileOverlap{{
+		Form: "Jo", HolderKey: "person_j-fern", HolderName: "Jo", HolderFirstSeen: "2026-05-05",
+		SharerKey: "person_j-lark", SharerName: "Jo Lark",
+	}}, res.Overlaps)
+	assert.Equal(t, reconcileNoCandidates+`
+First-name overlaps — a bare name goes to one person while another shares that first name:
+- A bare "Jo" goes to "Jo" (person_j-fern, first seen 2026-05-05), and "Jo Lark" (person_j-lark) also has the first name "Jo".
+    → lucid person claim person_j-lark "Jo"
+    → lucid person dormant person_j-fern`, res.Text)
+
+	// An off-limits holder or sharer is never named.
+	a := f.r.store
+	require.NoError(t, a.WriteOffLimitsPersonKeys([]string{"person_j-fern"}))
+	res = f.reconcile(false)
+	assert.Empty(t, res.Overlaps)
+	assert.Equal(t, reconcileNoCandidates, res.Text)
+	require.NoError(t, a.WriteOffLimitsPersonKeys([]string{"person_j-lark"}))
+	res = f.reconcile(false)
+	assert.Empty(t, res.Overlaps)
+}
+
+// TestPersonReconcile_OverlapDropsWhenClaimedOrDormant: the overlap line drops
+// once the form is claimed — by either person — or either person is dormant,
+// and comes back on restore or when the claimant goes dormant (their claim is
+// then inert). A form no one holds exactly is never listed.
+func TestPersonReconcile_OverlapDropsWhenClaimedOrDormant(t *testing.T) {
+	seed := func(t *testing.T) *reconcileFixture {
+		f := newReconcileFixture(t)
+		f.person("person_s-oak", "Sam", 5)
+		f.person("person_s-river", "Sam Rivera", 6)
+		f.person("person_j-lee", "Jordan Lee", 7)
+		require.NotNil(t, f.reconcile(false).Candidates[0].Overlap, "the overlap starts out listed")
+		return f
+	}
+	hasOverlap := func(res PersonReconcileResult) bool {
+		for _, c := range res.Candidates {
+			if c.Overlap != nil {
+				return true
+			}
+		}
+		return len(res.Overlaps) > 0 || strings.Contains(res.Text, "also has the first name")
+	}
+	cases := []struct {
+		name string
+		act  func(f *reconcileFixture)
+		want bool
+	}{
+		{"claimed for the sharer", func(f *reconcileFixture) { f.claim("person_s-river", "Sam", true) }, false},
+		{"claimed for the holder", func(f *reconcileFixture) { f.claim("person_s-oak", "Sam", false) }, false},
+		{"holder dormant", func(f *reconcileFixture) { f.dormant("person_s-oak") }, false},
+		{"sharer dormant", func(f *reconcileFixture) { f.dormant("person_s-river") }, false},
+		{"holder restored", func(f *reconcileFixture) {
+			f.dormant("person_s-oak")
+			f.restore("person_s-oak")
+		}, true},
+		{"claimant dormant, claim inert", func(f *reconcileFixture) {
+			f.claim("person_j-lee", "Sam", true)
+			f.dormant("person_j-lee")
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := seed(t)
+			tc.act(f)
+			assert.Equal(t, tc.want, hasOverlap(f.reconcile(false)))
+		})
+	}
+
+	t.Run("no exact holder", func(t *testing.T) {
+		f := newReconcileFixture(t)
+		f.person("person_a-kim", "Alex Kim", 5)
+		f.person("person_a-stone", "Alex Stone", 6)
+		res := f.reconcile(false)
+		assert.False(t, hasOverlap(res), "two people sharing a first name no one holds exactly is not an overlap")
+	})
+}
+
+// TestPersonReconcile_ActiveSharesFormWithDormant: an active record that shares
+// an exact normalized form with a dormant one — a fresh "Sam" minted under the
+// next suffix after the old "Sam" went dormant — is flagged by default with the
+// restore-then-merge fix. Under --all the two are a merge pair, so the restore
+// step attaches to it instead. An off-limits person is never named.
+func TestPersonReconcile_ActiveSharesFormWithDormant(t *testing.T) {
+	f := newIDFixture(t)
+	old := f.person("Sam")
+	f.dormant(old)
+	fresh := f.person("Sam")
+	require.NotEqual(t, old, fresh, "a dormant-only holder mints under the next suffix")
+
+	res, err := f.r.PersonReconcile(PersonReconcileRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Candidates, "dormant people join merge pairs only under --all")
+	share := ReconcileDormantShare{Form: "sam", ActiveKey: fresh, ActiveName: "Sam", DormantKey: old, DormantName: "Sam"}
+	assert.Equal(t, []ReconcileDormantShare{share}, res.DormantShares)
+	assert.Equal(t, reconcileNoCandidates+"\n"+reconcileDormantHeader+"\n"+
+		fmt.Sprintf(`- "Sam" (%s) shares the written form "sam" with the dormant "Sam" (%s). If they are the same person:`, fresh, old)+"\n"+
+		fmt.Sprintf("    → lucid person dormant %s --restore\n", old)+
+		fmt.Sprintf("    → lucid person merge %s %s", fresh, old), res.Text)
+
+	all, err := f.r.PersonReconcile(PersonReconcileRequest{All: true})
+	require.NoError(t, err)
+	require.Len(t, all.Candidates, 1)
+	c := all.Candidates[0]
+	assert.Equal(t, old, c.TargetKey)
+	assert.True(t, c.TargetDormant)
+	assert.False(t, c.SourceDormant)
+	require.NotNil(t, c.DormantShare)
+	assert.Equal(t, share, *c.DormantShare)
+	assert.Empty(t, all.DormantShares, "an attached look-alike is not repeated")
+	assert.Equal(t, "Found 1 likely-duplicate pair — review each; nothing has changed:\n"+
+		fmt.Sprintf(`- "Sam" (%s, dormant) and "Sam" (%s) — share the written form "sam".`, old, fresh)+"\n"+
+		fmt.Sprintf("    → lucid person merge %s %s\n", fresh, old)+
+		fmt.Sprintf(`  "Sam" (%s) is dormant — restore them before merging:`, old)+"\n"+
+		fmt.Sprintf("    → lucid person dormant %s --restore", old), all.Text)
+
+	require.NoError(t, f.a.WriteOffLimitsPersonKeys([]string{old}))
+	res, err = f.r.PersonReconcile(PersonReconcileRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, res.DormantShares, "an off-limits person is never named")
+	assert.Equal(t, reconcileNoCandidates, res.Text)
+}
+
+// TestPersonReconcile_ExcludesDormantUnlessAll: a dormant person leaves the
+// merge suggestions by default; --all brings them back, marked dormant inside
+// the parentheses. Off-limits people stay out either way, and restore returns
+// the pair to the default scan.
+func TestPersonReconcile_ExcludesDormantUnlessAll(t *testing.T) {
+	f := newReconcileFixture(t)
+	f.person("person_s-sam", "Sam", 5)
+	f.person("person_s-sammy", "Sammy", 6)
+	require.Len(t, f.reconcile(false).Candidates, 1)
+
+	f.dormant("person_s-sammy")
+	res := f.reconcile(false)
+	assert.Empty(t, res.Candidates)
+	assert.Equal(t, reconcileNoCandidates, res.Text)
+
+	all := f.reconcile(true)
+	require.Len(t, all.Candidates, 1)
+	c := all.Candidates[0]
+	assert.Equal(t, "person_s-sammy", c.SourceKey)
+	assert.True(t, c.SourceDormant)
+	assert.False(t, c.TargetDormant)
+	assert.Equal(t, `Found 1 likely-duplicate pair — review each; nothing has changed:
+- "Sam" (person_s-sam) and "Sammy" (person_s-sammy, dormant) — linked nicknames ("sam" ~ "sammy").
+    → lucid person merge person_s-sammy person_s-sam`, all.Text)
+
+	a := f.r.store
+	require.NoError(t, a.WriteOffLimitsPersonKeys([]string{"person_s-sammy"}))
+	assert.Empty(t, f.reconcile(true).Candidates, "an off-limits person stays out under --all")
+	require.NoError(t, a.WriteOffLimitsPersonKeys(nil))
+
+	f.restore("person_s-sammy")
+	assert.Len(t, f.reconcile(false).Candidates, 1, "restore returns the pair to the default scan")
 }

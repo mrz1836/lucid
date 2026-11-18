@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mrz1836/lucid/data"
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // ErrPersonAkaConflict is returned by [Adapter.AddPersonAka] when the requested
@@ -315,7 +316,9 @@ func (a *Adapter) SetPerson(key string, patch PersonPatch) (PersonRecord, error)
 // record instead of forking a duplicate.
 //
 // Creating a name whose derived (or redirect-resolved) key already names a live
-// record is an idempotent no-op: it returns the existing record with
+// record is an idempotent no-op — except when every record on the name's slug
+// path is dormant (ADR-0016), where create mints a fresh active record under
+// the next free collision suffix and never returns the dormant one: it returns the existing record with
 // created=false, writes nothing, and leaves its durable fields untouched —
 // enriching an already-recorded person stays [Adapter.SetPerson]'s job. A fresh
 // record carries entry_refs: [], first_seen_at = last_seen_at = now, and
@@ -336,22 +339,38 @@ func (a *Adapter) CreatePerson(displayName string, now time.Time, patch PersonPa
 	if err != nil {
 		return PersonRecord{}, false, fmt.Errorf("storage: create_person: resolve key: %w", err)
 	}
-	// Follow a redirect: a name whose derived slug is a merged-away or aliased
-	// tombstone folds onto the canonical it points to, so create never forks a
-	// duplicate of an absorbed form (data-model.md §"Merge & redirect").
-	key, err = a.ResolvePersonRedirect(key)
-	if err != nil {
-		return PersonRecord{}, false, err
-	}
 
-	existing, found, err := a.ReadPerson(key)
+	// A dormant holder (ADR-0016): when every record on the name's slug path is
+	// dormant, create mints a fresh active record under the next free collision
+	// suffix instead of returning the dormant one; an active holder further
+	// down the chain is the "already recorded" no-op.
+	mintKey, held, err := a.createDormantHolder(displayName)
 	if err != nil {
 		return PersonRecord{}, false, err
 	}
-	if found && !existing.IsTombstone() {
-		// The person is already recorded — return it untouched, write nothing,
-		// and leave any patch for `person set` (idempotent no-op; A1).
-		return existing, false, nil
+	switch {
+	case held.PersonKey != "":
+		return held, false, nil
+	case mintKey != "":
+		key = mintKey
+	default:
+		// Follow a redirect: a name whose derived slug is a merged-away or aliased
+		// tombstone folds onto the canonical it points to, so create never forks a
+		// duplicate of an absorbed form (data-model.md §"Merge & redirect").
+		key, err = a.ResolvePersonRedirect(key)
+		if err != nil {
+			return PersonRecord{}, false, err
+		}
+
+		existing, found, rerr := a.ReadPerson(key)
+		if rerr != nil {
+			return PersonRecord{}, false, rerr
+		}
+		if found && !existing.IsTombstone() {
+			// The person is already recorded — return it untouched, write nothing,
+			// and leave any patch for `person set` (idempotent no-op; A1).
+			return existing, false, nil
+		}
 	}
 
 	// A fresh canonical record: the not-found shape mergePerson would build,
@@ -371,6 +390,40 @@ func (a *Adapter) CreatePerson(displayName string, now time.Time, patch PersonPa
 		return PersonRecord{}, false, err
 	}
 	return rec, true, nil
+}
+
+// createDormantHolder applies the dormant-holder rule (R4) for
+// [Adapter.CreatePerson]. It reads the identity log first: a Ledger with no
+// log has no dormant person, so create runs exactly as it always has without
+// even scanning people/. When some slug-path holder of the name is dormant it
+// returns either the first active holder on the chain (the "already recorded"
+// no-op) or, when every holder is dormant, the next free collision-suffix key
+// to mint at. It never routes to a person who only shares the first name.
+// Both results are zero when no holder is dormant.
+func (a *Adapter) createDormantHolder(displayName string) (string, PersonRecord, error) {
+	events, err := a.ReadIdentityEvents()
+	if err != nil || len(events) == 0 {
+		return "", PersonRecord{}, err
+	}
+	ix, err := a.loadPeopleIndex()
+	if err != nil {
+		return "", PersonRecord{}, err
+	}
+	st := identity.Fold(events, ix.canonKey)
+	holders := ix.slugPath(displayName)
+	if !slices.ContainsFunc(holders, st.IsDormant) {
+		return "", PersonRecord{}, nil
+	}
+	for _, k := range holders {
+		if !st.IsDormant(k) {
+			return "", ix.recs[k], nil
+		}
+	}
+	key, err := ResolvePersonKey(displayName, data.Wordlist(), a.mintOwner(st, NormalizeName(displayName)))
+	if err != nil {
+		return "", PersonRecord{}, fmt.Errorf("storage: create_person: resolve key: %w", err)
+	}
+	return key, PersonRecord{}, nil
 }
 
 // applyPatchField applies one optional patch field: nil leaves the current
