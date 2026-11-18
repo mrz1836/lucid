@@ -12,20 +12,23 @@ import (
 
 // PersonInfo is what the due view needs to know about a live person record:
 // the canonical key, the name to show, the date of birth (YYYY-MM-DD, "" when
-// unset) and whether the person is off-limits. The router builds it from the
-// people tree; this package never reads it from disk.
+// unset), whether the person is off-limits, and whether they are dormant (not
+// who the user means now). The router builds it from the people tree and the
+// identity log; this package never reads either from disk.
 type PersonInfo struct {
 	Key         string
 	DisplayName string
 	Dob         string
 	OffLimits   bool
+	Dormant     bool
 }
 
 // DueRow is one person line in a due group (ADR-0014 §6). Cadence is the window
 // as typed (`4w`) and CadenceDays its length; Human is the same window for
 // people ("every 4 weeks") and never marshals. LastContact is the logical day of
 // the most recent non-voided contact, "" when nothing is logged (null in JSON).
-// WindowCloses is a date — the ordering key — and never a count.
+// WindowCloses is a date — the ordering key — and never a count. Dormant marks
+// a dormant person's row, which only a view built with [DueOptions.All] holds.
 type DueRow struct {
 	PersonKey    string
 	DisplayName  string
@@ -34,9 +37,12 @@ type DueRow struct {
 	Human        string
 	LastContact  string
 	WindowCloses string
+	Dormant      bool
 }
 
-// dueRowWire is the documented `--json` person row.
+// dueRowWire is the documented `--json` person row. dormant is left out for
+// everyone but a dormant person, so a view with no dormant rows marshals
+// exactly as before.
 type dueRowWire struct {
 	PersonKey    string  `json:"person_key"`
 	DisplayName  string  `json:"display_name"`
@@ -44,6 +50,7 @@ type dueRowWire struct {
 	CadenceDays  int     `json:"cadence_days"`
 	LastContact  *string `json:"last_contact"`
 	WindowCloses string  `json:"window_closes"`
+	Dormant      bool    `json:"dormant,omitempty"`
 }
 
 // MarshalJSON renders the documented row, with last_contact null when unset.
@@ -54,6 +61,7 @@ func (r DueRow) MarshalJSON() ([]byte, error) {
 		Cadence:      r.Cadence,
 		CadenceDays:  r.CadenceDays,
 		WindowCloses: r.WindowCloses,
+		Dormant:      r.Dormant,
 	}
 	if r.LastContact != "" {
 		last := r.LastContact
@@ -76,6 +84,7 @@ func (r *DueRow) UnmarshalJSON(b []byte) error {
 		CadenceDays:  w.CadenceDays,
 		Human:        Window{Text: w.Cadence, Days: w.CadenceDays}.Human(),
 		WindowCloses: w.WindowCloses,
+		Dormant:      w.Dormant,
 	}
 	if w.LastContact != nil {
 		r.LastContact = *w.LastContact
@@ -85,11 +94,13 @@ func (r *DueRow) UnmarshalJSON(b []byte) error {
 
 // BirthdayRow is one birthday observed in the due week (ADR-0014 §7): Date is
 // the day it falls this week, which for a Feb 29 birthday in a non-leap year is
-// Feb 28.
+// Feb 28. Dormant marks a dormant person's birthday, which only a view built
+// with [DueOptions.All] holds; it is left out of the JSON otherwise.
 type BirthdayRow struct {
 	PersonKey   string `json:"person_key"`
 	DisplayName string `json:"display_name"`
 	Date        string `json:"date"`
+	Dormant     bool   `json:"dormant,omitempty"`
 }
 
 // DueView is the due view for one logical day (ADR-0014 §6): the ISO
@@ -98,7 +109,8 @@ type BirthdayRow struct {
 // empty group. A wrap view (Wrap) leaves out ComingUp and Birthdays, and its
 // JSON drops both keys. ActiveCadences counts the people with an active
 // cadence who may appear in the view (snoozed ones included, off-limits ones
-// not); it tells "no cadences yet" apart from "nobody due" and never marshals.
+// not, dormant ones only under [DueOptions.All]); it tells "no cadences yet"
+// apart from "nobody due" and never marshals.
 type DueView struct {
 	Day            string        `json:"day"`
 	Week           string        `json:"week"`
@@ -147,20 +159,36 @@ func (v DueView) MarshalJSON() ([]byte, error) {
 	return json.Marshal(w)
 }
 
-// Due groups folded states against the ISO Monday–Sunday week that contains
-// today, a YYYY-MM-DD logical day (ADR-0014 §6). Only a person with an active
-// cadence, a live record in people, no snooze this week and no off-limits flag
-// is grouped:
+// DueOptions shapes a due view: Wrap is the Sunday wrap's two lists alone, and
+// All brings dormant people back into the groups and the birthdays, each row
+// marked Dormant. Without All a dormant person appears nowhere in the view.
+type DueOptions struct {
+	Wrap bool
+	All  bool
+}
+
+// Due is [DueWith] with dormant people left out — the view the Monday post and
+// a plain `contact due` read.
+func Due(states map[string]PersonState, people map[string]PersonInfo, today string, wrap bool) DueView {
+	return DueWith(states, people, today, DueOptions{Wrap: wrap})
+}
+
+// DueWith groups folded states against the ISO Monday–Sunday week that
+// contains today, a YYYY-MM-DD logical day (ADR-0014 §6). Only a person with an
+// active cadence, a live record in people, no snooze this week, no off-limits
+// flag and — unless opts.All — no dormant status is grouped:
 //   - StillOpen: the window closed before this Monday;
 //   - DueThisWeek: it closes this Monday through this Sunday;
 //   - ComingUp: it closes next Monday through next Sunday.
 //
 // A later window is not shown. Each group is ordered by close date, then
 // case-folded display name, then person key. Birthdays come from people
-// directly — cadence or not, snoozed or paused, never off-limits — and are left
-// out of a wrap view along with ComingUp. Week math runs on civil dates, so a
-// DST change cannot move a day. An unreadable today yields an empty view.
-func Due(states map[string]PersonState, people map[string]PersonInfo, today string, wrap bool) DueView {
+// directly — cadence or not, snoozed or paused, never off-limits, dormant only
+// under opts.All — and are left out of a wrap view along with ComingUp. Week
+// math runs on civil dates, so a DST change cannot move a day. An unreadable
+// today yields an empty view.
+func DueWith(states map[string]PersonState, people map[string]PersonInfo, today string, opts DueOptions) DueView {
+	wrap := opts.Wrap
 	v := DueView{
 		Day:         today,
 		Wrap:        wrap,
@@ -182,7 +210,7 @@ func Due(states map[string]PersonState, people map[string]PersonInfo, today stri
 
 	for key, st := range states {
 		info, live := people[key]
-		if !live || info.OffLimits || st.State != StateActive {
+		if !live || info.OffLimits || (info.Dormant && !opts.All) || st.State != StateActive {
 			continue
 		}
 		v.ActiveCadences++
@@ -203,7 +231,7 @@ func Due(states map[string]PersonState, people map[string]PersonInfo, today stri
 		slices.SortFunc(group, compareDueRows)
 	}
 	if !wrap {
-		v.Birthdays = birthdaysBetween(people, start, end)
+		v.Birthdays = birthdaysBetween(people, start, end, opts.All)
 	}
 	return v
 }
@@ -217,6 +245,7 @@ func dueRow(key string, info PersonInfo, st PersonState) DueRow {
 		CadenceDays:  st.Window.Days,
 		Human:        st.Window.Human(),
 		WindowCloses: st.Closes,
+		Dormant:      info.Dormant,
 	}
 	if st.LastContact != nil {
 		row.LastContact = st.LastContact.Day

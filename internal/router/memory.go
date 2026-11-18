@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -179,7 +180,8 @@ func (r *Router) resolveMemoryRefs(parsed *observations.ParseResult, req MemoryW
 }
 
 // resolvePeopleKeys returns the person keys for the story's people that already
-// resolve to exactly one person record, sorted and de-duplicated so the ref is
+// resolve to exactly one person — who each name means now
+// ([Router.resolvePersonNow]) — sorted and de-duplicated so the ref is
 // byte-stable. A name that matches no one — or is ambiguous — is left as payload
 // testimony only: it links existing people, never mints one here. A read
 // failure is surfaced honestly so a story is never quietly half-written.
@@ -190,13 +192,15 @@ func (r *Router) resolvePeopleKeys(names []string) ([]string, error) {
 		if n == "" {
 			continue
 		}
-		matches, err := r.matchPeople(n)
+		subj, err := r.resolvePersonNow(n)
 		if err != nil {
+			var refused *PersonRejectedError
+			if errors.As(err, &refused) {
+				continue // no one, or more than one: testimony only, never a link
+			}
 			return nil, fmt.Errorf("could not resolve people; nothing was saved: %w", err)
 		}
-		if len(matches) == 1 {
-			keys = append(keys, matches[0].PersonKey)
-		}
+		keys = append(keys, subj.Record.PersonKey)
 	}
 	if len(keys) == 0 {
 		return nil, nil

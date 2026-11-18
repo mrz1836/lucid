@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,9 +222,11 @@ func TestPersonDormant_PreservesRecordAndRestore(t *testing.T) {
 }
 
 // TestPersonDormant_ReasonShownOnView: the one-line --reason-file text is
-// stored on the status event (the view line lands with the read surfaces); a
-// reason of more than one line, or one given with --restore, is refused before
-// any write.
+// stored on the status event and shown on the person view, right after its
+// first line ("Dormant since YYYY-MM-DD — <reason>", or "Dormant since
+// YYYY-MM-DD." with none) — the off-limits raw view included — and restore
+// drops the line; a reason of more than one line, or one given with --restore,
+// is refused before any write.
 func TestPersonDormant_ReasonShownOnView(t *testing.T) {
 	f := newIDFixture(t)
 	oldSam := f.person("Sam")
@@ -244,6 +247,40 @@ func TestPersonDormant_ReasonShownOnView(t *testing.T) {
 	assert.Equal(t, "an old contact from one passing mention", fact.Reason)
 	assert.Equal(t, "2026-11-17", fact.Date)
 	assert.Equal(t, res.Receipt, fact.EventID)
+
+	view, err := f.r.Person(PersonRequest{Name: oldSam})
+	require.NoError(t, err)
+	assert.True(t, view.Dormant)
+	lines := strings.Split(view.Text, "\n")
+	require.GreaterOrEqual(t, len(lines), 3)
+	assert.Equal(t, []string{"Sam", "Dormant since 2026-11-17 — an old contact from one passing mention"}, lines[:2])
+	assert.True(t, strings.HasPrefix(lines[2], "Mentioned in "), lines[2])
+	byName, err := f.r.Person(PersonRequest{Name: "Sam"})
+	require.NoError(t, err)
+	assert.Equal(t, view.Text, byName.Text, "the lone dormant holder still answers its own name, labeled")
+
+	_, err = f.r.PersonOffLimits(PersonOffLimitsRequest{Subject: oldSam})
+	require.NoError(t, err)
+	raw, err := f.r.Person(PersonRequest{Name: oldSam})
+	require.NoError(t, err)
+	require.True(t, raw.OffLimits)
+	rawLines := strings.Split(raw.Text, "\n")
+	assert.True(t, strings.HasPrefix(rawLines[0], "Sam is off-limits to inference"), rawLines[0])
+	assert.Equal(t, "Dormant since 2026-11-17 — an old contact from one passing mention", rawLines[1])
+	_, err = f.r.PersonOffLimits(PersonOffLimitsRequest{Subject: oldSam, Restore: true})
+	require.NoError(t, err)
+
+	_, err = f.r.PersonDormant(PersonDormantRequest{Subject: oldSam, Restore: true, Now: f.now()})
+	require.NoError(t, err)
+	restored, err := f.r.Person(PersonRequest{Name: oldSam})
+	require.NoError(t, err)
+	assert.False(t, restored.Dormant)
+	assert.NotContains(t, restored.Text, "Dormant since")
+
+	f.dormant(oldSam)
+	plain, err := f.r.Person(PersonRequest{Name: oldSam})
+	require.NoError(t, err)
+	assert.Equal(t, "Dormant since 2026-11-17.", strings.Split(plain.Text, "\n")[1], "no reason: the dated line alone")
 }
 
 // TestPersonDormant_OrthogonalToOffLimits: dormant and off-limits are

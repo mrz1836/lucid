@@ -1,11 +1,13 @@
 package router
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/storage"
 )
 
@@ -17,11 +19,13 @@ const (
 )
 
 // PersonCandidate is one row of the P-2 disambiguation list: the record's key,
-// its display name, and when it was first seen.
+// its display name, when it was first seen, and whether they are dormant
+// (ranked last and labeled).
 type PersonCandidate struct {
 	PersonKey   string
 	DisplayName string
 	FirstSeenAt time.Time
+	Dormant     bool
 }
 
 // PersonResult reports what /person resolved. Matched is false for the empty
@@ -30,7 +34,10 @@ type PersonCandidate struct {
 // check-in summary (ADR-0014 §6), nil when they have no contact events — it is
 // set in the off-limits view too, since it is the user's own record. Text is
 // the full rendered, byte-stable output the user sees — the same input always
-// renders the same bytes (S-22).
+// renders the same bytes (S-22). Dormant marks a matched person who is dormant
+// (their view carries the "Dormant since" line), and DormantAlso names the
+// dormant people who also hold the queried form when the name resolved to an
+// active person — both empty on a Ledger with no dormant people.
 type PersonResult struct {
 	Query           string
 	Matched         bool
@@ -38,6 +45,8 @@ type PersonResult struct {
 	Candidates      []PersonCandidate
 	OffLimits       bool
 	PersonKey       string
+	Dormant         bool
+	DormantAlso     []PersonRef
 	Contact         *PersonContact
 	Text            string
 }
@@ -50,49 +59,50 @@ type PersonRequest struct {
 // Person executes /person <name-or-key>: a deterministic, no-LLM join over the
 // people record, its mention counts, the accepted insights that cite entries
 // mentioning them, and its dominance share (agent-contracts.md §"How contracts
-// compose"; scope.md §4). It never calls a model and never writes. Resolution is
-// key-first: an exact person_key wins (a tombstone key resolves forward to its
-// canonical), mirroring the curation verbs' record targeting so the read and
-// write paths accept the same identifiers; otherwise the query is matched against display_name /
-// aka[]. No match returns the empty state (§P-1); several name matches list the
-// candidates (§P-2); a match named in the off-limits registry renders the raw
-// record only, behind the standing header, with nothing derived (§P-3). The
-// output is byte-stable across repeated runs on the same store (S-22).
+// compose"; scope.md §4). It never calls a model and never writes. The query
+// resolves to who it means now ([Router.resolvePersonNow]): an exact person_key
+// wins (a tombstone key resolves forward to its canonical), then the form's
+// active claimant, then the one active display_name / aka[] holder — a dormant
+// person never beats an active one — then, when every holder is dormant, the
+// first-name rule or the lone dormant holder, labeled. No match returns the
+// empty state (§P-1); an ambiguous name lists the candidates, active first and
+// dormant ones last and labeled (§P-2); a match named in the off-limits
+// registry renders the raw record only, behind the standing header, with
+// nothing derived (§P-3). The output is byte-stable across repeated runs on the
+// same store (S-22).
 func (r *Router) Person(req PersonRequest) (PersonResult, error) {
 	query := strings.TrimSpace(req.Name)
-
-	// Key-first: an exact person_key wins (a tombstone resolves forward to its
-	// canonical), mirroring the curation verbs' record targeting so read and
-	// write accept the same identifiers. A non-key query falls through to display_name/aka matching.
-	if rec, ok, err := r.exactKeySubject(query); err != nil {
-		return PersonResult{}, err
-	} else if ok {
-		return r.renderPerson(query, rec)
-	}
-
-	matches, err := r.matchPeople(query)
-	if err != nil {
-		return PersonResult{}, err
-	}
-
-	switch len(matches) {
-	case 0:
+	if query == "" {
 		return PersonResult{Query: query, Text: personNoMatch}, nil
-	case 1:
-		return r.renderPerson(query, matches[0])
-	default:
-		return r.renderCandidates(query, matches), nil
 	}
+	subj, err := r.resolvePersonNow(query)
+	switch {
+	case err == nil:
+		return r.renderPerson(query, subj)
+	case errors.Is(err, ErrPersonAmbiguousSubject):
+		return renderCandidates(query, subj.Candidates), nil
+	case errors.Is(err, ErrPersonUnknownSubject):
+		return PersonResult{Query: query, Text: personNoMatch}, nil
+	}
+	return PersonResult{}, err
 }
 
 // renderCandidates builds the P-2 disambiguation result: the candidates listed
-// by display name and first-seen date, nothing else rendered.
-func (r *Router) renderCandidates(query string, matches []storage.PersonRecord) PersonResult {
+// by display name and first-seen date — active people first, then dormant
+// ones, each labeled — nothing else rendered.
+func renderCandidates(query string, matches []PersonMatch) PersonResult {
 	cands := make([]PersonCandidate, 0, len(matches))
 	names := make([]string, 0, len(matches))
-	for _, rec := range matches {
-		cands = append(cands, PersonCandidate{PersonKey: rec.PersonKey, DisplayName: rec.DisplayName, FirstSeenAt: rec.FirstSeenAt})
-		names = append(names, fmt.Sprintf("%s (first seen %s)", rec.DisplayName, rec.FirstSeenAt.Format(personDateLayout)))
+	for _, m := range matches {
+		rec := m.Record
+		cands = append(cands, PersonCandidate{
+			PersonKey: rec.PersonKey, DisplayName: rec.DisplayName, FirstSeenAt: rec.FirstSeenAt, Dormant: m.Dormant,
+		})
+		label := ""
+		if m.Dormant {
+			label = ", dormant"
+		}
+		names = append(names, fmt.Sprintf("%s (first seen %s%s)", rec.DisplayName, rec.FirstSeenAt.Format(personDateLayout), label))
 	}
 	text := "That matches more than one person — which did you mean: " + strings.Join(names, "; ") + "?"
 	return PersonResult{Query: query, MultipleMatches: true, Candidates: cands, Text: text}
@@ -104,8 +114,20 @@ func (r *Router) renderCandidates(query string, matches []storage.PersonRecord) 
 // accepted insights citing entries that mention them, and a dominance line only
 // when their share of entries exceeds person_dominance_threshold. Both views
 // add the check-in line after the mention counts when the person has contact
-// events (ADR-0014 §6) — it is the user's own record, not an inference.
-func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonResult, error) {
+// events (ADR-0014 §6) — it is the user's own record, not an inference — and
+// the identity lines right after their first line: "Dormant since …" for a
+// dormant person, or the line naming the dormant people who also hold the
+// queried form. Neither line renders on a Ledger with no dormant people.
+func (r *Router) renderPerson(query string, subj PersonSubject) (PersonResult, error) {
+	rec := subj.Record
+	identityLines := personIdentityLines(query, subj)
+	also := make([]PersonRef, 0, len(subj.DormantAlso))
+	for _, m := range subj.DormantAlso {
+		also = append(also, PersonRef{PersonKey: m.Record.PersonKey, DisplayName: m.Record.DisplayName})
+	}
+	if len(also) == 0 {
+		also = nil
+	}
 	offLimits, err := r.store.ReadOffLimitsPersonKeys()
 	if err != nil {
 		return PersonResult{}, fmt.Errorf("person: read off-limits: %w", err)
@@ -122,8 +144,9 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 	}
 	if toSet(offLimits)[rec.PersonKey] {
 		return PersonResult{
-			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey, Contact: checkIns,
-			Text: renderOffLimits(rec, refs, checkIns),
+			Query: query, Matched: true, OffLimits: true, PersonKey: rec.PersonKey,
+			Dormant: subj.Dormant, DormantAlso: also, Contact: checkIns,
+			Text: renderOffLimits(rec, refs, checkIns, identityLines),
 		}, nil
 	}
 
@@ -138,6 +161,7 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + "\n")
+	writeLines(&b, identityLines)
 	b.WriteString(mentionSummary(rec, refs) + "\n")
 	writeCheckInLine(&b, checkIns)
 	if len(insightIDs) > 0 {
@@ -156,9 +180,60 @@ func (r *Router) renderPerson(query string, rec storage.PersonRecord) (PersonRes
 		b.WriteString(linked + "\n")
 	}
 	return PersonResult{
-		Query: query, Matched: true, PersonKey: rec.PersonKey, Contact: checkIns,
+		Query: query, Matched: true, PersonKey: rec.PersonKey,
+		Dormant: subj.Dormant, DormantAlso: also, Contact: checkIns,
 		Text: strings.TrimRight(b.String(), "\n"),
 	}, nil
+}
+
+// personIdentityLines returns the identity lines a person view adds right
+// after its first line (usage/commands.md §person): "Dormant since
+// YYYY-MM-DD." — or "Dormant since YYYY-MM-DD — <reason>" — for a dormant
+// person, and, when the query resolved to an active person, one line naming
+// every dormant person who also holds the queried form. Both are empty for
+// everyone on a Ledger with no dormant people, so such a view renders exactly
+// as before (S-22).
+func personIdentityLines(query string, subj PersonSubject) []string {
+	var lines []string
+	if subj.Dormant {
+		lines = append(lines, dormantSinceLine(subj.Status))
+	}
+	if len(subj.DormantAlso) > 0 {
+		lines = append(lines, dormantAlsoLine(query, subj.DormantAlso))
+	}
+	return lines
+}
+
+// dormantSinceLine renders a dormant person's status line from their folded
+// status event: the day it was recorded, and the one-line reason when one was
+// given.
+func dormantSinceLine(fact identity.StatusFact) string {
+	if reason := strings.TrimSpace(fact.Reason); reason != "" {
+		return "Dormant since " + fact.Date + " — " + reason
+	}
+	return "Dormant since " + fact.Date + "."
+}
+
+// dormantAlsoLine names the dormant people who also hold the queried form:
+// `"Sam" also names a dormant person: "Sam" (person_s-oak).`, or with several,
+// `… also names dormant people: "Sam" (person_s-oak); "Sam" (person_s-oak-2).`
+func dormantAlsoLine(query string, also []PersonMatch) string {
+	names := make([]string, 0, len(also))
+	for _, m := range also {
+		names = append(names, fmt.Sprintf("%q (%s)", m.Record.DisplayName, m.Record.PersonKey))
+	}
+	noun := "a dormant person"
+	if len(also) > 1 {
+		noun = "dormant people"
+	}
+	return fmt.Sprintf("%q also names %s: %s.", query, noun, strings.Join(names, "; "))
+}
+
+// writeLines writes each line followed by a newline.
+func writeLines(b *strings.Builder, lines []string) {
+	for _, l := range lines {
+		b.WriteString(l + "\n")
+	}
 }
 
 // writeCheckInLine adds the person's check-in line to a view, or nothing when
@@ -193,13 +268,15 @@ func (r *Router) personLinkedMediaLine(rec storage.PersonRecord) (string, error)
 }
 
 // renderOffLimits builds the §P-3 raw-record-only view: the standing header,
-// the mention summary, the check-in line when there are contact events (the
-// user's own record), and the raw entry ids (refs, the folded references) —
-// mentions and dates, nothing derived (no insights, no dominance).
-func renderOffLimits(rec storage.PersonRecord, refs []string, checkIns *PersonContact) string {
+// the identity lines (the user's own curation, not an inference), the mention
+// summary, the check-in line when there are contact events (the user's own
+// record), and the raw entry ids (refs, the folded references) — mentions and
+// dates, nothing derived (no insights, no dominance).
+func renderOffLimits(rec storage.PersonRecord, refs []string, checkIns *PersonContact, identityLines []string) string {
 	var b strings.Builder
 	b.WriteString(rec.DisplayName + " is off-limits to inference — what follows is your raw record only: " +
 		"mentions and dates, nothing derived.\n")
+	writeLines(&b, identityLines)
 	b.WriteString(mentionSummary(rec, refs) + "\n")
 	writeCheckInLine(&b, checkIns)
 	if len(refs) > 0 {
