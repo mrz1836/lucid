@@ -348,7 +348,7 @@ func TestPersonMoveRef_FoldsOnRead(t *testing.T) {
 	assert.Contains(t, samView, "Referenced by accepted insights: "+insight)
 	assert.Contains(t, samView, "Sam appears in 67% of entries — worth a look, or expected?")
 	assert.Contains(t, f.view(river), "Mentioned in 1 entry ")
-	rec, err := f.r.PersonReconcile()
+	rec, err := f.r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	require.Len(t, rec.Candidates, 1)
 	assert.Equal(t, river, rec.Candidates[0].SourceKey, "fewer mentions folds into more")
@@ -365,7 +365,7 @@ func TestPersonMoveRef_FoldsOnRead(t *testing.T) {
 	assert.Contains(t, riverView, "Sam Rivera appears in 67% of entries — worth a look, or expected?")
 	assert.Equal(t, riverView, f.view(river), "the folded view is byte-stable")
 
-	rec, err = f.r.PersonReconcile()
+	rec, err = f.r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	require.Len(t, rec.Candidates, 1)
 	assert.Equal(t, oldSam, rec.Candidates[0].SourceKey, "the moved mention now counts for Sam Rivera")

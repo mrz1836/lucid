@@ -247,7 +247,7 @@ func TestPersonCreate_ReconcileNoDuplicates(t *testing.T) {
 	_, err = a.UpdatePerson(newMention("Alex", "raw_2026_05_11_09_30", personSeedTime().Add(96*time.Hour)))
 	require.NoError(t, err)
 
-	rec, err := r.PersonReconcile()
+	rec, err := r.PersonReconcile(PersonReconcileRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, rec.Candidates, "one record — reconcile has nothing to flag")
 	assert.Equal(t, reconcileNoCandidates, rec.Text)
