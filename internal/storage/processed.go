@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/mrz1836/lucid/internal/identity"
 )
 
 // processedDirName is the flat Mirror subtree of JSON extraction artifacts,
@@ -55,6 +57,17 @@ type ProcessedPerson struct {
 	FirstMention bool
 }
 
+// HeldPerson is one mention the People routine held instead of assigning
+// (data-model.md §"Processed artifacts"; error-states.md §P-11): the name as
+// written, why it was held (exact or first_name), and the person_keys it could
+// mean, sorted by key. A held mention is never counted for anyone until a pin
+// in the identity log settles it.
+type HeldPerson struct {
+	DisplayName string
+	Reason      string
+	Candidates  []string
+}
+
 // ProcessedArtifact is one Structuring output for a raw entry
 // (data-model.md §"Processed artifacts"). Notes is nil when absent (renders
 // as JSON null). RejectedProposals/UnansweredProposals are always empty on a
@@ -69,6 +82,7 @@ type ProcessedArtifact struct {
 	Emotions            []ProcessedItem
 	Themes              []ProcessedItem
 	People              []ProcessedPerson
+	HeldPeople          []HeldPerson
 	Notes               *string
 	RejectedProposals   []json.RawMessage
 	UnansweredProposals []json.RawMessage
@@ -76,7 +90,8 @@ type ProcessedArtifact struct {
 
 // processedJSON is the on-disk JSON shape; field order matches data-model.md
 // §"Processed artifacts" so a written artifact reads like the documented
-// schema.
+// schema. held_people is omitted when empty, so an artifact without a held
+// mention is byte-identical to one written before held mentions existed.
 type processedJSON struct {
 	ID                  string            `json:"id"`
 	EntryID             string            `json:"entry_id"`
@@ -85,6 +100,7 @@ type processedJSON struct {
 	Emotions            []itemJSON        `json:"emotions"`
 	Themes              []itemJSON        `json:"themes"`
 	People              []personRefJSON   `json:"people"`
+	HeldPeople          []heldPersonJSON  `json:"held_people,omitempty"`
 	Notes               *string           `json:"notes"`
 	RejectedProposals   []json.RawMessage `json:"rejected_proposals"`
 	UnansweredProposals []json.RawMessage `json:"unanswered_proposals"`
@@ -101,6 +117,13 @@ type personRefJSON struct {
 	DisplayName  string `json:"display_name"`
 	PersonKey    string `json:"person_key"`
 	FirstMention bool   `json:"first_mention"`
+}
+
+// heldPersonJSON is the on-disk shape of a processed held_people[] entry.
+type heldPersonJSON struct {
+	DisplayName string   `json:"display_name"`
+	Reason      string   `json:"reason"`
+	Candidates  []string `json:"candidates"`
 }
 
 // WriteProcessed writes the processed artifact for a raw entry under
@@ -175,6 +198,7 @@ func renderProcessed(art ProcessedArtifact) ([]byte, error) {
 		Emotions:            encodeItems(art.Emotions),
 		Themes:              encodeItems(art.Themes),
 		People:              encodePeople(art.People),
+		HeldPeople:          encodeHeld(art.HeldPeople),
 		Notes:               art.Notes,
 		RejectedProposals:   orEmptyRaw(art.RejectedProposals),
 		UnansweredProposals: orEmptyRaw(art.UnansweredProposals),
@@ -206,6 +230,13 @@ func (j processedJSON) decode() (ProcessedArtifact, error) {
 	for _, p := range j.People {
 		art.People = append(art.People, ProcessedPerson(p))
 	}
+	for _, h := range j.HeldPeople {
+		art.HeldPeople = append(art.HeldPeople, HeldPerson{
+			DisplayName: h.DisplayName,
+			Reason:      h.Reason,
+			Candidates:  slices.Clone(h.Candidates),
+		})
+	}
 	return art, nil
 }
 
@@ -227,6 +258,23 @@ func encodePeople(people []ProcessedPerson) []personRefJSON {
 	return out
 }
 
+// encodeHeld renders the held_people[] slice to its on-disk shape, or nil when
+// there is no held mention so the field is omitted.
+func encodeHeld(held []HeldPerson) []heldPersonJSON {
+	if len(held) == 0 {
+		return nil
+	}
+	out := make([]heldPersonJSON, 0, len(held))
+	for _, h := range held {
+		cands := h.Candidates
+		if cands == nil {
+			cands = []string{}
+		}
+		out = append(out, heldPersonJSON{DisplayName: h.DisplayName, Reason: h.Reason, Candidates: cands})
+	}
+	return out
+}
+
 // orEmptyRaw returns xs, or an empty (non-nil) slice when xs is nil, so a
 // JSON array field renders `[]` rather than `null`.
 func orEmptyRaw(xs []json.RawMessage) []json.RawMessage {
@@ -244,7 +292,10 @@ func orEmptyRaw(xs []json.RawMessage) []json.RawMessage {
 //   - agent_version begins with "structuring-";
 //   - every people[] entry has display_name, a non-empty person_key, and a
 //     first_mention flag — no person_key is null on disk;
-//   - at least one of emotions/themes/people is non-empty, or notes is set.
+//   - every held_people[] entry has a display_name, a reason of exact or
+//     first_name, and at least one candidate person_key, sorted and unique;
+//   - at least one of emotions/themes/people/held_people is non-empty, or
+//     notes is set (a held mention counts as structure).
 //
 // It runs on the rendered bytes before every write, so no artifact that
 // breaks the contract can be persisted.
@@ -273,10 +324,40 @@ func ValidateProcessedArtifact(content []byte) error {
 			return fmt.Errorf("storage: processed people[%d] (%s) has a null person_key", i, p.DisplayName)
 		}
 	}
-	hasStructure := len(j.Emotions) > 0 || len(j.Themes) > 0 || len(j.People) > 0
+	for i, h := range j.HeldPeople {
+		if err := validateHeldPerson(i, h); err != nil {
+			return err
+		}
+	}
+	hasStructure := len(j.Emotions) > 0 || len(j.Themes) > 0 || len(j.People) > 0 || len(j.HeldPeople) > 0
 	hasNotes := j.Notes != nil && strings.TrimSpace(*j.Notes) != ""
 	if !hasStructure && !hasNotes {
 		return errors.New("storage: processed artifact has empty emotions/themes/people and no notes")
+	}
+	return nil
+}
+
+// validateHeldPerson checks one held_people[] entry: a display name, a known
+// hold reason, and a non-empty, sorted, duplicate-free candidate list.
+func validateHeldPerson(i int, h heldPersonJSON) error {
+	if h.DisplayName == "" {
+		return fmt.Errorf("storage: processed held_people[%d] has an empty display_name", i)
+	}
+	switch h.Reason {
+	case identity.HoldExact, identity.HoldFirstName:
+	default:
+		return fmt.Errorf("storage: processed held_people[%d] (%s) has unknown reason %q", i, h.DisplayName, h.Reason)
+	}
+	if len(h.Candidates) == 0 {
+		return fmt.Errorf("storage: processed held_people[%d] (%s) names no candidate", i, h.DisplayName)
+	}
+	for c, key := range h.Candidates {
+		if key == "" {
+			return fmt.Errorf("storage: processed held_people[%d] (%s) has an empty candidate", i, h.DisplayName)
+		}
+		if c > 0 && h.Candidates[c-1] >= key {
+			return fmt.Errorf("storage: processed held_people[%d] (%s) candidates are not sorted and unique", i, h.DisplayName)
+		}
 	}
 	return nil
 }
