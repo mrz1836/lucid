@@ -235,3 +235,145 @@ func TestIsISOTimestamp(t *testing.T) {
 	assert.False(t, isISOTimestamp("2026-05-05X")) // wrong date/time delimiter
 	assert.False(t, isISOTimestamp("2026-05-0aT")) // non-digit day
 }
+
+// heldArtifact is a synthetic artifact whose only finding is a held mention:
+// a bare "Sam" two active people hold exactly.
+func heldArtifact() ProcessedArtifact {
+	return ProcessedArtifact{
+		ID:           "raw_2026_11_18_09_00",
+		EntryID:      "raw_2026_11_18_09_00",
+		ProducedAt:   time.Date(2026, time.November, 18, 9, 0, 12, 0, time.FixedZone("", -5*3600)),
+		AgentVersion: "structuring-2026.05.0",
+		Themes:       nil,
+		HeldPeople: []HeldPerson{
+			{DisplayName: "Sam", Reason: "exact", Candidates: []string{"person_s-oak", "person_s-river"}},
+		},
+	}
+}
+
+// TestProcessed_HeldPeopleRoundTrip: held_people[] is written right after
+// people[] in the documented shape, round-trips through read, counts as
+// structure on its own, and every malformed held entry is refused.
+func TestProcessed_HeldPeopleRoundTrip(t *testing.T) {
+	a := New(t.TempDir())
+	art := heldArtifact()
+	require.NoError(t, a.WriteProcessed(art), "a held mention alone is structure")
+
+	got, err := a.ReadProcessed(art.ID)
+	require.NoError(t, err)
+	assert.Equal(t, art.HeldPeople, got.HeldPeople)
+	assert.Empty(t, got.People)
+
+	b, err := os.ReadFile(filepath.Join(a.processedDir(), art.ID+".json"))
+	require.NoError(t, err)
+	want := `{
+  "id": "raw_2026_11_18_09_00",
+  "entry_id": "raw_2026_11_18_09_00",
+  "produced_at": "2026-11-18T09:00:12-05:00",
+  "agent_version": "structuring-2026.05.0",
+  "emotions": [],
+  "themes": [],
+  "people": [],
+  "held_people": [
+    {
+      "display_name": "Sam",
+      "reason": "exact",
+      "candidates": [
+        "person_s-oak",
+        "person_s-river"
+      ]
+    }
+  ],
+  "notes": null,
+  "rejected_proposals": [],
+  "unanswered_proposals": []
+}
+`
+	assert.Equal(t, want, string(b), "held_people sits right after people, in the documented shape")
+
+	// A first_name hold beside an assigned mention round-trips too, and a
+	// re-render of what was read is byte-identical.
+	mixed := sampleArtifact()
+	mixed.HeldPeople = []HeldPerson{{DisplayName: "Jo", Reason: "first_name", Candidates: []string{"person_j-lee", "person_j-moss"}}}
+	require.NoError(t, a.WriteProcessed(mixed))
+	back, err := a.ReadProcessed(mixed.ID)
+	require.NoError(t, err)
+	assert.Equal(t, mixed.HeldPeople, back.HeldPeople)
+	assert.Equal(t, mustRender(t, mixed), mustRender(t, back))
+
+	bad := map[string]func(ProcessedArtifact) ProcessedArtifact{
+		"empty display": func(a ProcessedArtifact) ProcessedArtifact { a.HeldPeople[0].DisplayName = ""; return a },
+		"unknown reason": func(a ProcessedArtifact) ProcessedArtifact {
+			a.HeldPeople[0].Reason = "nickname"
+			return a
+		},
+		"no candidates": func(a ProcessedArtifact) ProcessedArtifact { a.HeldPeople[0].Candidates = nil; return a },
+		"blank candidate": func(a ProcessedArtifact) ProcessedArtifact {
+			a.HeldPeople[0].Candidates = []string{"", "person_s-river"}
+			return a
+		},
+		"unsorted candidates": func(a ProcessedArtifact) ProcessedArtifact {
+			a.HeldPeople[0].Candidates = []string{"person_s-river", "person_s-oak"}
+			return a
+		},
+		"repeated candidate": func(a ProcessedArtifact) ProcessedArtifact {
+			a.HeldPeople[0].Candidates = []string{"person_s-oak", "person_s-oak"}
+			return a
+		},
+	}
+	for name, mutate := range bad {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, ValidateProcessedArtifact(mustRender(t, mutate(heldArtifact()))), "expected %s to be rejected", name)
+		})
+	}
+}
+
+// TestProcessed_LegacyArtifactByteIdentical: an artifact written before held
+// mentions existed reads and re-renders byte for byte — held_people is omitted
+// when empty — and a fresh artifact with no held mention carries no
+// held_people key at all.
+func TestProcessed_LegacyArtifactByteIdentical(t *testing.T) {
+	legacy := `{
+  "id": "raw_2026_05_05_19_42",
+  "entry_id": "raw_2026_05_05_19_42",
+  "produced_at": "2026-05-05T19:42:14Z",
+  "agent_version": "structuring-2026.05.0",
+  "emotions": [
+    {
+      "name": "annoyed",
+      "rationale": "user said 'annoyed'"
+    }
+  ],
+  "themes": [],
+  "people": [
+    {
+      "display_name": "M.",
+      "person_key": "person_p-hazel",
+      "first_mention": true
+    }
+  ],
+  "notes": "testing-then-folding may be worth flagging.",
+  "rejected_proposals": [],
+  "unanswered_proposals": []
+}
+`
+	require.NoError(t, ValidateProcessedArtifact([]byte(legacy)))
+	a := New(t.TempDir())
+	require.NoError(t, os.MkdirAll(a.processedDir(), dirPerm))
+	path := filepath.Join(a.processedDir(), "raw_2026_05_05_19_42.json")
+	require.NoError(t, os.WriteFile(path, []byte(legacy), filePerm))
+
+	art, err := a.ReadProcessed("raw_2026_05_05_19_42")
+	require.NoError(t, err)
+	assert.Nil(t, art.HeldPeople)
+	assert.Equal(t, legacy, string(mustRender(t, art)), "a legacy artifact re-renders byte for byte")
+	require.NoError(t, a.WriteProcessed(art))
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, legacy, string(b))
+
+	assert.NotContains(t, string(mustRender(t, sampleArtifact())), "held_people")
+	empty := sampleArtifact()
+	empty.HeldPeople = []HeldPerson{}
+	assert.NotContains(t, string(mustRender(t, empty)), "held_people", "an empty list is omitted, never []")
+}
