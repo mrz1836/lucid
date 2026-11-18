@@ -2198,6 +2198,24 @@ recorded can never be finished, and nothing reads it.
 error anchors             engine/anchor_events.json — anchorev_2026_04_02_a: half-written pair — the slip event is missing; retry lucid anchor slip sobriety --day 2026-04-01
 ```
 
+The **people-identity** check reads the identity log
+(`identity/identity.jsonl`, written by [`person dormant`](#person-dormant),
+`claim`, `release`, `move-ref` and capture's held mentions) against the people
+tree. It runs only when the log exists, so a Ledger that never wrote an
+identity fact validates exactly as before and `people-identity` is not in
+`ran`. It reports one error per offending event: a claim on a person with no
+record (`identity-claim-dangling`), a claim still recorded on a merged-away
+tombstone (`identity-claim-tombstone`), a claim written while another person
+claimed the same form, which is inert (`identity-claim-duplicate`), and a
+dormant status left on a tombstone (`identity-status-tombstone`). A malformed
+log line is a schema finding. Lucid's own writes never produce one —
+`person merge` re-points the source's claims and clears a dormant source — and
+`validate` never rewrites the log.
+
+```
+error people-identity     identity/identity.jsonl#identity_2026_11_17_b — the claim on "Rivera" names person "person_s-river", a redirect tombstone (merged into "person_s-oak"); claim the form for "person_s-oak" instead
+```
+
 ```sh
 lucid validate
 lucid validate --json

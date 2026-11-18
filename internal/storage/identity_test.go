@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,6 +155,24 @@ func TestIdentityLog_MissingFileIsEmpty(t *testing.T) {
 	require.NoError(t, a.ReadIdentityEventErr("identity_2026_11_17_a"))
 
 	assert.NoDirExists(t, a.identityDir(), "reads never create the log")
+}
+
+// TestIdentityLog_ReadIdentityLogTellsAbsentFromPresent: ReadIdentityLog
+// reads like ReadIdentityEvents once the log exists, but reports a missing log
+// as fs.ErrNotExist — without creating it — so validate can skip the identity
+// check on a Ledger that never wrote an identity fact.
+func TestIdentityLog_ReadIdentityLogTellsAbsentFromPresent(t *testing.T) {
+	a := New(t.TempDir())
+
+	events, err := a.ReadIdentityLog()
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	assert.Empty(t, events)
+	assert.NoDirExists(t, a.identityDir(), "the read never creates the log")
+
+	stored := appendIdentityT(t, a, identity.NewStatus(synthIdentityAt, identity.SourceCLI, synthOldSam, identity.StatusDormant, ""))
+	events, err = a.ReadIdentityLog()
+	require.NoError(t, err)
+	assert.Equal(t, []identity.Event{stored}, events)
 }
 
 // TestIdentityLog_ReadSkipsAndReportsMalformed: reads return only well-formed

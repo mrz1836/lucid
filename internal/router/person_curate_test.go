@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/lucid/internal/engine"
+	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/storage"
 	"github.com/mrz1836/lucid/internal/validate"
 )
@@ -397,6 +398,18 @@ func (s personLedgerSource) ReadLinkEventErr(id string) error    { return s.a.Re
 func (s personLedgerSource) ListSecretRefIDs() ([]string, error) { return s.a.ListSecretRefIDs() }
 func (s personLedgerSource) ReadSecretRefErr(id string) error    { return s.a.ReadSecretRefErr(id) }
 func (s personLedgerSource) LoadConfigErr() error                { _, err := s.a.LoadConfig(); return err }
+
+func (s personLedgerSource) ListIdentityEventIDs() ([]string, error) {
+	return s.a.ListIdentityEventIDs()
+}
+
+func (s personLedgerSource) ReadIdentityEventErr(id string) error {
+	return s.a.ReadIdentityEventErr(id)
+}
+
+func (s personLedgerSource) IdentityEvents() ([]identity.Event, error) {
+	return s.a.ReadIdentityLog()
+}
 
 func (s personLedgerSource) ReadAnchorsErr() (engine.AnchorLog, error) {
 	return s.a.ReadAnchors()

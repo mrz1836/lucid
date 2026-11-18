@@ -14,6 +14,7 @@ import (
 
 	"github.com/mrz1836/lucid/internal/identity"
 	"github.com/mrz1836/lucid/internal/storage"
+	"github.com/mrz1836/lucid/internal/validate"
 )
 
 // The identity-verb fixtures use synthetic people only: two people named "Sam"
@@ -733,6 +734,18 @@ func TestPersonMerge_RepointsClaimsAndClearsSourceStatus(t *testing.T) {
 	}
 	assert.False(t, raw.IsDormant(andy))
 	assert.False(t, st.IsDormant(jordan), "the active exact holder the released claim yields to")
+
+	// lucid validate's people-identity check runs (the log exists) and finds
+	// nothing after the verbs plus merge: no claim and no dormant status sits on
+	// the tombstone, and no claim is a duplicate.
+	found, ran, err := validate.CheckPeopleIdentityLog(personLedgerSource{a: f.a})
+	require.NoError(t, err)
+	assert.True(t, ran)
+	assert.Empty(t, found, "a legitimate merge leaves the identity log valid")
+	rep, err := validate.Run(validate.Options{Ledger: personLedgerSource{a: f.a}})
+	require.NoError(t, err)
+	assert.Contains(t, rep.Ran, validate.CheckPeopleIdentity)
+	assert.True(t, rep.OK(), "validate is clean: %v", rep.Findings)
 
 	// A merge with no identity facts acks exactly as before.
 	g := newIDFixture(t)
